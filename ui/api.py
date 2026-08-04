@@ -3,9 +3,13 @@ import dataclasses
 import functools
 import json
 import threading
+from pathlib import Path
+
+import webview
 
 from core.db import get_connection, initialize_database
 from core import gardens as gardens_repo
+from core import garden_io
 from core import graph as graph_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
@@ -44,6 +48,10 @@ class Api:
         self._current_garden = gardens_repo.resolve_garden(garden)
         self._conn = get_connection(self._current_garden)
         initialize_database(self._conn)
+        # Set by ui/app.py right after the window is created (the window
+        # needs this Api instance to exist first, as its js_api) -- used
+        # for native file dialogs in export/import.
+        self._window: webview.Window | None = None
 
     @_synchronized
     def shutdown(self) -> None:
@@ -71,6 +79,33 @@ class Api:
         initialize_database(self._conn)
         self._current_garden = resolved
         return {"garden": resolved}
+
+    @_synchronized
+    def export_garden(self) -> dict:
+        path = self._window.create_file_dialog(
+            webview.FileDialog.SAVE, save_filename=f"{self._current_garden}.json"
+        )
+        if not path:
+            return {"cancelled": True}
+        target = Path(path if isinstance(path, str) else path[0])
+        target.write_text(json.dumps(garden_io.export_garden(self._conn), indent=2))
+        return {"path": str(target)}
+
+    @_synchronized
+    def import_garden_into_new(self, new_garden_name: str) -> dict:
+        paths = self._window.create_file_dialog(webview.FileDialog.OPEN)
+        if not paths:
+            return {"cancelled": True}
+        data = json.loads(Path(paths[0]).read_text())
+
+        gardens_repo.create_garden(new_garden_name)
+        conn = get_connection(new_garden_name)
+        try:
+            initialize_database(conn)
+            motes, rels = garden_io.import_garden(conn, data)
+        finally:
+            conn.close()
+        return {"garden": new_garden_name, "motes": motes, "relationships": rels}
 
     # ---- motes ----
 

@@ -483,6 +483,23 @@ function setupGardenSwitcher() {
     await refreshGardenSelect();
     await loadGarden(name);
   });
+
+  document.getElementById("export-garden-btn").addEventListener("click", async () => {
+    const result = await call(api.export_garden());
+    if (!result.cancelled) showToast(`Exported to ${result.path}`);
+  });
+
+  document.getElementById("import-garden-btn").addEventListener("click", async () => {
+    const name = window.prompt("Import into new garden named:");
+    if (!name) return;
+    const result = await call(api.import_garden_into_new(name));
+    if (result.cancelled) return;
+    showToast(`Imported ${result.motes} mote(s), ${result.relationships} relationship(s) into "${result.garden}"`);
+    await refreshGardenSelect();
+    await call(api.switch_garden(result.garden));
+    await loadGarden(result.garden);
+    document.getElementById("garden-select").value = result.garden;
+  });
 }
 
 function setupCytoscape() {
@@ -570,7 +587,7 @@ function setupCytoscape() {
   });
 
   cy.edgehandles({ snap: true });
-  cy.on("ehcomplete", (event, sourceNode, targetNode, addedEdge) => {
+  cy.on("ehcomplete", (_event, sourceNode, targetNode, addedEdge) => {
     // The backend is the source of truth for relationships -- edgehandles'
     // own preview edge has no real id/type yet, so it's removed immediately
     // and the same flow the two-click "Connect to..." button uses takes

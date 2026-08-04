@@ -27,11 +27,11 @@ def _load_properties(conn: sqlite3.Connection, mote_id: str) -> dict:
     return props
 
 
-def create_mote(conn: sqlite3.Connection, properties: dict | None = None) -> str:
+def create_mote(conn: sqlite3.Connection, properties: dict | None = None, id: str | None = None) -> str:
     properties = properties or {}
     cur = conn.cursor()
 
-    mote_id = generate_uuid()
+    mote_id = id or generate_uuid()
     cur.execute("INSERT INTO motes (id) VALUES (?)", (mote_id,))
 
     for key, value in properties.items():

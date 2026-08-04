@@ -20,6 +20,7 @@ def launch(garden: str | None = None) -> None:
         height=800,
         min_size=(900, 600),
     )
+    api._window = window
     window.events.closed += api.shutdown
     # http_server=True: serve the frontend over http://127.0.0.1 instead of
     # file://. WebKit disables localStorage for file:// pages (no origin to

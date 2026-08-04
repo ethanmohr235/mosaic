@@ -8,9 +8,11 @@ from core.models import Relationship
 # properties (simulation). Not implemented — design with the user first.
 
 
-def create_relationship(conn: sqlite3.Connection, from_id: str, to_id: str, type_: str) -> str:
+def create_relationship(
+    conn: sqlite3.Connection, from_id: str, to_id: str, type_: str, id: str | None = None
+) -> str:
     cur = conn.cursor()
-    rel_id = generate_uuid()
+    rel_id = id or generate_uuid()
     cur.execute(
         "INSERT INTO relationships (id, from_id, to_id, type) VALUES (?, ?, ?, ?)",
         (rel_id, from_id, to_id, type_)
