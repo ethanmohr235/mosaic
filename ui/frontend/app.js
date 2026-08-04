@@ -35,8 +35,16 @@ async function call(promise) {
 }
 
 function nodeLabel(mote) {
-  const name = mote.properties && mote.properties.name;
+  const props = mote.properties || {};
+  const name = props.name;
   if (typeof name === "string" && name.trim()) return name;
+
+  const keys = Object.keys(props).sort();
+  if (keys.length > 0) {
+    const key = keys[0];
+    const value = typeof props[key] === "string" ? props[key] : JSON.stringify(props[key]);
+    return `${key}: ${value}`;
+  }
   return mote.id.slice(0, 8) + "…";
 }
 
@@ -75,7 +83,16 @@ function renderGraph(payload) {
   cy.elements().remove();
   cy.add(buildElements(payload));
   cy.getElementById(focusId).addClass("focused");
-  cy.layout({ name: "cose", animate: true, animationDuration: 500, fit: true, padding: 30 }).run();
+  cy.layout({
+    name: "cose",
+    animate: true,
+    animationDuration: 500,
+    fit: true,
+    padding: 60,
+    nodeDimensionsIncludeLabels: true,
+    idealEdgeLength: 90,
+    nodeRepulsion: 9000,
+  }).run();
 }
 
 async function refreshMoteSelect() {
@@ -306,9 +323,12 @@ function setupCytoscape() {
   const rootStyle = getComputedStyle(document.documentElement);
   const fgColor = rootStyle.getPropertyValue("--fg").trim();
   const mutedColor = rootStyle.getPropertyValue("--muted").trim();
+  const bgColor = rootStyle.getPropertyValue("--bg").trim();
 
   cy = cytoscape({
     container: document.getElementById("cy"),
+    maxZoom: 2,
+    minZoom: 0.1,
     style: [
       {
         selector: "node",
@@ -316,11 +336,14 @@ function setupCytoscape() {
           "background-color": "#3462eb",
           label: "data(label)",
           color: fgColor,
-          "font-size": 11,
+          "font-size": 9,
           "text-valign": "bottom",
           "text-margin-y": 4,
-          width: 22,
-          height: 22,
+          "text-background-color": bgColor,
+          "text-background-opacity": 0.85,
+          "text-background-padding": 2,
+          width: 18,
+          height: 18,
         },
       },
       {
@@ -339,8 +362,11 @@ function setupCytoscape() {
           "target-arrow-shape": "triangle",
           "curve-style": "bezier",
           label: "data(label)",
-          "font-size": 9,
+          "font-size": 8,
           color: mutedColor,
+          "text-background-color": bgColor,
+          "text-background-opacity": 0.85,
+          "text-background-padding": 2,
         },
       },
     ],
