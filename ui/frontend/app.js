@@ -17,6 +17,34 @@ function lastFocusKey(garden) {
   return `monoss:lastFocus:${garden}`;
 }
 
+function positionsKey(garden) {
+  return `monoss:positions:${garden}`;
+}
+
+function loadPositions(garden) {
+  try {
+    return JSON.parse(localStorage.getItem(positionsKey(garden))) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAllPositions(garden) {
+  if (!cy) return;
+  const positions = loadPositions(garden);
+  cy.nodes().forEach((n) => {
+    const p = n.position();
+    positions[n.id()] = { x: p.x, y: p.y };
+  });
+  localStorage.setItem(positionsKey(garden), JSON.stringify(positions));
+}
+
+function removePosition(garden, moteId) {
+  const positions = loadPositions(garden);
+  delete positions[moteId];
+  localStorage.setItem(positionsKey(garden), JSON.stringify(positions));
+}
+
 function showToast(message) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -83,7 +111,23 @@ function renderGraph(payload) {
   cy.elements().remove();
   cy.add(buildElements(payload));
   cy.getElementById(focusId).addClass("focused");
-  cy.layout({
+
+  // Nodes with a remembered position are pinned there and excluded from
+  // the force simulation (locked), so re-focusing/re-opening a garden
+  // doesn't reshuffle everything you've already looked at. Cytoscape's
+  // layouts skip repositioning locked nodes regardless of `randomize`,
+  // so leaving randomize at its default (true) still places brand-new
+  // nodes normally -- it only randomizes the ones that are unlocked.
+  const stored = loadPositions(currentGarden);
+  cy.nodes().forEach((n) => {
+    const pos = stored[n.id()];
+    if (pos) {
+      n.position(pos);
+      n.lock();
+    }
+  });
+
+  const layout = cy.layout({
     name: "cose",
     animate: true,
     animationDuration: 500,
@@ -92,7 +136,19 @@ function renderGraph(payload) {
     nodeDimensionsIncludeLabels: true,
     idealEdgeLength: 90,
     nodeRepulsion: 9000,
-  }).run();
+  });
+  layout.one("layoutstop", () => {
+    cy.nodes().unlock();
+    // A single node has nothing to be positioned relative to -- saving it
+    // would later lock it (and whatever it's eventually connected to) at
+    // a spot that was never actually laid out against anything, silently
+    // defeating the layout once real relationships bring it into a bigger
+    // view.
+    if (cy.nodes().length > 1) {
+      saveAllPositions(currentGarden);
+    }
+  });
+  layout.run();
 }
 
 async function refreshMoteSelect() {
@@ -271,6 +327,7 @@ function setupDetailPanel() {
     if (!window.confirm("Delete this mote and all its relationships?")) return;
     await call(api.delete_mote(focusId));
     localStorage.removeItem(lastFocusKey(currentGarden));
+    removePosition(currentGarden, focusId);
     closeDetailPanel();
     await refocus(null);
   });
@@ -391,6 +448,13 @@ function setupCytoscape() {
     if (evt.target === cy) {
       connectSourceId = null;
     }
+  });
+
+  cy.on("dragfree", "node", (evt) => {
+    const p = evt.target.position();
+    const positions = loadPositions(currentGarden);
+    positions[evt.target.id()] = { x: p.x, y: p.y };
+    localStorage.setItem(positionsKey(currentGarden), JSON.stringify(positions));
   });
 }
 
