@@ -114,6 +114,13 @@ class Api:
         return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
 
     @_synchronized
+    def update_relationship(
+        self, rel_id: str, from_id: str | None = None, to_id: str | None = None, type_: str | None = None
+    ) -> dict:
+        rel_repo.update_relationship(self._conn, rel_id, from_id, to_id, type_)
+        return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
+
+    @_synchronized
     def delete_relationship(self, rel_id: str) -> bool:
         return rel_repo.delete_relationship(self._conn, rel_id)
 

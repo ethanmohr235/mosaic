@@ -233,7 +233,14 @@ function renderRelationships(moteId, rels) {
     const label = document.createElement("span");
     label.className = "rel-label";
     label.textContent = `${arrow} ${r.type} ${other.slice(0, 8)}…`;
-    label.title = other;
+    label.title = `${other} (click to rename the relationship type)`;
+    label.addEventListener("click", async () => {
+      const newType = window.prompt("Relationship type:", r.type);
+      if (!newType || newType === r.type) return;
+      await call(api.update_relationship(r.id, null, null, newType));
+      openDetailPanel(moteId);
+      refocus(focusId);
+    });
 
     const delBtn = document.createElement("button");
     delBtn.textContent = "×";
@@ -560,6 +567,17 @@ function setupCytoscape() {
     const positions = loadPositions(currentGarden);
     positions[evt.target.id()] = { x: p.x, y: p.y };
     localStorage.setItem(positionsKey(currentGarden), JSON.stringify(positions));
+  });
+
+  cy.edgehandles({ snap: true });
+  cy.on("ehcomplete", (event, sourceNode, targetNode, addedEdge) => {
+    // The backend is the source of truth for relationships -- edgehandles'
+    // own preview edge has no real id/type yet, so it's removed immediately
+    // and the same flow the two-click "Connect to..." button uses takes
+    // over (prompt for a type, create it via the Api, re-render from the
+    // authoritative payload).
+    addedEdge.remove();
+    connectNodes(sourceNode.id(), targetNode.id());
   });
 }
 

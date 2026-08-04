@@ -272,6 +272,11 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.rel-row .rel-label:hover {
+  text-decoration: underline;
 }
 
 #delete-mote-btn {
