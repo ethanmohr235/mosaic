@@ -29,7 +29,10 @@ def garden_db_path(name: str) -> Path:
 
 def get_connection(garden: str = DEFAULT_GARDEN) -> sqlite3.Connection:
     GARDENS_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(garden_db_path(garden))
+    # check_same_thread=False: callers that hand this connection across
+    # threads (e.g. ui/api.py, whose methods pywebview invokes from a
+    # worker thread) are responsible for serializing their own access.
+    conn = sqlite3.connect(garden_db_path(garden), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
