@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MonOSS</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div id="garden-switcher">
+    <select id="garden-select"></select>
+    <button id="new-garden-btn" title="Create a new garden">+</button>
+  </div>
+  <div id="topbar-title">MonOSS</div>
+  <button id="automations-btn" disabled title="Coming soon">Automations</button>
+</header>
+
+<main>
+  <div id="cy"></div>
+
+  <div id="empty-state" class="hidden">
+    <p>No motes yet in this garden.</p>
+    <p>Create one to get started.</p>
+  </div>
+
+  <section id="quick-add">
+    <h2>New mote</h2>
+    <div id="quick-add-rows"></div>
+    <button id="add-property-row" type="button">+ add property</button>
+    <button id="create-mote-btn" type="button">Create</button>
+  </section>
+
+  <aside id="detail-panel" class="hidden">
+    <button id="close-panel" title="Close">&times;</button>
+    <div id="detail-id"></div>
+    <h3>Properties</h3>
+    <div id="detail-properties"></div>
+    <div id="detail-add-property">
+      <input type="text" id="detail-new-key" placeholder="key">
+      <input type="text" id="detail-new-value" placeholder="value">
+      <button id="detail-add-property-btn" type="button">Add</button>
+    </div>
+    <h3>Relationships</h3>
+    <div id="detail-relationships"></div>
+    <button id="delete-mote-btn" type="button">Delete mote</button>
+  </aside>
+</main>
+
+<div id="toast" class="hidden"></div>
+
+<script src="vendor/cytoscape.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

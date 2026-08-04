@@ -80,3 +80,12 @@ def update_mote(conn: sqlite3.Connection, mote_id: str, new_props: dict) -> None
     """, [(mote_id, k, _encode_value(v)) for k, v in new_props.items()])
 
     conn.commit()
+
+
+def delete_property(conn: sqlite3.Connection, mote_id: str, key: str) -> bool:
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM mote_properties WHERE mote_id=? AND key=?", (mote_id, key)
+    )
+    conn.commit()
+    return cur.rowcount > 0

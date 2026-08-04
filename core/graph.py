@@ -1,0 +1,47 @@
+# core/graph.py
+import sqlite3
+
+from core.models import Mote, Relationship
+from core.motes import get_mote
+from core.relationships import list_relationships
+
+
+def most_recent_mote_id(conn: sqlite3.Connection) -> str | None:
+    """Most recently inserted mote, via SQLite's implicit rowid ordering."""
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM motes ORDER BY rowid DESC LIMIT 1")
+    row = cur.fetchone()
+    return row["id"] if row is not None else None
+
+
+def relationships_touching(conn: sqlite3.Connection, mote_id: str) -> list[Relationship]:
+    """All relationships where mote_id is either endpoint."""
+    return [r for r in list_relationships(conn) if mote_id in (r.from_id, r.to_id)]
+
+
+def neighborhood(
+    conn: sqlite3.Connection, start_id: str, hops: int = 2
+) -> tuple[list[Mote], list[Relationship]]:
+    """BFS outward from start_id up to `hops` edges.
+
+    Adjacency is undirected for hop-counting, so a relationship pointing
+    into start_id still makes its source reachable when navigating outward.
+    Returned relationships keep their real from/to direction for rendering.
+    """
+    all_rels = list_relationships(conn)
+    adjacency: dict[str, set[str]] = {}
+    for r in all_rels:
+        adjacency.setdefault(r.from_id, set()).add(r.to_id)
+        adjacency.setdefault(r.to_id, set()).add(r.from_id)
+
+    visited = {start_id}
+    frontier = {start_id}
+    for _ in range(hops):
+        frontier = {n for m in frontier for n in adjacency.get(m, ())} - visited
+        if not frontier:
+            break
+        visited |= frontier
+
+    motes = [m for m in (get_mote(conn, mid) for mid in visited) if m is not None]
+    rels = [r for r in all_rels if r.from_id in visited and r.to_id in visited]
+    return motes, rels
