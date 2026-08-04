@@ -56,8 +56,13 @@ body {
   align-items: center;
 }
 
-#automations-btn {
+#jump-select {
   margin-left: auto;
+  max-width: 220px;
+}
+
+#automations-btn {
+  margin-left: 0.75rem;
 }
 
 select, input, button {

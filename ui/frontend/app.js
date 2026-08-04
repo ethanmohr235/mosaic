@@ -78,10 +78,24 @@ function renderGraph(payload) {
   cy.layout({ name: "cose", animate: true, animationDuration: 500, fit: true, padding: 30 }).run();
 }
 
+async function refreshMoteSelect() {
+  const select = document.getElementById("jump-select");
+  const motes = await call(api.list_motes());
+  select.innerHTML = '<option value="">Jump to mote…</option>';
+  for (const m of motes) {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = nodeLabel(m);
+    select.appendChild(opt);
+  }
+  select.value = focusId || "";
+}
+
 async function refocus(moteId) {
   const payload = await call(api.focus(moteId));
   localStorage.setItem(lastFocusKey(currentGarden), payload.focus_id || "");
   renderGraph(payload);
+  await refreshMoteSelect();
   return payload;
 }
 
@@ -245,6 +259,16 @@ function setupDetailPanel() {
   });
 }
 
+function setupMoteJump() {
+  const select = document.getElementById("jump-select");
+  select.addEventListener("change", async () => {
+    if (!select.value) return;
+    const moteId = select.value;
+    await refocus(moteId);
+    await openDetailPanel(moteId);
+  });
+}
+
 async function refreshGardenSelect() {
   const select = document.getElementById("garden-select");
   const gardens = await call(api.list_gardens());
@@ -350,6 +374,7 @@ async function init() {
   setupQuickAdd();
   setupDetailPanel();
   setupGardenSwitcher();
+  setupMoteJump();
 
   currentGarden = await call(api.current_garden());
   await refreshGardenSelect();
