@@ -58,9 +58,57 @@ body {
   align-items: center;
 }
 
-#jump-select {
+#search-wrap {
+  position: relative;
   margin-left: auto;
-  max-width: 220px;
+  width: 220px;
+}
+
+#search-input {
+  width: 100%;
+}
+
+#search-results {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.search-result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.search-result-row:hover,
+.search-result-row.highlighted {
+  background: var(--bg);
+}
+
+.search-result-id {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.search-empty,
+.search-hint {
+  padding: 0.4rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 #automations-btn {

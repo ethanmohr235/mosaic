@@ -151,24 +151,10 @@ function renderGraph(payload) {
   layout.run();
 }
 
-async function refreshMoteSelect() {
-  const select = document.getElementById("jump-select");
-  const motes = await call(api.list_motes());
-  select.innerHTML = '<option value="">Jump to mote…</option>';
-  for (const m of motes) {
-    const opt = document.createElement("option");
-    opt.value = m.id;
-    opt.textContent = nodeLabel(m);
-    select.appendChild(opt);
-  }
-  select.value = focusId || "";
-}
-
 async function refocus(moteId) {
   const payload = await call(api.focus(moteId));
   localStorage.setItem(lastFocusKey(currentGarden), payload.focus_id || "");
   renderGraph(payload);
-  await refreshMoteSelect();
   return payload;
 }
 
@@ -333,13 +319,132 @@ function setupDetailPanel() {
   });
 }
 
-function setupMoteJump() {
-  const select = document.getElementById("jump-select");
-  select.addEventListener("change", async () => {
-    if (!select.value) return;
-    const moteId = select.value;
-    await refocus(moteId);
-    await openDetailPanel(moteId);
+let searchCache = null;
+let searchVisibleResults = [];
+let searchHighlightIndex = -1;
+
+function matchesQuery(mote, query) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  if (nodeLabel(mote).toLowerCase().includes(q)) return true;
+  for (const [k, v] of Object.entries(mote.properties || {})) {
+    if (k.toLowerCase().includes(q)) return true;
+    const vs = typeof v === "string" ? v : JSON.stringify(v);
+    if (vs.toLowerCase().includes(q)) return true;
+  }
+  return false;
+}
+
+async function refreshSearchCache() {
+  searchCache = await call(api.list_motes());
+}
+
+const SEARCH_RESULT_LIMIT = 50;
+
+function renderSearchResults(query) {
+  const container = document.getElementById("search-results");
+  const all = (searchCache || [])
+    .slice()
+    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)));
+  const filtered = all.filter((m) => matchesQuery(m, query));
+  searchVisibleResults = filtered.slice(0, SEARCH_RESULT_LIMIT);
+  searchHighlightIndex = searchVisibleResults.length > 0 ? 0 : -1;
+
+  container.innerHTML = "";
+
+  if (searchVisibleResults.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "search-empty";
+    empty.textContent = query ? "No matches" : "No motes yet";
+    container.appendChild(empty);
+  }
+
+  searchVisibleResults.forEach((m, i) => {
+    const row = document.createElement("div");
+    row.className = "search-result-row" + (i === searchHighlightIndex ? " highlighted" : "");
+
+    const label = document.createElement("span");
+    label.textContent = nodeLabel(m);
+
+    const idSpan = document.createElement("span");
+    idSpan.className = "search-result-id";
+    idSpan.textContent = m.id.slice(0, 8) + "…";
+
+    row.append(label, idSpan);
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      selectSearchResult(m.id);
+    });
+    container.appendChild(row);
+  });
+
+  if (filtered.length > SEARCH_RESULT_LIMIT) {
+    const hint = document.createElement("div");
+    hint.className = "search-hint";
+    const remaining = filtered.length - SEARCH_RESULT_LIMIT;
+    hint.textContent = `${remaining} more match${remaining === 1 ? "" : "es"} — refine your search`;
+    container.appendChild(hint);
+  }
+
+  container.classList.remove("hidden");
+}
+
+function updateSearchHighlight() {
+  const rows = document.querySelectorAll("#search-results .search-result-row");
+  rows.forEach((row, i) => row.classList.toggle("highlighted", i === searchHighlightIndex));
+}
+
+function hideSearchResults() {
+  document.getElementById("search-results").classList.add("hidden");
+  searchHighlightIndex = -1;
+}
+
+async function selectSearchResult(moteId) {
+  hideSearchResults();
+  await refocus(moteId);
+  await openDetailPanel(moteId);
+  const mote = (searchCache || []).find((m) => m.id === moteId);
+  document.getElementById("search-input").value = mote ? nodeLabel(mote) : "";
+  document.getElementById("search-input").blur();
+}
+
+function setupSearch() {
+  const input = document.getElementById("search-input");
+
+  input.addEventListener("focus", async () => {
+    await refreshSearchCache();
+    renderSearchResults("");
+    input.select();
+  });
+
+  input.addEventListener("input", () => {
+    renderSearchResults(input.value);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    const resultsVisible = !document.getElementById("search-results").classList.contains("hidden");
+    if (!resultsVisible) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (searchHighlightIndex < searchVisibleResults.length - 1) searchHighlightIndex++;
+      updateSearchHighlight();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (searchHighlightIndex > 0) searchHighlightIndex--;
+      updateSearchHighlight();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const selected = searchVisibleResults[searchHighlightIndex];
+      if (selected) selectSearchResult(selected.id);
+    } else if (e.key === "Escape") {
+      hideSearchResults();
+      input.blur();
+    }
+  });
+
+  input.addEventListener("blur", () => {
+    setTimeout(hideSearchResults, 100);
   });
 }
 
@@ -464,7 +569,7 @@ async function init() {
   setupQuickAdd();
   setupDetailPanel();
   setupGardenSwitcher();
-  setupMoteJump();
+  setupSearch();
 
   currentGarden = await call(api.current_garden());
   await refreshGardenSelect();
