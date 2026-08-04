@@ -47,3 +47,40 @@ a conda/miniforge install), `--system-site-packages` won't see the system
 `gi` package — it only reaches the site-packages of the interpreter the venv
 was built from. Point the venv at the real system interpreter explicitly,
 e.g. `/usr/bin/python3 -m venv --system-site-packages .venv`.
+
+## Desktop launcher
+
+A user-level launcher lives at `~/.local/share/applications/monoss.desktop`
+(not tracked in this repo — it's machine-specific, pointing at an absolute
+`.venv` path) so MonOSS shows up in the regular application menu instead of
+needing a terminal. Its icon is `assets/icon.svg`. Regenerate it with:
+
+```
+cat > ~/.local/share/applications/monoss.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=MonOSS
+Comment=Personal knowledge-graph organizer
+Exec=$(pwd)/.venv/bin/python $(pwd)/run_ui.py
+Icon=$(pwd)/assets/icon.svg
+Terminal=false
+Categories=Utility;
+StartupWMClass=MonOSS
+EOF
+update-desktop-database ~/.local/share/applications/
+```
+
+## Regression testing
+
+`pytest` covers `core/`/`ui/api.py` in isolation, but doesn't touch the
+actual GTK/WebKit window. `scripts/ui_smoke_test.py` drives the real running
+app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
+layout position stability, search/browse/keyboard-nav, garden-switch
+isolation) against a throwaway temp `GARDENS_DIR` and webview storage dir —
+never touches real data. Run it by hand after UI changes:
+
+```
+.venv/bin/python scripts/ui_smoke_test.py
+```
+
+Prints PASS/FAIL per check and exits non-zero if anything failed.
