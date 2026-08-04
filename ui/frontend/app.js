@@ -4,6 +4,15 @@ let currentGarden = null;
 let focusId = null;
 let connectSourceId = null;
 
+window.addEventListener("error", (e) => {
+  console.error(e.error || e.message);
+  showToast(String((e.error && e.error.message) || e.message));
+});
+window.addEventListener("unhandledrejection", (e) => {
+  console.error(e.reason);
+  showToast(String((e.reason && e.reason.message) || e.reason));
+});
+
 function lastFocusKey(garden) {
   return `monoss:lastFocus:${garden}`;
 }
@@ -58,6 +67,10 @@ function renderGraph(payload) {
   }
   emptyEl.classList.add("hidden");
   cyEl.classList.remove("hidden");
+  // #cy may have just gone from display:none to visible -- Cytoscape's
+  // canvas doesn't pick that up on its own, so it must be told to
+  // re-measure its container before adding/laying out elements.
+  cy.resize();
 
   cy.elements().remove();
   cy.add(buildElements(payload));
@@ -263,6 +276,13 @@ function setupGardenSwitcher() {
 }
 
 function setupCytoscape() {
+  // Cytoscape renders on <canvas>, not real DOM -- its style parser can't
+  // resolve CSS custom properties, so the current theme's colors have to
+  // be read out as concrete values before being handed to it.
+  const rootStyle = getComputedStyle(document.documentElement);
+  const fgColor = rootStyle.getPropertyValue("--fg").trim();
+  const mutedColor = rootStyle.getPropertyValue("--muted").trim();
+
   cy = cytoscape({
     container: document.getElementById("cy"),
     style: [
@@ -271,7 +291,7 @@ function setupCytoscape() {
         style: {
           "background-color": "#3462eb",
           label: "data(label)",
-          color: "var(--fg)",
+          color: fgColor,
           "font-size": 11,
           "text-valign": "bottom",
           "text-margin-y": 4,
@@ -296,7 +316,7 @@ function setupCytoscape() {
           "curve-style": "bezier",
           label: "data(label)",
           "font-size": 9,
-          color: "var(--muted)",
+          color: mutedColor,
         },
       },
     ],
