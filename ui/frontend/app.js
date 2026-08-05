@@ -15,6 +15,9 @@ let searchVisible = [];
 let searchHighlight = -1;
 const searchSpeciesFilter = new Set();
 const searchRelFilter = new Set();
+let multiSelectIds = null;             // non-null while the aggregate panel is open
+let clipboard = null;                  // {properties, speciesIds} from context-menu Copy
+let contextMenuWorldPos = null;        // world coords the context menu was opened at
 
 const DEPTH_KEY = "monoss:depth";
 const SIM_ERROR_TOAST_MS = 12000;
@@ -236,6 +239,10 @@ async function openDetailPanel(moteId) {
   ]);
   if (!mote) return;
 
+  multiSelectIds = null;
+  $("detail-multi").classList.add("hidden");
+  $("detail-single").classList.remove("hidden");
+
   $("detail-dot").style.background = graph.colorFor(moteId);
   $("detail-type-label").textContent = kindLabel(mote);
   $("detail-title").textContent = nodeLabel(mote);
@@ -248,9 +255,55 @@ async function openDetailPanel(moteId) {
   fitAllTextareas();
 }
 
+/** Shown instead of the single-mote panel once a box-select (or shift-add)
+ *  produces more than one selected mote. Its own small render function
+ *  rather than a generalization of openDetailPanel -- an aggregate view
+ *  and a per-mote editor genuinely show different things, and trying to
+ *  make one a special case of the other would tangle both. */
+function renderMultiSelectPanel(ids) {
+  multiSelectIds = ids;
+  $("detail-single").classList.add("hidden");
+  $("detail-multi").classList.remove("hidden");
+  hideSpeciesPicker();
+
+  $("detail-multi-count").textContent = `${ids.length} motes selected`;
+
+  const counts = new Map(); // species id -> count
+  let untyped = 0;
+  for (const id of ids) {
+    const species = speciesIdsOf(id);
+    if (species.length === 0) { untyped += 1; continue; }
+    for (const sid of species) counts.set(sid, (counts.get(sid) || 0) + 1);
+  }
+
+  const container = $("detail-multi-species");
+  container.innerHTML = "";
+  const rows = [...counts.entries()]
+    .map(([sid, count]) => ({ label: nodeLabel(moteById(sid) || { id: sid, properties: {} }), count, color: graph.colorFor(sid) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  if (untyped > 0) rows.push({ label: "No species", count: untyped, color: "oklch(0.62 0.02 250)" });
+
+  if (rows.length === 0) {
+    container.innerHTML = '<div class="empty-note">None</div>';
+  }
+  for (const row of rows) {
+    const el = document.createElement("div");
+    el.className = "multi-species-row";
+    el.innerHTML = `<span class="dot" style="background:${row.color}"></span><span class="name"></span><span class="count"></span>`;
+    el.querySelector(".name").textContent = row.label;
+    el.querySelector(".count").textContent = row.count;
+    container.appendChild(el);
+  }
+
+  $("delete-selection-btn").textContent = `Delete ${ids.length} motes`;
+  $("detail-panel").classList.remove("hidden");
+}
+
 function closeDetailPanel() {
   $("detail-panel").classList.add("hidden");
   hideSpeciesPicker();
+  multiSelectIds = null;
+  if (graph) graph.select(null);
 }
 
 /** A textarea only reports a usable scrollHeight once it is attached and
@@ -409,8 +462,8 @@ function renderRelationships(moteId, rels) {
   }
 }
 
-async function selectMote(moteId) {
-  await refocus(moteId);
+async function selectMote(moteId, opts = {}) {
+  await refocus(moteId, opts);
   await openDetailPanel(moteId);
 }
 
@@ -420,6 +473,27 @@ async function connectNodes(sourceId, targetId) {
   await call(api.create_relationship(sourceId, targetId, type));
   await refocus(sourceId, { pan: false });
   await openDetailPanel(sourceId);
+}
+
+/** The one delete path -- the single-mote panel's own button, the
+ *  multi-select panel's bulk button, the context menu's Delete, and the
+ *  Del/Backspace key all call this, rather than each having its own
+ *  inline delete-and-refresh logic. */
+async function deleteSelection() {
+  const ids = [...graph.selectedIds];
+  if (ids.length === 0) return;
+  const prompt = ids.length === 1
+    ? "Delete this mote and all its relationships?"
+    : `Delete ${ids.length} motes and all their relationships?`;
+  if (!window.confirm(prompt)) return;
+
+  for (const id of ids) {
+    await call(api.delete_mote(id));
+    if (id === focusId) localStorage.removeItem(lastFocusKey(currentGarden));
+  }
+  closeDetailPanel();
+  await refreshMoteCache();
+  await refocus(null);
 }
 
 // ---- quick add (with species templates) ----
@@ -504,6 +578,7 @@ function setupQuickAdd() {
     panel.classList.toggle("hidden", !opening);
     $("quick-add-btn").textContent = opening ? "×" : "+";
     if (opening) renderSpeciesChips();
+    else contextMenuWorldPos = null; // closing without creating cancels any pending placement
   });
 
   $("add-property-row").addEventListener("click", () => addQuickAddRow());
@@ -517,9 +592,28 @@ function setupQuickAdd() {
     $("quick-add-btn").textContent = "+";
     resetQuickAddRows();
     await refreshMoteCache();
-    await selectMote(mote.id);
+    // "New mote here" (right-click on empty canvas) remembers the click's
+    // world position so the mote lands under the cursor instead of at its
+    // usual hash-seeded spot; the ordinary + button leaves this unset.
+    const placeAt = contextMenuWorldPos;
+    contextMenuWorldPos = null;
+    await selectMote(mote.id, { pan: !placeAt });
+    if (placeAt) {
+      graph.placeAt(mote.id, placeAt.x, placeAt.y);
+      savePositions();
+    }
     showToast("Mote created.");
   });
+}
+
+/** Opens the existing quick-add panel (so species/template selection stays
+ *  in one place) but remembers where the click happened, so the mote it
+ *  produces lands there instead of at its usual hash-seeded spot. */
+function openQuickAddAt(worldX, worldY) {
+  contextMenuWorldPos = { x: worldX, y: worldY };
+  $("quick-add").classList.remove("hidden");
+  $("quick-add-btn").textContent = "×";
+  renderSpeciesChips();
 }
 
 // ---- species picker + new instance ----
@@ -733,6 +827,114 @@ function setupSearch() {
   });
 }
 
+// ---- selection + box-select overlay ----
+
+/** Reconciles the detail panel with graph.js's own selection state.
+ *  Used both as graph's onSelectionChanged callback (fired after a
+ *  box-select completes or an empty click deselects) and called directly
+ *  after a right-click, since graph.js may replace the selection itself
+ *  before the context menu callback fires. */
+async function syncSelectionPanel(ids) {
+  if (ids.length === 0) { closeDetailPanel(); return; }
+  if (ids.length === 1) { await selectMote(ids[0], { pan: false }); return; }
+  renderMultiSelectPanel(ids);
+}
+
+function updateSelectBox(rect) {
+  const box = $("select-box");
+  if (!rect) { box.classList.add("hidden"); return; }
+  const wrapRect = $("graph-wrap").getBoundingClientRect();
+  box.style.left = (rect.left - wrapRect.left) + "px";
+  box.style.top = (rect.top - wrapRect.top) + "px";
+  box.style.width = (rect.right - rect.left) + "px";
+  box.style.height = (rect.bottom - rect.top) + "px";
+  box.classList.remove("hidden");
+}
+
+// ---- context menu ----
+
+function hideContextMenu() {
+  $("context-menu").classList.add("hidden");
+}
+
+function addMenuItem(menu, label, onClick, { danger = false, disabled = false } = {}) {
+  const item = document.createElement("div");
+  item.className = "menu-item" + (danger ? " danger" : "") + (disabled ? " disabled" : "");
+  item.textContent = label;
+  if (!disabled) {
+    item.addEventListener("click", async () => { hideContextMenu(); await onClick(); });
+  }
+  menu.appendChild(item);
+}
+
+async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
+  // graph.js may have just replaced the selection with the right-clicked
+  // mote (or left an existing multi-selection that includes it) -- the
+  // panel needs to catch up before the menu's actions read graph.selectedIds.
+  if (targetId) await syncSelectionPanel([...graph.selectedIds]);
+
+  const menu = $("context-menu");
+  menu.innerHTML = "";
+
+  if (targetId) {
+    const node = graph.nodes.get(targetId);
+    addMenuItem(menu, "Copy", () => copySelectedMote(targetId));
+    addMenuItem(menu, node && node.pinned ? "Unpin" : "Pin", () => togglePin(targetId));
+    const sep = document.createElement("div");
+    sep.className = "menu-sep";
+    menu.appendChild(sep);
+    addMenuItem(menu, "Delete", () => deleteSelection(), { danger: true });
+  } else {
+    addMenuItem(menu, "New mote here", () => openQuickAddAt(worldX, worldY));
+    addMenuItem(menu, "Paste", () => pasteMote(worldX, worldY), { disabled: !clipboard });
+  }
+
+  menu.style.left = clientX + "px";
+  menu.style.top = clientY + "px";
+  menu.classList.remove("hidden");
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    menu.style.left = Math.max(8, window.innerWidth - rect.width - 8) + "px";
+  }
+  if (rect.bottom > window.innerHeight) {
+    menu.style.top = Math.max(8, window.innerHeight - rect.height - 8) + "px";
+  }
+}
+
+async function copySelectedMote(id) {
+  const mote = await call(api.get_mote(id));
+  if (!mote) return;
+  clipboard = { properties: { ...mote.properties }, speciesIds: speciesIdsOf(id) };
+  showToast("Copied.");
+}
+
+async function pasteMote(worldX, worldY) {
+  if (!clipboard) return;
+  const mote = await call(api.create_mote(clipboard.properties));
+  for (const speciesId of clipboard.speciesIds) {
+    await call(api.set_species(mote.id, speciesId));
+  }
+  await refreshMoteCache();
+  await selectMote(mote.id, { pan: false });
+  graph.placeAt(mote.id, worldX, worldY);
+  savePositions();
+  showToast("Pasted.");
+}
+
+function togglePin(id) {
+  const node = graph.nodes.get(id);
+  if (!node) return;
+  if (node.pinned) graph.unpin(id); else graph.pin(id);
+  savePositions();
+}
+
+function setupContextMenu() {
+  // Matches the garden menu's own dismiss-on-outside-click pattern.
+  document.addEventListener("click", (e) => {
+    if (!$("context-menu").contains(e.target)) hideContextMenu();
+  });
+}
+
 // ---- garden menu ----
 
 async function refreshGardenMenu() {
@@ -834,15 +1036,8 @@ function setupViewControls() {
     await openDetailPanel(focusId);
   });
 
-  $("delete-mote-btn").addEventListener("click", async () => {
-    if (!focusId) return;
-    if (!window.confirm("Delete this mote and all its relationships?")) return;
-    await call(api.delete_mote(focusId));
-    localStorage.removeItem(lastFocusKey(currentGarden));
-    closeDetailPanel();
-    await refreshMoteCache();
-    await refocus(null);
-  });
+  $("delete-mote-btn").addEventListener("click", deleteSelection);
+  $("delete-selection-btn").addEventListener("click", deleteSelection);
 }
 
 function setupSimulation() {
@@ -866,6 +1061,14 @@ function setupSimulation() {
   });
 }
 
+/** True while a text input/textarea has focus -- Del/Backspace and arrow
+ *  keys must not hijack normal text editing inside the detail panel or
+ *  quick-add's property fields. */
+function isTypingInField() {
+  const tag = document.activeElement && document.activeElement.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA";
+}
+
 function setupKeyboard() {
   window.addEventListener("keydown", (e) => {
     if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
@@ -873,15 +1076,28 @@ function setupKeyboard() {
       openSearch();
       return;
     }
+
+    if ((e.key === "Delete" || e.key === "Backspace") && !isTypingInField()) {
+      if (graph.selectedIds.size > 0) {
+        e.preventDefault();
+        deleteSelection();
+      }
+      return;
+    }
+
     if (e.key !== "Escape") return;
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
+    if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (!$("quick-add").classList.contains("hidden")) {
       $("quick-add").classList.add("hidden");
       $("quick-add-btn").textContent = "+";
+      contextMenuWorldPos = null;
       return;
     }
-    if (!$("detail-panel").classList.contains("hidden")) closeDetailPanel();
+    if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
+    // Nothing else was open -- Esc's last job is to deselect.
+    graph.select(null);
   });
 }
 
@@ -895,6 +1111,9 @@ async function init() {
     onSelect: (id) => selectMote(id),
     onConnect: (sourceId, targetId) => connectNodes(sourceId, targetId),
     onPositionsChanged: savePositions,
+    onBoxSelect: updateSelectBox,
+    onSelectionChanged: syncSelectionPanel,
+    onContextMenu: openContextMenu,
   });
   window.graph = graph;
 
@@ -904,6 +1123,7 @@ async function init() {
   setupSearch();
   setupViewControls();
   setupSimulation();
+  setupContextMenu();
   setupKeyboard();
 
   currentGarden = await call(api.current_garden());

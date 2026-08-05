@@ -41,6 +41,7 @@
 <main>
   <div id="graph-wrap">
     <canvas id="graph"></canvas>
+    <div id="select-box" class="hidden"></div>
 
     <div id="empty-state" class="hidden">
       <p>No motes in this garden yet.</p>
@@ -86,40 +87,52 @@
 
     <aside id="detail-panel" class="hidden">
       <button id="close-panel" type="button" title="Close">×</button>
-      <div id="detail-type">
-        <span id="detail-dot"></span><span id="detail-type-label"></span>
-      </div>
-      <div id="detail-title"></div>
-      <div id="detail-id"></div>
 
-      <div class="panel-heading">Properties</div>
-      <div id="detail-properties"></div>
-      <div id="detail-add-property">
-        <input type="text" id="detail-new-key" placeholder="key">
-        <input type="text" id="detail-new-value" placeholder="value">
-        <button id="detail-add-property-btn" type="button">Add</button>
+      <div id="detail-single">
+        <div id="detail-type">
+          <span id="detail-dot"></span><span id="detail-type-label"></span>
+        </div>
+        <div id="detail-title"></div>
+        <div id="detail-id"></div>
+
+        <div class="panel-heading">Properties</div>
+        <div id="detail-properties"></div>
+        <div id="detail-add-property">
+          <input type="text" id="detail-new-key" placeholder="key">
+          <input type="text" id="detail-new-value" placeholder="value">
+          <button id="detail-add-property-btn" type="button">Add</button>
+        </div>
+
+        <div class="panel-heading">Species</div>
+        <div id="detail-species"></div>
+        <div id="detail-species-actions">
+          <button id="set-species-btn" type="button" class="ghost">Set species…</button>
+          <button id="new-instance-btn" type="button" class="ghost hidden">+ New instance</button>
+        </div>
+        <div id="species-picker-wrap" class="hidden">
+          <input type="text" id="species-picker-input" placeholder="Search for a species…" autocomplete="off">
+          <div id="species-picker-results"></div>
+        </div>
+        <div id="detail-instance-count"></div>
+
+        <div class="panel-heading">Relationships</div>
+        <div id="detail-relationships"></div>
+        <button id="connect-btn" type="button" class="ghost wide">Connect to…</button>
+
+        <button id="delete-mote-btn" type="button" class="danger wide">Delete mote</button>
       </div>
 
-      <div class="panel-heading">Species</div>
-      <div id="detail-species"></div>
-      <div id="detail-species-actions">
-        <button id="set-species-btn" type="button" class="ghost">Set species…</button>
-        <button id="new-instance-btn" type="button" class="ghost hidden">+ New instance</button>
+      <div id="detail-multi">
+        <div id="detail-multi-count"></div>
+        <div class="panel-heading">Species</div>
+        <div id="detail-multi-species"></div>
+        <button id="delete-selection-btn" type="button" class="danger wide">Delete selected</button>
       </div>
-      <div id="species-picker-wrap" class="hidden">
-        <input type="text" id="species-picker-input" placeholder="Search for a species…" autocomplete="off">
-        <div id="species-picker-results"></div>
-      </div>
-      <div id="detail-instance-count"></div>
-
-      <div class="panel-heading">Relationships</div>
-      <div id="detail-relationships"></div>
-      <button id="connect-btn" type="button" class="ghost wide">Connect to…</button>
-
-      <button id="delete-mote-btn" type="button" class="danger wide">Delete mote</button>
     </aside>
   </div>
 </main>
+
+<div id="context-menu" class="hidden menu"></div>
 
 <div id="search-overlay" class="hidden">
   <div id="search-modal">
