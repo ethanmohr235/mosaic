@@ -23,6 +23,25 @@ function positionsKey(garden) {
   return `monoss:positions:${garden}`;
 }
 
+// How far out from the focused mote the graph reaches. Stored globally
+// rather than per garden: it's a viewing preference, and having it change
+// out from under you on every garden switch would be the surprising part.
+const DEPTH_KEY = "monoss:depth";
+const DEFAULT_DEPTH = 2;
+
+function loadDepth() {
+  const stored = localStorage.getItem(DEPTH_KEY);
+  if (stored === "all") return null;
+  const hops = parseInt(stored, 10);
+  return Number.isFinite(hops) && hops > 0 ? hops : DEFAULT_DEPTH;
+}
+
+// null means "whole garden" all the way through to Api.focus -- the only
+// setting that also reaches motes with no relationships yet.
+function saveDepth(hops) {
+  localStorage.setItem(DEPTH_KEY, hops === null ? "all" : String(hops));
+}
+
 function loadPositions(garden) {
   try {
     return JSON.parse(localStorage.getItem(positionsKey(garden))) || {};
@@ -156,7 +175,7 @@ function renderGraph(payload) {
 }
 
 async function refocus(moteId) {
-  const payload = await call(api.focus(moteId));
+  const payload = await call(api.focus(moteId, loadDepth()));
   localStorage.setItem(lastFocusKey(currentGarden), payload.focus_id || "");
   renderGraph(payload);
   return payload;
@@ -762,6 +781,17 @@ function setupCytoscape() {
 // routine confirmation.
 const SIM_ERROR_TOAST_MS = 12000;
 
+function setupDepthControl() {
+  const select = document.getElementById("depth-select");
+  const stored = loadDepth();
+  select.value = stored === null ? "all" : String(stored);
+
+  select.addEventListener("change", async () => {
+    saveDepth(select.value === "all" ? null : parseInt(select.value, 10));
+    await refocus(focusId);
+  });
+}
+
 function setupSimulation() {
   const button = document.getElementById("run-sim-btn");
 
@@ -793,6 +823,7 @@ async function init() {
   setupSpeciesPicker();
   setupGardenSwitcher();
   setupSearch();
+  setupDepthControl();
   setupSimulation();
 
   currentGarden = await call(api.current_garden());

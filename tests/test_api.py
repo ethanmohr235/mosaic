@@ -39,6 +39,39 @@ def test_focus_given_stale_id_falls_back_to_most_recent(api):
     assert result["focus_id"] == second["id"]
 
 
+def test_focus_hops_limits_how_far_the_graph_reaches(api):
+    a = api.create_mote({"name": "A"})
+    b = api.create_mote({"name": "B"})
+    c = api.create_mote({"name": "C"})
+    api.create_relationship(a["id"], b["id"], "next")
+    api.create_relationship(b["id"], c["id"], "next")
+
+    assert len(api.focus(a["id"], 1)["motes"]) == 2
+    assert len(api.focus(a["id"], 2)["motes"]) == 3
+
+
+def test_focus_with_no_hops_limit_returns_the_whole_garden(api):
+    a = api.create_mote({"name": "A"})
+    b = api.create_mote({"name": "B"})
+    api.create_relationship(a["id"], b["id"], "next")
+    # Deliberately unconnected: no hop count can ever reach this one, which
+    # is the whole reason "whole garden" exists as a separate setting.
+    api.create_mote({"name": "Island"})
+
+    result = api.focus(a["id"], None)
+    assert len(result["motes"]) == 3
+    assert result["focus_id"] == a["id"]
+
+
+def test_whole_garden_still_reports_species_ids(api):
+    species = api.create_mote({"name": "Node"})
+    instance = api.create_mote({"name": "N1"})
+    api.set_species(instance["id"], species["id"])
+
+    result = api.focus(instance["id"], None)
+    assert result["species_ids"] == [species["id"]]
+
+
 def test_coerce_properties_matches_repl_json_fallback_semantics():
     coerced = _coerce_properties({
         "age": "21",

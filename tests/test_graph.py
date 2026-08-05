@@ -1,4 +1,9 @@
-from core.graph import most_recent_mote_id, neighborhood, relationships_touching
+from core.graph import (
+    most_recent_mote_id,
+    neighborhood,
+    relationships_touching,
+    whole_garden,
+)
 from core.motes import create_mote, delete_property, update_mote
 from core.relationships import create_relationship
 
@@ -99,6 +104,21 @@ def test_neighborhood_nonexistent_start_returns_empty(conn):
     motes, rels = neighborhood(conn, "does-not-exist", hops=2)
     assert motes == []
     assert rels == []
+
+
+def test_whole_garden_includes_disconnected_motes(conn):
+    a = create_mote(conn, {"name": "Alice"})
+    b = create_mote(conn, {"name": "Bob"})
+    island = create_mote(conn, {"name": "Island"})
+    create_relationship(conn, a, b, "knows")
+
+    motes, rels = whole_garden(conn)
+    assert {m.id for m in motes} == {a, b, island}
+    assert len(rels) == 1
+
+
+def test_whole_garden_empty_when_no_motes(conn):
+    assert whole_garden(conn) == ([], [])
 
 
 def test_delete_property_removes_key_leaves_others(conn):

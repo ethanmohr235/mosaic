@@ -201,11 +201,14 @@ class Api:
     # ---- graph/focus ----
 
     @_synchronized
-    def focus(self, mote_id: str | None = None, hops: int = 2) -> dict:
+    def focus(self, mote_id: str | None = None, hops: int | None = 2) -> dict:
         """Single entrypoint for startup, recenter, and post-create/delete
         refresh. Resolves: given id (if it still exists) -> most-recent ->
         empty state. Returns the resolved focus_id so the caller can
-        self-heal stored state."""
+        self-heal stored state.
+
+        `hops=None` means the whole garden rather than a neighborhood --
+        the only way to see motes that have no relationships yet."""
         if mote_id is not None and motes_repo.get_mote(self._conn, mote_id) is None:
             mote_id = None
         if mote_id is None:
@@ -213,7 +216,10 @@ class Api:
         if mote_id is None:
             return {"focus_id": None, "motes": [], "relationships": [], "species_ids": []}
 
-        motes, rels = graph_repo.neighborhood(self._conn, mote_id, hops)
+        if hops is None:
+            motes, rels = graph_repo.whole_garden(self._conn)
+        else:
+            motes, rels = graph_repo.neighborhood(self._conn, mote_id, hops)
         species_ids = [
             m.id for m in motes
             if any(r.type == species_repo.INSTANCE_OF and r.to_id == m.id for r in rels)

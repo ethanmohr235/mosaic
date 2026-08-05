@@ -15,6 +15,18 @@
     <button id="import-garden-btn" title="Import a garden from a file into a new garden">Import</button>
   </div>
   <div id="topbar-title">MonOSS</div>
+  <label id="depth-wrap" title="How far out from the selected mote the graph reaches">
+    Depth
+    <select id="depth-select">
+      <option value="1">1 hop</option>
+      <option value="2">2 hops</option>
+      <option value="3">3 hops</option>
+      <option value="4">4 hops</option>
+      <option value="5">5 hops</option>
+      <option value="6">6 hops</option>
+      <option value="all">Whole garden</option>
+    </select>
+  </label>
   <div id="search-wrap">
     <input type="text" id="search-input" placeholder="Search motes…" autocomplete="off">
     <div id="search-results" class="hidden"></div>

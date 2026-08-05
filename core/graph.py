@@ -2,7 +2,7 @@
 import sqlite3
 
 from core.models import Mote, Relationship
-from core.motes import get_mote
+from core.motes import get_mote, list_motes
 from core.relationships import list_relationships
 
 
@@ -17,6 +17,12 @@ def most_recent_mote_id(conn: sqlite3.Connection) -> str | None:
 def relationships_touching(conn: sqlite3.Connection, mote_id: str) -> list[Relationship]:
     """All relationships where mote_id is either endpoint."""
     return [r for r in list_relationships(conn) if mote_id in (r.from_id, r.to_id)]
+
+
+def whole_garden(conn: sqlite3.Connection) -> tuple[list[Mote], list[Relationship]]:
+    """Every mote and relationship. Unlike `neighborhood`, this reaches
+    motes with no connections at all, which no amount of hopping can."""
+    return list_motes(conn), list_relationships(conn)
 
 
 def neighborhood(

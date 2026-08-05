@@ -300,6 +300,47 @@ def run_checks(window):
         species_set_and_remove_via_real_ui,
     )
 
+    def depth_control_changes_how_much_graph_is_visible():
+        # A --next--> B --next--> C, plus a mote connected to nothing.
+        js_async(window, """
+            async () => {
+                const a = await api.create_mote({name: 'depth-A'});
+                const b = await api.create_mote({name: 'depth-B'});
+                const c = await api.create_mote({name: 'depth-C'});
+                await api.create_mote({name: 'depth-island'});
+                await api.create_relationship(a.id, b.id, 'next');
+                await api.create_relationship(b.id, c.id, 'next');
+                window.__seed.depthA = a.id;
+                window.__result = 'ok';
+            }
+        """)
+
+        def visible_at(value):
+            js(window, f"""
+                const s = document.getElementById('depth-select');
+                s.value = {json.dumps(value)};
+                s.dispatchEvent(new Event('change'));
+            """)
+            time.sleep(1.8)
+            js(window, "refocus(window.__seed.depthA)")
+            time.sleep(1.8)
+            return js(window, "cy.nodes().length")
+
+        assert visible_at("1") == 2, "1 hop should show only A and its direct neighbour"
+        assert visible_at("2") == 3, "2 hops should reach C"
+
+        # 'Whole garden' has to reach the unconnected mote too -- no hop
+        # count ever can, which is the reason it exists as its own setting.
+        total = json.loads(js_async(window, """
+            async () => { window.__result = (await api.list_motes()).length; }
+        """))
+        assert visible_at("all") == total, "whole garden should show every mote in the garden"
+
+        stored = js(window, "localStorage.getItem('monoss:depth')")
+        assert stored == "all", f"depth setting should persist, got {stored!r}"
+
+    check("depth control changes how much of the graph is visible", depth_control_changes_how_much_graph_is_visible)
+
     def run_simulation_button_solves_and_refreshes():
         # A whole little model built through the API, then solved by
         # clicking the real button: Box(width=3, height=4) -> area 12.
