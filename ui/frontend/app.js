@@ -221,7 +221,8 @@ function renderSpecies(moteId, mySpecies, rels, instanceCount) {
     delBtn.textContent = "×";
     delBtn.addEventListener("click", async () => {
       if (rel) await call(api.delete_relationship(rel.id));
-      openDetailPanel(moteId);
+      await refocus(moteId);
+      await openDetailPanel(moteId);
     });
 
     row.append(label, delBtn);
@@ -412,7 +413,8 @@ function renderSpeciesPickerResults(query) {
       const targetId = speciesPickerTargetId;
       await call(api.set_species(targetId, m.id));
       hideSpeciesPicker();
-      openDetailPanel(targetId);
+      await refocus(targetId);
+      await openDetailPanel(targetId);
     });
     container.appendChild(row);
   });

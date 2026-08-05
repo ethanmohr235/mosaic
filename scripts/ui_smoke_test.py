@@ -229,11 +229,17 @@ def run_checks(window):
 
     check("delete relationship + mote", delete_relationship_and_mote)
 
-    def species_relationship_and_detail_panel():
+    def species_set_and_remove_via_real_ui():
+        # Drives the actual "Set species..." button/picker/row-click flow
+        # with synthetic DOM events, rather than calling api.set_species
+        # directly -- a prior version of this check did the latter and
+        # missed a real bug where the picker's own click handler never
+        # called refocus()/openDetailPanel(), so nothing visibly updated
+        # until an unrelated action (e.g. navigating away and back)
+        # happened to re-render the panel.
         result = js_async(window, """
             async () => {
                 const resistor = await api.create_mote({name: 'Resistor'});
-                await api.set_species(window.__seed.aliceId, resistor.id);
                 window.__seed.resistorId = resistor.id;
                 window.__result = 'ok';
             }
@@ -243,6 +249,22 @@ def run_checks(window):
         js(window, "refocus(window.__seed.aliceId).then(() => openDetailPanel(window.__seed.aliceId))")
         time.sleep(1.5)
 
+        js(window, "document.getElementById('set-species-btn').click();")
+        time.sleep(0.8)
+        js(window, """
+            const i = document.getElementById('species-picker-input');
+            i.value = 'Resistor';
+            i.dispatchEvent(new Event('input'));
+        """)
+        time.sleep(0.5)
+        js(window, """
+            (function() {
+                const row = document.querySelector('#species-picker-results .search-result-row');
+                row.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true, button: 0}));
+            })();
+        """)
+        time.sleep(1.5)  # no manual refocus/openDetailPanel call -- that's the point
+
         species_label = js(window, """
             (function() {
                 const rows = document.querySelectorAll('#detail-species .rel-label');
@@ -250,11 +272,11 @@ def run_checks(window):
             })()
         """)
         assert species_label == "Resistor", (
-            f"expected Alice's Species section to show 'Resistor', got {species_label!r}"
+            f"Species section should update on its own after picking via the UI, got {species_label!r}"
         )
 
         is_diamond = js(window, "cy.getElementById(window.__seed.resistorId).hasClass('species')")
-        assert is_diamond is True, "species mote should get the .species class for diamond styling"
+        assert is_diamond is True, "graph should pick up the new species styling without a manual refocus"
 
         js(window, "refocus(window.__seed.resistorId).then(() => openDetailPanel(window.__seed.resistorId))")
         time.sleep(1.5)
@@ -263,9 +285,19 @@ def run_checks(window):
             f"expected instance count text, got {instance_count_text!r}"
         )
 
+        # Removing a species membership (via the x button) should refresh
+        # the panel on its own too.
+        js(window, "refocus(window.__seed.aliceId).then(() => openDetailPanel(window.__seed.aliceId))")
+        time.sleep(1.5)
+        js(window, "document.querySelector('#detail-species .rel-row button').click();")
+        time.sleep(1.5)
+
+        remaining = js(window, "document.querySelectorAll('#detail-species .rel-label').length")
+        assert remaining == 0, "Species section should clear on its own after removing via the x button"
+
     check(
-        "species: set_species shows in detail panel + diamond styling + instance count",
-        species_relationship_and_detail_panel,
+        "species: set/remove via real UI refreshes panel + graph without extra action",
+        species_set_and_remove_via_real_ui,
     )
 
 
