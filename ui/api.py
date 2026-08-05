@@ -180,6 +180,23 @@ class Api:
     def list_species(self) -> list[dict]:
         return [dataclasses.asdict(m) for m in species_repo.list_species(self._conn)]
 
+    @_synchronized
+    def set_template(self, mote_id: str, species_id: str) -> dict:
+        rel_id = species_repo.set_template(self._conn, mote_id, species_id)
+        return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
+
+    @_synchronized
+    def template_for(self, species_id: str) -> dict | None:
+        template = species_repo.template_for(self._conn, species_id)
+        return dataclasses.asdict(template) if template is not None else None
+
+    @_synchronized
+    def create_instance(self, species_id: str, raw_overrides: dict | None = None) -> dict:
+        mote_id = species_repo.create_instance(
+            self._conn, species_id, _coerce_properties(raw_overrides or {})
+        )
+        return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
+
     # ---- simulation ----
 
     @_synchronized

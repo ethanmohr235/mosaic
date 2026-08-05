@@ -2,7 +2,7 @@
 import sqlite3
 
 from core.models import Mote
-from core.motes import get_mote
+from core.motes import create_mote, get_mote
 from core.relationships import create_relationship, list_relationships
 
 # A species is just a mote -- nothing marks it as special structurally. A
@@ -10,6 +10,12 @@ from core.relationships import create_relationship, list_relationships
 # relationships. Flat for v1: no species-of-species chains are interpreted
 # anywhere in this module.
 INSTANCE_OF = "instance_of"
+
+# A template is likewise just a mote, pointing at the species it supplies
+# starting properties for. Deliberately a different relationship type from
+# INSTANCE_OF: a template is not an instance, so instances_of() excludes it
+# for free and the simulation engine never tries to solve one.
+TEMPLATE_OF = "template_of"
 
 
 def set_species(conn: sqlite3.Connection, mote_id: str, species_id: str) -> str:
@@ -31,7 +37,45 @@ def instances_of(conn: sqlite3.Connection, species_id: str) -> list[Mote]:
 
 
 def list_species(conn: sqlite3.Connection) -> list[Mote]:
-    """Every mote currently acting as a species -- i.e. the target of at
-    least one instance_of relationship."""
-    species_ids = {r.to_id for r in list_relationships(conn, type_=INSTANCE_OF)}
+    """Every mote currently acting as a species -- the target of at least
+    one instance_of *or* template_of relationship. Templates count so that
+    a species you've set up but not yet instantiated still appears."""
+    species_ids = {
+        r.to_id
+        for r in list_relationships(conn)
+        if r.type in (INSTANCE_OF, TEMPLATE_OF)
+    }
     return [m for m in (get_mote(conn, sid) for sid in species_ids) if m is not None]
+
+
+def set_template(conn: sqlite3.Connection, mote_id: str, species_id: str) -> str:
+    """Make mote_id the template for species_id -- the mote whose properties
+    new instances start from."""
+    return create_relationship(conn, mote_id, species_id, TEMPLATE_OF)
+
+
+def template_for(conn: sqlite3.Connection, species_id: str) -> Mote | None:
+    """The species' template, if it has one. Only the first is used: a
+    species with several templates is a modelling mistake, not a feature,
+    and silently merging them would hide it."""
+    rels = [r for r in list_relationships(conn, type_=TEMPLATE_OF) if r.to_id == species_id]
+    for rel in rels:
+        mote = get_mote(conn, rel.from_id)
+        if mote is not None:
+            return mote
+    return None
+
+
+def create_instance(
+    conn: sqlite3.Connection, species_id: str, overrides: dict | None = None
+) -> str:
+    """Create a new instance of species_id, seeded from its template's
+    properties if it has one. Without a template this is just a bare mote
+    with an instance_of relationship, so it always does something sensible."""
+    template = template_for(conn, species_id)
+    properties = dict(template.properties) if template is not None else {}
+    properties.update(overrides or {})
+
+    mote_id = create_mote(conn, properties)
+    set_species(conn, mote_id, species_id)
+    return mote_id

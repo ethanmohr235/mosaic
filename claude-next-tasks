@@ -1,0 +1,23 @@
+# Usability and design pass
+Before we move on to the more advanced simulation stuff, I want to make sure that the foundation of the program is solid and easy enough to use. Here's a checklist of things I want to fix/add before we move on:
+
+- Species templating. When I have a species definer, I want to be able to rapidly create more instances of that species which have certain properties. For example, in the circuit example, I want to be able to quickly add more resistor motes with  current, name, and resistance properties. Ideally, come up with a way to do this that remains in the "everything is a mote" paradigm. Maybe a special "is_template" relation for a species that designates one mote as the template and creates copies of that mote whenever I add an instance of that species.
+
+- View decluttering. It's already getting difficult to understand what's happening in the circuit example, even though it does work perfectly (props for making it work exactly within the design philosophy, too). Maybe we could add view filters like "don't show instance_of" since that relationship goes from practically every mote. Even better, create a generalized view filter system that allows me to pick exactly which motes and relationships are visible.
+
+- Inspection panel rework. For one, it's not wide enough to have the property keys and values on the same line, which means that they end up in this ugly vertical stack. Additionally, the rule formulas get pretty long, and I can't see all of the equation at once. Maybe allow the box to expand vertically downwards instead of running off the screen.
+
+- View refocusing issues. You're trying to make it so that the graph stays in the same place when I click on another mote, but this really just adds this specific "prioritized view"--whenever I actually DO want to move the graph and then select another mote, it refocuses back to the old view, which is super jarring.
+
+- Aesthetics pass. I had your alter ego, Claude Design, make a mockup of a new frontend. I want you to wire in our existing backend to work with this nicer design. See below:
+
+Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/41befa85-7d74-43d5-ac9c-9957286f0eeb?file=MonOSS+Graph.dc.html
+
+Focus on these files (the whole project is readable):
+- `MonOSS Graph.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `MonOSS Graph.dc.html`
