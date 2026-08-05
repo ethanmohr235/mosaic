@@ -229,6 +229,45 @@ def run_checks(window):
 
     check("delete relationship + mote", delete_relationship_and_mote)
 
+    def species_relationship_and_detail_panel():
+        result = js_async(window, """
+            async () => {
+                const resistor = await api.create_mote({name: 'Resistor'});
+                await api.set_species(window.__seed.aliceId, resistor.id);
+                window.__seed.resistorId = resistor.id;
+                window.__result = 'ok';
+            }
+        """)
+        assert result == '"ok"', f"species setup failed: {result}"
+
+        js(window, "refocus(window.__seed.aliceId).then(() => openDetailPanel(window.__seed.aliceId))")
+        time.sleep(1.5)
+
+        species_label = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-species .rel-label');
+                return rows.length > 0 ? rows[0].textContent : null;
+            })()
+        """)
+        assert species_label == "Resistor", (
+            f"expected Alice's Species section to show 'Resistor', got {species_label!r}"
+        )
+
+        is_diamond = js(window, "cy.getElementById(window.__seed.resistorId).hasClass('species')")
+        assert is_diamond is True, "species mote should get the .species class for diamond styling"
+
+        js(window, "refocus(window.__seed.resistorId).then(() => openDetailPanel(window.__seed.resistorId))")
+        time.sleep(1.5)
+        instance_count_text = js(window, "document.getElementById('detail-instance-count').textContent")
+        assert instance_count_text == "Instances: 1", (
+            f"expected instance count text, got {instance_count_text!r}"
+        )
+
+    check(
+        "species: set_species shows in detail panel + diamond styling + instance count",
+        species_relationship_and_detail_panel,
+    )
+
 
 def drive():
     time.sleep(3)

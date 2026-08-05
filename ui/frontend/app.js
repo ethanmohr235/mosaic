@@ -4,6 +4,8 @@ let currentGarden = null;
 let focusId = null;
 let connectSourceId = null;
 
+const INSTANCE_OF = "instance_of";
+
 window.addEventListener("error", (e) => {
   console.error(e.error || e.message);
   showToast(String((e.error && e.error.message) || e.message));
@@ -77,8 +79,10 @@ function nodeLabel(mote) {
 }
 
 function buildElements(payload) {
+  const speciesIds = new Set(payload.species_ids || []);
   const nodes = payload.motes.map((m) => ({
     data: { id: m.id, label: nodeLabel(m) },
+    classes: speciesIds.has(m.id) ? "species" : "",
   }));
   const edges = payload.relationships.map((r) => ({
     data: {
@@ -167,21 +171,65 @@ async function loadGarden(garden) {
 }
 
 async function openDetailPanel(moteId) {
-  const [mote, rels] = await Promise.all([
+  const [mote, rels, mySpecies, instances] = await Promise.all([
     call(api.get_mote(moteId)),
     call(api.mote_relationships(moteId)),
+    call(api.species_of(moteId)),
+    call(api.instances_of(moteId)),
   ]);
   if (!mote) return;
 
   document.getElementById("detail-id").textContent = mote.id;
   renderProperties(mote);
-  renderRelationships(moteId, rels);
+  renderSpecies(moteId, mySpecies, rels, instances.length);
+  const ownSpeciesLinks = rels.filter((r) => r.type === INSTANCE_OF && r.from_id === moteId);
+  renderRelationships(moteId, rels.filter((r) => !ownSpeciesLinks.includes(r)));
   document.getElementById("detail-panel").classList.remove("hidden");
 }
 
 function closeDetailPanel() {
   document.getElementById("detail-panel").classList.add("hidden");
+  hideSpeciesPicker();
   if (cy) cy.elements().unselect();
+}
+
+function renderSpecies(moteId, mySpecies, rels, instanceCount) {
+  const container = document.getElementById("detail-species");
+  container.innerHTML = "";
+  if (mySpecies.length === 0) {
+    const empty = document.createElement("div");
+    empty.style.color = "var(--muted)";
+    empty.textContent = "None";
+    container.appendChild(empty);
+  }
+  for (const species of mySpecies) {
+    const rel = rels.find(
+      (r) => r.type === INSTANCE_OF && r.from_id === moteId && r.to_id === species.id
+    );
+    const row = document.createElement("div");
+    row.className = "rel-row";
+
+    const label = document.createElement("span");
+    label.className = "rel-label";
+    label.textContent = nodeLabel(species);
+    label.title = `${species.id} (click to view)`;
+    label.addEventListener("click", () => {
+      refocus(species.id).then(() => openDetailPanel(species.id));
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "×";
+    delBtn.addEventListener("click", async () => {
+      if (rel) await call(api.delete_relationship(rel.id));
+      openDetailPanel(moteId);
+    });
+
+    row.append(label, delBtn);
+    container.appendChild(row);
+  }
+
+  document.getElementById("detail-instance-count").textContent =
+    instanceCount > 0 ? `Instances: ${instanceCount}` : "";
 }
 
 function renderProperties(mote) {
@@ -323,6 +371,70 @@ function setupDetailPanel() {
     removePosition(currentGarden, focusId);
     closeDetailPanel();
     await refocus(null);
+  });
+}
+
+let speciesPickerTargetId = null;
+
+function hideSpeciesPicker() {
+  document.getElementById("species-picker-wrap").classList.add("hidden");
+  document.getElementById("species-picker-results").classList.add("hidden");
+  document.getElementById("species-picker-input").value = "";
+  speciesPickerTargetId = null;
+}
+
+function renderSpeciesPickerResults(query) {
+  const container = document.getElementById("species-picker-results");
+  const candidates = (searchCache || [])
+    .filter((m) => m.id !== speciesPickerTargetId)
+    .filter((m) => matchesQuery(m, query))
+    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
+    .slice(0, SEARCH_RESULT_LIMIT);
+
+  container.innerHTML = "";
+  if (candidates.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "search-empty";
+    empty.textContent = "No matches";
+    container.appendChild(empty);
+  }
+  candidates.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "search-result-row";
+    const label = document.createElement("span");
+    label.textContent = nodeLabel(m);
+    const idSpan = document.createElement("span");
+    idSpan.className = "search-result-id";
+    idSpan.textContent = m.id.slice(0, 8) + "…";
+    row.append(label, idSpan);
+    row.addEventListener("mousedown", async (e) => {
+      e.preventDefault();
+      const targetId = speciesPickerTargetId;
+      await call(api.set_species(targetId, m.id));
+      hideSpeciesPicker();
+      openDetailPanel(targetId);
+    });
+    container.appendChild(row);
+  });
+  container.classList.remove("hidden");
+}
+
+function setupSpeciesPicker() {
+  const input = document.getElementById("species-picker-input");
+
+  document.getElementById("set-species-btn").addEventListener("click", async () => {
+    if (!focusId) return;
+    speciesPickerTargetId = focusId;
+    await refreshSearchCache();
+    document.getElementById("species-picker-wrap").classList.remove("hidden");
+    renderSpeciesPickerResults("");
+    input.focus();
+  });
+
+  input.addEventListener("input", () => renderSpeciesPickerResults(input.value));
+  input.addEventListener("blur", () => setTimeout(hideSpeciesPicker, 150));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideSpeciesPicker();
   });
 }
 
@@ -540,6 +652,12 @@ function setupCytoscape() {
         },
       },
       {
+        selector: "node.species",
+        style: {
+          shape: "diamond",
+        },
+      },
+      {
         selector: "edge",
         style: {
           width: 1.5,
@@ -641,6 +759,7 @@ async function init() {
   setupCytoscape();
   setupQuickAdd();
   setupDetailPanel();
+  setupSpeciesPicker();
   setupGardenSwitcher();
   setupSearch();
 

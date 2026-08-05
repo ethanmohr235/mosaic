@@ -13,6 +13,7 @@ from core import garden_io
 from core import graph as graph_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
+from core import species as species_repo
 
 
 def _coerce(raw: str):
@@ -159,6 +160,25 @@ class Api:
     def delete_relationship(self, rel_id: str) -> bool:
         return rel_repo.delete_relationship(self._conn, rel_id)
 
+    # ---- species ----
+
+    @_synchronized
+    def set_species(self, mote_id: str, species_id: str) -> dict:
+        rel_id = species_repo.set_species(self._conn, mote_id, species_id)
+        return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
+
+    @_synchronized
+    def species_of(self, mote_id: str) -> list[dict]:
+        return [dataclasses.asdict(m) for m in species_repo.species_of(self._conn, mote_id)]
+
+    @_synchronized
+    def instances_of(self, species_id: str) -> list[dict]:
+        return [dataclasses.asdict(m) for m in species_repo.instances_of(self._conn, species_id)]
+
+    @_synchronized
+    def list_species(self) -> list[dict]:
+        return [dataclasses.asdict(m) for m in species_repo.list_species(self._conn)]
+
     # ---- graph/focus ----
 
     @_synchronized
@@ -172,11 +192,16 @@ class Api:
         if mote_id is None:
             mote_id = graph_repo.most_recent_mote_id(self._conn)
         if mote_id is None:
-            return {"focus_id": None, "motes": [], "relationships": []}
+            return {"focus_id": None, "motes": [], "relationships": [], "species_ids": []}
 
         motes, rels = graph_repo.neighborhood(self._conn, mote_id, hops)
+        species_ids = [
+            m.id for m in motes
+            if any(r.type == species_repo.INSTANCE_OF and r.to_id == m.id for r in rels)
+        ]
         return {
             "focus_id": mote_id,
             "motes": [dataclasses.asdict(m) for m in motes],
             "relationships": [dataclasses.asdict(r) for r in rels],
+            "species_ids": species_ids,
         }

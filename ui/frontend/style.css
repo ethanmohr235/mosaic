@@ -285,6 +285,35 @@ main {
   color: var(--danger);
 }
 
+#detail-instance-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+#species-picker-wrap {
+  position: relative;
+  margin-bottom: 0.35rem;
+}
+
+#species-picker-input {
+  width: 100%;
+}
+
+#species-picker-results {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
 #toast {
   position: absolute;
   left: 50%;
