@@ -610,6 +610,13 @@ function setupCytoscape() {
   cy.on("mousedown", "node", (evt) => {
     if (evt.originalEvent && evt.originalEvent.ctrlKey) {
       evt.target.ungrabify();
+      // Same fallback issue as the pan one above: with no grabbed node to
+      // consume the drag, cytoscape also offers up its default box-select
+      // rectangle (Ctrl is a common box-select modifier). Disabling it for
+      // the duration of the gesture is the only thing that actually
+      // suppresses it -- unlike userPanningEnabled, this one's confirmed
+      // effective.
+      cy.boxSelectionEnabled(false);
       manualConnectSourceId = evt.target.id();
       cy.container().style.cursor = "crosshair";
     }
@@ -620,6 +627,7 @@ function setupCytoscape() {
     const sourceId = manualConnectSourceId;
     manualConnectSourceId = null;
     cy.getElementById(sourceId).grabify();
+    cy.boxSelectionEnabled(true);
     cy.container().style.cursor = "";
 
     if (evt.target !== cy && evt.target.isNode && evt.target.isNode() && evt.target.id() !== sourceId) {
