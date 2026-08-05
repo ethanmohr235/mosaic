@@ -237,9 +237,14 @@ class Api:
             motes, rels = graph_repo.whole_garden(self._conn)
         else:
             motes, rels = graph_repo.neighborhood(self._conn, mote_id, hops)
+        # template_of counts as well as instance_of, matching
+        # species.list_species -- otherwise a species you've set up with a
+        # template but not yet instantiated wouldn't render as one, and the
+        # UI would offer no way to create its first instance.
+        structural = (species_repo.INSTANCE_OF, species_repo.TEMPLATE_OF)
         species_ids = [
             m.id for m in motes
-            if any(r.type == species_repo.INSTANCE_OF and r.to_id == m.id for r in rels)
+            if any(r.type in structural and r.to_id == m.id for r in rels)
         ]
         return {
             "focus_id": mote_id,

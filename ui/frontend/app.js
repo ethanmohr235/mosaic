@@ -1,10 +1,23 @@
+// ui/frontend/app.js
+//
+// Wiring between ui/api.py and the canvas graph in graph.js. State lives
+// here; graph.js owns only rendering, layout and pointer gestures.
+
 let api;
-let cy;
+let graph;
 let currentGarden = null;
 let focusId = null;
-let connectSourceId = null;
+let payload = { motes: [], relationships: [], species_ids: [] };
+let allMotes = [];
+let quickAddSpeciesId = null;
+let speciesPickerTargetId = null;
+let searchVisible = [];
+let searchHighlight = -1;
+const searchSpeciesFilter = new Set();
+const searchRelFilter = new Set();
 
-const INSTANCE_OF = "instance_of";
+const DEPTH_KEY = "monoss:depth";
+const SIM_ERROR_TOAST_MS = 12000;
 
 window.addEventListener("error", (e) => {
   console.error(e.error || e.message);
@@ -15,59 +28,34 @@ window.addEventListener("unhandledrejection", (e) => {
   showToast(String((e.reason && e.reason.message) || e.reason));
 });
 
-function lastFocusKey(garden) {
-  return `monoss:lastFocus:${garden}`;
-}
+// ---- small helpers ----
 
-function positionsKey(garden) {
-  return `monoss:positions:${garden}`;
-}
+const $ = (id) => document.getElementById(id);
 
-// How far out from the focused mote the graph reaches. Stored globally
-// rather than per garden: it's a viewing preference, and having it change
-// out from under you on every garden switch would be the surprising part.
-const DEPTH_KEY = "monoss:depth";
-const DEFAULT_DEPTH = 2;
+function positionsKey(garden) { return `monoss:positions:${garden}`; }
+function lastFocusKey(garden) { return `monoss:lastFocus:${garden}`; }
+function hiddenSpeciesKey(garden) { return `monoss:hiddenSpecies:${garden}`; }
+function hiddenRelKey(garden) { return `monoss:hiddenRels:${garden}`; }
+
+function readJSON(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
+  catch { return fallback; }
+}
 
 function loadDepth() {
   const stored = localStorage.getItem(DEPTH_KEY);
+  if (stored === null) return null;          // whole garden is the default
   if (stored === "all") return null;
   const hops = parseInt(stored, 10);
-  return Number.isFinite(hops) && hops > 0 ? hops : DEFAULT_DEPTH;
+  return Number.isFinite(hops) && hops > 0 ? hops : null;
 }
 
-// null means "whole garden" all the way through to Api.focus -- the only
-// setting that also reaches motes with no relationships yet.
 function saveDepth(hops) {
   localStorage.setItem(DEPTH_KEY, hops === null ? "all" : String(hops));
 }
 
-function loadPositions(garden) {
-  try {
-    return JSON.parse(localStorage.getItem(positionsKey(garden))) || {};
-  } catch {
-    return {};
-  }
-}
-
-function saveAllPositions(garden) {
-  if (!cy) return;
-  const positions = loadPositions(garden);
-  cy.nodes().forEach((n) => {
-    const p = n.position();
-    positions[n.id()] = { x: p.x, y: p.y };
-  });
-  localStorage.setItem(positionsKey(garden), JSON.stringify(positions));
-}
-
-function removePosition(garden, moteId) {
-  const positions = loadPositions(garden);
-  delete positions[moteId];
-  localStorage.setItem(positionsKey(garden), JSON.stringify(positions));
-}
-
 function showToast(message, durationMs = 3500) {
-  const toast = document.getElementById("toast");
+  const toast = $("toast");
   toast.textContent = message;
   toast.classList.remove("hidden");
   clearTimeout(showToast._timer);
@@ -75,19 +63,13 @@ function showToast(message, durationMs = 3500) {
 }
 
 async function call(promise) {
-  try {
-    return await promise;
-  } catch (err) {
-    showToast(String(err.message || err));
-    throw err;
-  }
+  try { return await promise; }
+  catch (err) { showToast(String(err.message || err)); throw err; }
 }
 
 function nodeLabel(mote) {
   const props = mote.properties || {};
-  const name = props.name;
-  if (typeof name === "string" && name.trim()) return name;
-
+  if (typeof props.name === "string" && props.name.trim()) return props.name;
   const keys = Object.keys(props).sort();
   if (keys.length > 0) {
     const key = keys[0];
@@ -97,100 +79,156 @@ function nodeLabel(mote) {
   return mote.id.slice(0, 8) + "…";
 }
 
-function buildElements(payload) {
-  const speciesIds = new Set(payload.species_ids || []);
-  const nodes = payload.motes.map((m) => ({
-    data: { id: m.id, label: nodeLabel(m) },
-    classes: speciesIds.has(m.id) ? "species" : "",
-  }));
-  const edges = payload.relationships.map((r) => ({
-    data: {
-      id: r.id,
-      source: r.from_id,
-      target: r.to_id,
-      label: r.type,
-    },
-  }));
-  return [...nodes, ...edges];
+function moteById(id) {
+  return payload.motes.find((m) => m.id === id) || allMotes.find((m) => m.id === id) || null;
 }
 
-function renderGraph(payload) {
-  focusId = payload.focus_id;
-  const cyEl = document.getElementById("cy");
-  const emptyEl = document.getElementById("empty-state");
-
-  if (focusId === null) {
-    cyEl.classList.add("hidden");
-    emptyEl.classList.remove("hidden");
-    return;
-  }
-  emptyEl.classList.add("hidden");
-  cyEl.classList.remove("hidden");
-  // #cy may have just gone from display:none to visible -- Cytoscape's
-  // canvas doesn't pick that up on its own, so it must be told to
-  // re-measure its container before adding/laying out elements.
-  cy.resize();
-
-  cy.elements().remove();
-  cy.add(buildElements(payload));
-  cy.getElementById(focusId).addClass("focused");
-
-  // Nodes with a remembered position are pinned there and excluded from
-  // the force simulation (locked), so re-focusing/re-opening a garden
-  // doesn't reshuffle everything you've already looked at. Cytoscape's
-  // layouts skip repositioning locked nodes regardless of `randomize`,
-  // so leaving randomize at its default (true) still places brand-new
-  // nodes normally -- it only randomizes the ones that are unlocked.
-  const stored = loadPositions(currentGarden);
-  cy.nodes().forEach((n) => {
-    const pos = stored[n.id()];
-    if (pos) {
-      n.position(pos);
-      n.lock();
-    }
-  });
-
-  const layout = cy.layout({
-    name: "cose",
-    animate: true,
-    animationDuration: 500,
-    fit: true,
-    padding: 60,
-    nodeDimensionsIncludeLabels: true,
-    idealEdgeLength: 90,
-    nodeRepulsion: 9000,
-  });
-  layout.one("layoutstop", () => {
-    cy.nodes().unlock();
-    // A single node has nothing to be positioned relative to -- saving it
-    // would later lock it (and whatever it's eventually connected to) at
-    // a spot that was never actually laid out against anything, silently
-    // defeating the layout once real relationships bring it into a bigger
-    // view.
-    if (cy.nodes().length > 1) {
-      saveAllPositions(currentGarden);
-    }
-  });
-  layout.run();
+/** Label for whatever a mote *is* -- its species names, or a structural
+ *  role if it plays one. Shown above the title in the detail panel and in
+ *  search results. */
+function kindLabel(mote) {
+  if (!mote) return "";
+  if (payload.species_ids.includes(mote.id)) return "Species";
+  const species = (payload.relationships || [])
+    .filter((r) => r.type === "instance_of" && r.from_id === mote.id)
+    .map((r) => moteById(r.to_id))
+    .filter(Boolean)
+    .map(nodeLabel);
+  if (species.length) return species.join(", ");
+  if (mote.properties && mote.properties.equation) return "Rule";
+  return "Mote";
 }
 
-async function refocus(moteId) {
-  const payload = await call(api.focus(moteId, loadDepth()));
-  localStorage.setItem(lastFocusKey(currentGarden), payload.focus_id || "");
-  renderGraph(payload);
-  return payload;
+// ---- graph data ----
+
+async function refocus(moteId, { pan = true, select = true } = {}) {
+  const next = await call(api.focus(moteId, loadDepth()));
+  focusId = next.focus_id;
+  payload = next;
+  localStorage.setItem(lastFocusKey(currentGarden), focusId || "");
+
+  graph.setData(next, readJSON(positionsKey(currentGarden), {}));
+  // Selection dims everything unrelated, which is what you want after
+  // clicking a mote and not what you want when a garden first opens.
+  graph.select(select ? focusId : null, { pan });
+  $("empty-state").classList.toggle("hidden", !!focusId);
+  renderLegend();
+  renderRelFilters();
+  return next;
 }
 
 async function loadGarden(garden) {
   currentGarden = garden;
-  connectSourceId = null;
+  $("garden-label").textContent = garden;
   closeDetailPanel();
+  graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
+  graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
   const stored = localStorage.getItem(lastFocusKey(garden)) || null;
-  await refocus(stored);
+  await refreshMoteCache();
+  // Frame the whole garden on open rather than panning to the remembered
+  // mote -- you want to see where you are before you go anywhere.
+  await refocus(stored, { pan: false, select: false });
+  graph.fitWhenSettled();
 }
 
+async function refreshMoteCache() {
+  allMotes = await call(api.list_motes());
+}
+
+function savePositions() {
+  localStorage.setItem(positionsKey(currentGarden), JSON.stringify(graph.pinnedPositions()));
+}
+
+// ---- legend + filters (view decluttering) ----
+
+function speciesRows() {
+  const counts = new Map();
+  let untyped = 0;
+  for (const mote of payload.motes) {
+    if (payload.species_ids.includes(mote.id)) continue;
+    const species = (payload.relationships || [])
+      .filter((r) => r.type === "instance_of" && r.from_id === mote.id)
+      .map((r) => r.to_id);
+    if (species.length === 0) { untyped += 1; continue; }
+    for (const id of species) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  const rows = payload.species_ids.map((id) => ({
+    id,
+    label: nodeLabel(moteById(id) || { id, properties: {} }),
+    count: counts.get(id) || 0,
+    color: graph.colorFor(id),
+    diamond: true,
+  }));
+  rows.sort((a, b) => a.label.localeCompare(b.label));
+  if (untyped > 0) {
+    rows.push({
+      id: "__none__", label: "No species", count: untyped,
+      color: "oklch(0.62 0.02 250)", diamond: false,
+    });
+  }
+  return rows;
+}
+
+function renderLegend() {
+  const container = $("legend");
+  container.innerHTML = "";
+  const rows = speciesRows();
+  if (rows.length === 0) {
+    container.innerHTML = '<div class="empty-note">No species yet</div>';
+    return;
+  }
+  for (const row of rows) {
+    const el = document.createElement("div");
+    const hidden = graph.hiddenSpecies.has(row.id);
+    el.className = "filter-row" + (hidden ? " off" : "");
+    el.title = hidden ? `Show ${row.label}` : `Hide ${row.label}`;
+    el.innerHTML =
+      `<span class="dot${row.diamond ? " diamond" : ""}" style="background:${row.color}"></span>` +
+      `<span class="name"></span><span class="count">${row.count}</span>`;
+    el.querySelector(".name").textContent = row.label;
+    el.addEventListener("click", () => {
+      const hiddenIds = new Set(graph.hiddenSpecies);
+      hiddenIds.has(row.id) ? hiddenIds.delete(row.id) : hiddenIds.add(row.id);
+      graph.setHiddenSpecies(hiddenIds);
+      localStorage.setItem(hiddenSpeciesKey(currentGarden), JSON.stringify([...hiddenIds]));
+      renderLegend();
+    });
+    container.appendChild(el);
+  }
+}
+
+function renderRelFilters() {
+  const container = $("rel-filters");
+  container.innerHTML = "";
+  const counts = new Map();
+  for (const rel of payload.relationships) {
+    counts.set(rel.type, (counts.get(rel.type) || 0) + 1);
+  }
+  const types = [...counts.keys()].sort();
+  $("rel-heading").classList.toggle("hidden", types.length === 0);
+  for (const type of types) {
+    const el = document.createElement("div");
+    const hidden = graph.hiddenRelTypes.has(type);
+    el.className = "filter-row" + (hidden ? " off" : "");
+    el.title = hidden ? `Show ${type}` : `Hide ${type}`;
+    el.innerHTML = '<span class="name"></span><span class="count"></span>';
+    el.querySelector(".name").textContent = type;
+    el.querySelector(".count").textContent = counts.get(type);
+    el.addEventListener("click", () => {
+      const hiddenTypes = new Set(graph.hiddenRelTypes);
+      hiddenTypes.has(type) ? hiddenTypes.delete(type) : hiddenTypes.add(type);
+      graph.setHiddenRelTypes(hiddenTypes);
+      localStorage.setItem(hiddenRelKey(currentGarden), JSON.stringify([...hiddenTypes]));
+      renderRelFilters();
+    });
+    container.appendChild(el);
+  }
+}
+
+// ---- detail panel ----
+
 async function openDetailPanel(moteId) {
-  const [mote, rels, mySpecies, instances] = await Promise.all([
+  const [mote, rels, species, instances] = await Promise.all([
     call(api.get_mote(moteId)),
     call(api.mote_relationships(moteId)),
     call(api.species_of(moteId)),
@@ -198,270 +236,356 @@ async function openDetailPanel(moteId) {
   ]);
   if (!mote) return;
 
-  document.getElementById("detail-id").textContent = mote.id;
+  $("detail-dot").style.background = graph.colorFor(moteId);
+  $("detail-type-label").textContent = kindLabel(mote);
+  $("detail-title").textContent = nodeLabel(mote);
+  $("detail-id").textContent = mote.id;
+
   renderProperties(mote);
-  renderSpecies(moteId, mySpecies, rels, instances.length);
-  const ownSpeciesLinks = rels.filter((r) => r.type === INSTANCE_OF && r.from_id === moteId);
-  renderRelationships(moteId, rels.filter((r) => !ownSpeciesLinks.includes(r)));
-  document.getElementById("detail-panel").classList.remove("hidden");
+  renderSpeciesSection(mote, species, instances);
+  renderRelationships(moteId, rels);
+  $("detail-panel").classList.remove("hidden");
+  fitAllTextareas();
 }
 
 function closeDetailPanel() {
-  document.getElementById("detail-panel").classList.add("hidden");
+  $("detail-panel").classList.add("hidden");
   hideSpeciesPicker();
-  if (cy) cy.elements().unselect();
 }
 
-function renderSpecies(moteId, mySpecies, rels, instanceCount) {
-  const container = document.getElementById("detail-species");
-  container.innerHTML = "";
-  if (mySpecies.length === 0) {
-    const empty = document.createElement("div");
-    empty.style.color = "var(--muted)";
-    empty.textContent = "None";
-    container.appendChild(empty);
+/** A textarea only reports a usable scrollHeight once it is attached and
+ *  visible, so sizing is done in an explicit pass after the panel is shown
+ *  rather than on a requestAnimationFrame -- that fired before the panel
+ *  was laid out and silently left every equation one line tall. */
+function fitTextarea(field) {
+  field.style.height = "auto";
+  field.style.height = field.scrollHeight + "px";
+}
+
+function fitAllTextareas() {
+  $("detail-properties").querySelectorAll("textarea").forEach(fitTextarea);
+}
+
+/** Values long enough to wrap get a textarea sized to its content, so a
+ *  rule's equation is readable in full instead of scrolling sideways in a
+ *  one-line input. */
+function valueField(rawValue, onCommit) {
+  const text = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue);
+  const multiline = text.length > 38 || text.includes("\n");
+  const field = document.createElement(multiline ? "textarea" : "input");
+  if (!multiline) field.type = "text";
+  field.value = text;
+
+  if (multiline) {
+    field.rows = 1;
+    field.addEventListener("input", () => fitTextarea(field));
   }
-  for (const species of mySpecies) {
-    const rel = rels.find(
-      (r) => r.type === INSTANCE_OF && r.from_id === moteId && r.to_id === species.id
+  field.addEventListener("change", () => onCommit(field.value));
+  return field;
+}
+
+function renderProperties(mote) {
+  const container = $("detail-properties");
+  container.innerHTML = "";
+  const entries = Object.entries(mote.properties);
+  if (entries.length === 0) {
+    container.innerHTML = '<div class="empty-note">None</div>';
+    return;
+  }
+  for (const [key, value] of entries) {
+    const row = document.createElement("div");
+    row.className = "detail-row";
+
+    const keyEl = document.createElement("span");
+    keyEl.className = "key";
+    keyEl.textContent = key;
+    keyEl.title = key;
+
+    const field = valueField(value, async (next) => {
+      await call(api.update_mote(mote.id, { [key]: next }));
+      await refocus(focusId, { pan: false });
+      await refreshMoteCache();
+    });
+
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "×";
+    del.title = `Delete ${key}`;
+    del.addEventListener("click", async () => {
+      await call(api.delete_property(mote.id, key));
+      await refocus(focusId, { pan: false });
+      await openDetailPanel(mote.id);
+    });
+
+    row.append(keyEl, field, del);
+    container.appendChild(row);
+  }
+}
+
+function renderSpeciesSection(mote, species, instances) {
+  const container = $("detail-species");
+  container.innerHTML = "";
+  if (species.length === 0) {
+    container.innerHTML = '<div class="empty-note">Not an instance of anything</div>';
+  }
+  for (const speciesMote of species) {
+    const rel = payload.relationships.find(
+      (r) => r.type === "instance_of" && r.from_id === mote.id && r.to_id === speciesMote.id
     );
     const row = document.createElement("div");
     row.className = "rel-row";
 
     const label = document.createElement("span");
-    label.className = "rel-label";
-    label.textContent = nodeLabel(species);
-    label.title = `${species.id} (click to view)`;
-    label.addEventListener("click", () => {
-      refocus(species.id).then(() => openDetailPanel(species.id));
-    });
+    label.className = "rel-other";
+    label.textContent = nodeLabel(speciesMote);
+    label.addEventListener("click", () => selectMote(speciesMote.id));
 
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "×";
-    delBtn.addEventListener("click", async () => {
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.title = "Remove from this species";
+    del.addEventListener("click", async () => {
       if (rel) await call(api.delete_relationship(rel.id));
-      await refocus(moteId);
-      await openDetailPanel(moteId);
+      await refocus(focusId, { pan: false });
+      await openDetailPanel(mote.id);
     });
 
-    row.append(label, delBtn);
+    row.append(label, del);
     container.appendChild(row);
   }
 
-  document.getElementById("detail-instance-count").textContent =
-    instanceCount > 0 ? `Instances: ${instanceCount}` : "";
-}
-
-function renderProperties(mote) {
-  const container = document.getElementById("detail-properties");
-  container.innerHTML = "";
-  for (const [key, value] of Object.entries(mote.properties)) {
-    const row = document.createElement("div");
-    row.className = "detail-row";
-
-    const keyEl = document.createElement("span");
-    keyEl.textContent = key;
-    keyEl.style.minWidth = "70px";
-    keyEl.style.color = "var(--muted)";
-
-    const valueInput = document.createElement("input");
-    valueInput.type = "text";
-    valueInput.value = typeof value === "string" ? value : JSON.stringify(value);
-    valueInput.addEventListener("change", async () => {
-      await call(api.update_mote(mote.id, { [key]: valueInput.value }));
-    });
-
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "×";
-    delBtn.addEventListener("click", async () => {
-      await call(api.delete_property(mote.id, key));
-      openDetailPanel(mote.id);
-    });
-
-    row.append(keyEl, valueInput, delBtn);
-    container.appendChild(row);
-  }
+  // Instantiating from a species is offered on the species itself, which
+  // is where you are when you think "I want another one of these".
+  const isSpecies = instances.length > 0 || payload.species_ids.includes(mote.id);
+  $("new-instance-btn").classList.toggle("hidden", !isSpecies);
+  $("detail-instance-count").textContent =
+    instances.length > 0 ? `${instances.length} instance${instances.length === 1 ? "" : "s"}` : "";
 }
 
 function renderRelationships(moteId, rels) {
-  const container = document.getElementById("detail-relationships");
+  const container = $("detail-relationships");
   container.innerHTML = "";
-  if (rels.length === 0) {
-    const empty = document.createElement("div");
-    empty.style.color = "var(--muted)";
-    empty.textContent = "None";
-    container.appendChild(empty);
+  const shown = rels.filter((r) => r.type !== "instance_of");
+  if (shown.length === 0) {
+    container.innerHTML = '<div class="empty-note">None</div>';
   }
-  for (const r of rels) {
+  for (const rel of shown) {
+    const otherId = rel.from_id === moteId ? rel.to_id : rel.from_id;
+    const other = moteById(otherId);
     const row = document.createElement("div");
     row.className = "rel-row";
 
-    const other = r.from_id === moteId ? r.to_id : r.from_id;
-    const arrow = r.from_id === moteId ? "→" : "←";
+    const arrow = document.createElement("span");
+    arrow.className = "arrow";
+    arrow.textContent = rel.from_id === moteId ? "→" : "←";
+
+    const type = document.createElement("span");
+    type.className = "rel-type";
+    type.textContent = rel.type;
+    type.title = "Click to rename";
+    type.addEventListener("click", async () => {
+      const next = window.prompt("Relationship type:", rel.type);
+      if (!next || next === rel.type) return;
+      await call(api.update_relationship(rel.id, null, null, next));
+      await refocus(focusId, { pan: false });
+      await openDetailPanel(moteId);
+    });
+
     const label = document.createElement("span");
-    label.className = "rel-label";
-    label.textContent = `${arrow} ${r.type} ${other.slice(0, 8)}…`;
-    label.title = `${other} (click to rename the relationship type)`;
-    label.addEventListener("click", async () => {
-      const newType = window.prompt("Relationship type:", r.type);
-      if (!newType || newType === r.type) return;
-      await call(api.update_relationship(r.id, null, null, newType));
-      openDetailPanel(moteId);
-      refocus(focusId);
+    label.className = "rel-other";
+    label.textContent = other ? nodeLabel(other) : otherId.slice(0, 8) + "…";
+    label.title = otherId;
+    label.addEventListener("click", () => selectMote(otherId));
+
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.addEventListener("click", async () => {
+      await call(api.delete_relationship(rel.id));
+      await refocus(focusId, { pan: false });
+      await openDetailPanel(moteId);
     });
 
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "×";
-    delBtn.addEventListener("click", async () => {
-      await call(api.delete_relationship(r.id));
-      openDetailPanel(moteId);
-      refocus(focusId);
-    });
-
-    row.append(label, delBtn);
+    row.append(arrow, type, label, del);
     container.appendChild(row);
   }
+}
 
-  const connectBtn = document.createElement("button");
-  connectBtn.textContent = "Connect to…";
-  connectBtn.style.marginTop = "0.5rem";
-  connectBtn.addEventListener("click", () => {
-    connectSourceId = moteId;
-    showToast("Click another mote on the graph to connect to it (click it again to cancel).");
-  });
-  container.appendChild(connectBtn);
+async function selectMote(moteId) {
+  await refocus(moteId);
+  await openDetailPanel(moteId);
 }
 
 async function connectNodes(sourceId, targetId) {
   const type = window.prompt("Relationship type:");
   if (!type) return;
   await call(api.create_relationship(sourceId, targetId, type));
-  await refocus(sourceId);
+  await refocus(sourceId, { pan: false });
   await openDetailPanel(sourceId);
 }
 
-function setupQuickAdd() {
-  const rowsEl = document.getElementById("quick-add-rows");
+// ---- quick add (with species templates) ----
 
-  function addRow() {
-    const row = document.createElement("div");
-    row.className = "prop-row";
-    const keyInput = document.createElement("input");
-    keyInput.placeholder = "key";
-    const valueInput = document.createElement("input");
-    valueInput.placeholder = "value";
-    row.append(keyInput, valueInput);
-    rowsEl.appendChild(row);
+function renderSpeciesChips() {
+  const container = $("species-chips");
+  container.innerHTML = "";
+  const rows = speciesRows().filter((r) => r.id !== "__none__");
+
+  const blank = document.createElement("button");
+  blank.type = "button";
+  blank.className = "chip" + (quickAddSpeciesId === null ? " on" : "");
+  blank.style.borderColor = quickAddSpeciesId === null ? "var(--accent)" : "var(--border)";
+  blank.textContent = "Blank";
+  blank.addEventListener("click", () => { quickAddSpeciesId = null; renderSpeciesChips(); resetQuickAddRows(); });
+  container.appendChild(blank);
+
+  for (const row of rows) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.speciesId = row.id;
+    chip.style.borderColor = quickAddSpeciesId === row.id ? row.color : "var(--border)";
+    chip.innerHTML = `<span class="dot" style="background:${row.color}"></span><span></span>`;
+    chip.querySelector("span:last-child").textContent = row.label;
+    chip.addEventListener("click", () => selectQuickAddSpecies(row.id));
+    container.appendChild(chip);
   }
-  addRow();
+}
 
-  document.getElementById("add-property-row").addEventListener("click", addRow);
+/** Picking a species pre-fills the form from its template, so making the
+ *  tenth resistor is picking a chip and typing one number. */
+async function selectQuickAddSpecies(speciesId) {
+  quickAddSpeciesId = speciesId;
+  renderSpeciesChips();
+  const template = await call(api.template_for(speciesId));
+  const rowsEl = $("quick-add-rows");
+  rowsEl.innerHTML = "";
+  const entries = template ? Object.entries(template.properties) : [["name", ""]];
+  for (const [key, value] of entries) {
+    addQuickAddRow(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  if (entries.length === 0) addQuickAddRow("name", "");
+}
 
-  document.getElementById("create-mote-btn").addEventListener("click", async () => {
-    const props = {};
-    for (const row of rowsEl.querySelectorAll(".prop-row")) {
-      const [keyInput, valueInput] = row.querySelectorAll("input");
-      if (keyInput.value.trim()) props[keyInput.value.trim()] = valueInput.value;
-    }
-    const mote = await call(api.create_mote(props));
-    rowsEl.innerHTML = "";
-    addRow();
-    await refocus(mote.id);
+function addQuickAddRow(key = "", value = "") {
+  const row = document.createElement("div");
+  row.className = "prop-row";
+  const keyInput = document.createElement("input");
+  keyInput.placeholder = "key";
+  keyInput.value = key;
+  const valueInput = document.createElement("input");
+  valueInput.placeholder = "value";
+  valueInput.value = value;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "×";
+  remove.addEventListener("click", () => row.remove());
+  row.append(keyInput, valueInput, remove);
+  $("quick-add-rows").appendChild(row);
+}
+
+function resetQuickAddRows() {
+  $("quick-add-rows").innerHTML = "";
+  addQuickAddRow("name", "");
+}
+
+function collectQuickAddProperties() {
+  const props = {};
+  for (const row of $("quick-add-rows").querySelectorAll(".prop-row")) {
+    const [keyInput, valueInput] = row.querySelectorAll("input");
+    if (keyInput.value.trim()) props[keyInput.value.trim()] = valueInput.value;
+  }
+  return props;
+}
+
+function setupQuickAdd() {
+  resetQuickAddRows();
+  $("quick-add-btn").addEventListener("click", () => {
+    const panel = $("quick-add");
+    const opening = panel.classList.contains("hidden");
+    panel.classList.toggle("hidden", !opening);
+    $("quick-add-btn").textContent = opening ? "×" : "+";
+    if (opening) renderSpeciesChips();
+  });
+
+  $("add-property-row").addEventListener("click", () => addQuickAddRow());
+
+  $("create-mote-btn").addEventListener("click", async () => {
+    const props = collectQuickAddProperties();
+    const mote = quickAddSpeciesId
+      ? await call(api.create_instance(quickAddSpeciesId, props))
+      : await call(api.create_mote(props));
+    $("quick-add").classList.add("hidden");
+    $("quick-add-btn").textContent = "+";
+    resetQuickAddRows();
+    await refreshMoteCache();
+    await selectMote(mote.id);
+    showToast("Mote created.");
   });
 }
 
-function setupDetailPanel() {
-  document.getElementById("close-panel").addEventListener("click", closeDetailPanel);
-
-  document.getElementById("detail-add-property-btn").addEventListener("click", async () => {
-    const keyInput = document.getElementById("detail-new-key");
-    const valueInput = document.getElementById("detail-new-value");
-    if (!keyInput.value.trim() || !focusId) return;
-    await call(api.update_mote(focusId, { [keyInput.value.trim()]: valueInput.value }));
-    keyInput.value = "";
-    valueInput.value = "";
-    await openDetailPanel(focusId);
-  });
-
-  document.getElementById("delete-mote-btn").addEventListener("click", async () => {
-    if (!focusId) return;
-    if (!window.confirm("Delete this mote and all its relationships?")) return;
-    await call(api.delete_mote(focusId));
-    localStorage.removeItem(lastFocusKey(currentGarden));
-    removePosition(currentGarden, focusId);
-    closeDetailPanel();
-    await refocus(null);
-  });
-}
-
-let speciesPickerTargetId = null;
+// ---- species picker + new instance ----
 
 function hideSpeciesPicker() {
-  document.getElementById("species-picker-wrap").classList.add("hidden");
-  document.getElementById("species-picker-results").classList.add("hidden");
-  document.getElementById("species-picker-input").value = "";
+  $("species-picker-wrap").classList.add("hidden");
+  $("species-picker-input").value = "";
   speciesPickerTargetId = null;
 }
 
 function renderSpeciesPickerResults(query) {
-  const container = document.getElementById("species-picker-results");
-  const candidates = (searchCache || [])
-    .filter((m) => m.id !== speciesPickerTargetId)
-    .filter((m) => matchesQuery(m, query))
-    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
-    .slice(0, SEARCH_RESULT_LIMIT);
-
+  const container = $("species-picker-results");
   container.innerHTML = "";
+  const q = (query || "").toLowerCase();
+  const candidates = allMotes
+    .filter((m) => m.id !== speciesPickerTargetId)
+    .filter((m) => !q || nodeLabel(m).toLowerCase().includes(q))
+    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
+    .slice(0, 40);
+
   if (candidates.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "search-empty";
-    empty.textContent = "No matches";
-    container.appendChild(empty);
+    container.innerHTML = '<div class="search-empty">No matches</div>';
+    return;
   }
-  candidates.forEach((m) => {
+  for (const mote of candidates) {
     const row = document.createElement("div");
     row.className = "search-result-row";
-    const label = document.createElement("span");
-    label.textContent = nodeLabel(m);
-    const idSpan = document.createElement("span");
-    idSpan.className = "search-result-id";
-    idSpan.textContent = m.id.slice(0, 8) + "…";
-    row.append(label, idSpan);
+    row.innerHTML = '<span class="label"></span>';
+    row.querySelector(".label").textContent = nodeLabel(mote);
     row.addEventListener("mousedown", async (e) => {
       e.preventDefault();
       const targetId = speciesPickerTargetId;
-      await call(api.set_species(targetId, m.id));
+      await call(api.set_species(targetId, mote.id));
       hideSpeciesPicker();
-      await refocus(targetId);
+      await refocus(targetId, { pan: false });
       await openDetailPanel(targetId);
     });
     container.appendChild(row);
-  });
-  container.classList.remove("hidden");
+  }
 }
 
-function setupSpeciesPicker() {
-  const input = document.getElementById("species-picker-input");
-
-  document.getElementById("set-species-btn").addEventListener("click", async () => {
+function setupSpeciesControls() {
+  $("set-species-btn").addEventListener("click", () => {
     if (!focusId) return;
     speciesPickerTargetId = focusId;
-    await refreshSearchCache();
-    document.getElementById("species-picker-wrap").classList.remove("hidden");
+    $("species-picker-wrap").classList.remove("hidden");
     renderSpeciesPickerResults("");
-    input.focus();
+    $("species-picker-input").focus();
+  });
+  $("species-picker-input").addEventListener("input", (e) =>
+    renderSpeciesPickerResults(e.target.value)
+  );
+  $("species-picker-input").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideSpeciesPicker();
   });
 
-  input.addEventListener("input", () => renderSpeciesPickerResults(input.value));
-  input.addEventListener("blur", () => setTimeout(hideSpeciesPicker, 150));
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hideSpeciesPicker();
+  $("new-instance-btn").addEventListener("click", async () => {
+    if (!focusId) return;
+    const mote = await call(api.create_instance(focusId, {}));
+    await refreshMoteCache();
+    await selectMote(mote.id);
+    showToast("Instance created.");
   });
 }
 
-let searchCache = null;
-let searchVisibleResults = [];
-let searchHighlightIndex = -1;
+// ---- search palette ----
 
 function matchesQuery(mote, query) {
   if (!query) return true;
@@ -475,326 +599,254 @@ function matchesQuery(mote, query) {
   return false;
 }
 
-async function refreshSearchCache() {
-  searchCache = await call(api.list_motes());
+function speciesIdsOf(moteId) {
+  return payload.relationships
+    .filter((r) => r.type === "instance_of" && r.from_id === moteId)
+    .map((r) => r.to_id);
 }
 
-const SEARCH_RESULT_LIMIT = 50;
+function computeSearchResults(query) {
+  return allMotes
+    .filter((mote) => {
+      if (searchSpeciesFilter.size) {
+        const ids = speciesIdsOf(mote.id);
+        const matches = ids.some((id) => searchSpeciesFilter.has(id)) ||
+          (searchSpeciesFilter.has("__none__") && ids.length === 0);
+        if (!matches) return false;
+      }
+      if (searchRelFilter.size) {
+        const touches = payload.relationships.some(
+          (r) => (r.from_id === mote.id || r.to_id === mote.id) && searchRelFilter.has(r.type)
+        );
+        if (!touches) return false;
+      }
+      return matchesQuery(mote, query);
+    })
+    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
+    .slice(0, 60);
+}
+
+function renderSearchChips() {
+  const speciesBox = $("search-species-chips");
+  speciesBox.innerHTML = "";
+  for (const row of speciesRows()) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip" + (searchSpeciesFilter.has(row.id) ? " on" : "");
+    chip.style.borderColor = searchSpeciesFilter.has(row.id) ? row.color : "var(--border)";
+    chip.innerHTML = `<span class="dot" style="background:${row.color}"></span><span></span>`;
+    chip.querySelector("span:last-child").textContent = row.label;
+    chip.addEventListener("click", () => {
+      searchSpeciesFilter.has(row.id)
+        ? searchSpeciesFilter.delete(row.id)
+        : searchSpeciesFilter.add(row.id);
+      renderSearchChips();
+      renderSearchResults($("search-input").value);
+    });
+    speciesBox.appendChild(chip);
+  }
+
+  const relBox = $("search-rel-chips");
+  relBox.innerHTML = "";
+  for (const type of [...new Set(payload.relationships.map((r) => r.type))].sort()) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip" + (searchRelFilter.has(type) ? " on" : "");
+    chip.style.borderColor = searchRelFilter.has(type) ? "var(--accent)" : "var(--border)";
+    chip.textContent = type;
+    chip.addEventListener("click", () => {
+      searchRelFilter.has(type) ? searchRelFilter.delete(type) : searchRelFilter.add(type);
+      renderSearchChips();
+      renderSearchResults($("search-input").value);
+    });
+    relBox.appendChild(chip);
+  }
+}
 
 function renderSearchResults(query) {
-  const container = document.getElementById("search-results");
-  const all = (searchCache || [])
-    .slice()
-    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)));
-  const filtered = all.filter((m) => matchesQuery(m, query));
-  searchVisibleResults = filtered.slice(0, SEARCH_RESULT_LIMIT);
-  searchHighlightIndex = searchVisibleResults.length > 0 ? 0 : -1;
-
+  const container = $("search-results");
   container.innerHTML = "";
+  searchVisible = computeSearchResults(query);
+  searchHighlight = searchVisible.length ? 0 : -1;
 
-  if (searchVisibleResults.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "search-empty";
-    empty.textContent = query ? "No matches" : "No motes yet";
-    container.appendChild(empty);
+  if (searchVisible.length === 0) {
+    container.innerHTML = '<div class="search-empty">No matches</div>';
+    return;
   }
-
-  searchVisibleResults.forEach((m, i) => {
+  searchVisible.forEach((mote, i) => {
     const row = document.createElement("div");
-    row.className = "search-result-row" + (i === searchHighlightIndex ? " highlighted" : "");
-
-    const label = document.createElement("span");
-    label.textContent = nodeLabel(m);
-
-    const idSpan = document.createElement("span");
-    idSpan.className = "search-result-id";
-    idSpan.textContent = m.id.slice(0, 8) + "…";
-
-    row.append(label, idSpan);
-    row.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      selectSearchResult(m.id);
-    });
+    row.className = "search-result-row" + (i === searchHighlight ? " highlighted" : "");
+    row.innerHTML =
+      `<span class="dot" style="background:${graph.colorFor(mote.id)}"></span>` +
+      '<span class="label"></span><span class="kind"></span>';
+    row.querySelector(".label").textContent = nodeLabel(mote);
+    row.querySelector(".kind").textContent = kindLabel(mote);
+    row.addEventListener("mousedown", (e) => { e.preventDefault(); selectSearchResult(mote.id); });
     container.appendChild(row);
   });
-
-  if (filtered.length > SEARCH_RESULT_LIMIT) {
-    const hint = document.createElement("div");
-    hint.className = "search-hint";
-    const remaining = filtered.length - SEARCH_RESULT_LIMIT;
-    hint.textContent = `${remaining} more match${remaining === 1 ? "" : "es"} — refine your search`;
-    container.appendChild(hint);
-  }
-
-  container.classList.remove("hidden");
 }
 
 function updateSearchHighlight() {
   const rows = document.querySelectorAll("#search-results .search-result-row");
-  rows.forEach((row, i) => row.classList.toggle("highlighted", i === searchHighlightIndex));
+  rows.forEach((row, i) => row.classList.toggle("highlighted", i === searchHighlight));
+  const active = rows[searchHighlight];
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
-function hideSearchResults() {
-  document.getElementById("search-results").classList.add("hidden");
-  searchHighlightIndex = -1;
+function openSearch() {
+  $("search-overlay").classList.remove("hidden");
+  $("search-input").value = "";
+  renderSearchChips();
+  renderSearchResults("");
+  $("search-input").focus();
 }
+
+function closeSearch() { $("search-overlay").classList.add("hidden"); }
 
 async function selectSearchResult(moteId) {
-  hideSearchResults();
-  await refocus(moteId);
-  await openDetailPanel(moteId);
-  const mote = (searchCache || []).find((m) => m.id === moteId);
-  document.getElementById("search-input").value = mote ? nodeLabel(mote) : "";
-  document.getElementById("search-input").blur();
+  closeSearch();
+  await selectMote(moteId);
 }
 
 function setupSearch() {
-  const input = document.getElementById("search-input");
-
-  input.addEventListener("focus", async () => {
-    await refreshSearchCache();
-    renderSearchResults("");
-    input.select();
+  $("search-btn").addEventListener("click", openSearch);
+  $("search-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("search-overlay")) closeSearch();
   });
-
-  input.addEventListener("input", () => {
-    renderSearchResults(input.value);
-  });
-
-  input.addEventListener("keydown", (e) => {
-    const resultsVisible = !document.getElementById("search-results").classList.contains("hidden");
-    if (!resultsVisible) return;
-
+  $("search-input").addEventListener("input", (e) => renderSearchResults(e.target.value));
+  $("search-input").addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (searchHighlightIndex < searchVisibleResults.length - 1) searchHighlightIndex++;
+      if (searchHighlight < searchVisible.length - 1) searchHighlight++;
       updateSearchHighlight();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (searchHighlightIndex > 0) searchHighlightIndex--;
+      if (searchHighlight > 0) searchHighlight--;
       updateSearchHighlight();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const selected = searchVisibleResults[searchHighlightIndex];
-      if (selected) selectSearchResult(selected.id);
+      const chosen = searchVisible[searchHighlight];
+      if (chosen) selectSearchResult(chosen.id);
     } else if (e.key === "Escape") {
-      hideSearchResults();
-      input.blur();
+      closeSearch();
     }
-  });
-
-  input.addEventListener("blur", () => {
-    setTimeout(hideSearchResults, 100);
   });
 }
 
-async function refreshGardenSelect() {
-  const select = document.getElementById("garden-select");
+// ---- garden menu ----
+
+async function refreshGardenMenu() {
   const gardens = await call(api.list_gardens());
-  select.innerHTML = "";
-  for (const g of gardens) {
-    const opt = document.createElement("option");
-    opt.value = g;
-    opt.textContent = g;
-    select.appendChild(opt);
+  const menu = $("garden-menu");
+  menu.innerHTML = "";
+
+  for (const name of gardens) {
+    const item = document.createElement("div");
+    item.className = "menu-item";
+    item.dataset.garden = name;
+    item.innerHTML = '<span></span><span class="check"></span>';
+    item.querySelector("span").textContent = name;
+    item.querySelector(".check").textContent = name === currentGarden ? "✓" : "";
+    item.addEventListener("click", async () => {
+      menu.classList.add("hidden");
+      if (name === currentGarden) return;
+      await call(api.switch_garden(name));
+      await loadGarden(name);
+    });
+    menu.appendChild(item);
   }
-  select.value = currentGarden;
+
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  menu.appendChild(sep);
+
+  const actions = [
+    ["+ New garden…", async () => {
+      const name = window.prompt("New garden name:");
+      if (!name) return;
+      await call(api.create_garden(name));
+      await call(api.switch_garden(name));
+      await loadGarden(name);
+      await refreshGardenMenu();
+    }],
+    ["Export garden…", async () => {
+      const result = await call(api.export_garden());
+      if (!result.cancelled) showToast(`Exported to ${result.path}`);
+    }],
+    ["Import garden…", async () => {
+      const name = window.prompt("Import into a new garden named:");
+      if (!name) return;
+      const result = await call(api.import_garden_into_new(name));
+      if (result.cancelled) return;
+      await call(api.switch_garden(result.garden));
+      await loadGarden(result.garden);
+      await refreshGardenMenu();
+      showToast(`Imported ${result.motes} motes, ${result.relationships} relationships.`);
+    }],
+  ];
+  for (const [label, handler] of actions) {
+    const item = document.createElement("div");
+    item.className = "menu-item accent";
+    item.textContent = label;
+    item.addEventListener("click", async () => { menu.classList.add("hidden"); await handler(); });
+    menu.appendChild(item);
+  }
 }
 
-function setupGardenSwitcher() {
-  const select = document.getElementById("garden-select");
-  select.addEventListener("change", async () => {
-    await call(api.switch_garden(select.value));
-    await loadGarden(select.value);
+function setupGardenMenu() {
+  $("garden-btn").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const menu = $("garden-menu");
+    const opening = menu.classList.contains("hidden");
+    if (opening) await refreshGardenMenu();
+    menu.classList.toggle("hidden", !opening);
   });
-
-  document.getElementById("new-garden-btn").addEventListener("click", async () => {
-    const name = window.prompt("New garden name:");
-    if (!name) return;
-    await call(api.create_garden(name));
-    await call(api.switch_garden(name));
-    await refreshGardenSelect();
-    await loadGarden(name);
-  });
-
-  document.getElementById("export-garden-btn").addEventListener("click", async () => {
-    const result = await call(api.export_garden());
-    if (!result.cancelled) showToast(`Exported to ${result.path}`);
-  });
-
-  document.getElementById("import-garden-btn").addEventListener("click", async () => {
-    const name = window.prompt("Import into new garden named:");
-    if (!name) return;
-    const result = await call(api.import_garden_into_new(name));
-    if (result.cancelled) return;
-    showToast(`Imported ${result.motes} mote(s), ${result.relationships} relationship(s) into "${result.garden}"`);
-    await refreshGardenSelect();
-    await call(api.switch_garden(result.garden));
-    await loadGarden(result.garden);
-    document.getElementById("garden-select").value = result.garden;
-  });
+  document.addEventListener("click", () => $("garden-menu").classList.add("hidden"));
 }
 
-function setupCytoscape() {
-  // Cytoscape renders on <canvas>, not real DOM -- its style parser can't
-  // resolve CSS custom properties, so the current theme's colors have to
-  // be read out as concrete values before being handed to it.
-  const rootStyle = getComputedStyle(document.documentElement);
-  const fgColor = rootStyle.getPropertyValue("--fg").trim();
-  const mutedColor = rootStyle.getPropertyValue("--muted").trim();
-  const bgColor = rootStyle.getPropertyValue("--bg").trim();
+// ---- view controls ----
 
-  cy = cytoscape({
-    container: document.getElementById("cy"),
-    maxZoom: 2,
-    minZoom: 0.1,
-    style: [
-      {
-        selector: "node",
-        style: {
-          "background-color": "#3462eb",
-          label: "data(label)",
-          color: fgColor,
-          "font-size": 9,
-          "text-valign": "bottom",
-          "text-margin-y": 4,
-          "text-background-color": bgColor,
-          "text-background-opacity": 0.85,
-          "text-background-padding": 2,
-          width: 18,
-          height: 18,
-        },
-      },
-      {
-        selector: "node.focused",
-        style: {
-          "border-width": 3,
-          "border-color": "#6d8dff",
-        },
-      },
-      {
-        selector: "node.species",
-        style: {
-          shape: "diamond",
-        },
-      },
-      {
-        selector: "edge",
-        style: {
-          width: 1.5,
-          "line-color": "#9a9a9a",
-          "target-arrow-color": "#9a9a9a",
-          "target-arrow-shape": "triangle",
-          "curve-style": "bezier",
-          label: "data(label)",
-          "font-size": 8,
-          color: mutedColor,
-          "text-background-color": bgColor,
-          "text-background-opacity": 0.85,
-          "text-background-padding": 2,
-        },
-      },
-    ],
-  });
-
-  cy.on("tap", "node", (evt) => {
-    const nodeId = evt.target.id();
-    if (connectSourceId !== null) {
-      const source = connectSourceId;
-      connectSourceId = null;
-      if (nodeId === source) {
-        showToast("Connection cancelled.");
-        return;
-      }
-      connectNodes(source, nodeId);
-      return;
-    }
-    refocus(nodeId).then(() => openDetailPanel(nodeId));
-  });
-
-  cy.on("tap", (evt) => {
-    if (evt.target === cy) {
-      connectSourceId = null;
-    }
-  });
-
-  cy.on("dragfree", "node", (evt) => {
-    const p = evt.target.position();
-    const positions = loadPositions(currentGarden);
-    positions[evt.target.id()] = { x: p.x, y: p.y };
-    localStorage.setItem(positionsKey(currentGarden), JSON.stringify(positions));
-  });
-
-  // Plain click-and-drag on a node already means "reposition it" (and pans
-  // the canvas from empty space), so drag-to-connect needs its own trigger
-  // rather than competing for the same gesture: Ctrl+drag. ungrabify() the
-  // node the instant its mousedown fires (synchronously, in the same tick,
-  // *before* cytoscape's own grab-drag would otherwise engage from that
-  // same event -- confirmed this reliably wins the race) and track the
-  // gesture with plain mousemove/mouseup rather than cytoscape-edgehandles:
-  // that library's hover-target detection turned out not to fire at all
-  // when its gesture is started manually via eh.start() instead of from
-  // its own handle-grab, so it could never actually complete a connection
-  // this way. No live preview line as a result -- just a crosshair cursor
-  // for feedback -- but it's simple and, unlike the library, reliable.
-  //
-  // (cy.pan() does shift once a connection is actually made, but that's
-  // renderGraph()'s normal fit:true relayout re-centering on the updated
-  // graph via refocus() -- confirmed by dragging to empty space, which
-  // cancels the gesture and triggers no relayout: pan doesn't move at all
-  // in that case. Not a side effect of the drag itself, so nothing here
-  // needs to compensate for it.)
-  let manualConnectSourceId = null;
-
-  cy.on("mousedown", "node", (evt) => {
-    if (evt.originalEvent && evt.originalEvent.ctrlKey) {
-      evt.target.ungrabify();
-      // Same fallback issue as the pan one above: with no grabbed node to
-      // consume the drag, cytoscape also offers up its default box-select
-      // rectangle (Ctrl is a common box-select modifier). Disabling it for
-      // the duration of the gesture is the only thing that actually
-      // suppresses it -- unlike userPanningEnabled, this one's confirmed
-      // effective.
-      cy.boxSelectionEnabled(false);
-      manualConnectSourceId = evt.target.id();
-      cy.container().style.cursor = "crosshair";
-    }
-  });
-
-  cy.on("mouseup", (evt) => {
-    if (manualConnectSourceId === null) return;
-    const sourceId = manualConnectSourceId;
-    manualConnectSourceId = null;
-    cy.getElementById(sourceId).grabify();
-    cy.boxSelectionEnabled(true);
-    cy.container().style.cursor = "";
-
-    if (evt.target !== cy && evt.target.isNode && evt.target.isNode() && evt.target.id() !== sourceId) {
-      connectNodes(sourceId, evt.target.id());
-    }
-  });
-}
-
-// A garden whose rules don't solve comes back as ok:false with an
-// explanation rather than throwing -- those messages name the motes
-// involved and are worth reading, so they linger far longer than a
-// routine confirmation.
-const SIM_ERROR_TOAST_MS = 12000;
-
-function setupDepthControl() {
-  const select = document.getElementById("depth-select");
+function setupViewControls() {
+  const select = $("depth-select");
   const stored = loadDepth();
   select.value = stored === null ? "all" : String(stored);
-
   select.addEventListener("change", async () => {
     saveDepth(select.value === "all" ? null : parseInt(select.value, 10));
-    await refocus(focusId);
+    await refocus(focusId, { pan: false });
+    // Changing depth is an explicit "show me more/less" command, so
+    // re-framing is what you asked for -- unlike selection, which isn't.
+    graph.fitWhenSettled();
+  });
+
+  $("reset-view-btn").addEventListener("click", () => graph.resetView());
+  $("close-panel").addEventListener("click", closeDetailPanel);
+  $("connect-btn").addEventListener("click", () => {
+    showToast("Ctrl+drag from one mote to another to connect them.");
+  });
+
+  $("detail-add-property-btn").addEventListener("click", async () => {
+    const key = $("detail-new-key").value.trim();
+    if (!key || !focusId) return;
+    await call(api.update_mote(focusId, { [key]: $("detail-new-value").value }));
+    $("detail-new-key").value = "";
+    $("detail-new-value").value = "";
+    await refocus(focusId, { pan: false });
+    await openDetailPanel(focusId);
+  });
+
+  $("delete-mote-btn").addEventListener("click", async () => {
+    if (!focusId) return;
+    if (!window.confirm("Delete this mote and all its relationships?")) return;
+    await call(api.delete_mote(focusId));
+    localStorage.removeItem(lastFocusKey(currentGarden));
+    closeDetailPanel();
+    await refreshMoteCache();
+    await refocus(null);
   });
 }
 
 function setupSimulation() {
-  const button = document.getElementById("run-sim-btn");
-
+  const button = $("run-sim-btn");
   button.addEventListener("click", async () => {
     button.disabled = true;
     button.textContent = "Running…";
@@ -802,12 +854,11 @@ function setupSimulation() {
       const result = await call(api.run_simulation());
       showToast(result.message, result.ok ? 3500 : SIM_ERROR_TOAST_MS);
       if (!result.ok || result.written === 0) return;
-
-      // Solved values land on the motes themselves, so both the graph
-      // labels and an open detail panel are stale until refreshed.
-      await refocus(focusId);
-      const panelOpen = !document.getElementById("detail-panel").classList.contains("hidden");
-      if (panelOpen && focusId) await openDetailPanel(focusId);
+      await refreshMoteCache();
+      await refocus(focusId, { pan: false });
+      if (!$("detail-panel").classList.contains("hidden") && focusId) {
+        await openDetailPanel(focusId);
+      }
     } finally {
       button.disabled = false;
       button.textContent = "Run simulation";
@@ -815,19 +866,47 @@ function setupSimulation() {
   });
 }
 
+function setupKeyboard() {
+  window.addEventListener("keydown", (e) => {
+    if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      openSearch();
+      return;
+    }
+    if (e.key !== "Escape") return;
+    if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
+    if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
+    if (!$("quick-add").classList.contains("hidden")) {
+      $("quick-add").classList.add("hidden");
+      $("quick-add-btn").textContent = "+";
+      return;
+    }
+    if (!$("detail-panel").classList.contains("hidden")) closeDetailPanel();
+  });
+}
+
+// ---- init ----
+
 async function init() {
   api = window.pywebview.api;
-  setupCytoscape();
+
+  graph = new MonossGraph($("graph"), {
+    labelFor: nodeLabel,
+    onSelect: (id) => selectMote(id),
+    onConnect: (sourceId, targetId) => connectNodes(sourceId, targetId),
+    onPositionsChanged: savePositions,
+  });
+  window.graph = graph;
+
+  setupGardenMenu();
   setupQuickAdd();
-  setupDetailPanel();
-  setupSpeciesPicker();
-  setupGardenSwitcher();
+  setupSpeciesControls();
   setupSearch();
-  setupDepthControl();
+  setupViewControls();
   setupSimulation();
+  setupKeyboard();
 
   currentGarden = await call(api.current_garden());
-  await refreshGardenSelect();
   await loadGarden(currentGarden);
 }
 

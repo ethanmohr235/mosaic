@@ -3,6 +3,12 @@
 The UI is a native window (via `pywebview`) wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server. Entry point: `run_ui.py`.
 
+The graph is drawn on a `<canvas>` by `ui/frontend/graph.js`, which owns the
+force layout, camera and pointer gestures. There is no graph library: motes
+are clustered into radial sectors by species, and the camera pans to a mote
+on selection rather than re-fitting the whole view. Fonts are vendored under
+`ui/frontend/vendor/fonts/`, so nothing is fetched at runtime.
+
 ## This machine (Arch Linux)
 
 `webkit2gtk-4.1`, `gtk3`, and `python-gobject` are already installed system-
@@ -76,12 +82,17 @@ update-desktop-database ~/.local/share/applications/
 actual GTK/WebKit window. `scripts/ui_smoke_test.py` drives the real running
 app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
 layout position stability, search/browse/keyboard-nav, garden-switch
-isolation, species picking, running a simulation) against a throwaway temp
-`GARDENS_DIR` and webview storage dir — never touches real data. Run it by
-hand after UI changes:
+isolation, species picking and templating, filters, depth, running a
+simulation) against a throwaway temp `GARDENS_DIR` and webview storage dir —
+never touches real data. Run it by hand after UI changes:
 
 ```
 .venv/bin/python scripts/ui_smoke_test.py
 ```
 
 Prints PASS/FAIL per check and exits non-zero if anything failed.
+
+One check samples the canvas pixels directly. That is not paranoia: the
+graph's render loop was once entirely dead while every other check passed,
+because hit-testing works off node coordinates rather than what was drawn —
+clicking, dragging and connecting all succeeded against a blank canvas.

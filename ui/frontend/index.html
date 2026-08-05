@@ -8,74 +8,134 @@
 <body>
 
 <header id="topbar">
-  <div id="garden-switcher">
-    <select id="garden-select"></select>
-    <button id="new-garden-btn" title="Create a new garden">+</button>
-    <button id="export-garden-btn" title="Export the current garden to a file">Export</button>
-    <button id="import-garden-btn" title="Import a garden from a file into a new garden">Import</button>
+  <div id="brand">
+    <svg width="22" height="22" viewBox="0 0 128 128" aria-hidden="true">
+      <rect width="128" height="128" rx="28" fill="var(--panel)"></rect>
+      <line x1="40" y1="44" x2="88" y2="34" stroke="var(--accent)" stroke-width="5"></line>
+      <line x1="40" y1="44" x2="70" y2="92" stroke="var(--accent)" stroke-width="5"></line>
+      <circle cx="40" cy="44" r="15" fill="var(--accent)"></circle>
+      <circle cx="88" cy="34" r="10" fill="var(--fg)"></circle>
+      <circle cx="70" cy="92" r="10" fill="var(--fg)"></circle>
+    </svg>
+    <span id="brand-name">MonOSS</span>
   </div>
-  <div id="topbar-title">MonOSS</div>
-  <label id="depth-wrap" title="How far out from the selected mote the graph reaches">
-    Depth
-    <select id="depth-select">
-      <option value="1">1 hop</option>
-      <option value="2">2 hops</option>
-      <option value="3">3 hops</option>
-      <option value="4">4 hops</option>
-      <option value="5">5 hops</option>
-      <option value="6">6 hops</option>
-      <option value="all">Whole garden</option>
-    </select>
-  </label>
-  <div id="search-wrap">
-    <input type="text" id="search-input" placeholder="Search motes…" autocomplete="off">
-    <div id="search-results" class="hidden"></div>
+
+  <div id="garden-menu-wrap">
+    <button id="garden-btn" type="button">
+      <span id="garden-label">…</span><span class="caret">⌄</span>
+    </button>
+    <div id="garden-menu" class="menu hidden"></div>
   </div>
-  <button id="run-sim-btn">Run simulation</button>
+
+  <div class="spacer"></div>
+
+  <button id="search-btn" type="button">
+    <span class="search-glyph"></span>
+    <span>Search motes…</span>
+    <kbd>⌘K</kbd>
+  </button>
+
+  <button id="run-sim-btn" type="button">Run simulation</button>
 </header>
 
 <main>
-  <div id="cy"></div>
+  <div id="graph-wrap">
+    <canvas id="graph"></canvas>
 
-  <div id="empty-state" class="hidden">
-    <p>No motes yet in this garden.</p>
-    <p>Create one to get started.</p>
+    <div id="empty-state" class="hidden">
+      <p>No motes in this garden yet.</p>
+      <p class="muted">Use the + button to create one.</p>
+    </div>
+
+    <section id="control-panel">
+      <div class="panel-heading">Species</div>
+      <div id="legend"></div>
+
+      <div class="panel-heading" id="rel-heading">Relationships</div>
+      <div id="rel-filters"></div>
+
+      <div class="panel-divider"></div>
+      <label id="depth-row">
+        <span>Depth</span>
+        <select id="depth-select">
+          <option value="1">1 hop</option>
+          <option value="2">2 hops</option>
+          <option value="3">3 hops</option>
+          <option value="4">4 hops</option>
+          <option value="5">5 hops</option>
+          <option value="6">6 hops</option>
+          <option value="all">Whole garden</option>
+        </select>
+      </label>
+      <button id="reset-view-btn" type="button" class="linkish">⤢ Reset view</button>
+    </section>
+
+    <div id="quick-add-wrap">
+      <section id="quick-add" class="hidden">
+        <div class="panel-title">New mote</div>
+        <div id="species-chips"></div>
+        <div id="quick-add-rows"></div>
+        <div class="row-actions">
+          <button id="add-property-row" type="button" class="ghost">+ add property</button>
+          <div class="spacer"></div>
+          <button id="create-mote-btn" type="button" class="primary">Create</button>
+        </div>
+      </section>
+      <button id="quick-add-btn" type="button" title="New mote">+</button>
+    </div>
+
+    <aside id="detail-panel" class="hidden">
+      <button id="close-panel" type="button" title="Close">×</button>
+      <div id="detail-type">
+        <span id="detail-dot"></span><span id="detail-type-label"></span>
+      </div>
+      <div id="detail-title"></div>
+      <div id="detail-id"></div>
+
+      <div class="panel-heading">Properties</div>
+      <div id="detail-properties"></div>
+      <div id="detail-add-property">
+        <input type="text" id="detail-new-key" placeholder="key">
+        <input type="text" id="detail-new-value" placeholder="value">
+        <button id="detail-add-property-btn" type="button">Add</button>
+      </div>
+
+      <div class="panel-heading">Species</div>
+      <div id="detail-species"></div>
+      <div id="detail-species-actions">
+        <button id="set-species-btn" type="button" class="ghost">Set species…</button>
+        <button id="new-instance-btn" type="button" class="ghost hidden">+ New instance</button>
+      </div>
+      <div id="species-picker-wrap" class="hidden">
+        <input type="text" id="species-picker-input" placeholder="Search for a species…" autocomplete="off">
+        <div id="species-picker-results"></div>
+      </div>
+      <div id="detail-instance-count"></div>
+
+      <div class="panel-heading">Relationships</div>
+      <div id="detail-relationships"></div>
+      <button id="connect-btn" type="button" class="ghost wide">Connect to…</button>
+
+      <button id="delete-mote-btn" type="button" class="danger wide">Delete mote</button>
+    </aside>
   </div>
-
-  <section id="quick-add">
-    <h2>New mote</h2>
-    <div id="quick-add-rows"></div>
-    <button id="add-property-row" type="button">+ add property</button>
-    <button id="create-mote-btn" type="button">Create</button>
-  </section>
-
-  <aside id="detail-panel" class="hidden">
-    <button id="close-panel" title="Close">&times;</button>
-    <div id="detail-id"></div>
-    <h3>Properties</h3>
-    <div id="detail-properties"></div>
-    <div id="detail-add-property">
-      <input type="text" id="detail-new-key" placeholder="key">
-      <input type="text" id="detail-new-value" placeholder="value">
-      <button id="detail-add-property-btn" type="button">Add</button>
-    </div>
-    <h3>Species</h3>
-    <div id="detail-species"></div>
-    <div id="detail-instance-count"></div>
-    <div id="species-picker-wrap" class="hidden">
-      <input type="text" id="species-picker-input" placeholder="Search motes…" autocomplete="off">
-      <div id="species-picker-results" class="hidden"></div>
-    </div>
-    <button id="set-species-btn" type="button">Set species…</button>
-    <h3>Relationships</h3>
-    <div id="detail-relationships"></div>
-    <button id="delete-mote-btn" type="button">Delete mote</button>
-  </aside>
 </main>
+
+<div id="search-overlay" class="hidden">
+  <div id="search-modal">
+    <input type="text" id="search-input" placeholder="Search motes and properties…" autocomplete="off">
+    <div id="search-species-chips" class="chip-row"></div>
+    <div id="search-rel-chips" class="chip-row"></div>
+    <div id="search-results"></div>
+    <div id="search-footer">
+      <span>↑↓ navigate</span><span>↵ select</span><span>esc close</span>
+    </div>
+  </div>
+</div>
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/cytoscape.min.js"></script>
+<script src="graph.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

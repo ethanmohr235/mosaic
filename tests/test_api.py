@@ -63,6 +63,18 @@ def test_focus_with_no_hops_limit_returns_the_whole_garden(api):
     assert result["focus_id"] == a["id"]
 
 
+def test_species_with_only_a_template_is_reported_as_a_species(api):
+    # The UI drives "New instance" and the species legend off species_ids,
+    # so a species set up with a template but no instances yet has to
+    # register -- otherwise there is no way to create its first instance.
+    species = api.create_mote({"name": "Resistor"})
+    template = api.create_mote({"name": "R", "resistance": "100"})
+    api.set_template(template["id"], species["id"])
+
+    result = api.focus(template["id"], None)
+    assert result["species_ids"] == [species["id"]]
+
+
 def test_whole_garden_still_reports_species_ids(api):
     species = api.create_mote({"name": "Node"})
     instance = api.create_mote({"name": "N1"})
