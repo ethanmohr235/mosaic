@@ -20,6 +20,7 @@ const MAX_SCALE = 3;
 const INITIAL_SCALE = 0.75;
 const HIT_RADIUS = 14;
 const DRAG_THRESHOLD = 4;
+const PARALLEL_EDGE_BOW = 32;
 
 // Deterministic string hash. Used for both species hues and each node's
 // starting offset, so a garden lays out the same way and keeps the same
@@ -51,7 +52,7 @@ class MonossGraph {
     this.nodes = new Map();       // mote id -> {x, y, vx, vy, pinned}
     this.hiddenSpecies = new Set();
     this.hiddenRelTypes = new Set();
-    this.selectedId = null;
+    this.selectedIds = new Set();
     this.hoverId = null;
     this.connectSourceId = null;
     this.camera = { x: 0, y: 0, scale: INITIAL_SCALE };
@@ -219,12 +220,26 @@ class MonossGraph {
 
   // ---- camera ----
 
-  select(id, { pan = true } = {}) {
-    this.selectedId = id;
-    const node = id && this.nodes.get(id);
-    if (node && pan) {
-      this.panTarget = { x: -node.x * this.camera.scale, y: -node.y * this.camera.scale };
+  /** Accepts a single id, an array of ids, or null/empty for "nothing
+   *  selected". Panning only ever happens for a single-mote selection --
+   *  there's no one sensible place to pan to for several at once, and
+   *  box-select callers pass pan:false anyway since everything they just
+   *  selected is already on screen by construction. */
+  select(ids, { pan = true } = {}) {
+    const list = ids == null ? [] : Array.isArray(ids) ? ids : [ids];
+    this.selectedIds = new Set(list);
+    if (pan && list.length === 1) {
+      const node = this.nodes.get(list[0]);
+      if (node) {
+        this.panTarget = { x: -node.x * this.camera.scale, y: -node.y * this.camera.scale };
+      }
     }
+  }
+
+  /** The single selected id, or null if zero or several are selected --
+   *  for callers (arrow-key nav) that only make sense for one at a time. */
+  get selectedId() {
+    return this.selectedIds.size === 1 ? [...this.selectedIds][0] : null;
   }
 
   resetView() {
@@ -256,6 +271,7 @@ class MonossGraph {
     cancelAnimationFrame(this._frame);
     clearTimeout(this._timer);
     if (this._observer) this._observer.disconnect();
+    this.canvas.removeEventListener("contextmenu", this._onContextMenu);
     window.removeEventListener("mousemove", this._onMouseMove);
     window.removeEventListener("mouseup", this._onMouseUp);
   }
@@ -359,18 +375,21 @@ class MonossGraph {
     ctx.translate(this.cssWidth / 2 + this.camera.x, this.cssHeight / 2 + this.camera.y);
     ctx.scale(this.camera.scale, this.camera.scale);
 
-    const focusId = this.hoverId || this.selectedId;
+    // Neighbour emphasis only makes sense around one mote at a time --
+    // hover wins over selection, and a multi-selection doesn't try to
+    // union everyone's neighbours together.
+    const primaryId = this.hoverId || this.selectedId;
     const neighbours = new Set();
-    if (focusId) {
+    if (primaryId) {
       for (const rel of this.relationships) {
         if (!this.isRelVisible(rel)) continue;
-        if (rel.from_id === focusId) neighbours.add(rel.to_id);
-        if (rel.to_id === focusId) neighbours.add(rel.from_id);
+        if (rel.from_id === primaryId) neighbours.add(rel.to_id);
+        if (rel.to_id === primaryId) neighbours.add(rel.from_id);
       }
     }
 
-    this._drawEdges(ctx, bg, focusId);
-    this._drawNodes(ctx, labelBg, focusId, neighbours);
+    this._drawEdges(ctx, bg, neighbours);
+    this._drawNodes(ctx, labelBg, neighbours);
     ctx.restore();
   }
 
@@ -390,8 +409,9 @@ class MonossGraph {
     return index;
   }
 
-  _drawEdges(ctx, bg, focusId) {
+  _drawEdges(ctx, bg, neighbours) {
     const parallel = this._parallelIndex();
+    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId;
     ctx.font = '10px "IBM Plex Sans", sans-serif';
 
     for (const rel of this.relationships) {
@@ -399,14 +419,16 @@ class MonossGraph {
       const a = this.nodes.get(rel.from_id), b = this.nodes.get(rel.to_id);
       if (!a || !b) continue;
 
-      const emphasized = !!focusId && (rel.from_id === focusId || rel.to_id === focusId);
-      const dimmed = !!focusId && !emphasized;
+      const emphasized =
+        this.selectedIds.has(rel.from_id) || this.selectedIds.has(rel.to_id) ||
+        rel.from_id === this.hoverId || rel.to_id === this.hoverId;
+      const dimmed = anyFocus && !emphasized;
       ctx.strokeStyle = emphasized
         ? "oklch(0.80 0.13 70 / 0.95)"
         : dimmed ? "oklch(0.55 0 0 / 0.18)" : "oklch(0.55 0 0 / 0.5)";
       ctx.lineWidth = emphasized ? 1.8 : 1;
 
-      const bow = (parallel.get(rel.id) || 0) * 18;
+      const bow = (parallel.get(rel.id) || 0) * PARALLEL_EDGE_BOW;
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       const angle = Math.atan2(b.y - a.y, b.x - a.x);
       const cx = mx + Math.cos(angle - Math.PI / 2) * bow;
@@ -441,19 +463,20 @@ class MonossGraph {
     }
   }
 
-  _drawNodes(ctx, labelBg, focusId, neighbours) {
+  _drawNodes(ctx, labelBg, neighbours) {
     const byId = new Map(this.motes.map((m) => [m.id, m]));
+    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId;
 
     for (const [id, node] of this.nodes) {
       const mote = byId.get(id);
       if (!mote || !this.isMoteVisible(id)) continue;
 
-      const isSelected = id === this.selectedId;
+      const isSelected = this.selectedIds.has(id);
       const isHover = id === this.hoverId;
       const isSource = id === this.connectSourceId;
       const related = neighbours.has(id);
       const radius = isSelected ? 9 : isHover ? 8 : 6.5;
-      ctx.globalAlpha = focusId && !isSelected && !isHover && !related ? 0.32 : 1;
+      ctx.globalAlpha = anyFocus && !isSelected && !isHover && !related ? 0.32 : 1;
 
       ctx.beginPath();
       if (this.speciesIds.has(id)) {
@@ -487,7 +510,7 @@ class MonossGraph {
 
       const showLabel =
         isSelected || isHover || related || this.camera.scale > 1.1 || this.nodes.size <= 40;
-      if (showLabel && (!focusId || isSelected || isHover || related)) {
+      if (showLabel && (!anyFocus || isSelected || isHover || related)) {
         this._drawLabel(ctx, labelBg, node, mote, radius, isSelected);
       }
     }
@@ -497,8 +520,9 @@ class MonossGraph {
   //
   // Every gesture is resolved here rather than by a library, so there is
   // nothing to fight: plain drag on a node moves it, ctrl+drag connects,
-  // drag on empty space pans. Previously these competed with Cytoscape's
-  // own grab/box-select handlers and needed ungrabify()/boxSelectionEnabled
+  // drag on empty space box-selects, middle-drag pans, right-click opens a
+  // context menu. Previously these competed with Cytoscape's own
+  // grab/box-select handlers and needed ungrabify()/boxSelectionEnabled
   // workarounds to behave.
 
   _bindEvents() {
@@ -506,6 +530,7 @@ class MonossGraph {
     this._observer.observe(this.canvas.parentElement);
     this.canvas.addEventListener("mousedown", this._onMouseDown);
     this.canvas.addEventListener("wheel", this._onWheel, { passive: false });
+    this.canvas.addEventListener("contextmenu", this._onContextMenu);
     window.addEventListener("mousemove", this._onMouseMove);
     window.addEventListener("mouseup", this._onMouseUp);
   }
@@ -515,6 +540,13 @@ class MonossGraph {
     return {
       x: (clientX - rect.left - this.cssWidth / 2 - this.camera.x) / this.camera.scale,
       y: (clientY - rect.top - this.cssHeight / 2 - this.camera.y) / this.camera.scale,
+    };
+  }
+
+  _normalizedRect(x1, y1, x2, y2) {
+    return {
+      left: Math.min(x1, x2), top: Math.min(y1, y2),
+      right: Math.max(x1, x2), bottom: Math.max(y1, y2),
     };
   }
 
@@ -531,7 +563,26 @@ class MonossGraph {
   }
 
   _onMouseDown = (e) => {
-    if (e.button !== 0) return;
+    // Unconditional and first: a click or drag anywhere is the user
+    // telling the camera what they want, which always wins over the
+    // few-second auto-fit a freshly opened garden runs (fitWhenSettled()).
+    // Without this, fitToContent() keeps resetting camera.x/y every frame
+    // while the user is mid-drag, fighting their gesture -- not a real
+    // unresponsiveness, but indistinguishable from one.
+    this._fitUntilAlpha = 0;
+
+    if (e.button === 1) {
+      e.preventDefault(); // stop X11/GTK's middle-click autoscroll/paste
+      this.panState = {
+        startX: e.clientX, startY: e.clientY,
+        camX: this.camera.x, camY: this.camera.y,
+      };
+      this.panTarget = null;
+      this.canvas.style.cursor = "grabbing";
+      return;
+    }
+    if (e.button !== 0) return; // right button is handled by contextmenu
+
     const id = this.hitTest(e.clientX, e.clientY);
     if (id && e.ctrlKey) {
       this.connectState = { sourceId: id };
@@ -543,12 +594,10 @@ class MonossGraph {
       this.dragState = { id, moved: false, startX: e.clientX, startY: e.clientY };
       return;
     }
-    this.panState = {
-      startX: e.clientX, startY: e.clientY,
-      camX: this.camera.x, camY: this.camera.y,
-    };
-    this.panTarget = null;
-    this.canvas.style.cursor = "grabbing";
+    // Empty canvas, plain left button -> box-select. Shift keeps whatever
+    // was already selected and adds to it; otherwise a completed box (or a
+    // plain click, handled in _onMouseUp) replaces the selection.
+    this.boxState = { startX: e.clientX, startY: e.clientY, moved: false, additive: e.shiftKey };
   };
 
   _onMouseMove = (e) => {
@@ -576,6 +625,19 @@ class MonossGraph {
     if (this.panState) {
       this.camera.x = this.panState.camX + (e.clientX - this.panState.startX);
       this.camera.y = this.panState.camY + (e.clientY - this.panState.startY);
+      return;
+    }
+    if (this.boxState) {
+      const dx = e.clientX - this.boxState.startX;
+      const dy = e.clientY - this.boxState.startY;
+      if (!this.boxState.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+        this.boxState.moved = true;
+      }
+      if (this.boxState.moved && this.callbacks.onBoxSelect) {
+        this.callbacks.onBoxSelect(
+          this._normalizedRect(this.boxState.startX, this.boxState.startY, e.clientX, e.clientY)
+        );
+      }
       return;
     }
     const id = this.hitTest(e.clientX, e.clientY);
@@ -610,6 +672,50 @@ class MonossGraph {
     if (this.panState) {
       this.panState = null;
       this.canvas.style.cursor = this.hoverId ? "pointer" : "grab";
+      return;
+    }
+    if (this.boxState) {
+      const { startX, startY, moved, additive } = this.boxState;
+      this.boxState = null;
+      if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(null); // clear the rect overlay
+
+      if (!moved) {
+        // A plain click on empty canvas: deselect (shift-click on empty
+        // space is a no-op rather than clearing an existing selection --
+        // shift means "add to", and there's nothing under the cursor to add).
+        if (!additive) {
+          this.select(null);
+          if (this.callbacks.onSelectionChanged) this.callbacks.onSelectionChanged([]);
+        }
+        return;
+      }
+
+      const rect = this._normalizedRect(startX, startY, e.clientX, e.clientY);
+      const hits = [];
+      for (const [id] of this.nodes) {
+        if (!this.isMoteVisible(id)) continue;
+        const pos = this.screenPositionOf(id);
+        if (pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom) {
+          hits.push(id);
+        }
+      }
+      const finalIds = additive ? [...new Set([...this.selectedIds, ...hits])] : hits;
+      this.select(finalIds, { pan: false });
+      if (this.callbacks.onSelectionChanged) this.callbacks.onSelectionChanged(finalIds);
+      return;
+    }
+  };
+
+  _onContextMenu = (e) => {
+    e.preventDefault();
+    const id = this.hitTest(e.clientX, e.clientY);
+    // Right-clicking a mote that isn't already part of the selection
+    // replaces the selection with just it, so it's visually obvious what
+    // the menu is about to act on.
+    if (id && !this.selectedIds.has(id)) this.select(id, { pan: false });
+    if (this.callbacks.onContextMenu) {
+      const world = this._worldAt(e.clientX, e.clientY);
+      this.callbacks.onContextMenu(e.clientX, e.clientY, id, world.x, world.y);
     }
   };
 
@@ -631,6 +737,29 @@ class MonossGraph {
   unpin(id) {
     const node = this.nodes.get(id);
     if (node) { node.pinned = false; this.alpha = Math.max(this.alpha, 0.4); }
+  }
+
+  /** Pin a node exactly where it already is, without moving it. */
+  pin(id) {
+    const node = this.nodes.get(id);
+    if (node) { node.pinned = true; node.vx = 0; node.vy = 0; }
+  }
+
+  /** Drop a node at a specific world position and pin it there -- used by
+   *  paste and "New mote here" so the result lands under the cursor
+   *  instead of at its usual hash-seeded starting spot. Only meaningful
+   *  after the node already exists (i.e. after a setData() call that
+   *  included it), same as pin()/unpin(). */
+  placeAt(id, x, y) {
+    const node = this.nodes.get(id);
+    if (node) { node.x = x; node.y = y; node.pinned = true; node.vx = 0; node.vy = 0; }
+  }
+
+  /** World-space coordinates under a page point -- the inverse of
+   *  screenPositionOf(), used to place a pasted/new mote where the user
+   *  right-clicked. */
+  worldPositionAt(clientX, clientY) {
+    return this._worldAt(clientX, clientY);
   }
 
   _drawLabel(ctx, labelBg, node, mote, radius, isSelected) {
