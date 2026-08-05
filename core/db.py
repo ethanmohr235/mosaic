@@ -80,4 +80,33 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships(type);
     """)
 
+    # Simulation audit log. Failed runs are recorded too -- a run that blew
+    # up is exactly the one worth looking back at. simulation_changes
+    # deliberately has no foreign key on mote_id, so the history of what a
+    # run did survives deleting the mote it touched.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS simulation_runs (
+        id TEXT PRIMARY KEY,
+        tick INTEGER NOT NULL,
+        ran_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        detail TEXT
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS simulation_changes (
+        run_id TEXT NOT NULL,
+        mote_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        FOREIGN KEY (run_id) REFERENCES simulation_runs(id) ON DELETE CASCADE
+    );
+    """)
+
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_simulation_changes_run ON simulation_changes(run_id);
+    """)
+
     conn.commit()

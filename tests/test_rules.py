@@ -1,0 +1,86 @@
+from core.motes import create_mote
+from core.relationships import create_relationship
+from core.rules import (
+    APPLIES_TO,
+    list_rules,
+    parse_unknowns,
+    species_unknowns,
+    unknown_keys,
+)
+from core.species import set_species
+
+
+def make_rule(conn, species_id, **properties):
+    rule_id = create_mote(conn, properties)
+    create_relationship(conn, rule_id, species_id, APPLIES_TO)
+    return rule_id
+
+
+def test_parse_unknowns_accepts_comma_separated_string():
+    assert parse_unknowns("voltage, current") == ["voltage", "current"]
+
+
+def test_parse_unknowns_accepts_a_json_list():
+    assert parse_unknowns(["voltage", "current"]) == ["voltage", "current"]
+
+
+def test_parse_unknowns_handles_missing_or_junk_values():
+    assert parse_unknowns(None) == []
+    assert parse_unknowns("") == []
+    assert parse_unknowns("  ,  ") == []
+    assert parse_unknowns(42) == []
+
+
+def test_list_rules_finds_rules_by_applies_to(conn):
+    species = create_mote(conn, {"name": "Resistor"})
+    make_rule(conn, species, name="Ohm's law", equation="voltage == current * resistance")
+
+    rules = list_rules(conn)
+    assert len(rules) == 1
+    assert rules[0].name == "Ohm's law"
+    assert rules[0].species_id == species
+    assert rules[0].equation == "voltage == current * resistance"
+
+
+def test_rule_without_an_equation_is_skipped(conn):
+    species = create_mote(conn, {"name": "Resistor"})
+    make_rule(conn, species, name="half-built")
+    make_rule(conn, species, name="blank", equation="   ")
+    assert list_rules(conn) == []
+
+
+def test_motes_without_applies_to_are_not_rules(conn):
+    create_mote(conn, {"name": "just a mote", "equation": "x == 1"})
+    assert list_rules(conn) == []
+
+
+def test_rule_name_falls_back_to_id_prefix(conn):
+    species = create_mote(conn, {"name": "S"})
+    rule_id = make_rule(conn, species, equation="x == 1")
+    assert list_rules(conn)[0].name == rule_id[:8]
+
+
+def test_species_unknowns_reads_the_species_property(conn):
+    species = create_mote(conn, {"name": "Node", "unknowns": "voltage"})
+    assert species_unknowns(conn, species) == ["voltage"]
+
+
+def test_species_unknowns_empty_for_unknown_mote(conn):
+    assert species_unknowns(conn, "does-not-exist") == []
+
+
+def test_unknown_keys_unions_across_every_species(conn):
+    node = create_mote(conn, {"name": "Node", "unknowns": "voltage"})
+    measured = create_mote(conn, {"name": "Measured", "unknowns": "current, power"})
+    mote = create_mote(conn, {"name": "N1"})
+    set_species(conn, mote, node)
+    set_species(conn, mote, measured)
+
+    assert unknown_keys(conn, mote) == {"voltage", "current", "power"}
+
+
+def test_unknown_keys_empty_when_species_declares_none(conn):
+    species = create_mote(conn, {"name": "Plain"})
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+    assert unknown_keys(conn, mote) == set()
