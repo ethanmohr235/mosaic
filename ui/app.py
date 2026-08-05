@@ -1,4 +1,5 @@
 # ui/app.py
+import shutil
 from pathlib import Path
 
 import webview
@@ -10,7 +11,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data"
 
 
+def _clear_http_cache() -> None:
+    """Drop WebKit's HTTP cache before the window opens.
+
+    pywebview serves the frontend from a fixed port (42001), so the origin
+    is identical on every run and WebKit happily reuses cached copies of
+    index.html/app.js/style.css from a previous launch -- meaning an edit
+    to the frontend silently doesn't appear. This was caught for real:
+    after adding the Run simulation button, the running app still rendered
+    the old disabled Automations button while the file on disk had the new
+    one. The automated smoke test never saw it because it uses a throwaway
+    storage_path each run.
+
+    Only `cache/` is removed. Sibling `localstorage/` holds each garden's
+    saved node positions and last-focused mote, which must survive. There
+    is nothing to gain from caching files served off local disk anyway.
+    """
+    shutil.rmtree(WEBVIEW_STORAGE_DIR / "cache", ignore_errors=True)
+
+
 def launch(garden: str | None = None) -> None:
+    _clear_http_cache()
     api = Api(garden)
     window = webview.create_window(
         "MonOSS",

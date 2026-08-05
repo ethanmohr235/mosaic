@@ -76,8 +76,9 @@ update-desktop-database ~/.local/share/applications/
 actual GTK/WebKit window. `scripts/ui_smoke_test.py` drives the real running
 app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
 layout position stability, search/browse/keyboard-nav, garden-switch
-isolation) against a throwaway temp `GARDENS_DIR` and webview storage dir —
-never touches real data. Run it by hand after UI changes:
+isolation, species picking, running a simulation) against a throwaway temp
+`GARDENS_DIR` and webview storage dir — never touches real data. Run it by
+hand after UI changes:
 
 ```
 .venv/bin/python scripts/ui_smoke_test.py

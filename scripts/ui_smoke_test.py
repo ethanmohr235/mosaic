@@ -300,6 +300,78 @@ def run_checks(window):
         species_set_and_remove_via_real_ui,
     )
 
+    def run_simulation_button_solves_and_refreshes():
+        # A whole little model built through the API, then solved by
+        # clicking the real button: Box(width=3, height=4) -> area 12.
+        result = js_async(window, """
+            async () => {
+                const species = await api.create_mote({name: 'Box', unknowns: 'area'});
+                const rule = await api.create_mote({
+                    name: 'Area', equation: 'area == width * height',
+                });
+                await api.create_relationship(rule.id, species.id, 'applies_to');
+                const box = await api.create_mote({name: 'b1', width: '3', height: '4'});
+                await api.set_species(box.id, species.id);
+                window.__seed.boxId = box.id;
+                await refocus(box.id);
+                await openDetailPanel(box.id);
+                window.__result = 'ok';
+            }
+        """)
+        assert result == '"ok"', f"simulation setup failed: {result}"
+
+        js(window, "document.getElementById('run-sim-btn').click();")
+        time.sleep(2.5)
+
+        area = json.loads(js_async(window, """
+            async () => {
+                const mote = await api.get_mote(window.__seed.boxId);
+                window.__result = mote.properties.area;
+            }
+        """))
+        assert area == 12.0, f"expected the solver to write area=12, got {area!r}"
+
+        toast = js(window, "document.getElementById('toast').textContent")
+        assert "Solved" in toast, f"expected a success toast, got {toast!r}"
+
+        # The panel was open across the run, so it must show the new value
+        # without any further interaction.
+        shown = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const row of rows) {
+                    if (row.querySelector('span').textContent === 'area') {
+                        return row.querySelector('input').value;
+                    }
+                }
+                return null;
+            })()
+        """)
+        assert shown == "12", f"open detail panel should refresh to show area=12, got {shown!r}"
+
+    check("simulation: Run button solves and refreshes the panel", run_simulation_button_solves_and_refreshes)
+
+    def unsolvable_rules_report_instead_of_crashing():
+        js_async(window, """
+            async () => {
+                const species = await api.create_mote({name: 'Loose', unknowns: 'x, y'});
+                const rule = await api.create_mote({name: 'one eq', equation: 'x + y == 10'});
+                await api.create_relationship(rule.id, species.id, 'applies_to');
+                const m = await api.create_mote({name: 'loose1'});
+                await api.set_species(m.id, species.id);
+                window.__result = 'ok';
+            }
+        """)
+        js(window, "document.getElementById('run-sim-btn').click();")
+        time.sleep(2.5)
+
+        toast = js(window, "document.getElementById('toast').textContent")
+        assert "underdetermined" in toast, f"expected an underdetermined message, got {toast!r}"
+        enabled = js(window, "!document.getElementById('run-sim-btn').disabled")
+        assert enabled is True, "Run button should be re-enabled after a failed run"
+
+    check("simulation: unsolvable garden reports instead of crashing", unsolvable_rules_report_instead_of_crashing)
+
 
 def drive():
     time.sleep(3)

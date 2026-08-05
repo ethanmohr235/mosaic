@@ -47,12 +47,12 @@ function removePosition(garden, moteId) {
   localStorage.setItem(positionsKey(garden), JSON.stringify(positions));
 }
 
-function showToast(message) {
+function showToast(message, durationMs = 3500) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
   toast.classList.remove("hidden");
   clearTimeout(showToast._timer);
-  showToast._timer = setTimeout(() => toast.classList.add("hidden"), 3500);
+  showToast._timer = setTimeout(() => toast.classList.add("hidden"), durationMs);
 }
 
 async function call(promise) {
@@ -756,6 +756,35 @@ function setupCytoscape() {
   });
 }
 
+// A garden whose rules don't solve comes back as ok:false with an
+// explanation rather than throwing -- those messages name the motes
+// involved and are worth reading, so they linger far longer than a
+// routine confirmation.
+const SIM_ERROR_TOAST_MS = 12000;
+
+function setupSimulation() {
+  const button = document.getElementById("run-sim-btn");
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Running…";
+    try {
+      const result = await call(api.run_simulation());
+      showToast(result.message, result.ok ? 3500 : SIM_ERROR_TOAST_MS);
+      if (!result.ok || result.written === 0) return;
+
+      // Solved values land on the motes themselves, so both the graph
+      // labels and an open detail panel are stale until refreshed.
+      await refocus(focusId);
+      const panelOpen = !document.getElementById("detail-panel").classList.contains("hidden");
+      if (panelOpen && focusId) await openDetailPanel(focusId);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Run simulation";
+    }
+  });
+}
+
 async function init() {
   api = window.pywebview.api;
   setupCytoscape();
@@ -764,6 +793,7 @@ async function init() {
   setupSpeciesPicker();
   setupGardenSwitcher();
   setupSearch();
+  setupSimulation();
 
   currentGarden = await call(api.current_garden());
   await refreshGardenSelect();

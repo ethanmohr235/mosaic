@@ -13,6 +13,7 @@ from core import garden_io
 from core import graph as graph_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
+from core import simulation as simulation_repo
 from core import species as species_repo
 
 
@@ -178,6 +179,24 @@ class Api:
     @_synchronized
     def list_species(self) -> list[dict]:
         return [dataclasses.asdict(m) for m in species_repo.list_species(self._conn)]
+
+    # ---- simulation ----
+
+    @_synchronized
+    def run_simulation(self) -> dict:
+        """A garden whose rules don't solve is an ordinary outcome to
+        report, not a crash -- so SimulationError comes back as ok:false
+        rather than propagating across the JS bridge as an exception."""
+        try:
+            result = simulation_repo.run_simulation(self._conn)
+        except simulation_repo.SimulationError as e:
+            return {"ok": False, "message": str(e)}
+        return {
+            "ok": True,
+            "tick": result.tick,
+            "written": len(result.changes),
+            "message": result.summary,
+        }
 
     # ---- graph/focus ----
 

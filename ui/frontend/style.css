@@ -111,8 +111,12 @@ body {
   font-size: 0.8rem;
 }
 
-#automations-btn {
+#run-sim-btn {
   margin-left: 0.75rem;
+}
+
+#run-sim-btn:disabled {
+  opacity: 0.6;
 }
 
 select, input, button {
