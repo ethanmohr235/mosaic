@@ -16,6 +16,7 @@ persistence bug that only showed up once motes were viewed in isolation
 before being connected. Never touches real data -- GARDENS_DIR and the
 webview storage_path are both pointed at a fresh temp directory.
 """
+import json
 import sys
 import tempfile
 import threading
@@ -76,6 +77,57 @@ def run_checks(window):
         assert result == '"ok"', f"seed setup failed: {result}"
 
     check("create motes + relationship", create_seed_data)
+
+    def ctrl_drag_connects_without_moving_node():
+        # Alice and Bob are already rendered together (connected via the
+        # seed 'knows' relationship, both within the focused neighborhood).
+        js(window, "window.prompt = function() { return 'ctrl-drag-test'; };")
+        geo = json.loads(js(window, """
+            JSON.stringify((function() {
+                const rect = document.getElementById('cy').getBoundingClientRect();
+                return {
+                    rect: {left: rect.left, top: rect.top},
+                    a: cy.getElementById(window.__seed.aliceId).renderedPosition(),
+                    b: cy.getElementById(window.__seed.bobId).renderedPosition(),
+                };
+            })());
+        """))
+        ax, ay = geo["rect"]["left"] + geo["a"]["x"], geo["rect"]["top"] + geo["a"]["y"]
+        bx, by = geo["rect"]["left"] + geo["b"]["x"], geo["rect"]["top"] + geo["b"]["y"]
+        pos_before = js(window, "JSON.stringify(cy.getElementById(window.__seed.aliceId).position())")
+
+        js(window, f"""
+            (function() {{
+                const canvas = document.querySelector('#cy canvas:last-child');
+                const steps = 12;
+                function fire(type, x, y) {{
+                    canvas.dispatchEvent(new MouseEvent(type, {{
+                        clientX: x, clientY: y, bubbles: true, cancelable: true,
+                        button: 0, buttons: 1, ctrlKey: true,
+                    }}));
+                }}
+                fire('mousedown', {ax}, {ay});
+                for (let i = 1; i <= steps; i++) {{
+                    const t = i / steps;
+                    fire('mousemove', {ax} + ({bx} - {ax}) * t, {ay} + ({by} - {ay}) * t);
+                }}
+                fire('mouseup', {bx}, {by});
+            }})();
+        """)
+        time.sleep(1.5)
+
+        pos_after = js(window, "JSON.stringify(cy.getElementById(window.__seed.aliceId).position())")
+        assert pos_before == pos_after, f"ctrl+drag should not reposition the source node: {pos_before} -> {pos_after}"
+
+        rels = json.loads(js_async(window, """
+            async () => {
+                window.__result = await api.mote_relationships(window.__seed.aliceId);
+            }
+        """))
+        types = [r["type"] for r in rels]
+        assert "ctrl-drag-test" in types, f"ctrl+drag should have created a relationship, got: {types}"
+
+    check("ctrl+drag connects two motes without moving them", ctrl_drag_connects_without_moving_node)
 
     def graph_shows_label_fallback():
         js(window, "refocus(window.__seed.carolId)")
@@ -158,15 +210,19 @@ def run_checks(window):
     def delete_relationship_and_mote():
         result = js_async(window, """
             async () => {
+                // Delete *all* of Alice's relationships, not just one --
+                // earlier checks (e.g. the ctrl+drag one) may have left
+                // more than the single seeded 'knows' relationship.
                 const rels = await api.mote_relationships(window.__seed.aliceId);
-                await api.delete_relationship(rels[0].id);
+                for (const r of rels) {
+                    await api.delete_relationship(r.id);
+                }
                 const remaining = await api.mote_relationships(window.__seed.aliceId);
                 await api.delete_mote(window.__seed.carolId);
                 const carol = await api.get_mote(window.__seed.carolId);
                 window.__result = { relsLeft: remaining.length, carolGone: carol === null };
             }
         """)
-        import json
         parsed = json.loads(result)
         assert parsed["relsLeft"] == 0, "relationship delete didn't take"
         assert parsed["carolGone"] is True, "mote delete didn't take"
