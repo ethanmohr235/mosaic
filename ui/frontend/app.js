@@ -586,15 +586,45 @@ function setupCytoscape() {
     localStorage.setItem(positionsKey(currentGarden), JSON.stringify(positions));
   });
 
-  cy.edgehandles({ snap: true });
-  cy.on("ehcomplete", (_event, sourceNode, targetNode, addedEdge) => {
-    // The backend is the source of truth for relationships -- edgehandles'
-    // own preview edge has no real id/type yet, so it's removed immediately
-    // and the same flow the two-click "Connect to..." button uses takes
-    // over (prompt for a type, create it via the Api, re-render from the
-    // authoritative payload).
-    addedEdge.remove();
-    connectNodes(sourceNode.id(), targetNode.id());
+  // Plain click-and-drag on a node already means "reposition it" (and pans
+  // the canvas from empty space), so drag-to-connect needs its own trigger
+  // rather than competing for the same gesture: Ctrl+drag. ungrabify() the
+  // node the instant its mousedown fires (synchronously, in the same tick,
+  // *before* cytoscape's own grab-drag would otherwise engage from that
+  // same event -- confirmed this reliably wins the race) and track the
+  // gesture with plain mousemove/mouseup rather than cytoscape-edgehandles:
+  // that library's hover-target detection turned out not to fire at all
+  // when its gesture is started manually via eh.start() instead of from
+  // its own handle-grab, so it could never actually complete a connection
+  // this way. No live preview line as a result -- just a crosshair cursor
+  // for feedback -- but it's simple and, unlike the library, reliable.
+  //
+  // (cy.pan() does shift once a connection is actually made, but that's
+  // renderGraph()'s normal fit:true relayout re-centering on the updated
+  // graph via refocus() -- confirmed by dragging to empty space, which
+  // cancels the gesture and triggers no relayout: pan doesn't move at all
+  // in that case. Not a side effect of the drag itself, so nothing here
+  // needs to compensate for it.)
+  let manualConnectSourceId = null;
+
+  cy.on("mousedown", "node", (evt) => {
+    if (evt.originalEvent && evt.originalEvent.ctrlKey) {
+      evt.target.ungrabify();
+      manualConnectSourceId = evt.target.id();
+      cy.container().style.cursor = "crosshair";
+    }
+  });
+
+  cy.on("mouseup", (evt) => {
+    if (manualConnectSourceId === null) return;
+    const sourceId = manualConnectSourceId;
+    manualConnectSourceId = null;
+    cy.getElementById(sourceId).grabify();
+    cy.container().style.cursor = "";
+
+    if (evt.target !== cy && evt.target.isNode && evt.target.isNode() && evt.target.id() !== sourceId) {
+      connectNodes(sourceId, evt.target.id());
+    }
   });
 }
 
