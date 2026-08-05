@@ -1064,6 +1064,54 @@ function setupSimulation() {
 /** True while a text input/textarea has focus -- Del/Backspace and arrow
  *  keys must not hijack normal text editing inside the detail panel or
  *  quick-add's property fields. */
+// ---- arrow-key navigation ----
+//
+// Each arrow key selects whichever visible neighbor sits closest to that
+// screen direction from the currently selected mote -- not a fixed cycle
+// order, so the key you press corresponds to where the neighbor actually
+// is on screen.
+
+const ARROW_ANGLES = { ArrowRight: 0, ArrowDown: 90, ArrowLeft: 180, ArrowUp: 270 };
+
+function angleBetween(fromPos, toPos) {
+  // Screen space has y increasing downward, so a plain atan2 already lines
+  // up with "ArrowDown = 90deg, ArrowRight = 0deg" going clockwise.
+  const degrees = (Math.atan2(toPos.y - fromPos.y, toPos.x - fromPos.x) * 180) / Math.PI;
+  return degrees < 0 ? degrees + 360 : degrees;
+}
+
+function angleDelta(a, b) {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+function visibleNeighborsOf(moteId) {
+  const ids = new Set();
+  for (const rel of payload.relationships) {
+    if (rel.from_id === moteId) ids.add(rel.to_id);
+    else if (rel.to_id === moteId) ids.add(rel.from_id);
+  }
+  return [...ids].filter((id) => graph.isMoteVisible(id));
+}
+
+function navigateArrow(key) {
+  const currentId = graph.selectedId;
+  const fromPos = graph.screenPositionOf(currentId);
+  if (!fromPos) return;
+
+  const targetAngle = ARROW_ANGLES[key];
+  let best = null, bestDelta = Infinity;
+  for (const id of visibleNeighborsOf(currentId)) {
+    const pos = graph.screenPositionOf(id);
+    if (!pos) continue;
+    const delta = angleDelta(angleBetween(fromPos, pos), targetAngle);
+    if (delta < bestDelta) { bestDelta = delta; best = id; }
+  }
+  // No neighbors at all (a dead end) is a silent no-op, matching how most
+  // graph/tree UIs handle running out of places to go.
+  if (best) selectMote(best);
+}
+
 function isTypingInField() {
   const tag = document.activeElement && document.activeElement.tagName;
   return tag === "INPUT" || tag === "TEXTAREA";
@@ -1081,6 +1129,14 @@ function setupKeyboard() {
       if (graph.selectedIds.size > 0) {
         e.preventDefault();
         deleteSelection();
+      }
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(ARROW_ANGLES, e.key) && !isTypingInField()) {
+      if (graph.selectedIds.size === 1) {
+        e.preventDefault();
+        navigateArrow(e.key);
       }
       return;
     }

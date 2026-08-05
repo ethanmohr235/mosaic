@@ -65,8 +65,11 @@ def js_async(window, code, wait=1.5):
     return js(window, "JSON.stringify(window.__result)")
 
 
-def drag(window, x1, y1, x2, y2, ctrl=False):
-    """Synthetic press-move-release against the canvas, in page pixels."""
+def drag(window, x1, y1, x2, y2, ctrl=False, shift=False, button=0):
+    """Synthetic press-move-release against the canvas, in page pixels.
+    button=0 (left, the default) is a click/box-select/node-drag/connect
+    depending on target and modifiers; button=1 is a middle-drag pan."""
+    buttons = {0: 1, 1: 4, 2: 2}[button]
     js(window, f"""
         (function() {{
             const canvas = document.getElementById('graph');
@@ -74,7 +77,8 @@ def drag(window, x1, y1, x2, y2, ctrl=False):
             function fire(type, x, y, target) {{
                 target.dispatchEvent(new MouseEvent(type, {{
                     clientX: x, clientY: y, bubbles: true, cancelable: true,
-                    button: 0, buttons: 1, ctrlKey: {str(ctrl).lower()},
+                    button: {button}, buttons: {buttons},
+                    ctrlKey: {str(ctrl).lower()}, shiftKey: {str(shift).lower()},
                 }}));
             }}
             fire('mousedown', {x1}, {y1}, canvas);
@@ -87,9 +91,30 @@ def drag(window, x1, y1, x2, y2, ctrl=False):
     """)
 
 
+def right_click(window, x, y):
+    js(window, f"""
+        document.getElementById('graph').dispatchEvent(new MouseEvent('contextmenu', {{
+            clientX: {x}, clientY: {y}, bubbles: true, cancelable: true,
+        }}));
+    """)
+
+
+def press_key(window, key, target="window"):
+    js(window, f"""
+        {target}.dispatchEvent(new KeyboardEvent('keydown', {{key: {json.dumps(key)}, bubbles: true}}));
+    """)
+
+
 def node_xy(window, id_expr):
     pos = json.loads(js(window, f"JSON.stringify(graph.screenPositionOf({id_expr}))"))
     return pos["x"], pos["y"]
+
+
+def click_menu_item(window, label):
+    js(window, f"""
+        Array.from(document.querySelectorAll('#context-menu .menu-item'))
+            .find(i => i.textContent === {json.dumps(label)}).click();
+    """)
 
 
 def run_checks(window):
@@ -484,6 +509,270 @@ def run_checks(window):
         assert count > 0, "switching back should restore the original garden's motes"
 
     check("garden switch isolates data", garden_switch_isolates_data)
+
+    def box_select_multiple_nodes():
+        result = js_async(window, """
+            async () => {
+                const a = await api.create_mote({name: 'box-A'});
+                const b = await api.create_mote({name: 'box-B'});
+                const c = await api.create_mote({name: 'box-C'});
+                window.__box = {a: a.id, b: b.id, c: c.id};
+                await refreshMoteCache();
+                await refocus(a.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"box-select setup failed: {result}"
+        ids = json.loads(js(window, "JSON.stringify(window.__box)"))
+
+        # A and B are placed together; C sits far away and must not be
+        # swept up by a box drawn tightly around A and B.
+        js(window, "graph.pin(window.__box.a); graph.placeAt(window.__box.a, -2000, -2000);")
+        js(window, "graph.pin(window.__box.b); graph.placeAt(window.__box.b, -1900, -2000);")
+        js(window, "graph.pin(window.__box.c); graph.placeAt(window.__box.c, 2000, 2000);")
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.2)
+
+        ax, ay = node_xy(window, "window.__box.a")
+        bx, by = node_xy(window, "window.__box.b")
+        drag(window, min(ax, bx) - 30, min(ay, by) - 30, max(ax, bx) + 30, max(ay, by) + 30)
+        time.sleep(1.0)
+
+        selected = json.loads(js(window, "JSON.stringify([...graph.selectedIds])"))
+        assert sorted(selected) == sorted([ids["a"], ids["b"]]), (
+            f"box-select should select exactly A and B, got {selected}"
+        )
+        count_text = js(window, "document.getElementById('detail-multi-count').textContent")
+        assert count_text == "2 motes selected", f"expected the aggregate panel, got {count_text!r}"
+
+    check("box-select selects multiple nodes and shows the aggregate panel", box_select_multiple_nodes)
+
+    def esc_deselects():
+        # Left selected by the box-select check above: A and B, panel open.
+        press_key(window, "Escape")
+        time.sleep(0.5)
+        size = js(window, "graph.selectedIds.size")
+        assert size == 0, f"Escape should deselect once nothing else is open, got {size} still selected"
+        hidden = js(window, "document.getElementById('detail-panel').classList.contains('hidden')")
+        assert hidden is True, "the panel should close along with deselecting"
+
+    check("Esc deselects", esc_deselects)
+
+    def del_key_deletes_selection():
+        ids = json.loads(js(window, "JSON.stringify(window.__box)"))
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        ax, ay = node_xy(window, "window.__box.a")
+        bx, by = node_xy(window, "window.__box.b")
+        drag(window, min(ax, bx) - 30, min(ay, by) - 30, max(ax, bx) + 30, max(ay, by) + 30)
+        time.sleep(1.0)
+        assert js(window, "graph.selectedIds.size") == 2, "setup: expected A and B selected"
+
+        js(window, "window.confirm = () => true;")
+        press_key(window, "Delete")
+        time.sleep(2.0)
+
+        remaining = json.loads(js_async(window, """
+            async () => { window.__result = (await api.list_motes()).map(m => m.id); }
+        """))
+        assert ids["a"] not in remaining and ids["b"] not in remaining, "Del should delete the selection"
+        assert ids["c"] in remaining, "Del must not touch motes outside the selection"
+
+    check("Del key deletes the selected motes", del_key_deletes_selection)
+
+    def middle_drag_pans():
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        before = json.loads(js(window, "JSON.stringify(graph.camera)"))
+        drag(window, 400, 400, 500, 470, button=1)
+        time.sleep(0.6)
+        after = json.loads(js(window, "JSON.stringify(graph.camera)"))
+        assert (before["x"], before["y"]) != (after["x"], after["y"]), (
+            f"middle-drag should pan the camera: {before} -> {after}"
+        )
+
+    check("middle-drag pans the camera", middle_drag_pans)
+
+    def context_menu_copy_paste():
+        result = js_async(window, """
+            async () => {
+                const src = await api.create_mote({name: 'copy-src', flavor: 'vanilla'});
+                window.__copySrcId = src.id;
+                await refreshMoteCache();
+                await refocus(src.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"copy/paste setup failed: {result}"
+        src_id = json.loads(js(window, "JSON.stringify(window.__copySrcId)"))
+
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        x, y = node_xy(window, "window.__copySrcId")
+        right_click(window, x, y)
+        time.sleep(0.5)
+        click_menu_item(window, "Copy")
+        time.sleep(0.5)
+        assert js(window, "clipboard !== null") is True, "Copy should populate the clipboard"
+
+        right_click(window, 60, 60)  # empty canvas, away from any node
+        time.sleep(0.5)
+        click_menu_item(window, "Paste")
+        time.sleep(2.0)
+
+        motes = json.loads(js_async(window, "async () => { window.__result = await api.list_motes(); }"))
+        pasted = [m for m in motes if m["id"] != src_id and m["properties"].get("flavor") == "vanilla"]
+        assert len(pasted) == 1, f"paste should create exactly one duplicate, got {pasted}"
+        assert pasted[0]["properties"]["name"] == "copy-src", (
+            f"pasted mote should match the copied properties, got {pasted[0]['properties']}"
+        )
+
+    check("context menu: Copy then Paste duplicates a mote", context_menu_copy_paste)
+
+    def pin_unpin_via_menu():
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'pin-test'});
+                window.__pinId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"pin/unpin setup failed: {result}"
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+
+        before_pinned = js(window, "graph.nodes.get(window.__pinId).pinned")
+        x, y = node_xy(window, "window.__pinId")
+        right_click(window, x, y)
+        time.sleep(0.5)
+        click_menu_item(window, "Unpin" if before_pinned else "Pin")
+        time.sleep(0.5)
+        after_pinned = js(window, "graph.nodes.get(window.__pinId).pinned")
+        assert after_pinned != before_pinned, (
+            f"the menu should toggle pinned state: {before_pinned} -> {after_pinned}"
+        )
+
+    check("Pin/Unpin toggles from the context menu", pin_unpin_via_menu)
+
+    def multi_select_species_breakdown():
+        result = js_async(window, """
+            async () => {
+                const species = await api.create_mote({name: 'Widget'});
+                const w1 = await api.create_mote({name: 'w1'});
+                const w2 = await api.create_mote({name: 'w2'});
+                const loose = await api.create_mote({name: 'loose-one'});
+                await api.set_species(w1.id, species.id);
+                await api.set_species(w2.id, species.id);
+                window.__multi = {w1: w1.id, w2: w2.id, loose: loose.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"multi-select setup failed: {result}"
+
+        js(window, """
+            const ids = [window.__multi.w1, window.__multi.w2, window.__multi.loose];
+            graph.select(ids, {pan: false});
+            syncSelectionPanel(ids);
+        """)
+        time.sleep(1.5)
+
+        rows = dict(json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('.multi-species-row')).map(r =>
+                [r.querySelector('.name').textContent, r.querySelector('.count').textContent]))
+        """)))
+        assert rows.get("Widget") == "2", f"expected Widget:2 in the breakdown, got {rows}"
+        assert rows.get("No species") == "1", f"expected No species:1 in the breakdown, got {rows}"
+
+    check("multi-select panel shows the correct species breakdown", multi_select_species_breakdown)
+
+    def arrow_key_navigation():
+        result = js_async(window, """
+            async () => {
+                const center = await api.create_mote({name: 'cross-center'});
+                const up = await api.create_mote({name: 'cross-up'});
+                const down = await api.create_mote({name: 'cross-down'});
+                const left = await api.create_mote({name: 'cross-left'});
+                const right = await api.create_mote({name: 'cross-right'});
+                await api.create_relationship(center.id, up.id, 'link');
+                await api.create_relationship(center.id, down.id, 'link');
+                await api.create_relationship(center.id, left.id, 'link');
+                await api.create_relationship(center.id, right.id, 'link');
+                window.__cross = {
+                    center: center.id, up: up.id, down: down.id, left: left.id, right: right.id,
+                };
+                await refreshMoteCache();
+                await refocus(center.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"arrow-nav setup failed: {result}"
+        ids = json.loads(js(window, "JSON.stringify(window.__cross)"))
+
+        js(window, "graph.pin(window.__cross.center); graph.placeAt(window.__cross.center, 0, 0);")
+        js(window, "graph.pin(window.__cross.up); graph.placeAt(window.__cross.up, 0, -200);")
+        js(window, "graph.pin(window.__cross.down); graph.placeAt(window.__cross.down, 0, 200);")
+        js(window, "graph.pin(window.__cross.left); graph.placeAt(window.__cross.left, -200, 0);")
+        js(window, "graph.pin(window.__cross.right); graph.placeAt(window.__cross.right, 200, 0);")
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+
+        for key, expected in [("ArrowUp", "up"), ("ArrowDown", "down"), ("ArrowLeft", "left"), ("ArrowRight", "right")]:
+            js(window, "graph.select(window.__cross.center, {pan: false});")
+            time.sleep(0.3)
+            press_key(window, key)
+            time.sleep(1.2)
+            selected = js(window, "graph.selectedId")
+            assert selected == ids[expected], f"{key} should select {expected!r}, got {selected!r}"
+
+    check("arrow keys navigate to the geometrically correct neighbour", arrow_key_navigation)
+
+    def auto_fit_cancels_on_interaction():
+        """The post-load auto-fit re-frames the camera every frame for a
+        couple of seconds while the layout settles. Before this was fixed,
+        dragging a node during that window looked broken -- the very next
+        frame's fitToContent() would silently overwrite the camera out
+        from under the user's gesture."""
+        result = js_async(window, """
+            async () => {
+                await api.create_garden('smoke-autofit');
+                await api.switch_garden('smoke-autofit');
+                const a = await api.create_mote({name: 'only'});
+                window.__afId = a.id;
+                await loadGarden('smoke-autofit');
+                window.__result = 'ok';
+            }
+        """, wait=1.0)
+        assert result == '"ok"', f"auto-fit setup failed: {result}"
+        assert js(window, "!!graph._fitUntilAlpha") is True, (
+            "test is meaningless unless the post-load auto-fit is still running"
+        )
+
+        x, y = node_xy(window, "window.__afId")
+        drag(window, x, y, x + 150, y - 80)
+        time.sleep(0.3)
+        assert js(window, "graph._fitUntilAlpha") == 0, "a drag should cancel the post-load auto-fit immediately"
+
+        time.sleep(2.5)  # let any would-be auto-fit finish, if it were still fighting the drag
+        node = json.loads(js(window, "JSON.stringify(graph.nodes.get(window.__afId))"))
+        assert node["pinned"] is True, (
+            "the dragged node should stay exactly where the user put it, not get reset by auto-fit"
+        )
+
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("dragging right after opening a garden isn't fought by auto-fit", auto_fit_cancels_on_interaction)
 
     def no_uncaught_errors():
         errors = js(window, "JSON.stringify(window.__uiErrors || [])")

@@ -9,6 +9,23 @@ are clustered into radial sectors by species, and the camera pans to a mote
 on selection rather than re-fitting the whole view. Fonts are vendored under
 `ui/frontend/vendor/fonts/`, so nothing is fetched at runtime.
 
+### Graph interactions
+
+| Gesture | Action |
+|---|---|
+| Left-click a mote | Select it |
+| Left-click empty canvas | Deselect |
+| Left-drag a mote | Move + pin it |
+| Left-drag empty canvas | Box-select (hold Shift to add to the current selection) |
+| Ctrl+Left-drag from a mote | Connect it to another mote |
+| Middle-drag | Pan |
+| Right-click a mote | Context menu: Copy, Pin/Unpin, Delete |
+| Right-click empty canvas | Context menu: New mote here, Paste |
+| Arrow keys | Select whichever visible neighbour sits closest to that screen direction |
+| Delete / Backspace | Delete the current selection |
+| Esc | Close the frontmost menu/panel, or deselect if nothing else is open |
+| Scroll | Zoom |
+
 ## This machine (Arch Linux)
 
 `webkit2gtk-4.1`, `gtk3`, and `python-gobject` are already installed system-
@@ -83,8 +100,10 @@ actual GTK/WebKit window. `scripts/ui_smoke_test.py` drives the real running
 app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
 layout position stability, search/browse/keyboard-nav, garden-switch
 isolation, species picking and templating, filters, depth, running a
-simulation) against a throwaway temp `GARDENS_DIR` and webview storage dir —
-never touches real data. Run it by hand after UI changes:
+simulation, box-select, middle-drag pan, the context menu's copy/paste/
+pin, bulk delete, Esc/Del, and arrow-key navigation) against a throwaway
+temp `GARDENS_DIR` and webview storage dir — never touches real data. Run
+it by hand after UI changes:
 
 ```
 .venv/bin/python scripts/ui_smoke_test.py
