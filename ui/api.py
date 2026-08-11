@@ -33,6 +33,15 @@ def _coerce_properties(raw_properties: dict[str, str]) -> dict:
     return {k: _coerce(v) for k, v in raw_properties.items()}
 
 
+def _popen_detached(args: list[str]) -> None:
+    """Launches args without waiting on it (see _open_with_os_default for
+    why), but still reaps the child on a background thread so it doesn't
+    sit as a zombie for as long as MonOSS keeps running -- this app is
+    long-lived and every Open click spawns one of these."""
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    threading.Thread(target=proc.wait, daemon=True).start()
+
+
 def _open_with_os_default(path: str) -> None:
     """Launches a local file with whatever the OS has registered as the
     default app for its type -- e.g. a .py file opens in VSCode, not as
@@ -44,11 +53,23 @@ def _open_with_os_default(path: str) -> None:
     launches) takes to return, which observably is not always fast."""
     system = platform.system()
     if system == "Darwin":
-        subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _popen_detached(["open", path])
     elif system == "Windows":
         os.startfile(path)
     else:
-        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # gio (GLib/GVFS) detects content-type the same way GTK file
+        # managers do (extension-aware glob matching), which is what a
+        # user expects "Open" to match. xdg-open shells out to a cruder
+        # MIME-sniffing heuristic that can disagree -- observed here as a
+        # .py file coming back as the legacy "text/x-script.python"
+        # alias, which has no registered default, instead of
+        # "text/x-python", which does, silently falling back to a web
+        # browser instead of erroring. Only falls back to xdg-open if
+        # gio itself isn't installed.
+        try:
+            _popen_detached(["gio", "open", path])
+        except FileNotFoundError:
+            _popen_detached(["xdg-open", path])
 
 
 def _synchronized(method):

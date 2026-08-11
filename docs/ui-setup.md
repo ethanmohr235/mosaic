@@ -51,11 +51,17 @@ web address or a local file path) and its detail panel row gets an
 `core/links.py::classify_link` decides which: a web address goes to the
 stdlib `webbrowser` module, while a local file is instead handed to the
 OS's native "open with the registered default app" mechanism
-(`xdg-open` on Linux, `open` on macOS, `os.startfile` on Windows --
-`ui/api.py::_open_with_os_default`), not `webbrowser.open()`, since
+(`ui/api.py::_open_with_os_default`), not `webbrowser.open()`, since
 that always launches the web browser itself and would show a `.py`
-file as plain text rather than opening it in, say, VSCode. A bare
-domain like
+file as plain text rather than opening it in, say, VSCode. On Linux
+that's `gio open` (falling back to `xdg-open` only if `gio` isn't
+installed) rather than `xdg-open` directly -- `gio`'s content-type
+detection is the same extension-aware logic GTK file managers use,
+whereas `xdg-open`'s own MIME-sniffing can land on a different, unregistered
+alias for the same file (observed for `.py`: `text/x-script.python`
+instead of `text/x-python`) and silently fall back to something else
+entirely instead of erroring. On macOS it's `open`; on Windows,
+`os.startfile`. A bare domain like
 `youtube.com` (no `http(s)://`) is assumed to be a URL missing its
 scheme and gets `https://` added automatically; local paths need to be
 absolute or start with `~`/`./`/`../` to be recognized as local rather

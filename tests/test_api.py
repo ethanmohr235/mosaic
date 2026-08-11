@@ -244,6 +244,41 @@ def test_open_link_launches_a_local_file_via_the_os_default_app(api, monkeypatch
     assert browser_calls == []
 
 
+class _FakeProc:
+    def wait(self):
+        return 0
+
+
+def test_open_with_os_default_prefers_gio_on_linux(monkeypatch):
+    # gio detects content-type the same way GTK file managers do; xdg-open
+    # uses a cruder heuristic that can disagree and silently land on the
+    # wrong app (this is the actual bug that was reported and reproduced).
+    monkeypatch.setattr(ui.api.platform, "system", lambda: "Linux")
+    calls = []
+    monkeypatch.setattr(ui.api.subprocess, "Popen", lambda args, **kw: calls.append(args) or _FakeProc())
+
+    ui.api._open_with_os_default("/tmp/some/file.py")
+
+    assert calls == [["gio", "open", "/tmp/some/file.py"]]
+
+
+def test_open_with_os_default_falls_back_to_xdg_open_if_gio_is_missing(monkeypatch):
+    monkeypatch.setattr(ui.api.platform, "system", lambda: "Linux")
+    calls = []
+
+    def fake_popen(args, **kwargs):
+        calls.append(args)
+        if args[0] == "gio":
+            raise FileNotFoundError()
+        return _FakeProc()
+
+    monkeypatch.setattr(ui.api.subprocess, "Popen", fake_popen)
+
+    ui.api._open_with_os_default("/tmp/some/file.py")
+
+    assert calls == [["gio", "open", "/tmp/some/file.py"], ["xdg-open", "/tmp/some/file.py"]]
+
+
 def test_open_link_missing_file_raises(api):
     with pytest.raises(FileNotFoundError):
         api.open_link("/no/such/file/anywhere")
