@@ -16,7 +16,8 @@ let searchHighlight = -1;
 const searchSpeciesFilter = new Set();
 const searchRelFilter = new Set();
 let multiSelectIds = null;             // non-null while the aggregate panel is open
-let clipboard = null;                  // {properties, speciesIds} from context-menu Copy
+let clipboard = null;                  // array of {properties, speciesIds, offset} from Copy
+let pasteRepeatCount = 0;              // steps repeated Ctrl+V pastes apart so they don't stack
 let contextMenuWorldPos = null;        // world coords the context menu was opened at
 
 const DEPTH_KEY = "monoss:depth";
@@ -878,7 +879,11 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
 
   if (targetId) {
     const node = graph.nodes.get(targetId);
-    addMenuItem(menu, "Copy", () => copySelectedMote(targetId));
+    // Right-clicking a mote that's part of the current multi-selection
+    // (syncSelectionPanel above already reconciled it) acts on the whole
+    // selection, matching the precedent Delete already set.
+    const ids = graph.selectedIds.has(targetId) ? [...graph.selectedIds] : [targetId];
+    addMenuItem(menu, ids.length > 1 ? `Copy ${ids.length} motes` : "Copy", () => copySelection(ids));
     addMenuItem(menu, node && node.pinned ? "Unpin" : "Pin", () => togglePin(targetId));
     const sep = document.createElement("div");
     sep.className = "menu-sep";
@@ -886,7 +891,8 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     addMenuItem(menu, "Delete", () => deleteSelection(), { danger: true });
   } else {
     addMenuItem(menu, "New mote here", () => openQuickAddAt(worldX, worldY));
-    addMenuItem(menu, "Paste", () => pasteMote(worldX, worldY), { disabled: !clipboard });
+    const pasteLabel = clipboard && clipboard.length > 1 ? `Paste ${clipboard.length} motes` : "Paste";
+    addMenuItem(menu, pasteLabel, () => pasteAt(worldX, worldY), { disabled: !clipboard });
   }
 
   menu.style.left = clientX + "px";
@@ -901,24 +907,45 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
   }
 }
 
-async function copySelectedMote(id) {
-  const mote = await call(api.get_mote(id));
-  if (!mote) return;
-  clipboard = { properties: { ...mote.properties }, speciesIds: speciesIdsOf(id) };
-  showToast("Copied.");
+/** clipboard is an array, one entry per copied mote, each carrying an
+ *  offset from the copied group's centroid (in world units) -- so pasting
+ *  a group reproduces its relative layout instead of stacking every mote
+ *  on the same point. pasteRepeatCount tracks how many times the current
+ *  clipboard has been pasted via Ctrl+V, so repeated pastes step apart
+ *  instead of landing exactly on top of each other. */
+function copySelection(ids) {
+  const nodes = ids.map((id) => graph.nodes.get(id)).filter(Boolean);
+  if (nodes.length === 0) return;
+  const cx = nodes.reduce((s, n) => s + n.x, 0) / nodes.length;
+  const cy = nodes.reduce((s, n) => s + n.y, 0) / nodes.length;
+  clipboard = ids.map((id, i) => ({
+    properties: { ...moteById(id).properties },
+    speciesIds: speciesIdsOf(id),
+    offset: { dx: nodes[i].x - cx, dy: nodes[i].y - cy },
+  }));
+  pasteRepeatCount = 0;
+  showToast(clipboard.length > 1 ? `Copied ${clipboard.length} motes.` : "Copied.");
 }
 
-async function pasteMote(worldX, worldY) {
+async function pasteAt(worldX, worldY) {
   if (!clipboard) return;
-  const mote = await call(api.create_mote(clipboard.properties));
-  for (const speciesId of clipboard.speciesIds) {
-    await call(api.set_species(mote.id, speciesId));
+  const placed = [];
+  for (const entry of clipboard) {
+    const mote = await call(api.create_mote(entry.properties));
+    for (const speciesId of entry.speciesIds) await call(api.set_species(mote.id, speciesId));
+    placed.push({ id: mote.id, x: worldX + entry.offset.dx, y: worldY + entry.offset.dy });
   }
   await refreshMoteCache();
-  await selectMote(mote.id, { pan: false });
-  graph.placeAt(mote.id, worldX, worldY);
+  // select:false -- the freshly-pasted group is about to become the
+  // selection below, not whatever single mote focus() would otherwise land
+  // on when centering the neighborhood view on the first pasted mote.
+  await refocus(placed[0].id, { pan: false, select: false });
+  for (const p of placed) graph.placeAt(p.id, p.x, p.y);
   savePositions();
-  showToast("Pasted.");
+  const newIds = placed.map((p) => p.id);
+  graph.select(newIds, { pan: false });
+  await syncSelectionPanel(newIds);
+  showToast(placed.length > 1 ? `Pasted ${placed.length} motes.` : "Pasted.");
 }
 
 function togglePin(id) {
@@ -1129,6 +1156,27 @@ function setupKeyboard() {
       if (graph.selectedIds.size > 0) {
         e.preventDefault();
         deleteSelection();
+      }
+      return;
+    }
+
+    // Guarded by isTypingInField() so ordinary text copy/paste inside the
+    // detail panel's own fields keeps working -- these only ever act on
+    // the graph selection.
+    if ((e.key === "c" || e.key === "C") && (e.metaKey || e.ctrlKey) && !isTypingInField()) {
+      if (graph.selectedIds.size > 0) {
+        e.preventDefault();
+        copySelection([...graph.selectedIds]);
+      }
+      return;
+    }
+    if ((e.key === "v" || e.key === "V") && (e.metaKey || e.ctrlKey) && !isTypingInField()) {
+      if (clipboard) {
+        e.preventDefault();
+        const center = graph.viewCenterWorld();
+        const step = pasteRepeatCount * 24;
+        pasteRepeatCount += 1;
+        pasteAt(center.x + step, center.y + step);
       }
       return;
     }

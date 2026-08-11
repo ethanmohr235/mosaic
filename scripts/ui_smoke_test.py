@@ -696,6 +696,125 @@ def run_checks(window):
 
     check("context menu: Copy then Paste duplicates a mote", context_menu_copy_paste)
 
+    def multi_copy_paste_preserves_relative_layout():
+        result = js_async(window, """
+            async () => {
+                const p = await api.create_mote({name: 'pair-P'});
+                const q = await api.create_mote({name: 'pair-Q'});
+                window.__pair = {p: p.id, q: q.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"multi-copy setup failed: {result}"
+
+        js(window, "graph.pin(window.__pair.p); graph.placeAt(window.__pair.p, -400, -400);")
+        js(window, "graph.pin(window.__pair.q); graph.placeAt(window.__pair.q, -200, -400);")  # 200 apart
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+
+        js(window, "graph.select([window.__pair.p, window.__pair.q], {pan: false});")
+        time.sleep(0.5)
+        x, y = node_xy(window, "window.__pair.p")
+        right_click(window, x, y)
+        time.sleep(0.5)
+        menu_text = js(window, "document.getElementById('context-menu').innerText")
+        assert "Copy 2 motes" in menu_text, (
+            f"right-clicking a member of a multi-selection should offer to copy the whole "
+            f"selection, got {menu_text!r}"
+        )
+        click_menu_item(window, "Copy 2 motes")
+        time.sleep(0.5)
+        assert js(window, "clipboard.length") == 2, "Copy should capture both selected motes"
+
+        right_click(window, 700, 550)  # empty canvas, far from P/Q
+        time.sleep(0.5)
+        paste_label = js(window, """
+            Array.from(document.querySelectorAll('#context-menu .menu-item'))
+                .map(i => i.textContent).find(t => t.startsWith('Paste'))
+        """)
+        assert paste_label == "Paste 2 motes", f"expected a pluralized paste label, got {paste_label!r}"
+        click_menu_item(window, "Paste 2 motes")
+        time.sleep(2.5)
+
+        ids = json.loads(js(window, "JSON.stringify(window.__pair)"))
+        pasted = json.loads(js_async(window, "async () => { window.__result = await api.list_motes(); }"))
+        new_p = next(m for m in pasted if m["properties"].get("name") == "pair-P" and m["id"] != ids["p"])
+        new_q = next(m for m in pasted if m["properties"].get("name") == "pair-Q" and m["id"] != ids["q"])
+        pos_p = json.loads(js(window, f"JSON.stringify(graph.nodes.get({json.dumps(new_p['id'])}))"))
+        pos_q = json.loads(js(window, f"JSON.stringify(graph.nodes.get({json.dumps(new_q['id'])}))"))
+        gap = abs(pos_p["x"] - pos_q["x"])
+        assert abs(gap - 200) < 1, f"pasted pair should keep their original 200-unit offset, got {gap}"
+
+        selected = js(window, "graph.selectedIds.size")
+        assert selected == 2, f"the pasted group should end up selected, got {selected}"
+
+    check("multi-select copy/paste preserves relative layout", multi_copy_paste_preserves_relative_layout)
+
+    def ctrl_c_ctrl_v_round_trip():
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'kbd-copy', tag: 'kbd'});
+                window.__kbdId = m.id;
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"ctrl+c/v setup failed: {result}"
+        src_id = json.loads(js(window, "JSON.stringify(window.__kbdId)"))
+
+        js(window, "graph.select(window.__kbdId, {pan: false});")
+        time.sleep(0.3)
+        # press_key() has no modifier support, so dispatch Ctrl+C directly.
+        js(window, """
+            window.dispatchEvent(new KeyboardEvent('keydown', {key: 'c', ctrlKey: true, bubbles: true}));
+        """)
+        time.sleep(0.5)
+        assert js(window, "clipboard !== null") is True, "Ctrl+C should copy the current selection"
+
+        js(window, """
+            window.dispatchEvent(new KeyboardEvent('keydown', {key: 'v', ctrlKey: true, bubbles: true}));
+        """)
+        time.sleep(2.5)
+
+        motes = json.loads(js_async(window, "async () => { window.__result = await api.list_motes(); }"))
+        pasted = [m for m in motes if m["id"] != src_id and m["properties"].get("tag") == "kbd"]
+        assert len(pasted) == 1, f"Ctrl+V should paste exactly one duplicate, got {pasted}"
+
+    check("Ctrl+C / Ctrl+V copies and pastes the selection", ctrl_c_ctrl_v_round_trip)
+
+    def ctrl_c_is_ignored_while_typing():
+        js(window, "clipboard = null;")
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'typing-guard'});
+                window.__typingId = m.id;
+                await refreshMoteCache();
+                await selectMote(m.id, {pan: false});
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"typing-guard setup failed: {result}"
+
+        js(window, "document.getElementById('detail-new-key').focus();")
+        time.sleep(0.2)
+        focused = js(window, "document.activeElement.id")
+        assert focused == "detail-new-key", "setup: the property key field should have focus"
+        js(window, """
+            document.getElementById('detail-new-key').dispatchEvent(
+                new KeyboardEvent('keydown', {key: 'c', ctrlKey: true, bubbles: true}));
+        """)
+        time.sleep(0.3)
+        assert js(window, "clipboard") is None, (
+            "Ctrl+C while typing in a field must not hijack normal text copy"
+        )
+        js(window, "document.getElementById('detail-new-key').blur();")
+
+    check("Ctrl+C is ignored while typing in a field", ctrl_c_is_ignored_while_typing)
+
     def pin_unpin_via_menu():
         result = js_async(window, """
             async () => {

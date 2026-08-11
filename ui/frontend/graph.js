@@ -804,6 +804,13 @@ class MonossGraph {
     return this._worldAt(clientX, clientY);
   }
 
+  /** The world point currently at the center of the viewport -- always
+   *  on-screen regardless of pan, unlike pasting near wherever a mote was
+   *  originally copied from (which could be anywhere after panning away). */
+  viewCenterWorld() {
+    return { x: -this.camera.x / this.camera.scale, y: -this.camera.y / this.camera.scale };
+  }
+
   _drawLabel(ctx, labelBg, node, mote, radius, isSelected) {
     const full = this.callbacks.labelFor ? this.callbacks.labelFor(mote) : mote.id.slice(0, 8);
     // Truncated on the canvas only. A rule called "Kirchhoff's current law"
