@@ -164,6 +164,15 @@ def run_checks(window):
 
     check("graph canvas actually renders", canvas_actually_paints)
 
+    def idle_cursor_is_not_a_hand():
+        # Pan moved to the middle button; a "grab" hand over empty canvas
+        # was left over from when plain left-drag used to pan, and wrongly
+        # implied it still does.
+        cursor = js(window, "getComputedStyle(document.getElementById('graph')).cursor")
+        assert cursor == "default", f"idle cursor should be the plain pointer, got {cursor!r}"
+
+    check("idle cursor is the plain pointer, not a hand", idle_cursor_is_not_a_hand)
+
     def graph_shows_label_fallback():
         label = js(window, """
             (function() {
@@ -548,8 +557,65 @@ def run_checks(window):
 
     check("box-select selects multiple nodes and shows the aggregate panel", box_select_multiple_nodes)
 
+    def box_select_highlights_live_during_the_drag():
+        """Motes must highlight as the box grows over them, not only once
+        the mouse is released -- checked by inspecting graph.selectedIds
+        mid-drag, before any mouseup fires."""
+        result = js_async(window, """
+            async () => {
+                const p = await api.create_mote({name: 'live-P'});
+                const q = await api.create_mote({name: 'live-Q'});
+                window.__live = {p: p.id, q: q.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"live box-select setup failed: {result}"
+        ids = json.loads(js(window, "JSON.stringify(window.__live)"))
+
+        js(window, "graph.pin(window.__live.p); graph.placeAt(window.__live.p, -3000, -3000);")
+        js(window, "graph.pin(window.__live.q); graph.placeAt(window.__live.q, -2900, -2900);")
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.2)
+
+        px, py = node_xy(window, "window.__live.p")
+        qx, qy = node_xy(window, "window.__live.q")
+
+        def fire(event_type, x, y, buttons=1):
+            js(window, f"""
+                document.getElementById('graph').dispatchEvent(new MouseEvent({json.dumps(event_type)}, {{
+                    clientX: {x}, clientY: {y}, bubbles: true, cancelable: true,
+                    button: 0, buttons: {buttons},
+                }}));
+            """)
+
+        fire("mousedown", px - 40, py - 40)
+        time.sleep(0.1)
+        # Grow the box just far enough to cover P but not yet Q.
+        fire("mousemove", px + 10, py + 10)
+        time.sleep(0.3)
+        mid_selection = json.loads(js(window, "JSON.stringify([...graph.selectedIds])"))
+        assert mid_selection == [ids["p"]], (
+            f"mid-drag, only P should be highlighted yet, got {mid_selection}"
+        )
+
+        # Grow it to cover both, still without releasing the mouse.
+        fire("mousemove", qx + 40, qy + 40)
+        time.sleep(0.3)
+        grown_selection = json.loads(js(window, "JSON.stringify([...graph.selectedIds])"))
+        assert sorted(grown_selection) == sorted([ids["p"], ids["q"]]), (
+            f"mid-drag, growing the box should add Q live, got {grown_selection}"
+        )
+
+        fire("mouseup", qx + 40, qy + 40)
+        time.sleep(0.5)
+
+    check("box-select highlights motes live as the box grows, before mouseup", box_select_highlights_live_during_the_drag)
+
     def esc_deselects():
-        # Left selected by the box-select check above: A and B, panel open.
+        # Left selected by the live box-select check above: P and Q, panel open.
         press_key(window, "Escape")
         time.sleep(0.5)
         size = js(window, "graph.selectedIds.size")

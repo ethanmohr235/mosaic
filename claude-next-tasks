@@ -1,20 +1,14 @@
 # Some more touches
 
-Very well done on the last pass. Here are some more small tasks for you:
+Looking good. Let's do one more polishing step before moving on.
 
-- New keybinds.
-    - Del or backspace: delete selected mote(s)
-    - Lmb + drag: multi-select
-    - Mmb: pan
-    - Rmb: context menu with copy/paste, create new mote (at that location), pin/unpin mote, etc.
-    - Ctrl + lmb + drag: still creates relationships
-    - Esc: deselect, when no menus left to exit
-    - If more ideas, ask me.
+Selection:
+- Multi-select should select/highlight motes as they enter the selection box, not after I let go of lmb.
+- Multi-select should allow me to copy and paste multiple motes at once.
+- Copy and paste should be usable with ctrl c and ctrl v.
+- The default mouse state should be a cursor, not a hand.
 
-- Selection pass. Currently there is no way to deselect a mote once you've selected it. Add one. Additionally, we want a multi-select box back (see above). Inspector panel for multi-select could show some kind of aggregate info, like species distribution, etc.
-
-- Small ui tweaks.
-    - The curvature between relations going between the same two nodes isn't quite curvy enough--their labels overlap constantly.
-    - I can't interact with the graph at all for a few seconds after opening a new garden. Any idea why?
-
-- Graph navigation. I want to be able to traverse the graph with the arrow keys, selecting a mote next along the chain each time I press the key. This is mostly just for fun but could also be useful for quicker navigation.
+Gardens:
+- Let's make garden selection its own window instead of a drop down. We should still be able to access this window from the top bar.
+    - Move the options for importing/exporting and creating here.
+- We need an option to delete gardens.

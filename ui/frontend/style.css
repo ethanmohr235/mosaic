@@ -160,7 +160,7 @@ button.linkish:hover { color: var(--fg); }
 
 main { flex: 1; min-height: 0; display: flex; }
 #graph-wrap { position: relative; flex: 1; min-height: 0; }
-#graph { position: absolute; inset: 0; display: block; cursor: grab; }
+#graph { position: absolute; inset: 0; display: block; cursor: default; }
 
 #empty-state {
   position: absolute; inset: 0; display: flex; flex-direction: column;

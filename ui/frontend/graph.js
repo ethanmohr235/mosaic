@@ -37,6 +37,15 @@ function hashString(text) {
   return (h ^= h >>> 16) >>> 0;
 }
 
+/** Set-equality for two id arrays -- used to skip redundant select() calls
+ *  during live box-select, where mousemove fires far more often than the
+ *  hit set actually changes. */
+function _sameIds(a, b) {
+  const setB = b instanceof Set ? b : new Set(b);
+  if (a.length !== setB.size) return false;
+  return a.every((id) => setB.has(id));
+}
+
 function hueFor(seed) {
   return hashString(seed) % 360;
 }
@@ -562,6 +571,21 @@ class MonossGraph {
     return best;
   }
 
+  /** Every visible node whose screen position falls inside a screen-space
+   *  rectangle -- shared by the live box-select preview (every qualifying
+   *  mousemove) and its mouseup finalize. */
+  _hitsInRect(rect) {
+    const hits = [];
+    for (const [id] of this.nodes) {
+      if (!this.isMoteVisible(id)) continue;
+      const pos = this.screenPositionOf(id);
+      if (pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom) {
+        hits.push(id);
+      }
+    }
+    return hits;
+  }
+
   _onMouseDown = (e) => {
     // Unconditional and first: a click or drag anywhere is the user
     // telling the camera what they want, which always wins over the
@@ -596,8 +620,13 @@ class MonossGraph {
     }
     // Empty canvas, plain left button -> box-select. Shift keeps whatever
     // was already selected and adds to it; otherwise a completed box (or a
-    // plain click, handled in _onMouseUp) replaces the selection.
-    this.boxState = { startX: e.clientX, startY: e.clientY, moved: false, additive: e.shiftKey };
+    // plain click, handled in _onMouseUp) replaces the selection. baseIds
+    // snapshots the pre-drag selection so the live preview below has
+    // something to union against in additive mode.
+    this.boxState = {
+      startX: e.clientX, startY: e.clientY, moved: false,
+      additive: e.shiftKey, baseIds: [...this.selectedIds],
+    };
   };
 
   _onMouseMove = (e) => {
@@ -633,17 +662,34 @@ class MonossGraph {
       if (!this.boxState.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
         this.boxState.moved = true;
       }
-      if (this.boxState.moved && this.callbacks.onBoxSelect) {
-        this.callbacks.onBoxSelect(
-          this._normalizedRect(this.boxState.startX, this.boxState.startY, e.clientX, e.clientY)
-        );
+      if (this.boxState.moved) {
+        const rect = this._normalizedRect(this.boxState.startX, this.boxState.startY, e.clientX, e.clientY);
+        if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(rect);
+
+        // Live preview: motes highlight on the canvas as they enter the
+        // box, not only once the mouse is released. Deliberately does NOT
+        // fire onSelectionChanged on every intermediate step -- for a
+        // single hit, app.js's handler goes through the full selectMote()
+        // -> refocus() path, a real async round trip to the backend. A
+        // fast box-drag can queue several of those, and an earlier one
+        // resolving after a later mousemove already moved on would clobber
+        // the in-progress selection with stale data. select() alone is
+        // synchronous and just touches render state, so it's race-free;
+        // the panel catches up once, authoritatively, at mouseup.
+        const hits = this._hitsInRect(rect);
+        const finalIds = this.boxState.additive
+          ? [...new Set([...this.boxState.baseIds, ...hits])]
+          : hits;
+        if (!_sameIds(finalIds, this.selectedIds)) {
+          this.select(finalIds, { pan: false });
+        }
       }
       return;
     }
     const id = this.hitTest(e.clientX, e.clientY);
     if (id !== this.hoverId) {
       this.hoverId = id;
-      this.canvas.style.cursor = id ? "pointer" : "grab";
+      this.canvas.style.cursor = id ? "pointer" : "default";
     }
   };
 
@@ -652,7 +698,7 @@ class MonossGraph {
       const { sourceId } = this.connectState;
       this.connectState = null;
       this.connectSourceId = null;
-      this.canvas.style.cursor = "grab";
+      this.canvas.style.cursor = "default";
       const targetId = this.hitTest(e.clientX, e.clientY);
       if (targetId && targetId !== sourceId && this.callbacks.onConnect) {
         this.callbacks.onConnect(sourceId, targetId);
@@ -671,11 +717,11 @@ class MonossGraph {
     }
     if (this.panState) {
       this.panState = null;
-      this.canvas.style.cursor = this.hoverId ? "pointer" : "grab";
+      this.canvas.style.cursor = this.hoverId ? "pointer" : "default";
       return;
     }
     if (this.boxState) {
-      const { startX, startY, moved, additive } = this.boxState;
+      const { startX, startY, moved, additive, baseIds } = this.boxState;
       this.boxState = null;
       if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(null); // clear the rect overlay
 
@@ -690,16 +736,12 @@ class MonossGraph {
         return;
       }
 
+      // The live preview in _onMouseMove has almost certainly already put
+      // the right ids in place; this is the authoritative final call in
+      // case no mousemove landed exactly on the release point.
       const rect = this._normalizedRect(startX, startY, e.clientX, e.clientY);
-      const hits = [];
-      for (const [id] of this.nodes) {
-        if (!this.isMoteVisible(id)) continue;
-        const pos = this.screenPositionOf(id);
-        if (pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom) {
-          hits.push(id);
-        }
-      }
-      const finalIds = additive ? [...new Set([...this.selectedIds, ...hits])] : hits;
+      const hits = this._hitsInRect(rect);
+      const finalIds = additive ? [...new Set([...baseIds, ...hits])] : hits;
       this.select(finalIds, { pan: false });
       if (this.callbacks.onSelectionChanged) this.callbacks.onSelectionChanged(finalIds);
       return;
