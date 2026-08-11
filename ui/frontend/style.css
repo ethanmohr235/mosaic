@@ -290,6 +290,10 @@ main { flex: 1; min-height: 0; display: flex; }
   padding: 0; width: 24px; height: 30px; flex-shrink: 0;
   background: transparent; color: var(--danger); border-color: var(--danger);
 }
+.detail-row .open-link {
+  padding: 0; width: 24px; height: 30px; flex-shrink: 0;
+  background: transparent; color: var(--accent); border-color: var(--accent);
+}
 
 #detail-add-property { display: flex; gap: 6px; margin: 4px 0 6px; }
 #detail-add-property #detail-new-key { width: 74px; flex-shrink: 0; }

@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import json
 import threading
+import webbrowser
 from pathlib import Path
 
 import webview
@@ -11,6 +12,7 @@ from core.db import get_connection, initialize_database
 from core import gardens as gardens_repo
 from core import garden_io
 from core import graph as graph_repo
+from core import links as links_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import simulation as simulation_repo
@@ -167,6 +169,13 @@ class Api:
     @_synchronized
     def delete_mote(self, mote_id: str) -> bool:
         return motes_repo.delete_mote(self._conn, mote_id)
+
+    # ---- links ----
+
+    @_synchronized
+    def open_link(self, target: str) -> dict:
+        webbrowser.open(links_repo.resolve_link(target))
+        return {"opened": target}
 
     # ---- relationships ----
 

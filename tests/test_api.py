@@ -1,4 +1,5 @@
 import json
+import webbrowser
 
 import pytest
 
@@ -215,3 +216,25 @@ def test_create_relationship_with_explicit_id_reuses_it(api):
     b = api.create_mote({"name": "Bob"})
     result = api.create_relationship(a["id"], b["id"], "knows", id="fixed-rel-id")
     assert result["id"] == "fixed-rel-id"
+
+
+def test_open_link_launches_a_url(api, monkeypatch):
+    calls = []
+    monkeypatch.setattr(webbrowser, "open", lambda x: calls.append(x))
+    result = api.open_link("https://example.com")
+    assert calls == ["https://example.com"]
+    assert result == {"opened": "https://example.com"}
+
+
+def test_open_link_launches_a_local_file(api, monkeypatch, tmp_path):
+    f = tmp_path / "note.txt"
+    f.write_text("hi")
+    calls = []
+    monkeypatch.setattr(webbrowser, "open", lambda x: calls.append(x))
+    api.open_link(str(f))
+    assert calls == [f.resolve().as_uri()]
+
+
+def test_open_link_missing_file_raises(api):
+    with pytest.raises(FileNotFoundError):
+        api.open_link("/no/such/file/anywhere")

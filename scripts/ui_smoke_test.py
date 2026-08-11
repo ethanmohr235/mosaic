@@ -410,6 +410,61 @@ def run_checks(window):
 
     check("detail panel: long equation gets a content-sized textarea", long_values_get_a_sized_textarea)
 
+    def url_property_gets_an_open_button():
+        result = js_async(window, """
+            async () => {
+                const linked = await api.create_mote({name: 'linked', url: 'https://example.com'});
+                window.__seed.linkedId = linked.id;
+                await refreshMoteCache();
+                await refocus(linked.id);
+                await openDetailPanel(linked.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"url mote setup failed: {result}"
+
+        has_open_on_url = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const r of rows) {
+                    if (r.querySelector('.key').textContent === 'url') return !!r.querySelector('.open-link');
+                }
+                return 'row not found';
+            })()
+        """)
+        assert has_open_on_url is True, f"a url property should get an Open button, got {has_open_on_url!r}"
+
+        has_open_on_name = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const r of rows) {
+                    if (r.querySelector('.key').textContent === 'name') return !!r.querySelector('.open-link');
+                }
+                return 'row not found';
+            })()
+        """)
+        assert has_open_on_name is False, "only the url property should get an Open button"
+
+        # Stub api.open_link so clicking Open doesn't try to launch a real
+        # browser on the test machine; restored immediately after.
+        js(window, """
+            window.__opened = [];
+            window.__origOpenLink = api.open_link.bind(api);
+            api.open_link = (t) => { window.__opened.push(t); return Promise.resolve({opened: t}); };
+        """)
+        js(window, """
+            const rows = document.querySelectorAll('#detail-properties .detail-row');
+            for (const r of rows) {
+                if (r.querySelector('.key').textContent === 'url') r.querySelector('.open-link').click();
+            }
+        """)
+        time.sleep(0.5)
+        opened = json.loads(js(window, "JSON.stringify(window.__opened)"))
+        js(window, "api.open_link = window.__origOpenLink;")
+        assert opened == ["https://example.com"], f"Open should call api.open_link with the property's value, got {opened}"
+
+    check("detail panel: a url property gets a working Open button", url_property_gets_an_open_button)
+
     def depth_control_limits_the_graph():
         def visible_at(value):
             js(window, f"""

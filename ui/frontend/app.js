@@ -365,6 +365,10 @@ function valueField(rawValue, onCommit) {
   return field;
 }
 
+function openLink(url) {
+  call(api.open_link(url));
+}
+
 function renderProperties(mote) {
   const container = $("detail-properties");
   container.innerHTML = "";
@@ -398,7 +402,19 @@ function renderProperties(mote) {
       await openDetailPanel(mote.id);
     });
 
-    row.append(keyEl, field, del);
+    // "url" is a reserved property name -- a mote holding one, whether a
+    // web link or a local path, gets a one-click way to launch it via the
+    // OS's default handler instead of only being able to read/edit it.
+    if (key === "url" && typeof value === "string" && value.trim()) {
+      const open = document.createElement("button");
+      open.className = "open-link";
+      open.textContent = "↗";
+      open.title = "Open";
+      open.addEventListener("click", () => openLink(value));
+      row.append(keyEl, field, open, del);
+    } else {
+      row.append(keyEl, field, del);
+    }
     container.appendChild(row);
   }
 }

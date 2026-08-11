@@ -43,6 +43,19 @@ works the same way at the file level: the garden's `.db` file is moved
 aside rather than removed, so `restore_garden` can move it back; only the
 most recently trashed copy of a given name is kept.
 
+### Linking out to files and websites
+
+`url` is a reserved property name: give any mote a `url` property (a
+`https://` link or a local file path) and its detail panel row gets an
+"Open" (↗) button that launches it via the OS's default handler --
+`core/links.py::resolve_link` turns a local path into a `file://` URI,
+and `ui/api.py::open_link` hands it to the stdlib `webbrowser` module,
+so opening a PDF, a folder, or a webpage all go through whatever the OS
+already treats as the default app for that target. This is purely a
+naming convention, not a schema change -- the property is still a
+normal, editable/deletable string like any other. There's no drag-and-
+drop yet; the path/URL has to be pasted in by hand.
+
 ## This machine (Arch Linux)
 
 `webkit2gtk-4.1`, `gtk3`, and `python-gobject` are already installed system-
@@ -120,9 +133,10 @@ isolation, species picking and templating, filters, depth, running a
 simulation, live box-select, middle-drag pan, the context menu's
 copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
 Esc/Del, arrow-key navigation, the gardens modal's list/switch/
-create/delete, and undoing a delete via the toast button and Ctrl+Z)
-against a throwaway temp `GARDENS_DIR` and webview storage dir — never
-touches real data. Run it by hand after UI changes:
+create/delete, undoing a delete via the toast button and Ctrl+Z, and the
+url property's Open button) against a throwaway temp `GARDENS_DIR` and
+webview storage dir — never touches real data. Run it by hand after UI
+changes:
 
 ```
 .venv/bin/python scripts/ui_smoke_test.py
