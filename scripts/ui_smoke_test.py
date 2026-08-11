@@ -519,6 +519,74 @@ def run_checks(window):
 
     check("garden switch isolates data", garden_switch_isolates_data)
 
+    def gardens_modal_lists_switches_and_guards_delete():
+        # Two gardens exist at this point: 'default' (current) and
+        # 'smoke-second', left behind by the check above.
+        js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(1.0)
+        visible = js(window, "!document.getElementById('gardens-overlay').classList.contains('hidden')")
+        assert visible is True, "clicking the garden button should open the modal"
+
+        rows = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => [
+                r.querySelector('.name').textContent, r.querySelector('.danger').disabled
+            ]))
+        """))
+        assert dict(rows) == {"default": True, "smoke-second": False}, (
+            f"delete should be disabled only for the current garden, got {rows}"
+        )
+
+        # Deleting the non-current garden should work end-to-end.
+        js(window, "window.confirm = () => true;")
+        js(window, """
+            Array.from(document.querySelectorAll('.garden-row'))
+                .find(r => r.querySelector('.name').textContent === 'smoke-second')
+                .querySelector('.danger').click();
+        """)
+        time.sleep(2.0)
+        remaining = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => r.querySelector('.name').textContent))
+        """))
+        assert remaining == ["default"], f"deleting smoke-second should remove its row, got {remaining}"
+
+        deleted_from_disk = json.loads(js_async(window, """
+            async () => { window.__result = await api.list_gardens(); }
+        """))
+        assert "smoke-second" not in deleted_from_disk, "the garden should actually be gone, not just hidden"
+
+    check("gardens modal: lists gardens, guards delete, deletes a non-current garden", gardens_modal_lists_switches_and_guards_delete)
+
+    def gardens_modal_esc_closes_it():
+        press_key(window, "Escape")
+        time.sleep(0.5)
+        hidden = js(window, "document.getElementById('gardens-overlay').classList.contains('hidden')")
+        assert hidden is True, "Esc should close the gardens modal"
+
+    check("gardens modal: Esc closes it", gardens_modal_esc_closes_it)
+
+    def gardens_modal_creates_and_switches():
+        js(window, "window.prompt = () => 'smoke-third';")
+        js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(1.0)
+        js(window, "document.getElementById('new-garden-btn').click();")
+        time.sleep(2.5)
+
+        assert js(window, "currentGarden") == "smoke-third", "creating a garden should switch to it"
+        modal_closed = js(window, "document.getElementById('gardens-overlay').classList.contains('hidden')")
+        assert modal_closed is True, "creating a garden should close the modal"
+
+        # Restore 'default' as current so the rest of the suite isn't
+        # affected by starting a fresh garden here.
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("gardens modal: creating a garden switches to it and closes the modal", gardens_modal_creates_and_switches)
+
     def box_select_multiple_nodes():
         result = js_async(window, """
             async () => {

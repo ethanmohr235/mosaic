@@ -83,14 +83,39 @@ class Api:
         return {"garden": resolved}
 
     @_synchronized
-    def export_garden(self) -> dict:
+    def delete_garden(self, name: str) -> dict:
+        # Checked in this order deliberately: if it's the only garden left,
+        # "switch away first" would be misleading advice -- there's nowhere
+        # to switch to.
+        if len(gardens_repo.list_gardens()) <= 1:
+            raise ValueError("Can't delete the last garden.")
+        if name == self._current_garden:
+            raise ValueError("Can't delete the garden you're currently in -- switch to another one first.")
+        gardens_repo.delete_garden(name)
+        return {"deleted": name}
+
+    @_synchronized
+    def export_garden(self, garden_name: str | None = None) -> dict:
+        """Exports the current garden by default, or any named garden --
+        via a short-lived connection, so exporting one from the gardens
+        list doesn't disturb the currently open one."""
+        target_name = garden_name or self._current_garden
         path = self._window.create_file_dialog(
-            webview.FileDialog.SAVE, save_filename=f"{self._current_garden}.json"
+            webview.FileDialog.SAVE, save_filename=f"{target_name}.json"
         )
         if not path:
             return {"cancelled": True}
         target = Path(path if isinstance(path, str) else path[0])
-        target.write_text(json.dumps(garden_io.export_garden(self._conn), indent=2))
+
+        if target_name == self._current_garden:
+            data = garden_io.export_garden(self._conn)
+        else:
+            conn = get_connection(target_name)
+            try:
+                data = garden_io.export_garden(conn)
+            finally:
+                conn.close()
+        target.write_text(json.dumps(data, indent=2))
         return {"path": str(target)}
 
     @_synchronized

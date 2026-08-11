@@ -1,6 +1,6 @@
 import pytest
 
-from core.gardens import create_garden, garden_exists, list_gardens, resolve_garden
+from core.gardens import create_garden, delete_garden, garden_exists, list_gardens, resolve_garden
 
 
 def test_create_garden_creates_initialized_db():
@@ -39,3 +39,15 @@ def test_resolve_garden_missing_raises():
 def test_resolve_garden_existing_returns_name():
     create_garden("work")
     assert resolve_garden("work") == "work"
+
+
+def test_delete_garden_removes_it():
+    create_garden("work")
+    delete_garden("work")
+    assert not garden_exists("work")
+    assert list_gardens() == []
+
+
+def test_delete_garden_missing_raises():
+    with pytest.raises(LookupError):
+        delete_garden("missing")

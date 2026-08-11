@@ -105,8 +105,7 @@ button.linkish:hover { color: var(--fg); }
 #brand { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
 #brand-name { font-family: var(--serif); font-size: 19px; font-weight: 500; letter-spacing: 0.01em; }
 
-#garden-menu-wrap { position: relative; flex-shrink: 0; }
-#garden-btn { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+#garden-btn { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-shrink: 0; }
 #garden-btn .caret { color: var(--faint); font-size: 11px; }
 
 .menu {
@@ -365,6 +364,33 @@ main { flex: 1; min-height: 0; display: flex; }
   padding: 8px 20px; border-top: 1px solid var(--border-soft);
   color: var(--faint); font-size: 11px; display: flex; gap: 14px;
 }
+
+/* ---- gardens modal ---- */
+
+#gardens-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
+}
+#gardens-modal {
+  width: 460px; max-width: 90vw; max-height: 72vh;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  display: flex; flex-direction: column; overflow: hidden;
+  padding: 20px;
+}
+#gardens-list { flex: 1; overflow-y: auto; min-height: 0; margin: 4px 0 14px; }
+.garden-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 6px; border-radius: 7px; cursor: pointer;
+}
+.garden-row:hover { background: var(--raised); }
+.garden-row .check { color: var(--accent); width: 14px; flex-shrink: 0; text-align: center; }
+.garden-row .name {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px;
+}
+.garden-row button { font-size: 12px; padding: 5px 9px; flex-shrink: 0; }
+#gardens-modal-actions { display: flex; align-items: center; gap: 8px; }
 
 /* ---- toast ---- */
 

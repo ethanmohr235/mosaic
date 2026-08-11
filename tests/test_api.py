@@ -1,7 +1,21 @@
+import json
+
 import pytest
 
 from core.gardens import create_garden
 from ui.api import Api, _coerce_properties
+
+
+class _StubWindow:
+    """Minimal stand-in for pywebview's window -- just enough of
+    create_file_dialog to test export_garden's own logic without a real
+    native dialog."""
+
+    def __init__(self, path):
+        self._path = path
+
+    def create_file_dialog(self, *args, **kwargs):
+        return self._path
 
 
 @pytest.fixture
@@ -73,6 +87,57 @@ def test_species_with_only_a_template_is_reported_as_a_species(api):
 
     result = api.focus(template["id"], None)
     assert result["species_ids"] == [species["id"]]
+
+
+def test_delete_garden_blocks_the_last_garden(api):
+    with pytest.raises(ValueError, match="last garden"):
+        api.delete_garden("test")
+
+
+def test_delete_garden_blocks_the_current_garden(api):
+    create_garden("other")
+    with pytest.raises(ValueError, match="currently in"):
+        api.delete_garden("test")
+    # Blocked, not partially applied.
+    assert "test" in api.list_gardens()
+
+
+def test_delete_garden_succeeds_for_a_non_current_garden(api):
+    create_garden("other")
+    result = api.delete_garden("other")
+    assert result == {"deleted": "other"}
+    assert "other" not in api.list_gardens()
+
+
+def test_export_garden_by_name_does_not_disturb_the_current_garden(api, tmp_path):
+    create_garden("other")
+    other_api = Api("other")
+    other_api.create_mote({"name": "OtherMote"})
+    other_api.shutdown()
+
+    api.create_mote({"name": "CurrentMote"})
+    out = tmp_path / "other.json"
+    api._window = _StubWindow(str(out))
+
+    result = api.export_garden("other")
+
+    assert result["path"] == str(out)
+    assert api.current_garden() == "test"
+    data = json.loads(out.read_text())
+    names = [m["properties"].get("name") for m in data["motes"]]
+    assert names == ["OtherMote"]
+
+
+def test_export_garden_defaults_to_the_current_garden(api, tmp_path):
+    api.create_mote({"name": "CurrentMote"})
+    out = tmp_path / "test.json"
+    api._window = _StubWindow(str(out))
+
+    api.export_garden()
+
+    data = json.loads(out.read_text())
+    names = [m["properties"].get("name") for m in data["motes"]]
+    assert names == ["CurrentMote"]
 
 
 def test_whole_garden_still_reports_species_ids(api):

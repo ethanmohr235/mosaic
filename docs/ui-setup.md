@@ -19,12 +19,18 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 | Left-drag empty canvas | Box-select (hold Shift to add to the current selection) |
 | Ctrl+Left-drag from a mote | Connect it to another mote |
 | Middle-drag | Pan |
-| Right-click a mote | Context menu: Copy, Pin/Unpin, Delete |
+| Right-click a mote | Context menu: Copy, Pin/Unpin, Delete (acts on the whole selection if the mote is part of one) |
 | Right-click empty canvas | Context menu: New mote here, Paste |
+| Ctrl/Cmd+C / Ctrl/Cmd+V | Copy / paste the current selection (Ctrl+V pastes at the viewport center) |
 | Arrow keys | Select whichever visible neighbour sits closest to that screen direction |
 | Delete / Backspace | Delete the current selection |
 | Esc | Close the frontmost menu/panel, or deselect if nothing else is open |
 | Scroll | Zoom |
+
+Motes highlight live as a box-select drag grows over them, not only once
+the mouse is released. Copying more than one mote preserves their
+relative layout on paste. Gardens (switch/create/export/import/delete)
+live in a modal opened from the topbar's garden button, not a dropdown.
 
 ## This machine (Arch Linux)
 
@@ -100,10 +106,11 @@ actual GTK/WebKit window. `scripts/ui_smoke_test.py` drives the real running
 app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
 layout position stability, search/browse/keyboard-nav, garden-switch
 isolation, species picking and templating, filters, depth, running a
-simulation, box-select, middle-drag pan, the context menu's copy/paste/
-pin, bulk delete, Esc/Del, and arrow-key navigation) against a throwaway
-temp `GARDENS_DIR` and webview storage dir — never touches real data. Run
-it by hand after UI changes:
+simulation, live box-select, middle-drag pan, the context menu's
+copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
+Esc/Del, arrow-key navigation, and the gardens modal's list/switch/
+create/delete) against a throwaway temp `GARDENS_DIR` and webview storage
+dir — never touches real data. Run it by hand after UI changes:
 
 ```
 .venv/bin/python scripts/ui_smoke_test.py

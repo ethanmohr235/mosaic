@@ -19,6 +19,12 @@ def list_gardens() -> list[str]:
     return sorted(p.stem for p in db.GARDENS_DIR.glob("*.db"))
 
 
+def delete_garden(name: str) -> None:
+    if not garden_exists(name):
+        raise LookupError(f"No such garden: {name!r}")
+    garden_db_path(name).unlink()
+
+
 def create_garden(name: str) -> str:
     validate_garden_name(name)
     if garden_exists(name):

@@ -962,75 +962,98 @@ function setupContextMenu() {
   });
 }
 
-// ---- garden menu ----
+// ---- gardens modal ----
+//
+// A centered modal like the search palette, not an anchored dropdown --
+// consistent with how every other panel in this app works, and gives
+// Export/Delete room to sit as real per-row buttons instead of being
+// crammed into a narrow menu item.
 
-async function refreshGardenMenu() {
+async function renderGardensList() {
   const gardens = await call(api.list_gardens());
-  const menu = $("garden-menu");
-  menu.innerHTML = "";
+  const container = $("gardens-list");
+  container.innerHTML = "";
 
   for (const name of gardens) {
-    const item = document.createElement("div");
-    item.className = "menu-item";
-    item.dataset.garden = name;
-    item.innerHTML = '<span></span><span class="check"></span>';
-    item.querySelector("span").textContent = name;
-    item.querySelector(".check").textContent = name === currentGarden ? "✓" : "";
-    item.addEventListener("click", async () => {
-      menu.classList.add("hidden");
+    const row = document.createElement("div");
+    row.className = "garden-row";
+    row.innerHTML =
+      '<span class="check"></span><span class="name"></span>' +
+      '<button type="button" class="ghost">Export</button>' +
+      '<button type="button" class="danger">Delete</button>';
+    row.querySelector(".check").textContent = name === currentGarden ? "✓" : "";
+    row.querySelector(".name").textContent = name;
+
+    row.addEventListener("click", async () => {
       if (name === currentGarden) return;
+      closeGardensModal();
       await call(api.switch_garden(name));
       await loadGarden(name);
     });
-    menu.appendChild(item);
-  }
 
-  const sep = document.createElement("div");
-  sep.className = "menu-sep";
-  menu.appendChild(sep);
-
-  const actions = [
-    ["+ New garden…", async () => {
-      const name = window.prompt("New garden name:");
-      if (!name) return;
-      await call(api.create_garden(name));
-      await call(api.switch_garden(name));
-      await loadGarden(name);
-      await refreshGardenMenu();
-    }],
-    ["Export garden…", async () => {
-      const result = await call(api.export_garden());
+    row.querySelector(".ghost").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const result = await call(api.export_garden(name));
       if (!result.cancelled) showToast(`Exported to ${result.path}`);
-    }],
-    ["Import garden…", async () => {
-      const name = window.prompt("Import into a new garden named:");
-      if (!name) return;
-      const result = await call(api.import_garden_into_new(name));
-      if (result.cancelled) return;
-      await call(api.switch_garden(result.garden));
-      await loadGarden(result.garden);
-      await refreshGardenMenu();
-      showToast(`Imported ${result.motes} motes, ${result.relationships} relationships.`);
-    }],
-  ];
-  for (const [label, handler] of actions) {
-    const item = document.createElement("div");
-    item.className = "menu-item accent";
-    item.textContent = label;
-    item.addEventListener("click", async () => { menu.classList.add("hidden"); await handler(); });
-    menu.appendChild(item);
+    });
+
+    // Disabled client-side for the same two cases the backend itself
+    // blocks, so the common case never even reaches a rejected-promise
+    // toast -- switching away first (or there being nothing else) is
+    // obvious just from looking at the list.
+    const deleteBtn = row.querySelector(".danger");
+    if (name === currentGarden || gardens.length <= 1) {
+      deleteBtn.disabled = true;
+      deleteBtn.title = name === currentGarden
+        ? "Switch to another garden before deleting this one"
+        : "Can't delete the last garden";
+    } else {
+      deleteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!window.confirm(`Delete garden '${name}'? This cannot be undone.`)) return;
+        await call(api.delete_garden(name));
+        await renderGardensList();
+      });
+    }
+
+    container.appendChild(row);
   }
 }
 
-function setupGardenMenu() {
-  $("garden-btn").addEventListener("click", async (e) => {
-    e.stopPropagation();
-    const menu = $("garden-menu");
-    const opening = menu.classList.contains("hidden");
-    if (opening) await refreshGardenMenu();
-    menu.classList.toggle("hidden", !opening);
+function openGardensModal() {
+  $("gardens-overlay").classList.remove("hidden");
+  renderGardensList();
+}
+
+function closeGardensModal() {
+  $("gardens-overlay").classList.add("hidden");
+}
+
+function setupGardensModal() {
+  $("garden-btn").addEventListener("click", openGardensModal);
+  $("gardens-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("gardens-overlay")) closeGardensModal();
   });
-  document.addEventListener("click", () => $("garden-menu").classList.add("hidden"));
+
+  $("new-garden-btn").addEventListener("click", async () => {
+    const name = window.prompt("New garden name:");
+    if (!name) return;
+    await call(api.create_garden(name));
+    await call(api.switch_garden(name));
+    closeGardensModal();
+    await loadGarden(name);
+  });
+
+  $("import-garden-btn").addEventListener("click", async () => {
+    const name = window.prompt("Import into a new garden named:");
+    if (!name) return;
+    const result = await call(api.import_garden_into_new(name));
+    if (result.cancelled) return;
+    await call(api.switch_garden(result.garden));
+    closeGardensModal();
+    await loadGarden(result.garden);
+    showToast(`Imported ${result.motes} motes, ${result.relationships} relationships.`);
+  });
 }
 
 // ---- view controls ----
@@ -1191,6 +1214,7 @@ function setupKeyboard() {
 
     if (e.key !== "Escape") return;
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
+    if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (!$("quick-add").classList.contains("hidden")) {
@@ -1221,7 +1245,7 @@ async function init() {
   });
   window.graph = graph;
 
-  setupGardenMenu();
+  setupGardensModal();
   setupQuickAdd();
   setupSpeciesControls();
   setupSearch();
