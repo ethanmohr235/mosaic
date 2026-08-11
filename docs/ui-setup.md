@@ -47,11 +47,15 @@ most recently trashed copy of a given name is kept.
 
 `url` is a reserved property name: give any mote a `url` property (a
 web address or a local file path) and its detail panel row gets an
-"Open" (↗) button that launches it via the OS's default handler --
-`core/links.py::resolve_link` turns a local path into a `file://` URI,
-and `ui/api.py::open_link` hands it to the stdlib `webbrowser` module,
-so opening a PDF, a folder, or a webpage all go through whatever the OS
-already treats as the default app for that target. A bare domain like
+"Open" (↗) button that launches it via the OS's default handler.
+`core/links.py::classify_link` decides which: a web address goes to the
+stdlib `webbrowser` module, while a local file is instead handed to the
+OS's native "open with the registered default app" mechanism
+(`xdg-open` on Linux, `open` on macOS, `os.startfile` on Windows --
+`ui/api.py::_open_with_os_default`), not `webbrowser.open()`, since
+that always launches the web browser itself and would show a `.py`
+file as plain text rather than opening it in, say, VSCode. A bare
+domain like
 `youtube.com` (no `http(s)://`) is assumed to be a URL missing its
 scheme and gets `https://` added automatically; local paths need to be
 absolute or start with `~`/`./`/`../` to be recognized as local rather

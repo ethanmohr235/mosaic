@@ -2,6 +2,9 @@
 import dataclasses
 import functools
 import json
+import os
+import platform
+import subprocess
 import threading
 import webbrowser
 from pathlib import Path
@@ -28,6 +31,24 @@ def _coerce(raw: str):
 
 def _coerce_properties(raw_properties: dict[str, str]) -> dict:
     return {k: _coerce(v) for k, v in raw_properties.items()}
+
+
+def _open_with_os_default(path: str) -> None:
+    """Launches a local file with whatever the OS has registered as the
+    default app for its type -- e.g. a .py file opens in VSCode, not as
+    text in a browser tab, which is what webbrowser.open() would do.
+
+    Fire-and-forget: open_link() is @_synchronized, so blocking here
+    until the opener command exits would hold that lock -- and freeze
+    every other Api call -- for as long as the opener (or the app it
+    launches) takes to return, which observably is not always fast."""
+    system = platform.system()
+    if system == "Darwin":
+        subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif system == "Windows":
+        os.startfile(path)
+    else:
+        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _synchronized(method):
@@ -174,7 +195,11 @@ class Api:
 
     @_synchronized
     def open_link(self, target: str) -> dict:
-        webbrowser.open(links_repo.resolve_link(target))
+        kind, value = links_repo.classify_link(target)
+        if kind == "url":
+            webbrowser.open(value)
+        else:
+            _open_with_os_default(value)
         return {"opened": target}
 
     # ---- relationships ----

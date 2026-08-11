@@ -10,13 +10,16 @@ def _looks_like_a_local_path(target: str) -> bool:
     return target.startswith(("/", "~", "./", "../")) or bool(_WINDOWS_DRIVE.match(target))
 
 
-def resolve_link(target: str) -> str:
-    """Turns a url property's value into something webbrowser.open() can
-    launch.
+def classify_link(target: str) -> tuple[str, str]:
+    """Classifies a url property's value as ("url", <url>) or
+    ("file", <absolute path>) -- kept separate so a URL can be handed to
+    a web browser while a local file is handed to the OS's file-type
+    default instead (a .py file should open in whatever normally opens
+    .py files, not as text in a browser tab).
 
-    - Already has a URL scheme (http://, https://, ...) -> passed through.
+    - Already has a URL scheme (http://, https://, ...) -> a URL.
     - Starts with /, ~, ./, ../, or a Windows drive letter -> an explicit
-      local path; resolved to a file:// URI, raising if it doesn't exist.
+      local path; raises if it doesn't exist.
     - Anything else (e.g. a bare "youtube.com") -> assumed to be a web
       address missing its scheme, and given one. This means a relative
       path with no leading indicator (e.g. "notes/todo.txt") is treated
@@ -25,10 +28,10 @@ def resolve_link(target: str) -> str:
     """
     target = target.strip()
     if _URL_SCHEME.match(target):
-        return target
+        return ("url", target)
     if _looks_like_a_local_path(target):
         path = Path(target).expanduser()
         if not path.exists():
             raise FileNotFoundError(f"No such file: {target!r}")
-        return path.resolve().as_uri()
-    return f"https://{target}"
+        return ("file", str(path.resolve()))
+    return ("url", f"https://{target}")

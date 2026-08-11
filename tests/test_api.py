@@ -3,6 +3,7 @@ import webbrowser
 
 import pytest
 
+import ui.api
 from core.gardens import create_garden
 from ui.api import Api, _coerce_properties
 
@@ -226,13 +227,21 @@ def test_open_link_launches_a_url(api, monkeypatch):
     assert result == {"opened": "https://example.com"}
 
 
-def test_open_link_launches_a_local_file(api, monkeypatch, tmp_path):
+def test_open_link_launches_a_local_file_via_the_os_default_app(api, monkeypatch, tmp_path):
+    # A local file must NOT go through webbrowser.open() -- that always
+    # launches the web browser, which shows a .py file as plain text
+    # instead of opening it in whatever the OS has registered for .py.
     f = tmp_path / "note.txt"
     f.write_text("hi")
     calls = []
-    monkeypatch.setattr(webbrowser, "open", lambda x: calls.append(x))
+    monkeypatch.setattr(ui.api, "_open_with_os_default", lambda p: calls.append(p))
+    browser_calls = []
+    monkeypatch.setattr(webbrowser, "open", lambda x: browser_calls.append(x))
+
     api.open_link(str(f))
-    assert calls == [f.resolve().as_uri()]
+
+    assert calls == [str(f.resolve())]
+    assert browser_calls == []
 
 
 def test_open_link_missing_file_raises(api):
