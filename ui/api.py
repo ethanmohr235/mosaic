@@ -95,6 +95,11 @@ class Api:
         return {"deleted": name}
 
     @_synchronized
+    def restore_garden(self, name: str) -> dict:
+        gardens_repo.restore_garden(name)
+        return {"restored": name}
+
+    @_synchronized
     def export_garden(self, garden_name: str | None = None) -> dict:
         """Exports the current garden by default, or any named garden --
         via a short-lived connection, so exporting one from the gardens
@@ -146,8 +151,8 @@ class Api:
         return [dataclasses.asdict(m) for m in motes_repo.list_motes(self._conn)]
 
     @_synchronized
-    def create_mote(self, raw_properties: dict[str, str]) -> dict:
-        mote_id = motes_repo.create_mote(self._conn, _coerce_properties(raw_properties))
+    def create_mote(self, raw_properties: dict[str, str], id: str | None = None) -> dict:
+        mote_id = motes_repo.create_mote(self._conn, _coerce_properties(raw_properties), id=id)
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
 
     @_synchronized
@@ -171,8 +176,8 @@ class Api:
         return [dataclasses.asdict(r) for r in rels]
 
     @_synchronized
-    def create_relationship(self, from_id: str, to_id: str, type_: str) -> dict:
-        rel_id = rel_repo.create_relationship(self._conn, from_id, to_id, type_)
+    def create_relationship(self, from_id: str, to_id: str, type_: str, id: str | None = None) -> dict:
+        rel_id = rel_repo.create_relationship(self._conn, from_id, to_id, type_, id=id)
         return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
 
     @_synchronized

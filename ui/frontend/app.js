@@ -66,6 +66,33 @@ function showToast(message, durationMs = 3500) {
   showToast._timer = setTimeout(() => toast.classList.add("hidden"), durationMs);
 }
 
+let lastUndo = null; // { perform: async () => {...} } while an undo is available
+
+function showUndoToast(message, perform, durationMs = 6000) {
+  const toast = $("toast");
+  toast.textContent = "";
+  toast.append(document.createTextNode(message + "  "));
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "linkish";
+  btn.textContent = "Undo";
+  btn.addEventListener("click", runUndo);
+  toast.append(btn);
+  toast.classList.remove("hidden");
+  lastUndo = { perform };
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => { toast.classList.add("hidden"); lastUndo = null; }, durationMs);
+}
+
+async function runUndo() {
+  if (!lastUndo) return;
+  const { perform } = lastUndo;
+  lastUndo = null;
+  $("toast").classList.add("hidden");
+  clearTimeout(showToast._timer);
+  await perform();
+}
+
 async function call(promise) {
   try { return await promise; }
   catch (err) { showToast(String(err.message || err)); throw err; }
@@ -488,6 +515,16 @@ async function deleteSelection() {
     : `Delete ${ids.length} motes and all their relationships?`;
   if (!window.confirm(prompt)) return;
 
+  // Snapshotted before deleting -- cascading deletes wipe properties and
+  // relationships along with the mote, so there's nothing left to read
+  // afterward if the user hits Undo.
+  const motesSnapshot = ids.map((id) => ({ id, properties: { ...moteById(id).properties } }));
+  const relsById = new Map();
+  for (const id of ids) {
+    for (const rel of await call(api.mote_relationships(id))) relsById.set(rel.id, rel);
+  }
+  const relsSnapshot = [...relsById.values()];
+
   for (const id of ids) {
     await call(api.delete_mote(id));
     if (id === focusId) localStorage.removeItem(lastFocusKey(currentGarden));
@@ -495,6 +532,20 @@ async function deleteSelection() {
   closeDetailPanel();
   await refreshMoteCache();
   await refocus(null);
+
+  showUndoToast(
+    ids.length === 1 ? "Deleted." : `Deleted ${ids.length} motes.`,
+    async () => {
+      for (const m of motesSnapshot) await call(api.create_mote(m.properties, m.id));
+      for (const r of relsSnapshot) await call(api.create_relationship(r.from_id, r.to_id, r.type, r.id));
+      await refreshMoteCache();
+      const restoredIds = motesSnapshot.map((m) => m.id);
+      await refocus(restoredIds[0], { pan: false });
+      graph.select(restoredIds, { pan: false });
+      await syncSelectionPanel(restoredIds);
+      showToast(restoredIds.length === 1 ? "Restored." : `Restored ${restoredIds.length} motes.`);
+    }
+  );
 }
 
 // ---- quick add (with species templates) ----
@@ -1010,9 +1061,14 @@ async function renderGardensList() {
     } else {
       deleteBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!window.confirm(`Delete garden '${name}'? This cannot be undone.`)) return;
+        if (!window.confirm(`Delete garden '${name}'?`)) return;
         await call(api.delete_garden(name));
         await renderGardensList();
+        showUndoToast(`Deleted garden '${name}'.`, async () => {
+          await call(api.restore_garden(name));
+          await renderGardensList();
+          showToast(`Restored garden '${name}'.`);
+        });
       });
     }
 
@@ -1200,6 +1256,13 @@ function setupKeyboard() {
         const step = pasteRepeatCount * 24;
         pasteRepeatCount += 1;
         pasteAt(center.x + step, center.y + step);
+      }
+      return;
+    }
+    if ((e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey) && !isTypingInField()) {
+      if (lastUndo) {
+        e.preventDefault();
+        runUndo();
       }
       return;
     }

@@ -109,6 +109,22 @@ def test_delete_garden_succeeds_for_a_non_current_garden(api):
     assert "other" not in api.list_gardens()
 
 
+def test_restore_garden_brings_a_deleted_garden_back(api):
+    create_garden("other")
+    api.delete_garden("other")
+    assert "other" not in api.list_gardens()
+
+    result = api.restore_garden("other")
+
+    assert result == {"restored": "other"}
+    assert "other" in api.list_gardens()
+
+
+def test_restore_garden_missing_raises(api):
+    with pytest.raises(LookupError):
+        api.restore_garden("never-deleted")
+
+
 def test_export_garden_by_name_does_not_disturb_the_current_garden(api, tmp_path):
     create_garden("other")
     other_api = Api("other")
@@ -185,3 +201,17 @@ def test_create_relationship_returns_plain_dict(api):
     assert isinstance(result, dict)
     assert result["from_id"] == a["id"]
     assert result["to_id"] == b["id"]
+
+
+def test_create_mote_with_explicit_id_reuses_it(api):
+    # This is how undo restores a deleted mote -- with its original id,
+    # so anything else still referencing that id doesn't need remapping.
+    result = api.create_mote({"name": "Alice"}, id="fixed-id")
+    assert result["id"] == "fixed-id"
+
+
+def test_create_relationship_with_explicit_id_reuses_it(api):
+    a = api.create_mote({"name": "Alice"})
+    b = api.create_mote({"name": "Bob"})
+    result = api.create_relationship(a["id"], b["id"], "knows", id="fixed-rel-id")
+    assert result["id"] == "fixed-rel-id"

@@ -22,6 +22,7 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 | Right-click a mote | Context menu: Copy, Pin/Unpin, Delete (acts on the whole selection if the mote is part of one) |
 | Right-click empty canvas | Context menu: New mote here, Paste |
 | Ctrl/Cmd+C / Ctrl/Cmd+V | Copy / paste the current selection (Ctrl+V pastes at the viewport center) |
+| Ctrl/Cmd+Z | Undo the most recent delete, while its toast is still up |
 | Arrow keys | Select whichever visible neighbour sits closest to that screen direction |
 | Delete / Backspace | Delete the current selection |
 | Esc | Close the frontmost menu/panel, or deselect if nothing else is open |
@@ -31,6 +32,16 @@ Motes highlight live as a box-select drag grows over them, not only once
 the mouse is released. Copying more than one mote preserves their
 relative layout on paste. Gardens (switch/create/export/import/delete)
 live in a modal opened from the topbar's garden button, not a dropdown.
+
+Deleting motes/relationships or a garden surfaces a toast with an "Undo"
+action (also triggerable with Ctrl/Cmd+Z) for a few seconds afterward.
+It's single-step -- only the most recent delete can be undone, and the
+window closes once the toast disappears. A restored mote/relationship
+keeps its original id, so anything else that was pointing at it (other
+relationships) doesn't need to be reconnected by hand. Garden delete
+works the same way at the file level: the garden's `.db` file is moved
+aside rather than removed, so `restore_garden` can move it back; only the
+most recently trashed copy of a given name is kept.
 
 ## This machine (Arch Linux)
 
@@ -108,9 +119,10 @@ layout position stability, search/browse/keyboard-nav, garden-switch
 isolation, species picking and templating, filters, depth, running a
 simulation, live box-select, middle-drag pan, the context menu's
 copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
-Esc/Del, arrow-key navigation, and the gardens modal's list/switch/
-create/delete) against a throwaway temp `GARDENS_DIR` and webview storage
-dir — never touches real data. Run it by hand after UI changes:
+Esc/Del, arrow-key navigation, the gardens modal's list/switch/
+create/delete, and undoing a delete via the toast button and Ctrl+Z)
+against a throwaway temp `GARDENS_DIR` and webview storage dir — never
+touches real data. Run it by hand after UI changes:
 
 ```
 .venv/bin/python scripts/ui_smoke_test.py

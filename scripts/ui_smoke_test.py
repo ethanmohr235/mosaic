@@ -556,6 +556,43 @@ def run_checks(window):
 
     check("gardens modal: lists gardens, guards delete, deletes a non-current garden", gardens_modal_lists_switches_and_guards_delete)
 
+    def gardens_modal_delete_can_be_undone():
+        js_async(window, """
+            async () => {
+                await api.create_garden('smoke-undo');
+                window.__result = 'ok';
+            }
+        """, wait=1.0)
+        js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(1.0)
+        js(window, "window.confirm = () => true;")
+        js(window, """
+            Array.from(document.querySelectorAll('.garden-row'))
+                .find(r => r.querySelector('.name').textContent === 'smoke-undo')
+                .querySelector('.danger').click();
+        """)
+        time.sleep(2.0)
+
+        after_delete = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => r.querySelector('.name').textContent))
+        """))
+        assert "smoke-undo" not in after_delete, f"setup: delete should have removed the row, got {after_delete}"
+
+        toast_text = js(window, "document.getElementById('toast').textContent")
+        assert "Undo" in toast_text, f"deleting a garden should surface an Undo toast, got {toast_text!r}"
+        js(window, "document.querySelector('#toast button').click();")
+        time.sleep(2.0)
+
+        on_disk = json.loads(js_async(window, "async () => { window.__result = await api.list_gardens(); }"))
+        assert "smoke-undo" in on_disk, "Undo should bring the garden back on disk"
+
+        rows_after_undo = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => r.querySelector('.name').textContent))
+        """))
+        assert "smoke-undo" in rows_after_undo, "Undo should re-list the garden in the modal"
+
+    check("gardens modal: a deleted garden's Undo toast brings it back", gardens_modal_delete_can_be_undone)
+
     def gardens_modal_esc_closes_it():
         press_key(window, "Escape")
         time.sleep(0.5)
@@ -714,6 +751,83 @@ def run_checks(window):
         assert ids["c"] in remaining, "Del must not touch motes outside the selection"
 
     check("Del key deletes the selected motes", del_key_deletes_selection)
+
+    def undo_restores_deleted_motes_and_relationships():
+        result = js_async(window, """
+            async () => {
+                const a = await api.create_mote({name: 'undo-A'});
+                const b = await api.create_mote({name: 'undo-B'});
+                await api.create_relationship(a.id, b.id, 'linked-for-undo');
+                window.__undoPair = {a: a.id, b: b.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"undo setup failed: {result}"
+        ids = json.loads(js(window, "JSON.stringify(window.__undoPair)"))
+
+        js(window, "graph.select([window.__undoPair.a, window.__undoPair.b], {pan: false});")
+        time.sleep(0.3)
+        js(window, "window.confirm = () => true;")
+        press_key(window, "Delete")
+        time.sleep(2.0)
+
+        remaining = json.loads(js_async(window, "async () => { window.__result = (await api.list_motes()).map(m => m.id); }"))
+        assert ids["a"] not in remaining and ids["b"] not in remaining, "setup: Del should have deleted the pair"
+
+        toast_text = js(window, "document.getElementById('toast').textContent")
+        assert "Undo" in toast_text, f"a delete should surface an Undo toast, got {toast_text!r}"
+
+        js(window, "document.querySelector('#toast button').click();")
+        time.sleep(2.0)
+
+        restored = json.loads(js_async(window, "async () => { window.__result = await api.list_motes(); }"))
+        restored_ids = [m["id"] for m in restored]
+        assert ids["a"] in restored_ids and ids["b"] in restored_ids, (
+            f"Undo should restore both motes with their original ids, got {restored_ids}"
+        )
+        restored_a = next(m for m in restored if m["id"] == ids["a"])
+        assert restored_a["properties"].get("name") == "undo-A", "restored mote should keep its properties"
+
+        rels = json.loads(js_async(window, f"""
+            async () => {{ window.__result = await api.mote_relationships({json.dumps(ids["a"])}); }}
+        """))
+        assert any(r["type"] == "linked-for-undo" for r in rels), (
+            f"Undo should also restore the relationship between them, got {rels}"
+        )
+
+    check("delete: Undo toast restores deleted motes and their relationship", undo_restores_deleted_motes_and_relationships)
+
+    def ctrl_z_undoes_a_delete():
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'ctrlz-victim'});
+                window.__ctrlZId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"ctrl+z setup failed: {result}"
+        victim_id = json.loads(js(window, "JSON.stringify(window.__ctrlZId)"))
+
+        js(window, "graph.select(window.__ctrlZId, {pan: false});")
+        time.sleep(0.3)
+        js(window, "window.confirm = () => true;")
+        press_key(window, "Delete")
+        time.sleep(2.0)
+
+        remaining = json.loads(js_async(window, "async () => { window.__result = (await api.list_motes()).map(m => m.id); }"))
+        assert victim_id not in remaining, "setup: Del should have deleted the mote"
+
+        js(window, "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'z', ctrlKey: true, bubbles: true}));")
+        time.sleep(2.0)
+
+        restored = json.loads(js_async(window, "async () => { window.__result = (await api.list_motes()).map(m => m.id); }"))
+        assert victim_id in restored, "Ctrl+Z should undo the delete"
+
+    check("Ctrl+Z undoes a delete", ctrl_z_undoes_a_delete)
 
     def middle_drag_pans():
         js(window, "graph.resetView();")

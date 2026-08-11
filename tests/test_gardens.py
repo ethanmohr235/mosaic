@@ -1,6 +1,14 @@
 import pytest
 
-from core.gardens import create_garden, delete_garden, garden_exists, list_gardens, resolve_garden
+from core.db import garden_db_path
+from core.gardens import (
+    create_garden,
+    delete_garden,
+    garden_exists,
+    list_gardens,
+    resolve_garden,
+    restore_garden,
+)
 
 
 def test_create_garden_creates_initialized_db():
@@ -51,3 +59,31 @@ def test_delete_garden_removes_it():
 def test_delete_garden_missing_raises():
     with pytest.raises(LookupError):
         delete_garden("missing")
+
+
+def test_delete_garden_leaves_a_trash_file():
+    create_garden("work")
+    delete_garden("work")
+    assert garden_db_path("work").with_name("work.db.trash").exists()
+
+
+def test_restore_garden_brings_it_back():
+    create_garden("work")
+    delete_garden("work")
+    restore_garden("work")
+    assert garden_exists("work")
+    assert list_gardens() == ["work"]
+    assert not garden_db_path("work").with_name("work.db.trash").exists()
+
+
+def test_restore_garden_missing_raises():
+    with pytest.raises(LookupError):
+        restore_garden("never-deleted")
+
+
+def test_restore_garden_onto_existing_name_raises():
+    create_garden("work")
+    delete_garden("work")
+    create_garden("work")
+    with pytest.raises(FileExistsError):
+        restore_garden("work")
