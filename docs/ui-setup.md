@@ -46,13 +46,18 @@ most recently trashed copy of a given name is kept.
 ### Linking out to files and websites
 
 `url` is a reserved property name: give any mote a `url` property (a
-`https://` link or a local file path) and its detail panel row gets an
+web address or a local file path) and its detail panel row gets an
 "Open" (↗) button that launches it via the OS's default handler --
 `core/links.py::resolve_link` turns a local path into a `file://` URI,
 and `ui/api.py::open_link` hands it to the stdlib `webbrowser` module,
 so opening a PDF, a folder, or a webpage all go through whatever the OS
-already treats as the default app for that target. This is purely a
-naming convention, not a schema change -- the property is still a
+already treats as the default app for that target. A bare domain like
+`youtube.com` (no `http(s)://`) is assumed to be a URL missing its
+scheme and gets `https://` added automatically; local paths need to be
+absolute or start with `~`/`./`/`../` to be recognized as local rather
+than a URL, since there's no other way to tell "example.com/page" and
+"notes/todo.txt" apart. This is purely a naming convention, not a
+schema change -- the property is still a
 normal, editable/deletable string like any other. There's no drag-and-
 drop yet; the path/URL has to be pasted in by hand.
 

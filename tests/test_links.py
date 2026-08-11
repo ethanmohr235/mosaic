@@ -24,3 +24,17 @@ def test_resolve_link_expands_a_tilde_path(tmp_path, monkeypatch):
 def test_resolve_link_missing_file_raises():
     with pytest.raises(FileNotFoundError):
         resolve_link("/no/such/file/anywhere")
+
+
+def test_resolve_link_treats_a_bare_domain_as_a_url():
+    assert resolve_link("youtube.com") == "https://youtube.com"
+
+
+def test_resolve_link_treats_a_bare_domain_with_a_path_as_a_url():
+    assert resolve_link("youtube.com/watch?v=xyz") == "https://youtube.com/watch?v=xyz"
+
+
+def test_resolve_link_a_relative_path_without_a_leading_indicator_is_treated_as_a_url():
+    # Documented limitation: local paths need to be absolute or start
+    # with ~/./.. to be recognized as local rather than a URL.
+    assert resolve_link("relative/notes.txt") == "https://relative/notes.txt"
