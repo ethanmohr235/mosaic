@@ -141,13 +141,24 @@ class TermList:
 class Context:
     """Everything a formula can see. Plain callables rather than a
     connection, so this module stays free of any database import and
-    stays trivially testable with dicts."""
+    stays trivially testable with dicts.
+
+    `tick` and `previous` exist for time-based simulation: `tick` is the
+    current step's index within a run (exposed to formulas as the
+    reserved name `t`), and `previous` is each mote's properties as they
+    stood *entering* the current step (read via the `prev(x)` builtin).
+    Both default to values that make time-based formulas simply
+    unavailable rather than silently wrong, so every non-time-based
+    caller (a plain one-shot evaluation, or an existing test) is
+    unaffected."""
     mote_id: str
     properties: Callable[[str], dict]
     unknown_keys: Callable[[str], set[str]]
     targets: Callable[[str, str], list[str]]
     sources: Callable[[str, str], list[str]]
     solved: dict[Unknown, float] = field(default_factory=dict)
+    tick: float = 0.0
+    previous: Callable[[str], dict] = lambda mote_id: {}
 
 
 def parse_equation(text: str) -> tuple[ast.AST, ast.AST]:
@@ -261,7 +272,27 @@ def _call(node: ast.Call, ctx: Context):
         return _aggregate(name, node, ctx)
     if name in ("abs", "min", "max"):
         return _numeric(name, node, ctx)
+    if name == "prev":
+        return _previous(node, ctx)
     raise FormulaError(f"unknown function {name!r} in formula")
+
+
+def _previous(node: ast.Call, ctx: Context) -> LinearExpr:
+    """prev(x) -- the value x had entering the current simulation step,
+    for expressing a recurrence (`population == prev(population) *
+    growth_rate`). x must be a bare property/unknown name on the current
+    mote, the same way targets()/sources() require a bare string literal
+    rather than an evaluated expression."""
+    if len(node.args) != 1 or not isinstance(node.args[0], ast.Name):
+        raise FormulaError("prev() takes a bare property name, e.g. prev(voltage)")
+    key = node.args[0].id
+    properties = ctx.previous(ctx.mote_id)
+    if key not in properties:
+        raise FormulaError(f"mote {ctx.mote_id[:8]} has no previous value for {key!r}")
+    value = properties[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise FormulaError(f"previous value of {key!r} is {value!r}, which is not a number")
+    return LinearExpr.number(value)
 
 
 def _navigate(name: str, node: ast.Call, ctx: Context) -> MoteSet:
@@ -314,6 +345,14 @@ def _numeric(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
 
 
 def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
+    # A reserved word in the formula language, not a per-mote property --
+    # the current simulation step's index, for time-dependent rules
+    # (e.g. `height == 10 - 0.5 * t`). Checked before both the unknowns
+    # and the properties lookup, so a mote with a real property literally
+    # named `t` has it shadowed inside formulas specifically (still an
+    # ordinary, visible property everywhere else in the UI).
+    if key == "t":
+        return LinearExpr.number(ctx.tick)
     if key in ctx.unknown_keys(mote_id):
         unknown = (mote_id, key)
         if unknown in ctx.solved:

@@ -1,9 +1,9 @@
 import pytest
 
-from core.motes import create_mote, get_mote
+from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
-from core.simulation import SimulationError, run_simulation
+from core.simulation import SimulationError, run_simulation, run_time_series
 from core.species import set_species
 
 OHMS_LAW = "targets('a').voltage - targets('b').voltage == current * resistance"
@@ -248,3 +248,127 @@ def test_change_log_records_old_and_new_values(conn):
     change = next(c for c in result.changes if c.key == "x")
     assert change.old_value == pytest.approx(10.0)
     assert change.new_value == pytest.approx(20.0)
+
+
+# ---- time-based simulation: run_time_series ----
+
+def _rows(conn, table):
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT * FROM {table}")
+    return cursor.fetchall()
+
+
+@pytest.fixture
+def compounding(conn):
+    """A single mote whose balance compounds by 5% each step -- the
+    simplest possible recurrence, via prev()."""
+    species = create_mote(conn, {"name": "Account", "unknowns": "balance"})
+    add_rule(conn, species, "Growth", "balance == prev(balance) * 1.05")
+    mote = create_mote(conn, {"name": "acct1", "balance": 100.0})
+    set_species(conn, mote, species)
+    return mote
+
+
+def test_time_series_recurrence_produces_the_expected_sequence(conn, compounding):
+    result = run_time_series(conn, step_count=4, commit=False)
+    assert result.failed_at is None
+    balances = [s.values[(compounding, "balance")] for s in result.steps]
+    assert balances == pytest.approx([105.0, 110.25, 115.7625, 121.55062500000001])
+
+
+def test_time_series_preview_never_writes(conn, compounding):
+    before_props = get_mote(conn, compounding).properties
+    before_runs = _rows(conn, "simulation_runs")
+    before_changes = _rows(conn, "simulation_changes")
+
+    run_time_series(conn, step_count=10, commit=False)
+
+    assert get_mote(conn, compounding).properties == before_props
+    assert _rows(conn, "simulation_runs") == before_runs
+    assert _rows(conn, "simulation_changes") == before_changes
+
+
+def test_time_series_commit_writes_only_the_final_cumulative_step(conn, compounding):
+    result = run_time_series(conn, step_count=3, commit=True)
+    # step 2 (the 3rd, 0-indexed) is the final step of a 3-step run.
+    assert prop(conn, compounding, "balance") == pytest.approx(result.steps[2].values[(compounding, "balance")])
+    assert prop(conn, compounding, "balance") == pytest.approx(115.7625)
+
+    runs = _rows(conn, "simulation_runs")
+    assert len(runs) == 1
+    assert runs[0]["status"] == "ok"
+
+    changes = _rows(conn, "simulation_changes")
+    assert len(changes) == 1  # one property touched, not one row per step
+
+
+def test_time_series_commit_continues_from_the_previously_committed_value(conn, compounding):
+    run_time_series(conn, step_count=3, commit=True)
+    run_time_series(conn, step_count=1, commit=True)
+    # 115.7625 * 1.05, not 100 * 1.05 -- the second commit must build on
+    # the first's result, not restart from the mote's original value.
+    assert prop(conn, compounding, "balance") == pytest.approx(121.55062500000001)
+    assert len(_rows(conn, "simulation_runs")) == 2
+
+
+def test_time_series_committing_an_earlier_step_than_the_last_preview_works(conn, compounding):
+    preview = run_time_series(conn, step_count=10, commit=False)
+    run_time_series(conn, step_count=3, commit=True)
+    # Committing step count 3 (steps 0,1,2) should land exactly on what
+    # scrubbing to step 2 in the larger preview showed -- determinism.
+    assert prop(conn, compounding, "balance") == pytest.approx(
+        preview.steps[2].values[(compounding, "balance")]
+    )
+
+
+def test_time_series_stops_at_a_failure_but_keeps_earlier_steps(conn):
+    # Two rules on the same species: "x stays whatever it was" and "x
+    # must equal the step index". Both agree at step 0 (x starts at 0,
+    # t is 0), so that step solves fine -- but from step 1 on they
+    # contradict (prev(x) is still 0, t is 1), so the run fails there.
+    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    add_rule(conn, species, "stays", "x == prev(x)")
+    add_rule(conn, species, "matches_t", "x == t")
+    mote = create_mote(conn, {"name": "m", "x": 0.0})
+    set_species(conn, mote, species)
+
+    result = run_time_series(conn, step_count=5, commit=False)
+    assert result.failed_at == 1
+    assert "contradictory" in result.error
+    assert len(result.steps) == 1
+    assert result.steps[0].values == {(mote, "x"): 0.0}
+
+    # Still safe to commit the one good step that was computed.
+    commit_result = run_time_series(conn, step_count=1, commit=True)
+    assert commit_result.run_id is not None
+    assert prop(conn, mote, "x") == pytest.approx(0.0)
+    assert len(_rows(conn, "simulation_runs")) == 1
+
+
+def test_time_series_commit_is_a_noop_when_every_step_fails(conn):
+    species = create_mote(conn, {"name": "S", "unknowns": "a, b"})
+    add_rule(conn, species, "underdetermined", "a + b == 10")
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+
+    result = run_time_series(conn, step_count=5, commit=True)
+    assert result.run_id is None
+    assert result.steps == []
+    assert _rows(conn, "simulation_runs") == []
+    assert _rows(conn, "simulation_changes") == []
+
+
+def test_time_series_rejects_a_non_positive_step_count(conn, compounding):
+    with pytest.raises(ValueError):
+        run_time_series(conn, step_count=0, commit=False)
+
+
+def test_t_is_available_in_a_time_series_rule(conn):
+    species = create_mote(conn, {"name": "Ramp", "unknowns": "height"})
+    add_rule(conn, species, "Linear ramp", "height == 10 - 2 * t")
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+
+    result = run_time_series(conn, step_count=3, commit=False)
+    heights = [s.values[(mote, "height")] for s in result.steps]
+    assert heights == pytest.approx([10.0, 8.0, 6.0])

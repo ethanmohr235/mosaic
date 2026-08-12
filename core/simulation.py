@@ -33,6 +33,7 @@ from core.formula import (
     describe,
     evaluate_equation,
 )
+from core.models import Relationship
 from core.motes import list_motes, update_mote
 from core.relationships import list_relationships
 
@@ -78,6 +79,43 @@ class SimulationResult:
 
 
 @dataclass(frozen=True)
+class StepResult:
+    """One step of a time-based run -- the same shape as SimulationResult
+    minus the audit-log fields (run_id/tick), since only a committed
+    run's *final* cumulative state ever gets logged, not every
+    intermediate step of a preview."""
+    step: int
+    values: dict[Unknown, float]
+    changes: list[Change]
+    equation_count: int
+    unsolved: list[Unknown] = field(default_factory=list)
+
+    @property
+    def summary(self) -> str:
+        motes = len({c.mote_id for c in self.changes})
+        text = (
+            f"Solved {len(self.values)} value{'' if len(self.values) == 1 else 's'} "
+            f"across {motes} mote{'' if motes == 1 else 's'} "
+            f"from {self.equation_count} equation{'' if self.equation_count == 1 else 's'} "
+            f"(step {self.step})."
+        )
+        if self.unsolved:
+            text += f" {len(self.unsolved)} declared unknown(s) had no equation."
+        return text
+
+
+@dataclass(frozen=True)
+class TimeSeriesResult:
+    """The result of run_time_series(): every step computed before a
+    failure (if any) stopped the run early, so a user can still scrub to
+    and commit an earlier good step rather than losing the whole run."""
+    steps: list[StepResult]
+    failed_at: int | None = None   # step index that raised, if the run stopped early
+    error: str | None = None
+    run_id: str | None = None      # set only when commit=True and at least one step succeeded
+
+
+@dataclass(frozen=True)
 class _GardenView:
     """The whole garden read once, so evaluating N equations doesn't mean
     N round trips. Fine at this scale -- MonOSS is explicitly not built
@@ -92,8 +130,10 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
     """Solve the garden and write the results back. Raises SimulationError
     (after logging the failed run) if the rules can't be satisfied."""
     tick = _next_tick(conn)
-    view = _build_view(conn)
-    pairs = _rule_instances(conn, view)
+    properties = {m.id: m.properties for m in list_motes(conn)}
+    relationships = list_relationships(conn)
+    view = _build_view(properties, relationships)
+    pairs = _rule_instances(rules_repo.list_rules(conn), view)
 
     try:
         solved: dict[Unknown, float] = {}
@@ -104,7 +144,7 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
         logger.warning("simulation tick %s failed: %s", tick, e)
         raise
 
-    changes = _write_back(conn, view, solved)
+    changes = _write_back(conn, view.properties, solved)
     run_id = _log_run(conn, tick, "ok", None, changes)
     logger.info("simulation tick %s solved %s values", tick, len(solved))
     return SimulationResult(
@@ -117,13 +157,76 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
     )
 
 
-def _build_view(conn: sqlite3.Connection) -> _GardenView:
-    properties = {m.id: m.properties for m in list_motes(conn)}
+def run_time_series(conn: sqlite3.Connection, step_count: int, commit: bool) -> TimeSeriesResult:
+    """Runs step_count steps entirely in memory, each step's solve
+    starting from the *previous* step's solved values rather than
+    re-reading the database -- this is what lets a rule use prev(x) to
+    express a recurrence. Nothing is written to the database unless
+    commit=True, in which case only the *cumulative* result (start state
+    -> however far the run got) is written in one shot and logged as a
+    single entry, exactly like an ordinary run_simulation() call.
+
+    A step that fails to solve stops the run there but keeps every step
+    computed before it (see TimeSeriesResult.failed_at/error), so a
+    caller can still commit an earlier successful step rather than
+    losing the whole run."""
+    if step_count < 1:
+        raise ValueError("step_count must be at least 1")
+
+    relationships = list_relationships(conn)
+    rules = rules_repo.list_rules(conn)
+    baseline = {m.id: dict(m.properties) for m in list_motes(conn)}
+    running = {mid: dict(props) for mid, props in baseline.items()}
+    cumulative: dict[Unknown, float] = {}
+
+    steps: list[StepResult] = []
+    failed_at: int | None = None
+    error: str | None = None
+
+    for step in range(step_count):
+        view = _build_view(running, relationships)
+        pairs = _rule_instances(rules, view)
+        try:
+            solved: dict[Unknown, float] = {}
+            equations = _resolve(view, pairs, solved, tick=float(step), previous=running)
+            solved.update(_matrix_solve(equations, solved))
+        except SimulationError as e:
+            failed_at, error = step, str(e)
+            logger.warning("simulation preview step %s failed: %s", step, e)
+            break
+
+        changes = _changes_for(view.properties, solved)
+        cumulative.update(solved)
+        next_running = {mid: dict(props) for mid, props in running.items()}
+        for (mote_id, key), value in solved.items():
+            next_running.setdefault(mote_id, {})[key] = value
+        running = next_running
+        steps.append(StepResult(step, solved, changes, len(equations), _unsolved(view, solved)))
+
+    run_id = None
+    if commit and steps:
+        tick = _next_tick(conn)
+        committed_changes = _write_back(conn, baseline, cumulative)
+        run_id = _log_run(conn, tick, "ok", None, committed_changes)
+        logger.info(
+            "simulation time series committed %s steps, %s values",
+            len(steps), len(cumulative),
+        )
+
+    return TimeSeriesResult(steps, failed_at, error, run_id)
+
+
+def _build_view(
+    properties: dict[str, dict], relationships: list[Relationship]
+) -> _GardenView:
+    """Pure -- takes properties/relationships already read, rather than a
+    connection, so a multi-step run can rebuild the view from its own
+    in-memory state each step without hitting the database again."""
     out_edges: dict[tuple[str, str], list[str]] = {}
     in_edges: dict[tuple[str, str], list[str]] = {}
     unknowns: dict[str, set[str]] = {}
 
-    for rel in list_relationships(conn):
+    for rel in relationships:
         out_edges.setdefault((rel.from_id, rel.type), []).append(rel.to_id)
         in_edges.setdefault((rel.to_id, rel.type), []).append(rel.from_id)
         if rel.type != species_repo.INSTANCE_OF:
@@ -138,17 +241,29 @@ def _build_view(conn: sqlite3.Connection) -> _GardenView:
 
 
 def _rule_instances(
-    conn: sqlite3.Connection, view: _GardenView
+    rules: list[rules_repo.Rule], view: _GardenView
 ) -> list[tuple[rules_repo.Rule, str]]:
-    """Every (rule, instance) pair the run will evaluate."""
+    """Every (rule, instance) pair the run will evaluate. Rules and
+    relationships never change mid-run (only property values do), so the
+    caller computes `rules` once and reuses it across every step."""
     pairs = []
-    for rule in rules_repo.list_rules(conn):
+    for rule in rules:
         for mote_id in view.in_edges.get((rule.species_id, species_repo.INSTANCE_OF), []):
             pairs.append((rule, mote_id))
     return pairs
 
 
-def _context(view: _GardenView, mote_id: str, solved: dict[Unknown, float]) -> Context:
+def _context(
+    view: _GardenView,
+    mote_id: str,
+    solved: dict[Unknown, float],
+    tick: float = 0.0,
+    previous: dict[str, dict] | None = None,
+) -> Context:
+    """tick/previous default to values that make a plain run_simulation()
+    call behave exactly as it always has: t reads as 0, and prev(x) is
+    simply unavailable (there is no "previous step" for a one-shot
+    solve)."""
     return Context(
         mote_id=mote_id,
         properties=lambda mid: view.properties.get(mid, {}),
@@ -156,6 +271,8 @@ def _context(view: _GardenView, mote_id: str, solved: dict[Unknown, float]) -> C
         targets=lambda mid, type_: view.out_edges.get((mid, type_), []),
         sources=lambda mid, type_: view.in_edges.get((mid, type_), []),
         solved=solved,
+        tick=tick,
+        previous=lambda mid: (previous or {}).get(mid, {}),
     )
 
 
@@ -163,6 +280,8 @@ def _resolve(
     view: _GardenView,
     pairs: list[tuple[rules_repo.Rule, str]],
     solved: dict[Unknown, float],
+    tick: float = 0.0,
+    previous: dict[str, dict] | None = None,
 ) -> list[Equation]:
     """Substitution loop. Returns the equations as evaluated against the
     final set of substituted values, ready for the matrix solve."""
@@ -170,7 +289,7 @@ def _resolve(
     deferred: list[tuple[rules_repo.Rule, str, Exception]] = []
 
     while True:
-        equations, deferred = _evaluate_all(view, pairs, solved)
+        equations, deferred = _evaluate_all(view, pairs, solved, tick, previous)
         newly = _solve_singletons(equations, solved)
         if not newly:
             break
@@ -188,6 +307,8 @@ def _evaluate_all(
     view: _GardenView,
     pairs: list[tuple[rules_repo.Rule, str]],
     solved: dict[Unknown, float],
+    tick: float = 0.0,
+    previous: dict[str, dict] | None = None,
 ) -> tuple[list[Equation], list[tuple[rules_repo.Rule, str, Exception]]]:
     """Nonlinear failures are deferred rather than fatal -- the offending
     unknown may still be determined by another equation, which would make
@@ -195,7 +316,8 @@ def _evaluate_all(
     equations, deferred = [], []
     for rule, mote_id in pairs:
         try:
-            equations.append(evaluate_equation(rule.equation, _context(view, mote_id, solved)))
+            ctx = _context(view, mote_id, solved, tick, previous)
+            equations.append(evaluate_equation(rule.equation, ctx))
         except NonlinearError as e:
             deferred.append((rule, mote_id, e))
         except FormulaError as e:
@@ -263,21 +385,33 @@ def _check_consistency(closed: list[Equation]) -> None:
             )
 
 
-def _write_back(
-    conn: sqlite3.Connection, view: _GardenView, values: dict[Unknown, float]
-) -> list[Change]:
+def _changes_for(properties: dict[str, dict], values: dict[Unknown, float]) -> list[Change]:
+    """Old/new pairs for a set of solved values against a baseline
+    properties dict -- pure, no DB write. Shared by every step of a
+    preview (which never writes) and by the final commit (which does)."""
     by_mote: dict[str, dict[str, float]] = {}
     for (mote_id, key), value in values.items():
         by_mote.setdefault(mote_id, {})[key] = value
 
     changes = []
     for mote_id, new_properties in sorted(by_mote.items()):
-        existing = view.properties.get(mote_id, {})
+        existing = properties.get(mote_id, {})
         for key, value in sorted(new_properties.items()):
             old = existing.get(key)
             changes.append(
                 Change(mote_id, key, old if isinstance(old, (int, float)) else None, value)
             )
+    return changes
+
+
+def _write_back(
+    conn: sqlite3.Connection, properties: dict[str, dict], values: dict[Unknown, float]
+) -> list[Change]:
+    changes = _changes_for(properties, values)
+    by_mote: dict[str, dict[str, float]] = {}
+    for (mote_id, key), value in values.items():
+        by_mote.setdefault(mote_id, {})[key] = value
+    for mote_id, new_properties in sorted(by_mote.items()):
         update_mote(conn, mote_id, new_properties)
     return changes
 

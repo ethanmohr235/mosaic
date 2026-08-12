@@ -22,7 +22,7 @@ UNKNOWNS = {"R1": {"current"}, "N1": {"voltage"}, "N2": {"voltage"}, "N3": {"vol
 RELATIONSHIPS = [("R1", "N1", "a"), ("R1", "N2", "b"), ("R1", "N3", "b")]
 
 
-def context(mote_id="R1", solved=None):
+def context(mote_id="R1", solved=None, tick=0.0, previous=None):
     return Context(
         mote_id=mote_id,
         properties=lambda mid: PROPERTIES.get(mid, {}),
@@ -30,6 +30,8 @@ def context(mote_id="R1", solved=None):
         targets=lambda mid, t: [to for f, to, ty in RELATIONSHIPS if f == mid and ty == t],
         sources=lambda mid, t: [f for f, to, ty in RELATIONSHIPS if to == mid and ty == t],
         solved=solved or {},
+        tick=tick,
+        previous=lambda mid: (previous or {}).get(mid, {}),
     )
 
 
@@ -152,6 +154,70 @@ def test_ohms_law_produces_expected_coefficients():
         ("R1", "current"): -100.0,
     }
     assert equation.constant == 0.0
+
+
+# ---- time-based simulation: t and prev() ----
+
+def test_t_resolves_to_the_context_tick():
+    assert evaluate_expression("t", context(tick=3)).constant == 3.0
+
+
+def test_t_shadows_a_same_named_property():
+    # A mote with a real property literally named "t" still gets the
+    # reserved word's value inside a formula, not its own property.
+    ctx = Context(
+        mote_id="R1",
+        properties=lambda mid: {"t": 999},
+        unknown_keys=lambda mid: set(),
+        targets=lambda mid, t: [],
+        sources=lambda mid, t: [],
+        tick=7.0,
+    )
+    assert evaluate_expression("t", ctx).constant == 7.0
+
+
+def test_prev_reads_the_previous_value():
+    ctx = context(previous={"R1": {"resistance": 50}})
+    assert evaluate_expression("prev(resistance)", ctx).constant == 50.0
+
+
+def test_prev_on_an_unknown_reads_its_prior_solved_value_not_this_ticks():
+    ctx = context(previous={"R1": {"current": 2.0}}, solved={})
+    # "current" is declared an unknown for R1 -- prev() must still read
+    # the snapshot, not go through ctx.solved (which is this step's,
+    # still-being-determined value).
+    assert evaluate_expression("prev(current)", ctx).constant == 2.0
+
+
+def test_prev_requires_a_bare_name_argument():
+    with pytest.raises(FormulaError, match="bare property name"):
+        evaluate_expression("prev('resistance')", context())
+    with pytest.raises(FormulaError, match="bare property name"):
+        evaluate_expression("prev(resistance + 1)", context())
+
+
+def test_prev_missing_key_is_reported_clearly():
+    with pytest.raises(FormulaError, match="no previous value"):
+        evaluate_expression("prev(resistance)", context(previous={}))
+
+
+def test_prev_non_numeric_previous_value_is_rejected():
+    with pytest.raises(FormulaError, match="not a number"):
+        evaluate_expression("prev(label)", context(previous={"R1": {"label": "a string"}}))
+
+
+def test_prev_unavailable_by_default_when_not_wired_up():
+    # A caller that doesn't pass `previous` at all (e.g. a one-shot,
+    # non-time-based evaluation) gets a clear error, not a silent {}.
+    ctx = Context(
+        mote_id="R1",
+        properties=lambda mid: PROPERTIES.get(mid, {}),
+        unknown_keys=lambda mid: UNKNOWNS.get(mid, set()),
+        targets=lambda mid, t: [],
+        sources=lambda mid, t: [],
+    )
+    with pytest.raises(FormulaError, match="no previous value"):
+        evaluate_expression("prev(resistance)", ctx)
 
 
 # ---- errors ----
