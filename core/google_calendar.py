@@ -8,8 +8,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 from core.db import PROJECT_ROOT
+from core.links import URL_PROPERTY
 
-RESERVED_KEYS = {"date", "duration", "gcal_event_id", "recurrence", "url"}
+RESERVED_KEYS = {"date", "duration", "gcal_event_id", "recurrence", URL_PROPERTY}
 
 CREDENTIALS_DIR = PROJECT_ROOT / ".credentials"
 CLIENT_SECRET_PATH = CREDENTIALS_DIR / "client_secret.json"

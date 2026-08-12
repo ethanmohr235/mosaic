@@ -19,6 +19,7 @@ from core import graph as graph_repo
 from core import links as links_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
+from core import reserved as reserved_repo
 from core import simulation as simulation_repo
 from core import species as species_repo
 
@@ -367,6 +368,15 @@ class Api:
         return {
             "created": created, "updated": updated, "skipped": skipped,
             "deleted": deleted, "total": len(motes),
+        }
+
+    # ---- reserved names ----
+
+    @_synchronized
+    def reserved_names(self) -> dict:
+        return {
+            "properties": sorted(reserved_repo.RESERVED_PROPERTIES),
+            "relationshipTypes": sorted(reserved_repo.RESERVED_RELATIONSHIP_TYPES),
         }
 
     # ---- graph/focus ----

@@ -429,3 +429,11 @@ def test_export_to_google_calendar_does_not_delete_a_still_dated_motes_event(api
 
     assert deleted == []
     assert result["deleted"] == 0
+
+
+def test_reserved_names_returns_properties_and_relationship_types(api):
+    result = api.reserved_names()
+    assert "date" in result["properties"]
+    assert "url" in result["properties"]
+    assert "instance_of" in result["relationshipTypes"]
+    assert result["properties"] == sorted(result["properties"]), "should already be sorted for the frontend"

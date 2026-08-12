@@ -20,6 +20,8 @@ let clipboard = null;                  // array of {sourceId, properties, offset
 let clipboardRelationships = null;     // every relationship touching a copied mote, original ids
 let pasteRepeatCount = 0;              // steps repeated Ctrl+V pastes apart so they don't stack
 let contextMenuWorldPos = null;        // world coords the context menu was opened at
+let reservedProperties = new Set();    // property keys recognized by convention (core/reserved.py)
+let reservedRelTypes = new Set();      // relationship types recognized by convention
 
 const DEPTH_KEY = "monoss:depth";
 const SIM_ERROR_TOAST_MS = 12000;
@@ -386,6 +388,7 @@ function renderProperties(mote) {
     keyEl.className = "key";
     keyEl.textContent = key;
     keyEl.title = key;
+    maybeAddReservedBadge(keyEl, key, reservedProperties);
 
     const field = valueField(value, async (next) => {
       await call(api.update_mote(mote.id, { [key]: next }));
@@ -480,6 +483,7 @@ function renderRelationships(moteId, rels) {
     type.className = "rel-type";
     type.textContent = rel.type;
     type.title = "Click to rename";
+    maybeAddReservedBadge(type, rel.type, reservedRelTypes);
     type.addEventListener("click", async () => {
       const next = window.prompt("Relationship type:", rel.type);
       if (!next || next === rel.type) return;
@@ -1362,8 +1366,25 @@ function setupKeyboard() {
 
 // ---- init ----
 
+/** Flags a property key or relationship type recognized by convention
+ *  (core/reserved.py) with a small badge, so it doesn't look like
+ *  ordinary user data. A dot rather than a text color: .rel-type is
+ *  already accent-colored (it's clickable-to-rename), so recoloring a
+ *  reserved one wouldn't read as different from an ordinary one. */
+function maybeAddReservedBadge(el, name, reservedSet) {
+  if (!reservedSet.has(name)) return;
+  const badge = document.createElement("span");
+  badge.className = "reserved-badge";
+  badge.title = "Reserved name -- recognized by MonOSS for special behavior.";
+  el.appendChild(badge);
+}
+
 async function init() {
   api = window.pywebview.api;
+
+  const reserved = await call(api.reserved_names());
+  reservedProperties = new Set(reserved.properties);
+  reservedRelTypes = new Set(reserved.relationshipTypes);
 
   graph = new MonossGraph($("graph"), {
     labelFor: nodeLabel,

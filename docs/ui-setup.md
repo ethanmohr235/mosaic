@@ -74,10 +74,21 @@ drop yet; the path/URL has to be pasted in by hand.
 ### Exporting dated motes to Google Calendar
 
 The topbar's "Export to Calendar" button pushes every mote with a `date`
-property in the current garden to Google Calendar (one-way, manual, never
-deletes anything on the Calendar side). See `docs/google-calendar.md` for
-the reserved properties involved, the one-time Google Cloud setup only
-you can do, and what happens on first export.
+property in the current garden to Google Calendar (one-way, manual).
+Deleting a dated mote, or removing its `date`, deletes the corresponding
+event on the next export. See `docs/google-calendar.md` for the reserved
+properties involved, the one-time Google Cloud setup only you can do,
+and what happens on first export.
+
+### Reserved names
+
+`docs/architecture.md` lists every property key and relationship type
+MonOSS recognizes by convention (`url`, `date`, `duration`, `equation`,
+`instance_of`, ...). Any property or relationship using one of these
+gets a small dot badge next to its name in the detail panel, so it
+doesn't look like ordinary data -- hover it for a tooltip. This is
+purely a visual cue; the name still works exactly like any other
+property/relationship, editable and deletable like anything else.
 
 ## This machine (Arch Linux)
 
@@ -158,7 +169,7 @@ copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
 Esc/Del, arrow-key navigation, the gardens modal's list/switch/
 create/delete, undoing a delete via the toast button and Ctrl+Z, the
 url property's Open button, dragging/pinning a whole multi-selection
-together, and the Export to Calendar button -- with
+together, reserved-name badges, and the Export to Calendar button -- with
 `api.export_to_google_calendar` itself stubbed, since the real OAuth/
 network path needs a real Google account and has no place in an
 automated, offline suite) against a throwaway temp `GARDENS_DIR` and

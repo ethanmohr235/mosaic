@@ -295,6 +295,11 @@ main { flex: 1; min-height: 0; display: flex; }
   background: transparent; color: var(--accent); border-color: var(--accent);
 }
 
+.reserved-badge {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-left: 5px; flex-shrink: 0; vertical-align: middle;
+}
+
 #detail-add-property { display: flex; gap: 6px; margin: 4px 0 6px; }
 #detail-add-property #detail-new-key { width: 74px; flex-shrink: 0; }
 #detail-add-property input { padding: 6px 8px; font-size: 12px; min-width: 0; flex: 1; }

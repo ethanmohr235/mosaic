@@ -465,6 +465,54 @@ def run_checks(window):
 
     check("detail panel: a url property gets a working Open button", url_property_gets_an_open_button)
 
+    def reserved_names_get_a_badge():
+        result = js_async(window, """
+            async () => {
+                const other = await api.create_mote({name: 'badge-other'});
+                const m = await api.create_mote({name: 'badge-checker', date: '2026-08-15'});
+                await api.create_relationship(m.id, other.id, 'applies_to');
+                await api.create_relationship(m.id, other.id, 'knows');
+                window.__badgeIds = {m: m.id, other: other.id};
+                await refreshMoteCache();
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"reserved-badge setup failed: {result}"
+
+        badges = json.loads(js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const out = {};
+                for (const r of rows) {
+                    out[r.querySelector('.key').textContent] = !!r.querySelector('.key .reserved-badge');
+                }
+                return JSON.stringify(out);
+            })()
+        """))
+        assert badges.get("date") is True, f"a reserved property (date) should get a badge, got {badges}"
+        assert badges.get("name") is False, f"an ordinary property (name) should not get a badge, got {badges}"
+
+        rel_badges = json.loads(js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-relationships .rel-row');
+                const out = {};
+                for (const r of rows) {
+                    out[r.querySelector('.rel-type').textContent] = !!r.querySelector('.rel-type .reserved-badge');
+                }
+                return JSON.stringify(out);
+            })()
+        """))
+        assert rel_badges.get("applies_to") is True, (
+            f"a reserved relationship type (applies_to) should get a badge, got {rel_badges}"
+        )
+        assert rel_badges.get("knows") is False, (
+            f"an ordinary relationship type (knows) should not get a badge, got {rel_badges}"
+        )
+
+    check("reserved property/relationship names get a badge, ordinary ones don't", reserved_names_get_a_badge)
+
     def export_to_calendar_button_calls_the_api_and_reports_the_result():
         # Stubbed -- the real path needs OAuth against a real Google
         # account, which has no place in an automated, offline suite.

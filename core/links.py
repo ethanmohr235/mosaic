@@ -2,6 +2,8 @@
 import re
 from pathlib import Path
 
+URL_PROPERTY = "url"
+
 _URL_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 _WINDOWS_DRIVE = re.compile(r"^[a-zA-Z]:[\\/]")
 
