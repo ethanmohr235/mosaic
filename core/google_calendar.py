@@ -9,7 +9,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 from core.db import PROJECT_ROOT
 
-RESERVED_KEYS = {"date", "duration", "gcal_event_id", "url"}
+RESERVED_KEYS = {"date", "duration", "gcal_event_id", "recurrence", "url"}
 
 CREDENTIALS_DIR = PROJECT_ROOT / ".credentials"
 CLIENT_SECRET_PATH = CREDENTIALS_DIR / "client_secret.json"
@@ -83,6 +83,19 @@ def event_payload(mote: dict) -> dict:
         end_d = start_d + timedelta(days=days)
         payload["start"] = {"date": start_d.isoformat()}
         payload["end"] = {"date": end_d.isoformat()}
+
+    recurrence = props.get("recurrence")
+    if isinstance(recurrence, str) and recurrence.strip():
+        # Pasted in as-is (RFC 5545 RRULE syntax) -- not parsed or
+        # validated here, just forwarded; Google's own 400 response for a
+        # malformed rule already surfaces as a toast via the existing
+        # error path. A leading "RRULE:" is stripped first and re-added,
+        # since some RRULE-builder tools give you the full line rather
+        # than just the rule part.
+        rule = recurrence.strip()
+        if rule.upper().startswith("RRULE:"):
+            rule = rule[len("RRULE:"):]
+        payload["recurrence"] = [f"RRULE:{rule}"]
 
     return payload
 

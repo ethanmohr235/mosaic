@@ -73,10 +73,35 @@ def test_event_payload_description_excludes_reserved_keys():
         "duration": 120,
         "gcal_event_id": "already-exported",
         "url": "https://example.com/syllabus",
+        "recurrence": "FREQ=WEEKLY;BYDAY=TU,TH",
         "room": "MEGN 212",
     })
     payload = event_payload(mote)
     assert payload["description"] == "room: MEGN 212"
+
+
+def test_event_payload_has_no_recurrence_field_when_absent():
+    payload = event_payload(_mote({"date": "2026-08-15"}))
+    assert "recurrence" not in payload
+
+
+def test_event_payload_passes_a_bare_rrule_through():
+    mote = _mote({"date": "2026-08-15T09:00:00", "recurrence": "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261215"})
+    payload = event_payload(mote)
+    assert payload["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261215"]
+
+
+def test_event_payload_strips_a_redundant_rrule_prefix():
+    # Some RRULE-builder tools hand you the full line, not just the rule.
+    mote = _mote({"date": "2026-08-15T09:00:00", "recurrence": "RRULE:FREQ=DAILY;COUNT=5"})
+    payload = event_payload(mote)
+    assert payload["recurrence"] == ["RRULE:FREQ=DAILY;COUNT=5"]
+
+
+def test_event_payload_recurrence_works_on_all_day_events_too():
+    mote = _mote({"date": "2026-08-15", "recurrence": "FREQ=YEARLY"})
+    payload = event_payload(mote)
+    assert payload["recurrence"] == ["RRULE:FREQ=YEARLY"]
 
 
 def test_dated_motes_filters_to_motes_with_a_date_property():

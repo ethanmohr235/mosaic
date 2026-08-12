@@ -32,7 +32,7 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of` and `applies_to` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration` and `gcal_event_id` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of` and `applies_to` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence` and `gcal_event_id` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 Equations are written in a small expression language parsed against a strict whitelist -- never `eval`. Evaluating one produces a weighted sum of unknowns plus a constant, so an expression that happens to contain no unknowns is simply a number. That is why there is only one kind of rule: an assignment and a coupled equation are the same thing to the solver.
 
@@ -50,7 +50,11 @@ file path, launched via the OS's default handler. See `docs/ui-setup.md`.
 `date` and `duration` (`core/google_calendar.py`) mark a mote as something
 with a time: `date` is ISO 8601 (a bare date for an all-day event, a full
 datetime for a timed one), `duration` is a plain number (minutes for a
-timed event, days for an all-day one). `gcal_event_id` gets written back
-onto a mote the first time it's exported to Google Calendar, so re-running
-the export updates that event instead of duplicating it. See
+timed event, days for an all-day one). `recurrence` is a raw RFC 5545
+RRULE string (e.g. `FREQ=WEEKLY;BYDAY=TU,TH`), passed straight through to
+Google rather than parsed or validated locally -- one Calendar event with
+a rule represents the whole series, so this needed no other change.
+`gcal_event_id` gets written back onto a mote the first time it's
+exported to Google Calendar, so re-running the export updates that event
+(the whole series, if recurring) instead of duplicating it. See
 `docs/google-calendar.md` for setup and details.

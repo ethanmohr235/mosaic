@@ -15,11 +15,22 @@ a mote's `date`, its old event is left alone rather than auto-deleted.
   local timezone.
 - **`duration`** (optional) -- a plain number. Minutes for a timed event
   (default 60); days for an all-day event (default 1).
+- **`recurrence`** (optional) -- a raw [RFC 5545 RRULE](https://icalendar.org/iCalendar-RFC-5545/3-8-5-3-recurrence-rule.html)
+  string, e.g. `FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261215`. Pasted straight
+  through to Google as-is, not parsed or validated by MonOSS -- an
+  invalid rule surfaces as an error toast from Google's own response
+  rather than failing locally. Free RRULE-builder tools exist online if
+  you don't want to write one by hand; if what you paste already includes
+  a leading `RRULE:`, that's stripped and re-added, so either form works.
+  One Calendar event with a rule represents the *whole* series, so this
+  is still just one mote → one event → one `gcal_event_id`, same as a
+  non-recurring mote.
 - **`gcal_event_id`** -- written back onto the mote automatically after
   its first export. Its presence is what makes a second export update the
-  same event instead of creating a duplicate. You can delete this property
-  yourself if you ever want the next export to create a fresh event
-  instead of updating the old one.
+  same event (or, for a recurring one, the whole series) instead of
+  creating a duplicate. You can delete this property yourself if you ever
+  want the next export to create a fresh event instead of updating the
+  old one.
 
 ## One-time setup (you have to do this part)
 
