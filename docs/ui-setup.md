@@ -171,7 +171,9 @@ create/delete, undoing a delete via the toast button and Ctrl+Z, the
 url property's Open button, dragging/pinning a whole multi-selection
 together, reserved-name badges, the resizable detail panel, selecting
 and inspecting a relationship by clicking its edge, the "New mote here"
-form opening near the click, and the Export to Calendar button -- with
+form opening near the click, a hidden species' instances actually
+dropping out of the physics loop instead of just not being drawn, and
+the Export to Calendar button -- with
 `api.export_to_google_calendar` itself stubbed, since the real OAuth/
 network path needs a real Google account and has no place in an
 automated, offline suite) against a throwaway temp `GARDENS_DIR` and

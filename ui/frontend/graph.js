@@ -287,15 +287,6 @@ class MonossGraph {
     return out;
   }
 
-  destroy() {
-    cancelAnimationFrame(this._frame);
-    clearTimeout(this._timer);
-    if (this._observer) this._observer.disconnect();
-    this.canvas.removeEventListener("contextmenu", this._onContextMenu);
-    window.removeEventListener("mousemove", this._onMouseMove);
-    window.removeEventListener("mouseup", this._onMouseUp);
-  }
-
   // ---- simulation ----
 
   _tick = () => {
@@ -317,7 +308,10 @@ class MonossGraph {
   };
 
   _step() {
-    const ids = [...this.nodes.keys()];
+    // Nodes hidden by a species/relationship filter are never drawn or
+    // interactable, so simulating them is pure waste -- this is an O(n²)
+    // loop below, and every hidden node still counted toward that n.
+    const ids = [...this.nodes.keys()].filter((id) => this.isMoteVisible(id));
 
     for (let i = 0; i < ids.length; i++) {
       const a = this.nodes.get(ids[i]);
@@ -338,6 +332,7 @@ class MonossGraph {
     // grouping is what carries the layout, and letting every instance_of
     // edge yank its instance toward the species mote would undo it.
     for (const rel of this.relationships) {
+      if (!this.isRelVisible(rel)) continue;
       const a = this.nodes.get(rel.from_id), b = this.nodes.get(rel.to_id);
       if (!a || !b) continue;
       const sameSpecies =
@@ -376,17 +371,27 @@ class MonossGraph {
     this.canvas.style.width = rect.width + "px";
     this.canvas.style.height = rect.height + "px";
     this.dpr = dpr;
+    this._readColors();
   };
 
-  _draw() {
-    const ctx = this.canvas.getContext("2d");
+  /** getComputedStyle() forces a style recalc -- cheap once, wasteful if
+   *  called every animation frame. Cached here and refreshed on resize
+   *  rather than in _draw(); nothing today changes these at runtime (no
+   *  theme toggle exists), but if one gets added later it needs to call
+   *  this too, not just rely on a resize happening to fire. */
+  _readColors() {
     const style = getComputedStyle(document.documentElement);
-    const bg = style.getPropertyValue("--graph-bg").trim() || "#111";
+    this._bg = style.getPropertyValue("--graph-bg").trim() || "#111";
     // Label backplates need their own translucent colour rather than the
     // background with an alpha suffix appended: an unparseable fillStyle
     // is silently ignored by canvas, leaving whatever colour was set last
     // (the node's), which drew every label on a bright coloured slab.
-    const labelBg = style.getPropertyValue("--graph-label-bg").trim() || bg;
+    this._labelBg = style.getPropertyValue("--graph-label-bg").trim() || this._bg;
+  }
+
+  _draw() {
+    const ctx = this.canvas.getContext("2d");
+    const bg = this._bg, labelBg = this._labelBg;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
@@ -875,13 +880,6 @@ class MonossGraph {
   placeAt(id, x, y) {
     const node = this.nodes.get(id);
     if (node) { node.x = x; node.y = y; node.pinned = true; node.vx = 0; node.vy = 0; }
-  }
-
-  /** World-space coordinates under a page point -- the inverse of
-   *  screenPositionOf(), used to place a pasted/new mote where the user
-   *  right-clicked. */
-  worldPositionAt(clientX, clientY) {
-    return this._worldAt(clientX, clientY);
   }
 
   /** The world point currently at the center of the viewport -- always

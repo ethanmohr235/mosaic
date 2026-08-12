@@ -1653,6 +1653,64 @@ def run_checks(window):
 
     check("dragging right after opening a garden isn't fought by auto-fit", auto_fit_cancels_on_interaction)
 
+    def hidden_motes_are_excluded_from_physics():
+        """Regression guard for the _step() perf fix: a filtered-out
+        species' instances should drop out of the physics working set
+        entirely, not just stop being drawn. Seeds a real batch (60 motes)
+        in a throwaway garden so alpha is genuinely high (physics actively
+        running) right after load, then hides the species immediately and
+        checks a hidden instance's position/velocity is completely frozen
+        across several frames -- under the old bug it would still be
+        getting pushed around by repulsion/damping/anchor pull even
+        though invisible."""
+        result = js_async(window, """
+            async () => {
+                await api.create_garden('smoke-perf');
+                await api.switch_garden('smoke-perf');
+                const species = await api.create_mote({name: 'Batch'});
+                let sample = null;
+                for (let i = 0; i < 60; i++) {
+                    const m = await api.create_mote({name: 'batch-' + i});
+                    await api.set_species(m.id, species.id);
+                    if (i === 0) sample = m.id;
+                }
+                window.__batchSpeciesId = species.id;
+                window.__sampleId = sample;
+                await loadGarden('smoke-perf');
+                window.__result = 'ok';
+            }
+        """, wait=8.0)
+        assert result == '"ok"', f"batch setup failed: {result}"
+
+        total = js(window, "graph.nodes.size")
+        assert total == 61, f"expected 61 nodes (60 instances + the species), got {total}"
+        assert js(window, "graph.alpha") > 0.5, "test is meaningless unless physics is actively running after load"
+
+        # Hide immediately, while alpha is still high.
+        js(window, """
+            Array.from(document.querySelectorAll('#legend .filter-row'))
+                .find(e => e.querySelector('.name').textContent === 'Batch').click();
+        """)
+
+        before = json.loads(js(window, "JSON.stringify(graph.nodes.get(window.__sampleId))"))
+        time.sleep(0.5)  # several animation frames' worth
+        after = json.loads(js(window, "JSON.stringify(graph.nodes.get(window.__sampleId))"))
+        assert before == after, (
+            f"a hidden instance's position/velocity should be completely frozen, not still simulated: "
+            f"{before} -> {after}"
+        )
+
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("hiding a species freezes its instances instead of still simulating them invisibly",
+          hidden_motes_are_excluded_from_physics)
+
     def no_uncaught_errors():
         errors = js(window, "JSON.stringify(window.__uiErrors || [])")
         assert errors == "[]", f"the UI logged uncaught errors: {errors}"
