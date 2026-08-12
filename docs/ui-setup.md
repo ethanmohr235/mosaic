@@ -169,7 +169,9 @@ copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
 Esc/Del, arrow-key navigation, the gardens modal's list/switch/
 create/delete, undoing a delete via the toast button and Ctrl+Z, the
 url property's Open button, dragging/pinning a whole multi-selection
-together, reserved-name badges, and the Export to Calendar button -- with
+together, reserved-name badges, the resizable detail panel, selecting
+and inspecting a relationship by clicking its edge, the "New mote here"
+form opening near the click, and the Export to Calendar button -- with
 `api.export_to_google_calendar` itself stubbed, since the real OAuth/
 network path needs a real Google account and has no place in an
 automated, offline suite) against a throwaway temp `GARDENS_DIR` and
@@ -180,7 +182,10 @@ changes:
 .venv/bin/python scripts/ui_smoke_test.py
 ```
 
-Prints PASS/FAIL per check and exits non-zero if anything failed.
+Prints PASS/FAIL per check and exits non-zero if anything failed. Its
+own waits are polling, not flat sleeps sized for the worst case
+(`js_async`'s `wait=` and `wait_until()`'s `timeout=` are both ceilings),
+so it finishes well under the naive fixed-sleep total in the common case.
 
 One check samples the canvas pixels directly. That is not paranoia: the
 graph's render loop was once entirely dead while every other check passed,

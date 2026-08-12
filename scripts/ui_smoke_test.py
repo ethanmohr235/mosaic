@@ -41,6 +41,7 @@ from ui.api import Api  # noqa: E402
 FRONTEND_DIR = PROJECT_ROOT / "ui" / "frontend"
 
 results = []
+_page_loaded = threading.Event()
 
 
 def check(name, fn):
@@ -59,10 +60,31 @@ def js(window, code):
 
 def js_async(window, code, wait=1.5):
     """Fire an async IIFE that stores its outcome on `window.__result`,
-    since evaluate_js does not await a returned Promise -- then poll it."""
+    since evaluate_js does not await a returned Promise -- then poll for
+    it at short intervals. `wait` is a ceiling, not a fixed cost: every
+    caller's IIFE ends by setting window.__result, so this returns as
+    soon as that happens instead of always sleeping the worst case --
+    across ~40 call sites in a 1.5s-heavy suite, that adds up."""
     js(window, f"window.__result = undefined; ({code})();")
-    time.sleep(wait)
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if js(window, "window.__result !== undefined") is True:
+            break
+        time.sleep(0.05)
     return js(window, "JSON.stringify(window.__result)")
+
+
+def wait_until(condition, timeout=5.0, interval=0.05):
+    """Poll `condition()` until it returns True or `timeout` elapses.
+    For waits with a clear, cheap-to-check completion signal (a button's
+    disabled state, an element's visibility) -- a tighter, faster
+    alternative to a flat time.sleep() sized for the worst case."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(interval)
+    return False
 
 
 def drag(window, x1, y1, x2, y2, ctrl=False, shift=False, button=0):
@@ -711,7 +733,7 @@ def run_checks(window):
         assert result == '"ok"', f"simulation setup failed: {result}"
 
         js(window, "document.getElementById('run-sim-btn').click();")
-        time.sleep(3.0)
+        wait_until(lambda: js(window, "!document.getElementById('run-sim-btn').disabled") is True)
 
         area = json.loads(js_async(window, """
             async () => {
@@ -750,7 +772,7 @@ def run_checks(window):
             }
         """)
         js(window, "document.getElementById('run-sim-btn').click();")
-        time.sleep(3.0)
+        wait_until(lambda: js(window, "!document.getElementById('run-sim-btn').disabled") is True)
         toast = js(window, "document.getElementById('toast').textContent")
         assert "underdetermined" in toast, f"expected an underdetermined message, got {toast!r}"
         enabled = js(window, "!document.getElementById('run-sim-btn').disabled")
@@ -1639,7 +1661,11 @@ def run_checks(window):
 
 
 def drive():
-    time.sleep(3.5)
+    # An event fired from window.events.loaded, not a blind sleep sized
+    # for the worst case -- the page is almost always ready well under
+    # the old fixed 3.5s, and this still has a generous ceiling for a
+    # slow first launch.
+    _page_loaded.wait(timeout=15)
     window = webview.windows[0]
     # Record uncaught errors so the final check can assert on them.
     js(window, """
@@ -1660,6 +1686,7 @@ def main():
     )
     api._window = window
     window.events.closed += api.shutdown
+    window.events.loaded += _page_loaded.set
 
     threading.Thread(target=drive, daemon=True).start()
     webview.start(http_server=True, private_mode=False, storage_path=str(_TMP / "webview_data"))
