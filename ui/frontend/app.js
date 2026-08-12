@@ -126,11 +126,7 @@ function moteById(id) {
 function kindLabel(mote) {
   if (!mote) return "";
   if (payload.species_ids.includes(mote.id)) return "Species";
-  const species = (payload.relationships || [])
-    .filter((r) => r.type === "instance_of" && r.from_id === mote.id)
-    .map((r) => moteById(r.to_id))
-    .filter(Boolean)
-    .map(nodeLabel);
+  const species = speciesIdsOf(mote.id).map(moteById).filter(Boolean).map(nodeLabel);
   if (species.length) return species.join(", ");
   if (mote.properties && mote.properties.equation) return "Rule";
   return "Mote";
@@ -183,9 +179,7 @@ function speciesRows() {
   let untyped = 0;
   for (const mote of payload.motes) {
     if (payload.species_ids.includes(mote.id)) continue;
-    const species = (payload.relationships || [])
-      .filter((r) => r.type === "instance_of" && r.from_id === mote.id)
-      .map((r) => r.to_id);
+    const species = speciesIdsOf(mote.id);
     if (species.length === 0) { untyped += 1; continue; }
     for (const id of species) counts.set(id, (counts.get(id) || 0) + 1);
   }
@@ -343,6 +337,26 @@ function closeDetailPanel() {
   if (graph) graph.select(null);
 }
 
+/** Shared by both places a relationship's type can be renamed (its own
+ *  panel, and a mote's relationship list): prompts, applies via the API,
+ *  and refreshes the shared graph data. Returns false without doing
+ *  anything if the prompt was cancelled or unchanged, so callers know
+ *  whether to bother re-rendering. */
+async function renameRelationshipType(rel) {
+  const next = window.prompt("Relationship type:", rel.type);
+  if (!next || next === rel.type) return false;
+  await call(api.update_relationship(rel.id, null, null, next));
+  await refocus(focusId, { pan: false });
+  return true;
+}
+
+/** Shared by both places a relationship can be deleted -- see
+ *  renameRelationshipType above. */
+async function deleteRelationshipAndRefresh(rel) {
+  await call(api.delete_relationship(rel.id));
+  await refocus(focusId, { pan: false });
+}
+
 /** Mirrors openDetailPanel, but for a relationship rather than a mote --
  *  its own render function for the same reason renderMultiSelectPanel is
  *  its own: a relationship's panel shows genuinely different things
@@ -385,19 +399,12 @@ async function openRelationshipPanel(relId) {
   type.title = "Click to rename";
   maybeAddReservedBadge(type, rel.type, reservedRelTypes);
   type.addEventListener("click", async () => {
-    const next = window.prompt("Relationship type:", rel.type);
-    if (!next || next === rel.type) return;
-    await call(api.update_relationship(rel.id, null, null, next));
-    await refreshMoteCache();
-    await refocus(focusId, { pan: false, select: false });
-    await openRelationshipPanel(rel.id);
+    if (await renameRelationshipType(rel)) await openRelationshipPanel(rel.id);
   });
   typeRow.append(arrow, type);
 
   $("delete-relationship-btn").onclick = async () => {
-    await call(api.delete_relationship(rel.id));
-    await refreshMoteCache();
-    await refocus(focusId, { pan: false, select: false });
+    await deleteRelationshipAndRefresh(rel);
     closeDetailPanel();
   };
 
@@ -587,11 +594,7 @@ function renderRelationships(moteId, rels) {
     type.title = "Click to rename";
     maybeAddReservedBadge(type, rel.type, reservedRelTypes);
     type.addEventListener("click", async () => {
-      const next = window.prompt("Relationship type:", rel.type);
-      if (!next || next === rel.type) return;
-      await call(api.update_relationship(rel.id, null, null, next));
-      await refocus(focusId, { pan: false });
-      await openDetailPanel(moteId);
+      if (await renameRelationshipType(rel)) await openDetailPanel(moteId);
     });
 
     const label = document.createElement("span");
@@ -603,8 +606,7 @@ function renderRelationships(moteId, rels) {
     const del = document.createElement("button");
     del.textContent = "×";
     del.addEventListener("click", async () => {
-      await call(api.delete_relationship(rel.id));
-      await refocus(focusId, { pan: false });
+      await deleteRelationshipAndRefresh(rel);
       await openDetailPanel(moteId);
     });
 
