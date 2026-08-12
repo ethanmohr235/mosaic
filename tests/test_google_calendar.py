@@ -80,9 +80,12 @@ def test_event_payload_description_excludes_reserved_keys():
     assert payload["description"] == "room: MEGN 212"
 
 
-def test_event_payload_has_no_recurrence_field_when_absent():
+def test_event_payload_recurrence_is_explicit_null_when_absent():
+    # Not just an absent key: push_event's PATCH only touches keys present
+    # in the payload, so clearing a mote's recurrence property needs an
+    # explicit null to actually clear it on an existing event.
     payload = event_payload(_mote({"date": "2026-08-15"}))
-    assert "recurrence" not in payload
+    assert payload["recurrence"] is None
 
 
 def test_event_payload_passes_a_bare_rrule_through():

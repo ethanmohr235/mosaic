@@ -30,7 +30,10 @@ you edited or deleted an event by hand in Calendar in the meantime.
   a leading `RRULE:`, that's stripped and re-added, so either form works.
   One Calendar event with a rule represents the *whole* series, so this
   is still just one mote → one event → one `gcal_event_id`, same as a
-  non-recurring mote.
+  non-recurring mote. Removing the property (or never having set it) is
+  itself exported: the next export explicitly clears recurrence on the
+  existing event rather than leaving the old rule in place, so an event
+  can go from recurring back to a single occurrence.
 - **`gcal_event_id`** -- written back onto the mote automatically after
   its first export. Its presence is what makes a second export update the
   same event (or, for a recurring one, the whole series) instead of

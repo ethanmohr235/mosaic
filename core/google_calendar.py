@@ -97,6 +97,12 @@ def event_payload(mote: dict) -> dict:
         if rule.upper().startswith("RRULE:"):
             rule = rule[len("RRULE:"):]
         payload["recurrence"] = [f"RRULE:{rule}"]
+    else:
+        # Explicit null, not an absent key: push_event's PATCH only touches
+        # keys present in the payload, so a mote that lost its recurrence
+        # property (or never had one) needs this to actually clear
+        # recurrence on an existing event rather than leaving it in place.
+        payload["recurrence"] = None
 
     # managed_by is a constant sentinel (same value on every MonOSS-
     # created event) so list_managed_events() can find all of them with
