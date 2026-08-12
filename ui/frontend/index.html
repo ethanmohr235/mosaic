@@ -32,7 +32,10 @@
     <kbd>⌘K</kbd>
   </button>
 
-  <button id="run-sim-btn" type="button">Run simulation</button>
+  <div id="sim-controls">
+    <input type="number" id="sim-steps-input" min="1" max="500" value="10" title="Steps to simulate">
+    <button id="run-sim-btn" type="button">Run simulation</button>
+  </div>
   <button id="export-calendar-btn" type="button">Export to Calendar</button>
 </header>
 
@@ -163,6 +166,22 @@
       <button id="new-garden-btn" type="button" class="ghost">+ New garden…</button>
       <div class="spacer"></div>
       <button id="import-garden-btn" type="button" class="ghost">Import…</button>
+    </div>
+  </div>
+</div>
+
+<div id="simulation-overlay" class="hidden">
+  <div id="simulation-modal">
+    <div class="panel-title">Simulation preview</div>
+    <div id="sim-step-summary"></div>
+    <div id="sim-step-error" class="hidden"></div>
+    <input type="range" id="sim-step-slider" min="0" step="1" value="0">
+    <div id="sim-step-label"></div>
+    <div id="sim-step-changes"></div>
+    <div id="sim-modal-actions">
+      <button id="sim-cancel-btn" type="button" class="ghost">Cancel</button>
+      <div class="spacer"></div>
+      <button id="sim-commit-btn" type="button" class="primary">Commit this step</button>
     </div>
   </div>
 </div>

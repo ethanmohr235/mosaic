@@ -715,7 +715,7 @@ def run_checks(window):
 
     check("depth control limits how much of the graph is visible", depth_control_limits_the_graph)
 
-    def simulation_runs_from_the_button():
+    def simulation_previews_then_commits_from_the_scrub_overlay():
         result = js_async(window, """
             async () => {
                 const species = await api.create_mote({name: 'Box', unknowns: 'area'});
@@ -732,18 +732,29 @@ def run_checks(window):
         """, wait=2.0)
         assert result == '"ok"', f"simulation setup failed: {result}"
 
+        js(window, "document.getElementById('sim-steps-input').value = '1';")
         js(window, "document.getElementById('run-sim-btn').click();")
-        wait_until(lambda: js(window, "!document.getElementById('run-sim-btn').disabled") is True)
+        wait_until(lambda: js(window, "!document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
 
-        area = json.loads(js_async(window, """
+        area_present_before_commit = json.loads(js_async(window, """
             async () => {
-                const mote = await api.get_mote(window.__seed.boxId);
-                window.__result = mote.properties.area;
+                window.__result = 'area' in (await api.get_mote(window.__seed.boxId)).properties;
             }
         """))
-        assert area == 12.0, f"expected the solver to write area=12, got {area!r}"
+        assert area_present_before_commit is False, "previewing must not write anything to the mote"
+
+        summary = js(window, "document.getElementById('sim-step-summary').textContent")
+        assert "Solved" in summary, f"expected a solved summary in the overlay, got {summary!r}"
+
+        js(window, "document.getElementById('sim-commit-btn').click();")
+        wait_until(lambda: js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+
+        area = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__seed.boxId)).properties.area ?? null; }
+        """))
+        assert area == 12.0, f"expected the solver to write area=12 after commit, got {area!r}"
         toast = js(window, "document.getElementById('toast').textContent")
-        assert "Solved" in toast, f"expected a success toast, got {toast!r}"
+        assert "Solved" in toast, f"expected a success toast after commit, got {toast!r}"
 
         shown = js(window, """
             (function() {
@@ -758,7 +769,8 @@ def run_checks(window):
         """)
         assert shown == "12", f"open panel should refresh to show area=12, got {shown!r}"
 
-    check("simulation: Run button solves and refreshes the panel", simulation_runs_from_the_button)
+    check("simulation: previewing then committing from the scrub overlay solves and refreshes the panel",
+          simulation_previews_then_commits_from_the_scrub_overlay)
 
     def unsolvable_garden_reports_instead_of_crashing():
         js_async(window, """
@@ -771,14 +783,104 @@ def run_checks(window):
                 window.__result = 'ok';
             }
         """)
+        js(window, "document.getElementById('sim-steps-input').value = '1';")
         js(window, "document.getElementById('run-sim-btn').click();")
         wait_until(lambda: js(window, "!document.getElementById('run-sim-btn').disabled") is True)
         toast = js(window, "document.getElementById('toast').textContent")
         assert "underdetermined" in toast, f"expected an underdetermined message, got {toast!r}"
+        overlay_hidden = js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')")
+        assert overlay_hidden is True, "the scrub overlay should not open when nothing could be solved"
         enabled = js(window, "!document.getElementById('run-sim-btn').disabled")
         assert enabled is True, "Run button should be re-enabled after a failed run"
 
     check("simulation: unsolvable garden reports instead of crashing", unsolvable_garden_reports_instead_of_crashing)
+
+    def simulation_scrubbing_and_cancel_and_earlier_step_commit():
+        # A dedicated garden, not the shared one -- an earlier check
+        # (unsolvable_garden_reports_instead_of_crashing) deliberately
+        # leaves an unsolvable rule behind in the shared garden forever,
+        # which would poison every simulation run after it.
+        result = js_async(window, """
+            async () => {
+                await api.create_garden('smoke-sim');
+                await api.switch_garden('smoke-sim');
+                const species = await api.create_mote({name: 'Account', unknowns: 'balance'});
+                const rule = await api.create_mote({name: 'Growth', equation: 'balance == prev(balance) * 1.05'});
+                await api.create_relationship(rule.id, species.id, 'applies_to');
+                const mote = await api.create_mote({name: 'acct1', balance: 100.0});
+                await api.set_species(mote.id, species.id);
+                window.__acctId = mote.id;
+                await loadGarden('smoke-sim');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"recurrence setup failed: {result}"
+
+        js(window, "document.getElementById('sim-steps-input').value = '5';")
+        js(window, "document.getElementById('run-sim-btn').click();")
+        wait_until(lambda: js(window, "!document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+
+        slider_max = js(window, "document.getElementById('sim-step-slider').max")
+        assert slider_max == "4", f"5 steps should give a slider max of 4 (0-indexed), got {slider_max!r}"
+
+        balance = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
+        """))
+        assert balance == 100.0, f"previewing must not touch the mote yet, got {balance!r}"
+
+        # Scrub to step index 2 (the 3rd step) and check the display updates.
+        js(window, """
+            const slider = document.getElementById('sim-step-slider');
+            slider.value = '2';
+            slider.dispatchEvent(new Event('input', {bubbles: true}));
+        """)
+        time.sleep(0.3)
+        label = js(window, "document.getElementById('sim-step-label').textContent")
+        assert label == "Step 3 of 5", f"expected the label to track the slider, got {label!r}"
+        changes_text = js(window, "document.getElementById('sim-step-changes').textContent")
+        assert "115.7625" in changes_text, f"expected step 3's cumulative balance in the changes list, got {changes_text!r}"
+
+        # Cancel: nothing should be written.
+        js(window, "document.getElementById('sim-cancel-btn').click();")
+        time.sleep(0.3)
+        overlay_hidden = js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')")
+        assert overlay_hidden is True, "Cancel should close the overlay"
+        balance_after_cancel = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
+        """))
+        assert balance_after_cancel == 100.0, "Cancel must not write anything"
+
+        # Re-run, scrub to the same earlier step, and commit -- the mote
+        # should land on step 3's value, not step 5's.
+        js(window, "document.getElementById('run-sim-btn').click();")
+        wait_until(lambda: js(window, "!document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+        js(window, """
+            const slider = document.getElementById('sim-step-slider');
+            slider.value = '2';
+            slider.dispatchEvent(new Event('input', {bubbles: true}));
+        """)
+        time.sleep(0.3)
+        js(window, "document.getElementById('sim-commit-btn').click();")
+        wait_until(lambda: js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+
+        committed_balance = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
+        """))
+        assert abs(committed_balance - 115.7625) < 1e-6, (
+            f"committing at the scrubbed step should land on that step's value, not the last step's, got {committed_balance!r}"
+        )
+
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                await api.delete_garden('smoke-sim');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("simulation: scrubbing updates the display, Cancel writes nothing, committing an earlier step lands on that step",
+          simulation_scrubbing_and_cancel_and_earlier_step_commit)
 
     def garden_switch_isolates_data():
         result = js_async(window, """

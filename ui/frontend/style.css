@@ -433,6 +433,42 @@ main { flex: 1; min-height: 0; display: flex; }
 .garden-row button { font-size: 12px; padding: 5px 9px; flex-shrink: 0; }
 #gardens-modal-actions { display: flex; align-items: center; gap: 8px; }
 
+/* ---- simulation ---- */
+
+#sim-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+#sim-steps-input { width: 56px; text-align: center; padding: 7px 4px; }
+
+#simulation-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
+}
+#simulation-modal {
+  width: 480px; max-width: 90vw; max-height: 78vh;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  display: flex; flex-direction: column; overflow: hidden;
+  padding: 20px;
+}
+#sim-step-summary { font-size: 13px; color: var(--fg-bright); min-height: 18px; }
+#sim-step-error {
+  color: var(--danger); font-size: 12.5px; margin-top: 6px;
+  padding: 8px 10px; background: oklch(0.65 0.15 25 / 0.1); border-radius: 7px;
+}
+#sim-step-slider { width: 100%; margin: 14px 0 4px; accent-color: var(--accent); }
+#sim-step-label {
+  text-align: center; color: var(--muted); font-size: 11.5px;
+  margin-bottom: 12px; font-variant-numeric: tabular-nums;
+}
+#sim-step-changes { flex: 1; overflow-y: auto; min-height: 0; margin-bottom: 14px; }
+.sim-change-row {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 6px 0; font-size: 12.5px; border-bottom: 1px solid var(--border-soft);
+}
+.sim-change-row .mote { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-change-row .key { color: var(--muted); flex-shrink: 0; }
+.sim-change-row .values { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--fg-bright); }
+#sim-modal-actions { display: flex; align-items: center; gap: 8px; }
+
 /* ---- toast ---- */
 
 #toast {

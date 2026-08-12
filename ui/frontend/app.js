@@ -22,11 +22,14 @@ let pasteRepeatCount = 0;              // steps repeated Ctrl+V pastes apart so 
 let contextMenuWorldPos = null;        // world coords the context menu was opened at
 let reservedProperties = new Set();    // property keys recognized by convention (core/reserved.py)
 let reservedRelTypes = new Set();      // relationship types recognized by convention
+let simPreview = null;                 // the last preview_simulation() payload, while the scrub overlay is open
+let simScrubStep = 0;                  // which step of simPreview.steps is currently shown
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
 const DETAIL_WIDTH_MIN = 280;
 const DETAIL_WIDTH_MAX = 640;
+const SIM_STEPS_KEY = "monoss:simSteps";
 const SIM_ERROR_TOAST_MS = 12000;
 
 window.addEventListener("error", (e) => {
@@ -1327,23 +1330,147 @@ function setupViewControls() {
 
 function setupSimulation() {
   const button = $("run-sim-btn");
+  const stepsInput = $("sim-steps-input");
+
+  const storedSteps = localStorage.getItem(SIM_STEPS_KEY);
+  if (storedSteps) stepsInput.value = storedSteps;
+  stepsInput.addEventListener("change", () => {
+    localStorage.setItem(SIM_STEPS_KEY, stepsInput.value);
+  });
+
   button.addEventListener("click", async () => {
+    const steps = Math.max(1, parseInt(stepsInput.value, 10) || 1);
     button.disabled = true;
     button.textContent = "Running…";
     try {
-      const result = await call(api.run_simulation());
-      showToast(result.message, result.ok ? 3500 : SIM_ERROR_TOAST_MS);
-      if (!result.ok || result.written === 0) return;
+      const result = await call(api.preview_simulation(steps));
+      if (result.steps.length === 0) {
+        showToast(result.error ? `Simulation failed: ${result.error}` : "Nothing to simulate.", SIM_ERROR_TOAST_MS);
+        return;
+      }
+      openSimulationScrub(result);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Run simulation";
+    }
+  });
+
+  $("sim-step-slider").addEventListener("input", () => {
+    simScrubStep = parseInt($("sim-step-slider").value, 10);
+    renderSimStep();
+  });
+
+  $("sim-cancel-btn").addEventListener("click", closeSimulationScrub);
+  $("simulation-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("simulation-overlay")) closeSimulationScrub();
+  });
+
+  $("sim-commit-btn").addEventListener("click", async () => {
+    if (!simPreview) return;
+    const btn = $("sim-commit-btn");
+    btn.disabled = true;
+    try {
+      // The scrub slider is a step *index*; the API takes a step *count*.
+      const result = await call(api.commit_simulation(simScrubStep + 1));
+      const committed = result.steps[result.steps.length - 1];
+      closeSimulationScrub();
+      showToast(committed ? committed.summary : "Committed.", 3500);
       await refreshMoteCache();
       await refocus(focusId, { pan: false });
       if (!$("detail-panel").classList.contains("hidden") && focusId) {
         await openDetailPanel(focusId);
       }
     } finally {
-      button.disabled = false;
-      button.textContent = "Run simulation";
+      btn.disabled = false;
     }
   });
+}
+
+/** Nondestructive: nothing was written by the preview call that produced
+ *  `result`, so opening this is purely a display action. Scrubbing moves
+ *  through `result.steps` entirely client-side -- no further API calls
+ *  until Commit. */
+function openSimulationScrub(result) {
+  simPreview = result;
+  simScrubStep = result.steps.length - 1; // default to where the run ended up
+  const slider = $("sim-step-slider");
+  slider.max = String(result.steps.length - 1);
+  slider.value = String(simScrubStep);
+  renderSimStep();
+  $("simulation-overlay").classList.remove("hidden");
+}
+
+function closeSimulationScrub() {
+  $("simulation-overlay").classList.add("hidden");
+  simPreview = null;
+  simScrubStep = 0;
+}
+
+/** Every property touched from step 0 through simScrubStep, with the
+ *  value it had entering the whole run and its value as of the
+ *  currently scrubbed step -- not just that one step's own delta, so
+ *  scrubbing shows the state of the garden at that point in time, not a
+ *  single frame's diff. */
+function cumulativeSimChanges() {
+  const byKey = new Map();
+  for (let i = 0; i <= simScrubStep; i++) {
+    for (const c of simPreview.steps[i].changes) {
+      const key = `${c.mote_id}|${c.key}`;
+      const existing = byKey.get(key);
+      if (existing) existing.new_value = c.new_value;
+      else byKey.set(key, { ...c });
+    }
+  }
+  return [...byKey.values()].sort((a, b) =>
+    a.mote_id.localeCompare(b.mote_id) || a.key.localeCompare(b.key));
+}
+
+function formatSimValue(value) {
+  if (Number.isInteger(value)) return String(value);
+  return value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function renderSimStep() {
+  const step = simPreview.steps[simScrubStep];
+  $("sim-step-summary").textContent = step.summary;
+  $("sim-step-label").textContent = `Step ${simScrubStep + 1} of ${simPreview.steps.length}`;
+
+  const errorEl = $("sim-step-error");
+  if (simPreview.failed_at !== null) {
+    errorEl.textContent = `The run stopped at step ${simPreview.failed_at + 1}: ${simPreview.error}`;
+    errorEl.classList.remove("hidden");
+  } else {
+    errorEl.classList.add("hidden");
+  }
+
+  const container = $("sim-step-changes");
+  container.innerHTML = "";
+  const changes = cumulativeSimChanges();
+  if (changes.length === 0) {
+    container.innerHTML = '<div class="empty-note">No properties changed yet.</div>';
+    return;
+  }
+  for (const c of changes) {
+    const row = document.createElement("div");
+    row.className = "sim-change-row";
+
+    const mote = moteById(c.mote_id);
+    const moteEl = document.createElement("span");
+    moteEl.className = "mote";
+    moteEl.textContent = mote ? nodeLabel(mote) : c.mote_id.slice(0, 8) + "…";
+
+    const keyEl = document.createElement("span");
+    keyEl.className = "key";
+    keyEl.textContent = c.key;
+
+    const valuesEl = document.createElement("span");
+    valuesEl.className = "values";
+    const oldText = c.old_value === null || c.old_value === undefined ? "—" : formatSimValue(c.old_value);
+    valuesEl.textContent = `${oldText} → ${formatSimValue(c.new_value)}`;
+
+    row.append(moteEl, keyEl, valuesEl);
+    container.appendChild(row);
+  }
 }
 
 function setupCalendarExport() {
@@ -1479,6 +1606,7 @@ function setupKeyboard() {
     if (e.key !== "Escape") return;
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
+    if (!$("simulation-overlay").classList.contains("hidden")) { closeSimulationScrub(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (!$("quick-add").classList.contains("hidden")) {
