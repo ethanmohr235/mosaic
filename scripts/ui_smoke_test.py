@@ -323,6 +323,48 @@ def run_checks(window):
 
     check("quick add: species chip prefills from template", quick_add_prefills_from_template)
 
+    def quick_add_enter_key_creates_mote():
+        js(window, "document.getElementById('quick-add-btn').click();")
+        time.sleep(1.0)
+        js(window, """
+            const rows = document.querySelectorAll('#quick-add-rows .prop-row');
+            for (const r of rows) {
+                const [k, v] = r.querySelectorAll('input');
+                if (k.value === 'name') {
+                    v.value = 'EnterMote';
+                    v.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+                }
+            }
+        """)
+        time.sleep(2.0)
+        name = js(window, "document.getElementById('detail-title').textContent")
+        assert name == "EnterMote", f"Enter in quick-add should create the mote, got {name!r}"
+        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
+        assert hidden is True, "creating via Enter should close the quick-add panel"
+
+    check("quick add: Enter key creates the mote", quick_add_enter_key_creates_mote)
+
+    def quick_add_closes_on_outside_click():
+        js(window, "document.getElementById('quick-add-btn').click();")
+        time.sleep(1.0)
+        opened = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
+        assert opened is False, "quick-add should be open before this check"
+
+        # A real click (mousedown+mouseup from an actual user) fires a
+        # 'click' event that bubbles to document -- drag()'s synthetic
+        # mousedown/mousemove/mouseup doesn't, so this dispatches the
+        # 'click' itself to exercise the same outside-click listener.
+        js(window, """
+            document.getElementById('graph').dispatchEvent(new MouseEvent('click', {
+                clientX: 60, clientY: 60, bubbles: true, cancelable: true,
+            }));
+        """)
+        time.sleep(0.5)
+        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
+        assert hidden is True, "clicking outside the quick-add panel should close it"
+
+    check("quick add: clicking outside the panel closes it", quick_add_closes_on_outside_click)
+
     def legend_and_relationship_filters():
         js(window, "(async () => { await refocus(window.__seed.aliceId); })()")
         time.sleep(2.0)
@@ -384,6 +426,28 @@ def run_checks(window):
         assert labels == '["Alice"]', f"property-value search failed: {labels}"
 
     check("search: browse all + filter by property value", search_palette_browses_and_filters)
+
+    def search_key_value_query_matches_exactly():
+        js(window, """
+            const i = document.getElementById('search-input');
+            i.value = 'role = engineer'; i.dispatchEvent(new Event('input'));
+        """)
+        time.sleep(0.8)
+        labels = js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#search-results .label'))
+                .map(e => e.textContent))
+        """)
+        assert labels == '["Alice"]', f"key = value search should match on the exact property, got {labels}"
+
+        js(window, """
+            const i = document.getElementById('search-input');
+            i.value = 'role = doctor'; i.dispatchEvent(new Event('input'));
+        """)
+        time.sleep(0.8)
+        empty = js(window, "document.querySelector('#search-results .search-empty') !== null")
+        assert empty is True, "key = value search should not match a different value"
+
+    check("search: key = value matches a specific property exactly", search_key_value_query_matches_exactly)
 
     def search_keyboard_nav_selects():
         js(window, """
@@ -619,6 +683,74 @@ def run_checks(window):
 
     check("clicking an edge selects and inspects the relationship (rename/delete/deselect)",
           click_edge_selects_and_inspects_relationship)
+
+    def shift_click_multiselects_relationships():
+        result = js_async(window, """
+            async () => {
+                const p = await api.create_mote({name: 'MultiRel-P'});
+                const q = await api.create_mote({name: 'MultiRel-Q'});
+                const r = await api.create_mote({name: 'MultiRel-R'});
+                const rel1 = await api.create_relationship(p.id, q.id, 'knows');
+                const rel2 = await api.create_relationship(q.id, r.id, 'knows');
+                window.__multiRel = {p: p.id, q: q.id, r: r.id, rel1: rel1.id, rel2: rel2.id};
+                await refreshMoteCache();
+                await refocus(p.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"multi-relationship setup failed: {result}"
+
+        # Positions are read fresh right before each click rather than
+        # cached upfront -- the force layout is still settling shortly
+        # after these motes were created, so a midpoint captured too early
+        # can drift out from under a later click.
+        def click_edge(a_expr, b_expr, shift=False):
+            mid = json.loads(js(window, f"""
+                (function() {{
+                    const a = graph.screenPositionOf({a_expr});
+                    const b = graph.screenPositionOf({b_expr});
+                    return JSON.stringify({{x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}});
+                }})()
+            """))
+            drag(window, mid["x"], mid["y"], mid["x"], mid["y"], shift=shift)
+
+        rel1 = json.loads(js(window, "JSON.stringify(window.__multiRel.rel1)"))
+        rel2 = json.loads(js(window, "JSON.stringify(window.__multiRel.rel2)"))
+        p, q, r = "window.__multiRel.p", "window.__multiRel.q", "window.__multiRel.r"
+
+        click_edge(p, q)  # plain click: select rel1
+        time.sleep(0.3)
+        click_edge(q, r, shift=True)  # shift+click: add rel2
+        time.sleep(0.5)
+
+        count_text = js(window, "document.getElementById('detail-relationship-multi-count').textContent")
+        assert count_text == "2 relationships selected", \
+            f"shift+click should build a 2-relationship selection, got {count_text!r}"
+        shown = js(window, "!document.getElementById('detail-relationship-multi').classList.contains('hidden')")
+        assert shown is True, "selecting 2 relationships should show the multi-relationship panel"
+
+        selected = json.loads(js(window, "JSON.stringify([...graph.selectedRelIds])"))
+        assert set(selected) == {rel1, rel2}, f"both relationships should be selected, got {selected}"
+
+        # Shift+click the first one again to remove it, dropping back to one.
+        click_edge(p, q, shift=True)
+        time.sleep(0.5)
+        single_shown = js(window, "!document.getElementById('detail-relationship').classList.contains('hidden')")
+        assert single_shown is True, \
+            "toggling back down to one relationship should show the single-relationship panel"
+
+        # Re-select both and bulk-delete from the multi panel.
+        click_edge(p, q)
+        time.sleep(0.3)
+        click_edge(q, r, shift=True)
+        time.sleep(0.5)
+        js(window, "document.getElementById('delete-relationship-selection-btn').click();")
+        time.sleep(1.5)
+        remaining = json.loads(js(window, "JSON.stringify(graph.relationships.map(r => r.id))"))
+        assert rel1 not in remaining and rel2 not in remaining, \
+            "bulk delete should remove both selected relationships"
+
+    check("shift+click multi-selects relationships, with bulk delete", shift_click_multiselects_relationships)
 
     def reserved_names_get_a_badge():
         result = js_async(window, """

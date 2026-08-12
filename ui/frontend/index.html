@@ -160,6 +160,13 @@
         </div>
         <button id="delete-relationship-btn" type="button" class="danger wide">Delete relationship</button>
       </div>
+
+      <div id="detail-relationship-multi">
+        <div id="detail-relationship-multi-count"></div>
+        <div class="panel-heading">Types</div>
+        <div id="detail-relationship-multi-types"></div>
+        <button id="delete-relationship-selection-btn" type="button" class="danger wide">Delete selected</button>
+      </div>
     </aside>
   </div>
 </main>
@@ -168,7 +175,7 @@
 
 <div id="search-overlay" class="hidden">
   <div id="search-modal">
-    <input type="text" id="search-input" placeholder="Search motes and properties…" autocomplete="off">
+    <input type="text" id="search-input" placeholder="Search motes and properties, or key = value…" autocomplete="off">
     <div id="search-species-chips" class="chip-row"></div>
     <div id="search-rel-chips" class="chip-row"></div>
     <div id="search-results"></div>

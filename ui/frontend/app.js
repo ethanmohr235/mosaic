@@ -288,6 +288,7 @@ async function openDetailPanel(moteId) {
   multiSelectIds = null;
   $("detail-multi").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
+  $("detail-relationship-multi").classList.add("hidden");
   $("detail-single").classList.remove("hidden");
   $("detail-sim-banner").classList.toggle("hidden", !simPreview);
 
@@ -327,6 +328,7 @@ function renderMultiSelectPanel(ids) {
   multiSelectIds = ids;
   $("detail-single").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
+  $("detail-relationship-multi").classList.add("hidden");
   $("detail-multi").classList.remove("hidden");
   hideSpeciesPicker();
 
@@ -366,6 +368,7 @@ function renderMultiSelectPanel(ids) {
 function closeDetailPanel() {
   $("detail-panel").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
+  $("detail-relationship-multi").classList.add("hidden");
   hideSpeciesPicker();
   multiSelectIds = null;
   if (graph) graph.select(null);
@@ -410,6 +413,7 @@ async function openRelationshipPanel(relId) {
   multiSelectIds = null;
   $("detail-single").classList.add("hidden");
   $("detail-multi").classList.add("hidden");
+  $("detail-relationship-multi").classList.add("hidden");
   $("detail-relationship").classList.remove("hidden");
   hideSpeciesPicker();
 
@@ -446,6 +450,55 @@ async function openRelationshipPanel(relId) {
   };
 
   $("detail-panel").classList.remove("hidden");
+}
+
+/** Shown instead of the single-relationship panel once shift+click has
+ *  built up more than one selected relationship -- mirrors
+ *  renderMultiSelectPanel's relationship to openDetailPanel. */
+function renderMultiRelationshipPanel(ids) {
+  multiSelectIds = null;
+  $("detail-single").classList.add("hidden");
+  $("detail-multi").classList.add("hidden");
+  $("detail-relationship").classList.add("hidden");
+  $("detail-relationship-multi").classList.remove("hidden");
+  hideSpeciesPicker();
+
+  $("detail-relationship-multi-count").textContent = `${ids.length} relationships selected`;
+
+  const counts = new Map(); // type -> count
+  for (const id of ids) {
+    const rel = graph.relationships.find((r) => r.id === id);
+    if (!rel) continue;
+    counts.set(rel.type, (counts.get(rel.type) || 0) + 1);
+  }
+
+  const container = $("detail-relationship-multi-types");
+  container.innerHTML = "";
+  const rows = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  if (rows.length === 0) container.innerHTML = '<div class="empty-note">None</div>';
+  for (const [type, count] of rows) {
+    const el = document.createElement("div");
+    el.className = "multi-species-row";
+    el.innerHTML = `<span class="dot" style="background:var(--accent)"></span><span class="name"></span><span class="count"></span>`;
+    el.querySelector(".name").textContent = type;
+    el.querySelector(".count").textContent = count;
+    container.appendChild(el);
+  }
+
+  $("delete-relationship-selection-btn").textContent = `Delete ${ids.length} relationships`;
+  $("detail-panel").classList.remove("hidden");
+}
+
+/** Bulk counterpart to deleteRelationshipAndRefresh. No confirm dialog,
+ *  matching the single-relationship delete it's built from -- deleting a
+ *  relationship has no cascade, unlike a mote, so it never needed one. */
+async function deleteRelationshipSelection() {
+  if (simBlocked()) return;
+  const ids = [...graph.selectedRelIds];
+  if (ids.length === 0) return;
+  for (const id of ids) await call(api.delete_relationship(id));
+  closeDetailPanel();
+  await refocus(focusId, { pan: false });
 }
 
 /** Drag-to-resize on the panel's left edge. A CSS custom property rather
@@ -789,27 +842,57 @@ function collectQuickAddProperties() {
   return props;
 }
 
+/** Shared close path for the quick-add panel -- the toggle button, Esc, a
+ *  click outside it, and a successful create all funnel through here. */
+function closeQuickAdd() {
+  $("quick-add").classList.add("hidden");
+  $("quick-add-btn").textContent = "+";
+  contextMenuWorldPos = null; // closing without creating cancels any pending placement
+}
+
 function setupQuickAdd() {
   resetQuickAddRows();
   $("quick-add-btn").addEventListener("click", () => {
     if (simBlocked()) return;
     const panel = $("quick-add");
-    const opening = panel.classList.contains("hidden");
-    panel.classList.toggle("hidden", !opening);
-    $("quick-add-btn").textContent = opening ? "×" : "+";
-    if (opening) {
-      // The ordinary + button always opens at its usual bottom-left spot,
-      // even if a right-click left the panel floating near the cursor.
-      panel.classList.remove("floating");
-      panel.style.left = "";
-      panel.style.top = "";
-      renderSpeciesChips();
-    } else {
-      contextMenuWorldPos = null; // closing without creating cancels any pending placement
-    }
+    if (!panel.classList.contains("hidden")) { closeQuickAdd(); return; }
+    panel.classList.remove("hidden");
+    $("quick-add-btn").textContent = "×";
+    // The ordinary + button always opens at its usual bottom-left spot,
+    // even if a right-click left the panel floating near the cursor.
+    panel.classList.remove("floating");
+    panel.style.left = "";
+    panel.style.top = "";
+    renderSpeciesChips();
   });
 
   $("add-property-row").addEventListener("click", () => addQuickAddRow());
+
+  // Enter creates the mote instead of requiring a click on the Create
+  // button, as long as focus is on one of the panel's own text inputs
+  // (so it doesn't fire from, say, a button that happens to have focus).
+  $("quick-add").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.tagName === "INPUT") {
+      e.preventDefault();
+      $("create-mote-btn").click();
+    }
+  });
+
+  // Matches the context menu's own dismiss-on-outside-click pattern.
+  // Clicks on the toggle button are excluded since its own handler above
+  // already opens/closes the panel; clicks inside the context menu are
+  // excluded too, since "New mote here" is itself the click that opens
+  // this panel and would otherwise immediately close it again on the
+  // same bubble.
+  document.addEventListener("click", (e) => {
+    if ($("quick-add").classList.contains("hidden")) return;
+    if (
+      $("quick-add").contains(e.target) ||
+      $("quick-add-btn").contains(e.target) ||
+      $("context-menu").contains(e.target)
+    ) return;
+    closeQuickAdd();
+  });
 
   $("create-mote-btn").addEventListener("click", async () => {
     if (simBlocked()) return;
@@ -817,15 +900,13 @@ function setupQuickAdd() {
     const mote = quickAddSpeciesId
       ? await call(api.create_instance(quickAddSpeciesId, props))
       : await call(api.create_mote(props));
-    $("quick-add").classList.add("hidden");
-    $("quick-add-btn").textContent = "+";
-    resetQuickAddRows();
-    await refreshMoteCache();
     // "New mote here" (right-click on empty canvas) remembers the click's
     // world position so the mote lands under the cursor instead of at its
     // usual hash-seeded spot; the ordinary + button leaves this unset.
     const placeAt = contextMenuWorldPos;
-    contextMenuWorldPos = null;
+    closeQuickAdd();
+    resetQuickAddRows();
+    await refreshMoteCache();
     await selectMote(mote.id, { pan: !placeAt });
     if (placeAt) {
       graph.placeAt(mote.id, placeAt.x, placeAt.y);
@@ -931,8 +1012,28 @@ function setupSpeciesControls() {
 
 // ---- search palette ----
 
+// Matches "key = value" (or "key=value"), e.g. "priority = high" --
+// structured equality on a specific property, rather than the substring
+// search below being asked to guess that "priority" is a key and "high"
+// is its value out of a single blob of text.
+const KEY_VALUE_QUERY_RE = /^\s*([^=\s][^=]*?)\s*=\s*(.*)$/;
+
 function matchesQuery(mote, query) {
   if (!query) return true;
+
+  const kv = query.match(KEY_VALUE_QUERY_RE);
+  if (kv) {
+    const key = kv[1].trim().toLowerCase();
+    const value = kv[2].trim().toLowerCase();
+    for (const [k, v] of Object.entries(mote.properties || {})) {
+      if (k.toLowerCase() !== key) continue;
+      if (!value) return true; // "key =" with nothing after it: any value matches
+      const vs = typeof v === "string" ? v : JSON.stringify(v);
+      if (vs.toLowerCase() === value) return true;
+    }
+    return false;
+  }
+
   const q = query.toLowerCase();
   if (nodeLabel(mote).toLowerCase().includes(q)) return true;
   for (const [k, v] of Object.entries(mote.properties || {})) {
@@ -1373,6 +1474,7 @@ function setupViewControls() {
 
   $("delete-mote-btn").addEventListener("click", deleteSelection);
   $("delete-selection-btn").addEventListener("click", deleteSelection);
+  $("delete-relationship-selection-btn").addEventListener("click", deleteRelationshipSelection);
 }
 
 function setupSimulation() {
@@ -1638,6 +1740,9 @@ function setupKeyboard() {
       if (graph.selectedIds.size > 0) {
         e.preventDefault();
         deleteSelection();
+      } else if (graph.selectedRelIds.size > 0) {
+        e.preventDefault();
+        deleteRelationshipSelection();
       }
       return;
     }
@@ -1683,12 +1788,7 @@ function setupKeyboard() {
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
-    if (!$("quick-add").classList.contains("hidden")) {
-      $("quick-add").classList.add("hidden");
-      $("quick-add-btn").textContent = "+";
-      contextMenuWorldPos = null;
-      return;
-    }
+    if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
     // The sim bar is non-blocking (the rest of the UI stays usable while
     // it's open), so it sits behind every other panel in the Esc chain --
@@ -1729,7 +1829,8 @@ async function init() {
     onBoxSelect: updateSelectBox,
     onSelectionChanged: syncSelectionPanel,
     onContextMenu: openContextMenu,
-    onRelationshipSelected: (id) => openRelationshipPanel(id),
+    onRelationshipsSelected: (ids) =>
+      ids.length === 1 ? openRelationshipPanel(ids[0]) : renderMultiRelationshipPanel(ids),
   });
   window.graph = graph;
 

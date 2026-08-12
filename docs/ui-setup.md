@@ -14,6 +14,8 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 | Gesture | Action |
 |---|---|
 | Left-click a mote | Select it |
+| Left-click an edge | Select the relationship it represents |
+| Shift+Left-click an edge | Add/remove that relationship from the selection |
 | Left-click empty canvas | Deselect |
 | Left-drag a mote | Move + pin it (drags the whole selection together if it's part of one) |
 | Left-drag empty canvas | Box-select (hold Shift to add to the current selection) |
@@ -32,6 +34,21 @@ Motes highlight live as a box-select drag grows over them, not only once
 the mouse is released. Copying more than one mote preserves their
 relative layout on paste. Gardens (switch/create/export/import/delete)
 live in a modal opened from the topbar's garden button, not a dropdown.
+
+Shift+clicking edges builds up a relationship selection the same way
+box-select does for motes, just one at a time rather than by dragging a
+rectangle -- there's no edge-aware box-select. Selecting relationships
+and selecting motes are mutually exclusive, same as a single relationship
+and a single mote already were: picking one kind clears the other. The
+detail panel's bulk delete button (and Delete/Backspace) act on whichever
+kind is currently selected.
+
+The search palette (Ctrl/Cmd+K) also accepts a `key = value` query (e.g.
+`priority = high`) instead of the usual substring match across every
+mote's label and properties -- an exact, case-insensitive match on one
+named property. Combine it with the species/relationship filter chips for
+something like "every Task with priority = high." Anything more involved
+than that is expected to live in external BI software instead, not here.
 
 Deleting motes/relationships or a garden surfaces a toast with an "Undo"
 action (also triggerable with Ctrl/Cmd+Z) for a few seconds afterward.
@@ -173,10 +190,13 @@ Esc/Del, arrow-key navigation, the gardens modal's list/switch/
 create/delete, undoing a delete via the toast button and Ctrl+Z, the
 url property's Open button, dragging/pinning a whole multi-selection
 together, reserved-name badges, the resizable detail panel, selecting
-and inspecting a relationship by clicking its edge, the "New mote here"
-form opening near the click, a hidden species' instances actually
-dropping out of the physics loop instead of just not being drawn, and
-the Export to Calendar button -- with
+and inspecting a relationship by clicking its edge, shift+click building
+a multi-relationship selection and bulk-deleting it, the "New mote here"
+form opening near the click, creating a mote by pressing Enter in that
+form instead of clicking Create, that form closing on an outside click,
+the search palette's `key = value` exact-match query, a hidden species'
+instances actually dropping out of the physics loop instead of just not
+being drawn, and the Export to Calendar button -- with
 `api.export_to_google_calendar` itself stubbed, since the real OAuth/
 network path needs a real Google account and has no place in an
 automated, offline suite) against a throwaway temp `GARDENS_DIR` and

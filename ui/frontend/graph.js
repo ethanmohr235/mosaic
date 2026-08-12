@@ -19,7 +19,7 @@ const MIN_SCALE = 0.2;
 const MAX_SCALE = 3;
 const INITIAL_SCALE = 0.75;
 const HIT_RADIUS = 14;
-const EDGE_HIT_RADIUS = 8;
+const EDGE_HIT_RADIUS = 12;
 const DRAG_THRESHOLD = 4;
 const PARALLEL_EDGE_BOW = 32;
 
@@ -63,7 +63,7 @@ class MonossGraph {
     this.hiddenSpecies = new Set();
     this.hiddenRelTypes = new Set();
     this.selectedIds = new Set();
-    this.selectedRelId = null;
+    this.selectedRelIds = new Set();
     this.hoverId = null;
     this.connectSourceId = null;
     this.simActive = false;        // a preview is open -- draws the dashed viewport border
@@ -251,7 +251,7 @@ class MonossGraph {
   select(ids, { pan = true } = {}) {
     const list = ids == null ? [] : Array.isArray(ids) ? ids : [ids];
     this.selectedIds = new Set(list);
-    this.selectedRelId = null;
+    this.selectedRelIds = new Set();
     if (pan && list.length === 1) {
       const node = this.nodes.get(list[0]);
       if (node) {
@@ -265,7 +265,18 @@ class MonossGraph {
    *  only ever shows one kind of thing at a time. */
   selectRelationship(id) {
     this.selectedIds = new Set();
-    this.selectedRelId = id;
+    this.selectedRelIds = new Set([id]);
+  }
+
+  /** Shift+click on an edge, mirroring how shift+drag unions motes via
+   *  box-select -- adds/removes just that one relationship rather than
+   *  replacing the whole selection. Still mutually exclusive with node
+   *  selection. */
+  toggleRelationshipSelection(id) {
+    this.selectedIds = new Set();
+    const next = new Set(this.selectedRelIds);
+    next.has(id) ? next.delete(id) : next.add(id);
+    this.selectedRelIds = next;
   }
 
   /** The single selected id, or null if zero or several are selected --
@@ -471,7 +482,7 @@ class MonossGraph {
 
   _drawEdges(ctx, bg, neighbours) {
     const parallel = this._parallelIndex();
-    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId || !!this.selectedRelId;
+    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId || this.selectedRelIds.size > 0;
     ctx.font = '10px "IBM Plex Sans", sans-serif';
 
     for (const rel of this.relationships) {
@@ -482,7 +493,7 @@ class MonossGraph {
       const emphasized =
         this.selectedIds.has(rel.from_id) || this.selectedIds.has(rel.to_id) ||
         rel.from_id === this.hoverId || rel.to_id === this.hoverId ||
-        rel.id === this.selectedRelId;
+        this.selectedRelIds.has(rel.id);
       const dimmed = anyFocus && !emphasized;
       ctx.strokeStyle = emphasized
         ? "oklch(0.80 0.13 70 / 0.95)"
@@ -523,7 +534,7 @@ class MonossGraph {
 
   _drawNodes(ctx, labelBg, neighbours) {
     const byId = new Map(this.motes.map((m) => [m.id, m]));
-    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId || !!this.selectedRelId;
+    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId || this.selectedRelIds.size > 0;
 
     for (const [id, node] of this.nodes) {
       const mote = byId.get(id);
@@ -835,18 +846,22 @@ class MonossGraph {
       if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(null); // clear the rect overlay
 
       if (!moved) {
-        // A plain click on empty canvas: try an edge first (relationships
-        // have no multi-select, so this only applies outside shift-click),
-        // then fall back to deselect. Shift-click on empty space is a
-        // no-op rather than clearing an existing selection -- shift means
-        // "add to", and there's nothing under the cursor to add.
-        if (!additive) {
-          const relId = this._hitTestEdge(e.clientX, e.clientY);
-          if (relId) {
-            this.selectRelationship(relId);
-            if (this.callbacks.onRelationshipSelected) this.callbacks.onRelationshipSelected(relId);
-            return;
+        // A plain click on empty canvas: try an edge first, then fall back
+        // to deselect. Shift+click on an edge toggles it into/out of the
+        // relationship selection instead of replacing it. Shift-click on
+        // truly empty space (no edge under the cursor) is a no-op rather
+        // than clearing an existing selection -- shift means "add to", and
+        // there's nothing under the cursor to add.
+        const relId = this._hitTestEdge(e.clientX, e.clientY);
+        if (relId) {
+          if (additive) this.toggleRelationshipSelection(relId);
+          else this.selectRelationship(relId);
+          if (this.callbacks.onRelationshipsSelected) {
+            this.callbacks.onRelationshipsSelected([...this.selectedRelIds]);
           }
+          return;
+        }
+        if (!additive) {
           this.select(null);
           if (this.callbacks.onSelectionChanged) this.callbacks.onSelectionChanged([]);
         }
