@@ -1058,6 +1058,69 @@ def run_checks(window):
 
     check("multi-select copy/paste preserves relative layout", multi_copy_paste_preserves_relative_layout)
 
+    def copy_paste_reproduces_every_relationship():
+        # Regression: copy/paste used to only recreate a copied mote's
+        # species relationship, silently dropping every other one --
+        # including a relationship directly between two copied motes.
+        result = js_async(window, """
+            async () => {
+                const species = await api.create_mote({name: 'Widget'});
+                const a = await api.create_mote({name: 'rel-A'});
+                const b = await api.create_mote({name: 'rel-B'});
+                await api.create_relationship(a.id, b.id, 'knows');
+                await api.set_species(a.id, species.id);
+                window.__rel = {a: a.id, b: b.id, species: species.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"copy-relationships setup failed: {result}"
+        ids = json.loads(js(window, "JSON.stringify(window.__rel)"))
+
+        js(window, "graph.pin(window.__rel.a); graph.placeAt(window.__rel.a, -500, -500);")
+        js(window, "graph.pin(window.__rel.b); graph.placeAt(window.__rel.b, -300, -500);")
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+
+        js(window, "graph.select([window.__rel.a, window.__rel.b], {pan: false});")
+        time.sleep(0.3)
+        ax, ay = node_xy(window, "window.__rel.a")
+        right_click(window, ax, ay)
+        time.sleep(0.5)
+        click_menu_item(window, "Copy 2 motes")
+        time.sleep(0.5)
+
+        right_click(window, 700, 550)
+        time.sleep(0.5)
+        click_menu_item(window, "Paste 2 motes")
+        time.sleep(2.5)
+
+        motes = json.loads(js_async(window, "async () => { window.__result = await api.list_motes(); }"))
+        new_a = next(m for m in motes if m["properties"].get("name") == "rel-A" and m["id"] != ids["a"])
+        new_b = next(m for m in motes if m["properties"].get("name") == "rel-B" and m["id"] != ids["b"])
+
+        rels_new_a = json.loads(js_async(window, f"""
+            async () => {{ window.__result = await api.mote_relationships({json.dumps(new_a["id"])}); }}
+        """))
+        knows_between_copies = any(
+            r["type"] == "knows" and {r["from_id"], r["to_id"]} == {new_a["id"], new_b["id"]}
+            for r in rels_new_a
+        )
+        assert knows_between_copies, (
+            f"a relationship between two copied motes should reproduce between their pasted "
+            f"copies, got {rels_new_a}"
+        )
+
+        species_rel = [r for r in rels_new_a if r["type"] == "instance_of"]
+        assert any(r["to_id"] == ids["species"] for r in species_rel), (
+            f"a relationship to a mote outside the selection should still point at the "
+            f"original, got {species_rel}"
+        )
+
+    check("copy/paste reproduces every relationship, not just species", copy_paste_reproduces_every_relationship)
+
     def ctrl_c_ctrl_v_round_trip():
         result = js_async(window, """
             async () => {

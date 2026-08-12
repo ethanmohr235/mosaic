@@ -16,7 +16,8 @@ let searchHighlight = -1;
 const searchSpeciesFilter = new Set();
 const searchRelFilter = new Set();
 let multiSelectIds = null;             // non-null while the aggregate panel is open
-let clipboard = null;                  // array of {properties, speciesIds, offset} from Copy
+let clipboard = null;                  // array of {sourceId, properties, offset} from Copy
+let clipboardRelationships = null;     // every relationship touching a copied mote, original ids
 let pasteRepeatCount = 0;              // steps repeated Ctrl+V pastes apart so they don't stack
 let contextMenuWorldPos = null;        // world coords the context menu was opened at
 
@@ -985,19 +986,32 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
 /** clipboard is an array, one entry per copied mote, each carrying an
  *  offset from the copied group's centroid (in world units) -- so pasting
  *  a group reproduces its relative layout instead of stacking every mote
- *  on the same point. pasteRepeatCount tracks how many times the current
- *  clipboard has been pasted via Ctrl+V, so repeated pastes step apart
- *  instead of landing exactly on top of each other. */
-function copySelection(ids) {
+ *  on the same point. clipboardRelationships holds every relationship
+ *  touching any copied mote (species included -- instance_of is just an
+ *  ordinary relationship type, nothing special-cased about it), keyed by
+ *  the *original* mote ids; pasteAt() remaps the ones that point at
+ *  another copied mote to its new counterpart, and leaves the rest (e.g.
+ *  a species outside the selection) pointing at the original.
+ *  pasteRepeatCount tracks how many times the current clipboard has been
+ *  pasted via Ctrl+V, so repeated pastes step apart instead of landing
+ *  exactly on top of each other. */
+async function copySelection(ids) {
   const nodes = ids.map((id) => graph.nodes.get(id)).filter(Boolean);
   if (nodes.length === 0) return;
   const cx = nodes.reduce((s, n) => s + n.x, 0) / nodes.length;
   const cy = nodes.reduce((s, n) => s + n.y, 0) / nodes.length;
+
+  const relsById = new Map();
+  for (const id of ids) {
+    for (const rel of await call(api.mote_relationships(id))) relsById.set(rel.id, rel);
+  }
+
   clipboard = ids.map((id, i) => ({
+    sourceId: id,
     properties: { ...moteById(id).properties },
-    speciesIds: speciesIdsOf(id),
     offset: { dx: nodes[i].x - cx, dy: nodes[i].y - cy },
   }));
+  clipboardRelationships = [...relsById.values()];
   pasteRepeatCount = 0;
   showToast(clipboard.length > 1 ? `Copied ${clipboard.length} motes.` : "Copied.");
 }
@@ -1005,10 +1019,16 @@ function copySelection(ids) {
 async function pasteAt(worldX, worldY) {
   if (!clipboard) return;
   const placed = [];
+  const idMap = new Map(); // original mote id -> newly pasted mote id
   for (const entry of clipboard) {
     const mote = await call(api.create_mote(entry.properties));
-    for (const speciesId of entry.speciesIds) await call(api.set_species(mote.id, speciesId));
+    idMap.set(entry.sourceId, mote.id);
     placed.push({ id: mote.id, x: worldX + entry.offset.dx, y: worldY + entry.offset.dy });
+  }
+  for (const rel of clipboardRelationships) {
+    const fromId = idMap.get(rel.from_id) ?? rel.from_id;
+    const toId = idMap.get(rel.to_id) ?? rel.to_id;
+    await call(api.create_relationship(fromId, toId, rel.type));
   }
   await refreshMoteCache();
   // select:false -- the freshly-pasted group is about to become the
