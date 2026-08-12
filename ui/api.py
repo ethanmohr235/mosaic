@@ -45,6 +45,29 @@ def _coerce_properties(raw_properties: dict) -> dict:
     return {k: _coerce(v) for k, v in raw_properties.items()}
 
 
+def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
+    """Shapes a simulation_repo.TimeSeriesResult for the JS bridge.
+    StepResult.values/unsolved are keyed by (mote_id, key) tuples, which
+    don't survive JSON -- changes (already plain mote_id/key/old/new
+    dicts via Change) carry everything the scrub UI needs, so unsolved
+    counts stay prose-only inside each step's summary rather than being
+    serialized separately."""
+    return {
+        "steps": [
+            {
+                "step": s.step,
+                "changes": [dataclasses.asdict(c) for c in s.changes],
+                "equation_count": s.equation_count,
+                "summary": s.summary,
+            }
+            for s in result.steps
+        ],
+        "failed_at": result.failed_at,
+        "error": result.error,
+        "run_id": result.run_id,
+    }
+
+
 def _popen_detached(args: list[str]) -> None:
     """Launches args without waiting on it (see _open_with_os_default for
     why), but still reaps the child on a background thread so it doesn't
@@ -297,20 +320,23 @@ class Api:
     # ---- simulation ----
 
     @_synchronized
-    def run_simulation(self) -> dict:
-        """A garden whose rules don't solve is an ordinary outcome to
-        report, not a crash -- so SimulationError comes back as ok:false
-        rather than propagating across the JS bridge as an exception."""
-        try:
-            result = simulation_repo.run_simulation(self._conn)
-        except simulation_repo.SimulationError as e:
-            return {"ok": False, "message": str(e)}
-        return {
-            "ok": True,
-            "tick": result.tick,
-            "written": len(result.changes),
-            "message": result.summary,
-        }
+    def preview_simulation(self, step_count: int) -> dict:
+        """Runs step_count steps entirely in memory -- nothing is written
+        to this garden. The frontend scrubs through the returned steps
+        client-side; committing a chosen step is a separate call."""
+        result = simulation_repo.run_time_series(self._conn, step_count, commit=False)
+        return _time_series_payload(result)
+
+    @_synchronized
+    def commit_simulation(self, step_count: int) -> dict:
+        """Re-runs step_count steps (deterministic given the same garden
+        and rules) and this time writes the final cumulative result,
+        logging one entry the same way a single run_simulation() always
+        has. Never trusts step values echoed back from a prior preview
+        call -- the only numbers that ever reach the database are ones
+        this recomputes itself."""
+        result = simulation_repo.run_time_series(self._conn, step_count, commit=True)
+        return _time_series_payload(result)
 
     # ---- google calendar ----
 

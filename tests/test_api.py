@@ -437,3 +437,53 @@ def test_reserved_names_returns_properties_and_relationship_types(api):
     assert "url" in result["properties"]
     assert "instance_of" in result["relationshipTypes"]
     assert result["properties"] == sorted(result["properties"]), "should already be sorted for the frontend"
+
+
+# ---- time-based simulation ----
+
+def _seed_compounding_rule(api):
+    """Mirrors tests/test_simulation.py's `compounding` fixture, but
+    through the JS-facing Api rather than core.simulation directly."""
+    species = api.create_mote({"name": "Account", "unknowns": "balance"})
+    rule = api.create_mote({"name": "Growth", "equation": "balance == prev(balance) * 1.05"})
+    api.create_relationship(rule["id"], species["id"], "applies_to")
+    mote = api.create_mote({"name": "acct1", "balance": 100.0})
+    api.set_species(mote["id"], species["id"])
+    return mote["id"]
+
+
+def test_preview_simulation_returns_a_step_per_requested_count(api):
+    _seed_compounding_rule(api)
+    result = api.preview_simulation(4)
+    assert result["failed_at"] is None
+    assert result["error"] is None
+    assert result["run_id"] is None
+    assert [s["step"] for s in result["steps"]] == [0, 1, 2, 3]
+    assert result["steps"][0]["changes"][0]["new_value"] == pytest.approx(105.0)
+
+
+def test_preview_simulation_never_writes(api):
+    mote_id = _seed_compounding_rule(api)
+    before = api.get_mote(mote_id)
+    api.preview_simulation(10)
+    assert api.get_mote(mote_id) == before
+
+
+def test_commit_simulation_writes_the_final_step_and_returns_a_run_id(api):
+    mote_id = _seed_compounding_rule(api)
+    result = api.commit_simulation(3)
+    assert result["run_id"] is not None
+    assert api.get_mote(mote_id)["properties"]["balance"] == pytest.approx(115.7625)
+
+
+def test_preview_simulation_reports_a_failure_without_raising(api):
+    species = api.create_mote({"name": "S", "unknowns": "a, b"})
+    rule = api.create_mote({"name": "underdetermined", "equation": "a + b == 10"})
+    api.create_relationship(rule["id"], species["id"], "applies_to")
+    mote = api.create_mote({"name": "m"})
+    api.set_species(mote["id"], species["id"])
+
+    result = api.preview_simulation(5)
+    assert result["failed_at"] == 0
+    assert "underdetermined" in result["error"]
+    assert result["steps"] == []
