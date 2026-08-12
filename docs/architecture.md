@@ -54,6 +54,9 @@ timed event, days for an all-day one). `recurrence` is a raw RFC 5545
 RRULE string (e.g. `FREQ=WEEKLY;BYDAY=TU,TH`), passed straight through to
 Google rather than parsed or validated locally -- one Calendar event with
 a rule represents the whole series, so this needed no other change.
+Removing the property is itself exported: the next export explicitly
+clears recurrence on the existing event rather than leaving the old rule
+in place.
 `gcal_event_id` gets written back onto a mote the first time it's
 exported to Google Calendar, so re-running the export updates that event
 (the whole series, if recurring) instead of duplicating it. Every export
