@@ -15,7 +15,7 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 |---|---|
 | Left-click a mote | Select it |
 | Left-click empty canvas | Deselect |
-| Left-drag a mote | Move + pin it |
+| Left-drag a mote | Move + pin it (drags the whole selection together if it's part of one) |
 | Left-drag empty canvas | Box-select (hold Shift to add to the current selection) |
 | Ctrl+Left-drag from a mote | Connect it to another mote |
 | Middle-drag | Pan |
@@ -157,7 +157,8 @@ simulation, live box-select, middle-drag pan, the context menu's
 copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
 Esc/Del, arrow-key navigation, the gardens modal's list/switch/
 create/delete, undoing a delete via the toast button and Ctrl+Z, the
-url property's Open button, and the Export to Calendar button -- with
+url property's Open button, dragging/pinning a whole multi-selection
+together, and the Export to Calendar button -- with
 `api.export_to_google_calendar` itself stubbed, since the real OAuth/
 network path needs a real Google account and has no place in an
 automated, offline suite) against a throwaway temp `GARDENS_DIR` and

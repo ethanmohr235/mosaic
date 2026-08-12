@@ -1147,6 +1147,99 @@ def run_checks(window):
 
     check("Pin/Unpin toggles from the context menu", pin_unpin_via_menu)
 
+    def dragging_one_mote_moves_the_whole_selection():
+        result = js_async(window, """
+            async () => {
+                const a = await api.create_mote({name: 'drag-A'});
+                const b = await api.create_mote({name: 'drag-B'});
+                const c = await api.create_mote({name: 'drag-C'});
+                window.__drag = {a: a.id, b: b.id, c: c.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"group-drag setup failed: {result}"
+
+        js(window, "graph.pin(window.__drag.a); graph.placeAt(window.__drag.a, -400, -400);")
+        js(window, "graph.pin(window.__drag.b); graph.placeAt(window.__drag.b, -200, -400);")
+        js(window, "graph.pin(window.__drag.c); graph.placeAt(window.__drag.c, 2000, 2000);")
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+
+        js(window, "graph.select([window.__drag.a, window.__drag.b], {pan: false});")
+        time.sleep(0.3)
+        before_b = json.loads(js(window, "JSON.stringify({x: graph.nodes.get(window.__drag.b).x, y: graph.nodes.get(window.__drag.b).y})"))
+        before_a = json.loads(js(window, "JSON.stringify({x: graph.nodes.get(window.__drag.a).x, y: graph.nodes.get(window.__drag.a).y})"))
+        ax, ay = node_xy(window, "window.__drag.a")
+        drag(window, ax, ay, ax + 150, ay - 80)
+        time.sleep(1.0)
+
+        after_a = json.loads(js(window, "JSON.stringify({x: graph.nodes.get(window.__drag.a).x, y: graph.nodes.get(window.__drag.a).y})"))
+        after_b = json.loads(js(window, "JSON.stringify({x: graph.nodes.get(window.__drag.b).x, y: graph.nodes.get(window.__drag.b).y})"))
+        adx, ady = after_a["x"] - before_a["x"], after_a["y"] - before_a["y"]
+        bdx, bdy = after_b["x"] - before_b["x"], after_b["y"] - before_b["y"]
+        assert abs(adx - bdx) < 0.5 and abs(ady - bdy) < 0.5, (
+            f"B should move by the same delta as the dragged A: A moved ({adx},{ady}), B moved ({bdx},{bdy})"
+        )
+        assert js(window, "graph.nodes.get(window.__drag.b).pinned") is True, (
+            "the un-dragged group member should also end up pinned"
+        )
+
+        c_pos = json.loads(js(window, "JSON.stringify({x: graph.nodes.get(window.__drag.c).x, y: graph.nodes.get(window.__drag.c).y})"))
+        assert c_pos == {"x": 2000, "y": 2000}, f"a mote outside the selection must not move, got {c_pos}"
+
+    check("dragging one mote moves its whole multi-selection together", dragging_one_mote_moves_the_whole_selection)
+
+    def group_pin_unpin_via_menu():
+        result = js_async(window, """
+            async () => {
+                const a = await api.create_mote({name: 'grouppin-A'});
+                const b = await api.create_mote({name: 'grouppin-B'});
+                window.__grouppin = {a: a.id, b: b.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"group pin/unpin setup failed: {result}"
+
+        # placeAt() itself pins, so position first and unpin after -- the
+        # reverse order would silently leave both pinned.
+        js(window, "graph.placeAt(window.__grouppin.a, -300, -300); graph.placeAt(window.__grouppin.b, -100, -300);")
+        js(window, "graph.unpin(window.__grouppin.a); graph.unpin(window.__grouppin.b);")
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+
+        js(window, "graph.select([window.__grouppin.a, window.__grouppin.b], {pan: false});")
+        time.sleep(0.3)
+        ax, ay = node_xy(window, "window.__grouppin.a")
+        right_click(window, ax, ay)
+        time.sleep(0.5)
+        menu_text = js(window, "document.getElementById('context-menu').innerText")
+        assert "Pin 2 motes" in menu_text, f"expected a pluralized Pin label when both are unpinned, got {menu_text!r}"
+        click_menu_item(window, "Pin 2 motes")
+        time.sleep(0.5)
+        pinned = json.loads(js(window, """
+            JSON.stringify({a: graph.nodes.get(window.__grouppin.a).pinned, b: graph.nodes.get(window.__grouppin.b).pinned})
+        """))
+        assert pinned == {"a": True, "b": True}, f"Pin on a multi-selection should pin every member, got {pinned}"
+
+        right_click(window, ax, ay)
+        time.sleep(0.5)
+        menu_text2 = js(window, "document.getElementById('context-menu').innerText")
+        assert "Unpin 2 motes" in menu_text2, f"expected Unpin once every member is pinned, got {menu_text2!r}"
+        click_menu_item(window, "Unpin 2 motes")
+        time.sleep(0.5)
+        unpinned = json.loads(js(window, """
+            JSON.stringify({a: graph.nodes.get(window.__grouppin.a).pinned, b: graph.nodes.get(window.__grouppin.b).pinned})
+        """))
+        assert unpinned == {"a": False, "b": False}, f"Unpin on a multi-selection should unpin every member, got {unpinned}"
+
+    check("Pin/Unpin on a multi-selection acts on the whole group", group_pin_unpin_via_menu)
+
     def multi_select_species_breakdown():
         result = js_async(window, """
             async () => {

@@ -951,7 +951,15 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     // selection, matching the precedent Delete already set.
     const ids = graph.selectedIds.has(targetId) ? [...graph.selectedIds] : [targetId];
     addMenuItem(menu, ids.length > 1 ? `Copy ${ids.length} motes` : "Copy", () => copySelection(ids));
-    addMenuItem(menu, node && node.pinned ? "Unpin" : "Pin", () => togglePin(targetId));
+    // Mixed pinned/unpinned within a selection reads as "Pin" and pins
+    // everything; only once every member is already pinned does it flip
+    // to "Unpin".
+    const selectedNodes = ids.map((i) => graph.nodes.get(i)).filter(Boolean);
+    const allPinned = selectedNodes.length > 0 && selectedNodes.every((n) => n.pinned);
+    const pinLabel = ids.length > 1
+      ? (allPinned ? `Unpin ${ids.length} motes` : `Pin ${ids.length} motes`)
+      : (node && node.pinned ? "Unpin" : "Pin");
+    addMenuItem(menu, pinLabel, () => togglePin(ids));
     const sep = document.createElement("div");
     sep.className = "menu-sep";
     menu.appendChild(sep);
@@ -1015,10 +1023,12 @@ async function pasteAt(worldX, worldY) {
   showToast(placed.length > 1 ? `Pasted ${placed.length} motes.` : "Pasted.");
 }
 
-function togglePin(id) {
-  const node = graph.nodes.get(id);
-  if (!node) return;
-  if (node.pinned) graph.unpin(id); else graph.pin(id);
+function togglePin(ids) {
+  const nodes = ids.map((id) => graph.nodes.get(id)).filter(Boolean);
+  const allPinned = nodes.length > 0 && nodes.every((n) => n.pinned);
+  for (const id of ids) {
+    if (allPinned) graph.unpin(id); else graph.pin(id);
+  }
   savePositions();
 }
 

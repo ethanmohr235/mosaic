@@ -615,7 +615,19 @@ class MonossGraph {
       return;
     }
     if (id) {
-      this.dragState = { id, moved: false, startX: e.clientX, startY: e.clientY };
+      // Dragging a mote that's part of the current multi-selection moves
+      // the whole group together; dragging any other mote (including one
+      // outside a smaller/different selection) only moves that one.
+      const groupIds = this.selectedIds.has(id) && this.selectedIds.size > 1
+        ? [...this.selectedIds]
+        : [id];
+      const startPositions = new Map(groupIds.map((gid) => {
+        const n = this.nodes.get(gid);
+        return [gid, { x: n.x, y: n.y }];
+      }));
+      this.dragState = {
+        id, moved: false, startX: e.clientX, startY: e.clientY, groupIds, startPositions,
+      };
       return;
     }
     // Empty canvas, plain left button -> box-select. Shift keeps whatever
@@ -641,13 +653,22 @@ class MonossGraph {
         this.dragState.moved = true;
       }
       if (this.dragState.moved) {
-        const node = this.nodes.get(this.dragState.id);
-        if (node) {
-          const world = this._worldAt(e.clientX, e.clientY);
-          node.x = world.x; node.y = world.y;
-          node.pinned = true; node.vx = 0; node.vy = 0;
-          this.alpha = Math.max(this.alpha, 0.3);
+        // Delta from the primary (grabbed) node's own start position is
+        // applied to every group member's own start position, rather than
+        // snapping each one to the cursor directly -- that would collapse
+        // the whole group onto a single point instead of moving it as one.
+        const world = this._worldAt(e.clientX, e.clientY);
+        const startPrimary = this.dragState.startPositions.get(this.dragState.id);
+        const dx = world.x - startPrimary.x;
+        const dy = world.y - startPrimary.y;
+        for (const gid of this.dragState.groupIds) {
+          const n = this.nodes.get(gid);
+          if (!n) continue;
+          const start = this.dragState.startPositions.get(gid);
+          n.x = start.x + dx; n.y = start.y + dy;
+          n.pinned = true; n.vx = 0; n.vy = 0;
         }
+        this.alpha = Math.max(this.alpha, 0.3);
       }
       return;
     }
