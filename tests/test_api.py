@@ -318,11 +318,12 @@ def test_export_to_google_calendar_creates_events_and_writes_back_ids(api, monke
         return f"event-for-{payload['summary']}"
 
     monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
     monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
 
     result = api.export_to_google_calendar()
 
-    assert result == {"created": 1, "updated": 0, "skipped": 0, "total": 1}
+    assert result == {"created": 1, "updated": 0, "skipped": 0, "deleted": 0, "total": 1}
     assert pushed == [("Exam", None)]
     assert api.get_mote(a["id"])["properties"]["gcal_event_id"] == "event-for-Exam"
     assert "gcal_event_id" not in api.get_mote(b["id"])["properties"]
@@ -337,13 +338,14 @@ def test_export_to_google_calendar_reuses_the_existing_event_id_on_a_second_run(
         return "same-event-id"
 
     monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
     monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
 
     first = api.export_to_google_calendar()
     second = api.export_to_google_calendar()
 
-    assert first == {"created": 1, "updated": 0, "skipped": 0, "total": 1}
-    assert second == {"created": 0, "updated": 1, "skipped": 0, "total": 1}
+    assert first == {"created": 1, "updated": 0, "skipped": 0, "deleted": 0, "total": 1}
+    assert second == {"created": 0, "updated": 1, "skipped": 0, "deleted": 0, "total": 1}
     assert calls == [None, "same-event-id"]
     assert api.get_mote(a["id"])["properties"]["gcal_event_id"] == "same-event-id"
 
@@ -352,11 +354,12 @@ def test_export_to_google_calendar_skips_a_mote_with_an_unparseable_date(api, mo
     api.create_mote({"name": "Bad", "date": "not-a-date"})
     calls = []
     monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
     monkeypatch.setattr(ui.api.gcal_repo, "push_event", lambda *a, **k: calls.append(1))
 
     result = api.export_to_google_calendar()
 
-    assert result == {"created": 0, "updated": 0, "skipped": 1, "total": 1}
+    assert result == {"created": 0, "updated": 0, "skipped": 1, "deleted": 0, "total": 1}
     assert calls == []
 
 
@@ -371,9 +374,58 @@ def test_export_to_google_calendar_does_not_write_back_if_the_garden_changed_mid
         return "event-id"
 
     monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
     monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
 
     api.export_to_google_calendar()
 
     api.switch_garden("test")
     assert "gcal_event_id" not in api.get_mote(a["id"])["properties"]
+
+
+def test_export_to_google_calendar_deletes_an_event_whose_mote_is_gone(api, monkeypatch):
+    deleted = []
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(
+        ui.api.gcal_repo, "list_managed_events",
+        lambda credentials: {"never-existed-or-deleted": "orphan-event-id"},
+    )
+    monkeypatch.setattr(ui.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
+
+    result = api.export_to_google_calendar()
+
+    assert deleted == ["orphan-event-id"]
+    assert result["deleted"] == 1
+
+
+def test_export_to_google_calendar_deletes_an_event_whose_mote_lost_its_date(api, monkeypatch):
+    m = api.create_mote({"name": "No longer dated"})  # never had a date
+    deleted = []
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(
+        ui.api.gcal_repo, "list_managed_events",
+        lambda credentials: {m["id"]: "stale-event-id"},
+    )
+    monkeypatch.setattr(ui.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
+
+    result = api.export_to_google_calendar()
+
+    assert deleted == ["stale-event-id"]
+    assert result["deleted"] == 1
+
+
+def test_export_to_google_calendar_does_not_delete_a_still_dated_motes_event(api, monkeypatch):
+    m = api.create_mote({"name": "Still dated", "date": "2026-08-15T09:00:00"})
+    deleted = []
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(
+        ui.api.gcal_repo, "list_managed_events",
+        lambda credentials: {m["id"]: "current-event-id"},
+    )
+    monkeypatch.setattr(ui.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
+    monkeypatch.setattr(ui.api.gcal_repo, "push_event", lambda credentials, payload, existing_event_id: "current-event-id")
+
+    result = api.export_to_google_calendar()
+
+    assert deleted == []
+    assert result["deleted"] == 0

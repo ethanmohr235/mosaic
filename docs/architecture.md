@@ -56,5 +56,9 @@ Google rather than parsed or validated locally -- one Calendar event with
 a rule represents the whole series, so this needed no other change.
 `gcal_event_id` gets written back onto a mote the first time it's
 exported to Google Calendar, so re-running the export updates that event
-(the whole series, if recurring) instead of duplicating it. See
-`docs/google-calendar.md` for setup and details.
+(the whole series, if recurring) instead of duplicating it. Every export
+also deletes any previously-created event whose mote is gone or no longer
+dated -- found by querying Calendar itself for everything tagged as
+MonOSS-managed (`extendedProperties.private` on each event), not a local
+record, so this stays correct even if events were edited or deleted by
+hand. See `docs/google-calendar.md` for setup and details.

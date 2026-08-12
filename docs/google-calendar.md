@@ -3,9 +3,15 @@
 Any mote with a `date` property can be pushed to Google Calendar via the
 topbar's "Export to Calendar" button. This is one-way (MonOSS → Calendar)
 and manual: clicking it walks every dated mote in the current garden and
-creates or updates a matching event. Nothing runs in the background, and
-nothing is ever deleted from your calendar automatically -- if you remove
-a mote's `date`, its old event is left alone rather than auto-deleted.
+creates or updates a matching event. Nothing runs in the background --
+export only happens when you click the button.
+
+Every export also deletes any event MonOSS previously created whose mote
+is no longer dated -- either because the mote itself was deleted, or its
+`date` property was removed. MonOSS finds these by asking Google Calendar
+directly for everything it's tagged as managing (no local record of past
+exports is kept), so this stays correct even across restarts, and even if
+you edited or deleted an event by hand in Calendar in the meantime.
 
 ## Properties
 
@@ -30,7 +36,10 @@ a mote's `date`, its old event is left alone rather than auto-deleted.
   same event (or, for a recurring one, the whole series) instead of
   creating a duplicate. You can delete this property yourself if you ever
   want the next export to create a fresh event instead of updating the
-  old one.
+  old one -- note that since the mote is still dated, its previous event
+  won't be picked up by the delete-orphan pass either, so the old one is
+  left behind rather than replaced; delete it by hand in Calendar if you
+  don't want it hanging around.
 
 ## One-time setup (you have to do this part)
 

@@ -104,6 +104,13 @@ def test_event_payload_recurrence_works_on_all_day_events_too():
     assert payload["recurrence"] == ["RRULE:FREQ=YEARLY"]
 
 
+def test_event_payload_tags_the_event_with_the_mote_id():
+    payload = event_payload(_mote({"date": "2026-08-15"}, id="mote-123"))
+    assert payload["extendedProperties"] == {
+        "private": {"monoss_mote_id": "mote-123", "managed_by": "monoss"}
+    }
+
+
 def test_dated_motes_filters_to_motes_with_a_date_property():
     motes = [
         _mote({"date": "2026-08-15"}, id="a"),
@@ -179,3 +186,55 @@ def test_push_event_falls_back_to_create_if_the_existing_event_was_deleted(monke
 
     assert event_id == "fresh-id"
     assert calls == ["PATCH", "POST"]
+
+
+def _event(event_id, mote_id):
+    return {"id": event_id, "extendedProperties": {"private": {"monoss_mote_id": mote_id, "managed_by": "monoss"}}}
+
+
+def test_list_managed_events_returns_a_mote_id_to_event_id_map(monkeypatch):
+    def fake_get(url, params, headers, timeout):
+        assert params["privateExtendedProperty"] == "managed_by=monoss"
+        return _FakeResponse(200, {"items": [_event("evt-1", "mote-a"), _event("evt-2", "mote-b")]})
+
+    monkeypatch.setattr(gcal.requests, "get", fake_get)
+
+    assert gcal.list_managed_events(_FakeCredentials()) == {"mote-a": "evt-1", "mote-b": "evt-2"}
+
+
+def test_list_managed_events_follows_pagination(monkeypatch):
+    pages = [
+        {"items": [_event("evt-1", "mote-a")], "nextPageToken": "page2"},
+        {"items": [_event("evt-2", "mote-b")]},
+    ]
+    seen_page_tokens = []
+
+    def fake_get(url, params, headers, timeout):
+        seen_page_tokens.append(params.get("pageToken"))
+        return _FakeResponse(200, pages.pop(0))
+
+    monkeypatch.setattr(gcal.requests, "get", fake_get)
+
+    result = gcal.list_managed_events(_FakeCredentials())
+
+    assert result == {"mote-a": "evt-1", "mote-b": "evt-2"}
+    assert seen_page_tokens == [None, "page2"]
+
+
+def test_delete_event_calls_the_right_url(monkeypatch):
+    calls = []
+
+    def fake_delete(url, headers, timeout):
+        calls.append(url)
+        return _FakeResponse(204, {})
+
+    monkeypatch.setattr(gcal.requests, "delete", fake_delete)
+
+    gcal.delete_event(_FakeCredentials(), "evt-1")
+
+    assert calls == [f"{gcal.EVENTS_URL}/evt-1"]
+
+
+def test_delete_event_tolerates_a_404(monkeypatch):
+    monkeypatch.setattr(gcal.requests, "delete", lambda url, headers, timeout: _FakeResponse(404, {}))
+    gcal.delete_event(_FakeCredentials(), "already-gone")  # must not raise

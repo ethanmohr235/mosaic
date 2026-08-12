@@ -1226,6 +1226,7 @@ function setupCalendarExport() {
       const result = await call(api.export_to_google_calendar());
       const parts = [`${result.created} new`, `${result.updated} updated`];
       if (result.skipped) parts.push(`${result.skipped} skipped (invalid date)`);
+      if (result.deleted) parts.push(`${result.deleted} removed`);
       showToast(`Exported ${result.total} mote${result.total === 1 ? "" : "s"} to Google Calendar: ${parts.join(", ")}.`, 6000);
     } finally {
       button.disabled = false;

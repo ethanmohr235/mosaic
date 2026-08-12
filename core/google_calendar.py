@@ -97,6 +97,14 @@ def event_payload(mote: dict) -> dict:
             rule = rule[len("RRULE:"):]
         payload["recurrence"] = [f"RRULE:{rule}"]
 
+    # managed_by is a constant sentinel (same value on every MonOSS-
+    # created event) so list_managed_events() can find all of them with
+    # one exact-match query; monoss_mote_id records which mote each one
+    # belongs to, read back out of that query's results. This is the
+    # registry that lets a next export detect and delete events whose
+    # mote is gone or no longer dated -- no local tracking file needed.
+    payload["extendedProperties"] = {"private": {"monoss_mote_id": mote["id"], "managed_by": "monoss"}}
+
     return payload
 
 
@@ -151,3 +159,33 @@ def push_event(credentials: Credentials, payload: dict, existing_event_id: str |
         response = requests.post(EVENTS_URL, json=payload, headers=headers, timeout=15)
     response.raise_for_status()
     return response.json()["id"]
+
+
+def list_managed_events(credentials: Credentials) -> dict[str, str]:
+    """mote_id -> event_id for every event MonOSS currently manages
+    (tagged with managed_by=monoss at creation time), across all pages.
+    This is queried fresh on every export rather than trusted from local
+    state, so it stays correct even if events were edited or deleted by
+    hand in Calendar."""
+    headers = {"Authorization": f"Bearer {credentials.token}"}
+    params = {"privateExtendedProperty": "managed_by=monoss", "maxResults": 2500}
+    result = {}
+    while True:
+        response = requests.get(EVENTS_URL, params=params, headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        for item in data.get("items", []):
+            mote_id = item.get("extendedProperties", {}).get("private", {}).get("monoss_mote_id")
+            if mote_id:
+                result[mote_id] = item["id"]
+        next_page = data.get("nextPageToken")
+        if not next_page:
+            return result
+        params["pageToken"] = next_page
+
+
+def delete_event(credentials: Credentials, event_id: str) -> None:
+    headers = {"Authorization": f"Bearer {credentials.token}"}
+    response = requests.delete(f"{EVENTS_URL}/{event_id}", headers=headers, timeout=15)
+    if response.status_code not in (200, 204, 404):
+        response.raise_for_status()  # 404 = already gone, treated as success

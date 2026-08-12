@@ -322,8 +322,24 @@ class Api:
         (see _open_with_os_default). Only the brief DB-touching calls
         (list_motes, update_mote) are synchronized, individually."""
         garden_at_start = self._current_garden
-        motes = gcal_repo.dated_motes(self.list_motes())
+        all_motes = self.list_motes()
+        motes = gcal_repo.dated_motes(all_motes)
+        dated_ids = {m["id"] for m in motes}
         credentials = gcal_repo.get_credentials()
+
+        # Anything MonOSS previously exported (per Calendar's own
+        # extendedProperties tag -- see event_payload) whose mote is now
+        # gone, or no longer has a `date`, gets its event deleted. This
+        # is the only place that needs to know about motes that no
+        # longer exist, and Calendar itself is the registry -- no local
+        # tracking file to keep in sync.
+        deleted = 0
+        for mote_id, event_id in gcal_repo.list_managed_events(credentials).items():
+            if self._current_garden != garden_at_start:
+                break
+            if mote_id not in dated_ids:
+                gcal_repo.delete_event(credentials, event_id)
+                deleted += 1
 
         created = updated = skipped = 0
         for mote in motes:
@@ -348,7 +364,10 @@ class Api:
             if event_id != existing_id:
                 self.update_mote(mote["id"], {"gcal_event_id": event_id})
 
-        return {"created": created, "updated": updated, "skipped": skipped, "total": len(motes)}
+        return {
+            "created": created, "updated": updated, "skipped": skipped,
+            "deleted": deleted, "total": len(motes),
+        }
 
     # ---- graph/focus ----
 
