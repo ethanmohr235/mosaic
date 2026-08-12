@@ -1,6 +1,22 @@
 import pytest
 
-from core.motes import create_mote, get_mote, list_motes, update_mote, delete_mote
+from core.motes import create_mote, get_mote, get_motes, list_motes, update_mote, delete_mote
+
+
+def _count_queries(conn, fn):
+    """Runs fn() with SQL tracing on, returns (result, query_count)."""
+    count = 0
+
+    def trace(_sql):
+        nonlocal count
+        count += 1
+
+    conn.set_trace_callback(trace)
+    try:
+        result = fn()
+    finally:
+        conn.set_trace_callback(None)
+    return result, count
 
 
 @pytest.mark.parametrize("value", [
@@ -51,6 +67,42 @@ def test_list_motes_returns_all(conn):
     motes = list_motes(conn)
     assert len(motes) == 2
     assert {m.properties["name"] for m in motes} == {"Alice", "Bob"}
+
+
+def test_list_motes_issues_a_constant_number_of_queries(conn):
+    """Regression guard: list_motes() used to issue one properties query
+    per mote (N+1). Seeding a batch and counting executed statements
+    catches that coming back even if a future change reintroduces it."""
+    for i in range(50):
+        create_mote(conn, {"name": f"mote-{i}"})
+
+    _, query_count = _count_queries(conn, lambda: list_motes(conn))
+    assert query_count <= 3, f"list_motes() should not scale with mote count, issued {query_count} queries"
+
+
+def test_get_motes_returns_in_input_order_and_skips_missing(conn):
+    a = create_mote(conn, {"name": "Alice"})
+    b = create_mote(conn, {"name": "Bob"})
+    motes = get_motes(conn, [b, "does-not-exist", a])
+    assert [m.id for m in motes] == [b, a]
+
+
+def test_get_motes_matches_get_mote_per_item(conn):
+    a = create_mote(conn, {"name": "Alice", "age": 30})
+    b = create_mote(conn, {"name": "Bob"})
+    [ma, mb] = get_motes(conn, [a, b])
+    assert ma == get_mote(conn, a)
+    assert mb == get_mote(conn, b)
+
+
+def test_get_motes_empty_list_returns_empty(conn):
+    assert get_motes(conn, []) == []
+
+
+def test_get_motes_issues_a_constant_number_of_queries(conn):
+    ids = [create_mote(conn, {"name": f"mote-{i}"}) for i in range(50)]
+    _, query_count = _count_queries(conn, lambda: get_motes(conn, ids))
+    assert query_count <= 3, f"get_motes() should not scale with id count, issued {query_count} queries"
 
 
 def test_delete_mote_returns_true_when_found(conn):

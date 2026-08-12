@@ -10,6 +10,22 @@ from core.species import (
 )
 
 
+def _count_queries(conn, fn):
+    """Runs fn() with SQL tracing on, returns (result, query_count)."""
+    count = 0
+
+    def trace(_sql):
+        nonlocal count
+        count += 1
+
+    conn.set_trace_callback(trace)
+    try:
+        result = fn()
+    finally:
+        conn.set_trace_callback(None)
+    return result, count
+
+
 def test_set_species_creates_instance_of_relationship(conn):
     resistor = create_mote(conn, {"name": "Resistor"})
     r1 = create_mote(conn, {"resistance_ohms": 100})
@@ -53,6 +69,24 @@ def test_list_species_returns_every_mote_with_instances(conn):
 def test_list_species_empty_when_no_instance_of_relationships(conn):
     create_mote(conn, {"name": "Alice"})
     assert list_species(conn) == []
+
+
+def test_species_of_and_instances_of_issue_a_constant_number_of_queries(conn):
+    """Regression guard: species_of()/instances_of() used to issue one
+    properties query per related mote (N+1)."""
+    resistor = create_mote(conn, {"name": "Resistor"})
+    multi_species_mote = create_mote(conn, {"name": "belongs to many"})
+    for i in range(50):
+        instance = create_mote(conn, {"name": f"r{i}"})
+        set_species(conn, instance, resistor)
+        species = create_mote(conn, {"name": f"s{i}"})
+        set_species(conn, multi_species_mote, species)
+
+    _, species_of_count = _count_queries(conn, lambda: species_of(conn, multi_species_mote))
+    assert species_of_count <= 3, f"species_of() should not scale with species count, issued {species_of_count} queries"
+
+    _, instances_of_count = _count_queries(conn, lambda: instances_of(conn, resistor))
+    assert instances_of_count <= 3, f"instances_of() should not scale with instance count, issued {instances_of_count} queries"
 
 
 # ---- templating ----

@@ -2,7 +2,7 @@
 import sqlite3
 
 from core.models import Mote, Relationship
-from core.motes import get_mote, list_motes
+from core.motes import get_motes, list_motes
 from core.relationships import list_relationships
 
 
@@ -48,6 +48,6 @@ def neighborhood(
             break
         visited |= frontier
 
-    motes = [m for m in (get_mote(conn, mid) for mid in visited) if m is not None]
+    motes = get_motes(conn, list(visited))
     rels = [r for r in all_rels if r.from_id in visited and r.to_id in visited]
     return motes, rels

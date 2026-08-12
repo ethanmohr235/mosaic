@@ -13,18 +13,37 @@ def _encode_value(value):
         raise ValueError(f"Property value is not JSON-serializable: {value!r}") from e
 
 
-def _load_properties(conn: sqlite3.Connection, mote_id: str) -> dict:
+def _decode_value(row: sqlite3.Row):
+    try:
+        return json.loads(row["value"])
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Corrupt property value for mote {row['mote_id']!r} key {row['key']!r}"
+        ) from e
+
+
+def _properties_by_mote(conn: sqlite3.Connection, mote_ids: list[str] | None = None) -> dict[str, dict]:
+    """Every relevant mote's properties in one query, grouped by mote_id --
+    mote_ids=None means the whole table (used by list_motes(), where an
+    IN-list of every id risks SQLite's bound-parameter limit for a large
+    garden)."""
     cur = conn.cursor()
-    cur.execute("SELECT key, value FROM mote_properties WHERE mote_id=?", (mote_id,))
-    props = {}
+    if mote_ids is None:
+        cur.execute("SELECT mote_id, key, value FROM mote_properties")
+    else:
+        placeholders = ",".join("?" * len(mote_ids))
+        cur.execute(
+            f"SELECT mote_id, key, value FROM mote_properties WHERE mote_id IN ({placeholders})",
+            mote_ids,
+        )
+    grouped: dict[str, dict] = {}
     for row in cur.fetchall():
-        try:
-            props[row["key"]] = json.loads(row["value"])
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Corrupt property value for mote {mote_id!r} key {row['key']!r}"
-            ) from e
-    return props
+        grouped.setdefault(row["mote_id"], {})[row["key"]] = _decode_value(row)
+    return grouped
+
+
+def _load_properties(conn: sqlite3.Connection, mote_id: str) -> dict:
+    return _properties_by_mote(conn, [mote_id]).get(mote_id, {})
 
 
 def create_mote(conn: sqlite3.Connection, properties: dict | None = None, id: str | None = None) -> str:
@@ -56,10 +75,23 @@ def get_mote(conn: sqlite3.Connection, mote_id: str) -> Mote | None:
 def list_motes(conn: sqlite3.Connection) -> list[Mote]:
     cur = conn.cursor()
     cur.execute("SELECT id FROM motes")
-    return [
-        Mote(id=row["id"], properties=_load_properties(conn, row["id"]))
-        for row in cur.fetchall()
-    ]
+    ids = [row["id"] for row in cur.fetchall()]
+    props = _properties_by_mote(conn)
+    return [Mote(id=i, properties=props.get(i, {})) for i in ids]
+
+
+def get_motes(conn: sqlite3.Connection, ids: list[str]) -> list[Mote]:
+    """Batch equivalent of get_mote() -- two queries total instead of N.
+    Preserves the order of `ids`; ids with no matching mote are skipped."""
+    if not ids:
+        return []
+    placeholders = ",".join("?" * len(ids))
+    cur = conn.cursor()
+    cur.execute(f"SELECT id FROM motes WHERE id IN ({placeholders})", ids)
+    existing = {row["id"] for row in cur.fetchall()}
+    ordered = [i for i in ids if i in existing]
+    props = _properties_by_mote(conn, ordered)
+    return [Mote(id=i, properties=props.get(i, {})) for i in ordered]
 
 
 def delete_mote(conn: sqlite3.Connection, id: str) -> bool:

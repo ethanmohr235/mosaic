@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from core.models import Mote
 from core.motes import get_mote
 from core.relationships import list_relationships
-from core.species import species_of
 
 APPLIES_TO = "applies_to"
 EQUATION_KEY = "equation"
@@ -58,19 +57,3 @@ def parse_unknowns(value) -> list[str]:
     if isinstance(value, list):
         return [str(part).strip() for part in value if str(part).strip()]
     return []
-
-
-def species_unknowns(conn: sqlite3.Connection, species_id: str) -> list[str]:
-    species = get_mote(conn, species_id)
-    if species is None:
-        return []
-    return parse_unknowns(species.properties.get(UNKNOWNS_KEY))
-
-
-def unknown_keys(conn: sqlite3.Connection, mote_id: str) -> set[str]:
-    """Property names the solver may determine for this mote -- the union
-    over every species it is an instance of."""
-    keys: set[str] = set()
-    for species in species_of(conn, mote_id):
-        keys.update(parse_unknowns(species.properties.get(UNKNOWNS_KEY)))
-    return keys

@@ -406,10 +406,8 @@ class Api:
         # template but not yet instantiated wouldn't render as one, and the
         # UI would offer no way to create its first instance.
         structural = (species_repo.INSTANCE_OF, species_repo.TEMPLATE_OF)
-        species_ids = [
-            m.id for m in motes
-            if any(r.type in structural and r.to_id == m.id for r in rels)
-        ]
+        species_target_ids = {r.to_id for r in rels if r.type in structural}
+        species_ids = [m.id for m in motes if m.id in species_target_ids]
         return {
             "focus_id": mote_id,
             "motes": [dataclasses.asdict(m) for m in motes],

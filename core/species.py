@@ -2,7 +2,7 @@
 import sqlite3
 
 from core.models import Mote
-from core.motes import create_mote, get_mote
+from core.motes import create_mote, get_mote, get_motes
 from core.relationships import create_relationship, list_relationships
 
 # A species is just a mote -- nothing marks it as special structurally. A
@@ -27,13 +27,13 @@ def set_species(conn: sqlite3.Connection, mote_id: str, species_id: str) -> str:
 def species_of(conn: sqlite3.Connection, mote_id: str) -> list[Mote]:
     """Species mote_id is declared an instance of."""
     rels = list_relationships(conn, from_id=mote_id, type_=INSTANCE_OF)
-    return [m for m in (get_mote(conn, r.to_id) for r in rels) if m is not None]
+    return get_motes(conn, [r.to_id for r in rels])
 
 
 def instances_of(conn: sqlite3.Connection, species_id: str) -> list[Mote]:
     """Motes declared as instances of species_id."""
     rels = [r for r in list_relationships(conn, type_=INSTANCE_OF) if r.to_id == species_id]
-    return [m for m in (get_mote(conn, r.from_id) for r in rels) if m is not None]
+    return get_motes(conn, [r.from_id for r in rels])
 
 
 def list_species(conn: sqlite3.Connection) -> list[Mote]:
@@ -45,7 +45,7 @@ def list_species(conn: sqlite3.Connection) -> list[Mote]:
         for r in list_relationships(conn)
         if r.type in (INSTANCE_OF, TEMPLATE_OF)
     }
-    return [m for m in (get_mote(conn, sid) for sid in species_ids) if m is not None]
+    return get_motes(conn, list(species_ids))
 
 
 def set_template(conn: sqlite3.Connection, mote_id: str, species_id: str) -> str:
