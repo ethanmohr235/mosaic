@@ -163,8 +163,10 @@ update-desktop-database ~/.local/share/applications/
 actual GTK/WebKit window. `scripts/ui_smoke_test.py` drives the real running
 app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
 layout position stability, search/browse/keyboard-nav, garden-switch
-isolation, species picking and templating, filters, depth, running a
-simulation, live box-select, middle-drag pan, the context menu's
+isolation, species picking and templating, filters, depth, previewing
+and committing a time-based simulation from the scrub overlay
+(including scrubbing to and committing an earlier step, and Cancel
+writing nothing), live box-select, middle-drag pan, the context menu's
 copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
 Esc/Del, arrow-key navigation, the gardens modal's list/switch/
 create/delete, undoing a delete via the toast button and Ctrl+Z, the

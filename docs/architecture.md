@@ -38,9 +38,9 @@ Equations are written in a small expression language parsed against a strict whi
 
 Solving happens in two stages. A substitution loop repeatedly resolves any equation that has come down to a single unknown and feeds the answer back, which allows nonlinear formulas as long as the nonlinear part involves values already known. Whatever remains must be linear and goes to a single least-squares solve.
 
-Runs are recorded in `simulation_runs` and `simulation_changes`, failures included. The per-garden tick counter is derived from that log.
+A run can be time-based: `core.simulation.run_time_series()` solves a requested number of discrete steps, each one starting from the *previous* step's solved values rather than the database, so a rule can use the reserved `t` (the current step index) or `prev(x)` (the value `x` had entering the step) to express time-dependent behavior or a recurrence. This is computed entirely in memory and nondestructive by default -- nothing is written, and nothing is logged -- until a specific step is explicitly committed, which re-solves up to that step (deterministic, given the same garden and rules) and writes only the cumulative result in one shot. A single steady-state `run_simulation()` call is equivalent to committing a 1-step time series.
 
-Simulation is currently static: solving finds a steady state, and there is no notion of a previous timestep. See `docs/simulation.md` for the language reference and what is deferred.
+Only a committed run is recorded in `simulation_runs` and `simulation_changes`, failures included -- a discarded preview leaves no trace. The per-garden tick counter is derived from that log, and is a different thing from a time-based run's own step numbering (which resets to 0 every run and is never persisted). See `docs/simulation.md` for the language reference and what is deferred.
 
 # Links and external export
 
