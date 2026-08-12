@@ -71,6 +71,14 @@ schema change -- the property is still a
 normal, editable/deletable string like any other. There's no drag-and-
 drop yet; the path/URL has to be pasted in by hand.
 
+### Exporting dated motes to Google Calendar
+
+The topbar's "Export to Calendar" button pushes every mote with a `date`
+property in the current garden to Google Calendar (one-way, manual, never
+deletes anything on the Calendar side). See `docs/google-calendar.md` for
+the reserved properties involved, the one-time Google Cloud setup only
+you can do, and what happens on first export.
+
 ## This machine (Arch Linux)
 
 `webkit2gtk-4.1`, `gtk3`, and `python-gobject` are already installed system-
@@ -148,8 +156,11 @@ isolation, species picking and templating, filters, depth, running a
 simulation, live box-select, middle-drag pan, the context menu's
 copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
 Esc/Del, arrow-key navigation, the gardens modal's list/switch/
-create/delete, undoing a delete via the toast button and Ctrl+Z, and the
-url property's Open button) against a throwaway temp `GARDENS_DIR` and
+create/delete, undoing a delete via the toast button and Ctrl+Z, the
+url property's Open button, and the Export to Calendar button -- with
+`api.export_to_google_calendar` itself stubbed, since the real OAuth/
+network path needs a real Google account and has no place in an
+automated, offline suite) against a throwaway temp `GARDENS_DIR` and
 webview storage dir — never touches real data. Run it by hand after UI
 changes:
 

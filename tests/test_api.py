@@ -282,3 +282,79 @@ def test_open_with_os_default_falls_back_to_xdg_open_if_gio_is_missing(monkeypat
 def test_open_link_missing_file_raises(api):
     with pytest.raises(FileNotFoundError):
         api.open_link("/no/such/file/anywhere")
+
+
+class _FakeCredentials:
+    token = "fake-token"
+
+
+def test_export_to_google_calendar_creates_events_and_writes_back_ids(api, monkeypatch):
+    a = api.create_mote({"name": "Exam", "date": "2026-08-15T09:00:00"})
+    b = api.create_mote({"name": "No date"})
+
+    pushed = []
+
+    def fake_push_event(credentials, payload, existing_event_id):
+        pushed.append((payload["summary"], existing_event_id))
+        return f"event-for-{payload['summary']}"
+
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
+
+    result = api.export_to_google_calendar()
+
+    assert result == {"created": 1, "updated": 0, "skipped": 0, "total": 1}
+    assert pushed == [("Exam", None)]
+    assert api.get_mote(a["id"])["properties"]["gcal_event_id"] == "event-for-Exam"
+    assert "gcal_event_id" not in api.get_mote(b["id"])["properties"]
+
+
+def test_export_to_google_calendar_reuses_the_existing_event_id_on_a_second_run(api, monkeypatch):
+    a = api.create_mote({"name": "Exam", "date": "2026-08-15T09:00:00"})
+    calls = []
+
+    def fake_push_event(credentials, payload, existing_event_id):
+        calls.append(existing_event_id)
+        return "same-event-id"
+
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
+
+    first = api.export_to_google_calendar()
+    second = api.export_to_google_calendar()
+
+    assert first == {"created": 1, "updated": 0, "skipped": 0, "total": 1}
+    assert second == {"created": 0, "updated": 1, "skipped": 0, "total": 1}
+    assert calls == [None, "same-event-id"]
+    assert api.get_mote(a["id"])["properties"]["gcal_event_id"] == "same-event-id"
+
+
+def test_export_to_google_calendar_skips_a_mote_with_an_unparseable_date(api, monkeypatch):
+    api.create_mote({"name": "Bad", "date": "not-a-date"})
+    calls = []
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "push_event", lambda *a, **k: calls.append(1))
+
+    result = api.export_to_google_calendar()
+
+    assert result == {"created": 0, "updated": 0, "skipped": 1, "total": 1}
+    assert calls == []
+
+
+def test_export_to_google_calendar_does_not_write_back_if_the_garden_changed_mid_export(api, monkeypatch):
+    create_garden("other")
+    a = api.create_mote({"name": "Exam", "date": "2026-08-15T09:00:00"})
+
+    def fake_push_event(credentials, payload, existing_event_id):
+        # Simulate the user switching gardens while the network call for
+        # this mote was in flight.
+        api.switch_garden("other")
+        return "event-id"
+
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
+
+    api.export_to_google_calendar()
+
+    api.switch_garden("test")
+    assert "gcal_event_id" not in api.get_mote(a["id"])["properties"]

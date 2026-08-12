@@ -465,6 +465,33 @@ def run_checks(window):
 
     check("detail panel: a url property gets a working Open button", url_property_gets_an_open_button)
 
+    def export_to_calendar_button_calls_the_api_and_reports_the_result():
+        # Stubbed -- the real path needs OAuth against a real Google
+        # account, which has no place in an automated, offline suite.
+        js(window, """
+            window.__gcalCalled = false;
+            window.__origExportToGoogleCalendar = api.export_to_google_calendar.bind(api);
+            api.export_to_google_calendar = () => {
+                window.__gcalCalled = true;
+                return Promise.resolve({created: 2, updated: 1, skipped: 0, total: 3});
+            };
+        """)
+        js(window, "document.getElementById('export-calendar-btn').click();")
+        time.sleep(1.0)
+
+        called = js(window, "window.__gcalCalled")
+        assert called is True, "clicking Export to Calendar should call api.export_to_google_calendar"
+
+        toast = js(window, "document.getElementById('toast').textContent")
+        assert "2 new" in toast and "1 updated" in toast, f"expected a result summary toast, got {toast!r}"
+
+        enabled = js(window, "!document.getElementById('export-calendar-btn').disabled")
+        assert enabled is True, "the button should re-enable once export finishes"
+
+        js(window, "api.export_to_google_calendar = window.__origExportToGoogleCalendar;")
+
+    check("Export to Calendar button calls the API and reports the result", export_to_calendar_button_calls_the_api_and_reports_the_result)
+
     def depth_control_limits_the_graph():
         def visible_at(value):
             js(window, f"""

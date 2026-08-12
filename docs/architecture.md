@@ -32,7 +32,7 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of`, `applies_to`, `equation` and `unknowns` are the only reserved names in the system. Everything else is ordinary user data.
+`instance_of`, `template_of` and `applies_to` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration` and `gcal_event_id` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 Equations are written in a small expression language parsed against a strict whitelist -- never `eval`. Evaluating one produces a weighted sum of unknowns plus a constant, so an expression that happens to contain no unknowns is simply a number. That is why there is only one kind of rule: an assignment and a coupled equation are the same thing to the solver.
 
@@ -41,3 +41,16 @@ Solving happens in two stages. A substitution loop repeatedly resolves any equat
 Runs are recorded in `simulation_runs` and `simulation_changes`, failures included. The per-garden tick counter is derived from that log.
 
 Simulation is currently static: solving finds a steady state, and there is no notion of a previous timestep. See `docs/simulation.md` for the language reference and what is deferred.
+
+# Links and external export
+
+`url` (`core/links.py`) makes a mote openable -- a web address or a local
+file path, launched via the OS's default handler. See `docs/ui-setup.md`.
+
+`date` and `duration` (`core/google_calendar.py`) mark a mote as something
+with a time: `date` is ISO 8601 (a bare date for an all-day event, a full
+datetime for a timed one), `duration` is a plain number (minutes for a
+timed event, days for an all-day one). `gcal_event_id` gets written back
+onto a mote the first time it's exported to Google Calendar, so re-running
+the export updates that event instead of duplicating it. See
+`docs/google-calendar.md` for setup and details.

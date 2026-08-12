@@ -1183,6 +1183,27 @@ function setupSimulation() {
   });
 }
 
+function setupCalendarExport() {
+  const button = $("export-calendar-btn");
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Exporting…";
+    // Shown immediately, not just on completion: the very first export
+    // can block for a while on the user finishing sign-in in their
+    // browser, and without this the button just looks stuck.
+    showToast("Exporting to Google Calendar… complete sign-in in your browser if prompted.", 8000);
+    try {
+      const result = await call(api.export_to_google_calendar());
+      const parts = [`${result.created} new`, `${result.updated} updated`];
+      if (result.skipped) parts.push(`${result.skipped} skipped (invalid date)`);
+      showToast(`Exported ${result.total} mote${result.total === 1 ? "" : "s"} to Google Calendar: ${parts.join(", ")}.`, 6000);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Export to Calendar";
+    }
+  });
+}
+
 /** True while a text input/textarea has focus -- Del/Backspace and arrow
  *  keys must not hijack normal text editing inside the detail panel or
  *  quick-add's property fields. */
@@ -1330,6 +1351,7 @@ async function init() {
   setupSearch();
   setupViewControls();
   setupSimulation();
+  setupCalendarExport();
   setupContextMenu();
   setupKeyboard();
 

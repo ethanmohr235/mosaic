@@ -14,6 +14,7 @@ import webview
 from core.db import get_connection, initialize_database
 from core import gardens as gardens_repo
 from core import garden_io
+from core import google_calendar as gcal_repo
 from core import graph as graph_repo
 from core import links as links_repo
 from core import motes as motes_repo
@@ -299,6 +300,45 @@ class Api:
             "written": len(result.changes),
             "message": result.summary,
         }
+
+    # ---- google calendar ----
+
+    def export_to_google_calendar(self) -> dict:
+        """Deliberately NOT @_synchronized: this does OAuth (may block on
+        the user completing a consent screen in their browser) and
+        network I/O, and holding the shared connection lock for that long
+        would freeze every other Api call for as long as it takes -- the
+        same mistake already made and fixed once for local-file opening
+        (see _open_with_os_default). Only the brief DB-touching calls
+        (list_motes, update_mote) are synchronized, individually."""
+        garden_at_start = self._current_garden
+        motes = gcal_repo.dated_motes(self.list_motes())
+        credentials = gcal_repo.get_credentials()
+
+        created = updated = skipped = 0
+        for mote in motes:
+            try:
+                payload = gcal_repo.event_payload(mote)
+            except ValueError:
+                skipped += 1
+                continue
+
+            existing_id = mote["properties"].get("gcal_event_id")
+            event_id = gcal_repo.push_event(credentials, payload, existing_id)
+
+            if self._current_garden != garden_at_start:
+                # The garden changed underneath this loop (e.g. the user
+                # switched gardens mid-export) -- don't write this id
+                # into whatever garden is open now.
+                continue
+            if existing_id:
+                updated += 1
+            else:
+                created += 1
+            if event_id != existing_id:
+                self.update_mote(mote["id"], {"gcal_event_id": event_id})
+
+        return {"created": created, "updated": updated, "skipped": skipped, "total": len(motes)}
 
     # ---- graph/focus ----
 
