@@ -465,6 +465,139 @@ def run_checks(window):
 
     check("detail panel: a url property gets a working Open button", url_property_gets_an_open_button)
 
+    def detail_panel_is_resizable():
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'resize-checker'});
+                window.__resizeId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"resize mote setup failed: {result}"
+
+        before_width = json.loads(js(window,
+            "JSON.stringify(document.getElementById('detail-panel').getBoundingClientRect().width)"))
+
+        handle = json.loads(js(window, """
+            (function() {
+                const r = document.getElementById('detail-resize-handle').getBoundingClientRect();
+                return JSON.stringify({x: r.left + r.width / 2, y: r.top + r.height / 2});
+            })()
+        """))
+
+        # Drag the handle 80px to the left -- the panel is right-anchored,
+        # so that should grow it by ~80px.
+        hx, hy = handle["x"], handle["y"]
+        js(window, f"""
+            (function() {{
+                const h = document.getElementById('detail-resize-handle');
+                function fire(type, x, target) {{
+                    target.dispatchEvent(new MouseEvent(type, {{
+                        clientX: x, clientY: {hy}, bubbles: true, cancelable: true,
+                    }}));
+                }}
+                fire('mousedown', {hx}, h);
+                fire('mousemove', {hx} - 80, window);
+                fire('mouseup', {hx} - 80, window);
+            }})();
+        """)
+        time.sleep(0.3)
+
+        after_width = json.loads(js(window,
+            "JSON.stringify(document.getElementById('detail-panel').getBoundingClientRect().width)"))
+        grew_by = after_width - before_width
+        assert 70 <= grew_by <= 90, f"dragging the handle 80px should grow the panel by ~80px, got {grew_by}"
+
+        stored = js(window, "localStorage.getItem('monoss:detailWidth')")
+        assert stored == str(int(after_width)), f"resized width should persist to localStorage, got {stored!r}"
+
+        # Reopening after a reload should restore the resized width.
+        js_async(window, """
+            async () => {
+                await loadGarden(currentGarden);
+                await openDetailPanel(window.__resizeId);
+                window.__result = 'ok';
+            }
+        """, wait=1.5)
+        after_reload_width = json.loads(js(window,
+            "JSON.stringify(document.getElementById('detail-panel').getBoundingClientRect().width)"))
+        assert abs(after_reload_width - after_width) < 2, \
+            f"resized width should survive a garden reload, got {after_reload_width} vs {after_width}"
+
+    check("detail panel is resizable by dragging its left edge, and the width persists", detail_panel_is_resizable)
+
+    def click_edge_selects_and_inspects_relationship():
+        result = js_async(window, """
+            async () => {
+                const p = await api.create_mote({name: 'Edge-From'});
+                const q = await api.create_mote({name: 'Edge-To'});
+                const rel = await api.create_relationship(p.id, q.id, 'knows');
+                window.__edgeIds = {p: p.id, q: q.id, rel: rel.id};
+                await refreshMoteCache();
+                await refocus(p.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"edge-select mote setup failed: {result}"
+
+        mid = json.loads(js(window, """
+            (function() {
+                const a = graph.screenPositionOf(window.__edgeIds.p);
+                const b = graph.screenPositionOf(window.__edgeIds.q);
+                return JSON.stringify({x: (a.x + b.x) / 2, y: (a.y + b.y) / 2});
+            })()
+        """))
+        drag(window, mid["x"], mid["y"], mid["x"], mid["y"])  # a plain click, no movement
+        time.sleep(0.5)
+
+        shown = js(window, "document.getElementById('detail-relationship').classList.contains('hidden')")
+        assert shown is False, "clicking an edge should open the relationship panel"
+
+        from_text = js(window, "document.getElementById('detail-rel-from').textContent")
+        to_text = js(window, "document.getElementById('detail-rel-to').textContent")
+        type_text = js(window, "document.getElementById('detail-rel-type-row').querySelector('.rel-type').textContent")
+        assert (from_text, to_text, type_text) == ("Edge-From", "Edge-To", "knows"), \
+            f"relationship panel should show its endpoints and type, got {(from_text, to_text, type_text)}"
+
+        # Renaming reuses the same click-to-rename prompt pattern as the mote panel.
+        js(window, "window.prompt = () => 'connected_to';")
+        js(window, "document.getElementById('detail-rel-type-row').querySelector('.rel-type').click();")
+        time.sleep(1.5)
+        renamed = js(window, "document.getElementById('detail-rel-type-row').querySelector('.rel-type').textContent")
+        assert renamed == "connected_to", f"renaming a relationship's type should update the panel, got {renamed!r}"
+
+        # A plain click elsewhere on the canvas deselects it.
+        drag(window, 60, 60, 60, 60)
+        time.sleep(0.3)
+        hidden_after_deselect = js(window, "document.getElementById('detail-panel').classList.contains('hidden')")
+        assert hidden_after_deselect is True, "clicking empty canvas should close the relationship panel"
+
+        # Clicking a mote switches cleanly to the mote panel, not the relationship one.
+        p_xy = node_xy(window, "window.__edgeIds.p")
+        drag(window, p_xy[0], p_xy[1], p_xy[0], p_xy[1])
+        time.sleep(0.5)
+        single_shown = js(window, "!document.getElementById('detail-single').classList.contains('hidden')")
+        rel_hidden = js(window, "document.getElementById('detail-relationship').classList.contains('hidden')")
+        assert single_shown is True and rel_hidden is True, \
+            "selecting a mote after a relationship should show the mote panel, not the relationship one"
+
+        # Re-select the edge and delete it from its own panel.
+        drag(window, mid["x"], mid["y"], mid["x"], mid["y"])
+        time.sleep(0.5)
+        js(window, "document.getElementById('delete-relationship-btn').click();")
+        time.sleep(1.5)
+        remaining = json.loads(js(window, "JSON.stringify(graph.relationships.map(r => r.id))"))
+        rel_id = json.loads(js(window, "JSON.stringify(window.__edgeIds.rel)"))
+        assert rel_id not in remaining, "deleting a relationship from its panel should remove the edge"
+        panel_hidden_after_delete = js(window, "document.getElementById('detail-panel').classList.contains('hidden')")
+        assert panel_hidden_after_delete is True, "deleting the selected relationship should close its panel"
+
+    check("clicking an edge selects and inspects the relationship (rename/delete/deselect)",
+          click_edge_selects_and_inspects_relationship)
+
     def reserved_names_get_a_badge():
         result = js_async(window, """
             async () => {
@@ -1257,6 +1390,36 @@ def run_checks(window):
         )
 
     check("Pin/Unpin toggles from the context menu", pin_unpin_via_menu)
+
+    def new_mote_here_opens_near_the_click():
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+
+        # A point far from the corner the form otherwise defaults to.
+        x, y = 700, 400
+        right_click(window, x, y)
+        time.sleep(0.5)
+        click_menu_item(window, "New mote here")
+        time.sleep(0.3)
+
+        floating = js(window, "document.getElementById('quick-add').classList.contains('floating')")
+        assert floating is True, "New mote here should float the quick-add panel rather than leave it bottom-left"
+        rect = json.loads(js(window, "JSON.stringify(document.getElementById('quick-add').getBoundingClientRect())"))
+        assert abs(rect["left"] - x) < 40 and abs(rect["top"] - y) < 40, \
+            f"quick-add should open near the click point ({x}, {y}), got {rect}"
+
+        # Close it, then open via the ordinary + button -- reverts to bottom-left.
+        js(window, "document.getElementById('quick-add-btn').click();")
+        time.sleep(0.2)
+        js(window, "document.getElementById('quick-add-btn').click();")
+        time.sleep(0.3)
+        floating_after_button = js(window, "document.getElementById('quick-add').classList.contains('floating')")
+        assert floating_after_button is False, "the ordinary + button should not leave the panel floating"
+        js(window, "document.getElementById('quick-add-btn').click();")  # close again for later checks
+        time.sleep(0.2)
+
+    check("New mote here opens the quick-add form near the click, not always bottom-left",
+          new_mote_here_opens_near_the_click)
 
     def dragging_one_mote_moves_the_whole_selection():
         result = js_async(window, """

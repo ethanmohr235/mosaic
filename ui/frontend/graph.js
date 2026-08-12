@@ -19,6 +19,7 @@ const MIN_SCALE = 0.2;
 const MAX_SCALE = 3;
 const INITIAL_SCALE = 0.75;
 const HIT_RADIUS = 14;
+const EDGE_HIT_RADIUS = 8;
 const DRAG_THRESHOLD = 4;
 const PARALLEL_EDGE_BOW = 32;
 
@@ -62,6 +63,7 @@ class MonossGraph {
     this.hiddenSpecies = new Set();
     this.hiddenRelTypes = new Set();
     this.selectedIds = new Set();
+    this.selectedRelId = null;
     this.hoverId = null;
     this.connectSourceId = null;
     this.camera = { x: 0, y: 0, scale: INITIAL_SCALE };
@@ -237,12 +239,21 @@ class MonossGraph {
   select(ids, { pan = true } = {}) {
     const list = ids == null ? [] : Array.isArray(ids) ? ids : [ids];
     this.selectedIds = new Set(list);
+    this.selectedRelId = null;
     if (pan && list.length === 1) {
       const node = this.nodes.get(list[0]);
       if (node) {
         this.panTarget = { x: -node.x * this.camera.scale, y: -node.y * this.camera.scale };
       }
     }
+  }
+
+  /** Mutually exclusive with node selection -- selecting a relationship
+   *  clears any selected motes and vice versa, since the detail panel
+   *  only ever shows one kind of thing at a time. */
+  selectRelationship(id) {
+    this.selectedIds = new Set();
+    this.selectedRelId = id;
   }
 
   /** The single selected id, or null if zero or several are selected --
@@ -418,9 +429,23 @@ class MonossGraph {
     return index;
   }
 
+  /** The quadratic bezier's control point for one edge, given its
+   *  endpoints and how far parallel edges between the same pair have
+   *  bowed it apart. Shared by drawing and edge hit-testing so they never
+   *  disagree about where the curve actually is. */
+  _edgeCurve(a, b, bow) {
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const angle = Math.atan2(b.y - a.y, b.x - a.x);
+    return {
+      mx, my,
+      cx: mx + Math.cos(angle - Math.PI / 2) * bow,
+      cy: my + Math.sin(angle - Math.PI / 2) * bow,
+    };
+  }
+
   _drawEdges(ctx, bg, neighbours) {
     const parallel = this._parallelIndex();
-    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId;
+    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId || !!this.selectedRelId;
     ctx.font = '10px "IBM Plex Sans", sans-serif';
 
     for (const rel of this.relationships) {
@@ -430,7 +455,8 @@ class MonossGraph {
 
       const emphasized =
         this.selectedIds.has(rel.from_id) || this.selectedIds.has(rel.to_id) ||
-        rel.from_id === this.hoverId || rel.to_id === this.hoverId;
+        rel.from_id === this.hoverId || rel.to_id === this.hoverId ||
+        rel.id === this.selectedRelId;
       const dimmed = anyFocus && !emphasized;
       ctx.strokeStyle = emphasized
         ? "oklch(0.80 0.13 70 / 0.95)"
@@ -438,10 +464,7 @@ class MonossGraph {
       ctx.lineWidth = emphasized ? 1.8 : 1;
 
       const bow = (parallel.get(rel.id) || 0) * PARALLEL_EDGE_BOW;
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-      const angle = Math.atan2(b.y - a.y, b.x - a.x);
-      const cx = mx + Math.cos(angle - Math.PI / 2) * bow;
-      const cy = my + Math.sin(angle - Math.PI / 2) * bow;
+      const { mx, my, cx, cy } = this._edgeCurve(a, b, bow);
 
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -474,7 +497,7 @@ class MonossGraph {
 
   _drawNodes(ctx, labelBg, neighbours) {
     const byId = new Map(this.motes.map((m) => [m.id, m]));
-    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId;
+    const anyFocus = this.selectedIds.size > 0 || !!this.hoverId || !!this.selectedRelId;
 
     for (const [id, node] of this.nodes) {
       const mote = byId.get(id);
@@ -567,6 +590,34 @@ class MonossGraph {
       if (!this.isMoteVisible(id)) continue;
       const d = Math.hypot(node.x - world.x, node.y - world.y);
       if (d < bestDist) { bestDist = d; best = id; }
+    }
+    return best;
+  }
+
+  /** Same idea as hitTest() but for edges: only tried when a click hits no
+   *  node, and with a tighter radius since edges are thin lines that
+   *  shouldn't steal clicks meant for the canvas or a nearby node. The
+   *  curve is a quadratic bezier (see _edgeCurve), so this samples it at
+   *  fixed steps rather than solving for the nearest point analytically
+   *  -- plenty precise for the mild bow these curves ever have. */
+  _hitTestEdge(clientX, clientY) {
+    const world = this._worldAt(clientX, clientY);
+    const parallel = this._parallelIndex();
+    let best = null;
+    let bestDist = EDGE_HIT_RADIUS / this.camera.scale;
+    for (const rel of this.relationships) {
+      if (!this.isRelVisible(rel)) continue;
+      const a = this.nodes.get(rel.from_id), b = this.nodes.get(rel.to_id);
+      if (!a || !b) continue;
+      const bow = (parallel.get(rel.id) || 0) * PARALLEL_EDGE_BOW;
+      const { cx, cy } = this._edgeCurve(a, b, bow);
+      for (let i = 0; i <= 16; i++) {
+        const t = i / 16, it = 1 - t;
+        const px = it * it * a.x + 2 * it * t * cx + t * t * b.x;
+        const py = it * it * a.y + 2 * it * t * cy + t * t * b.y;
+        const d = Math.hypot(px - world.x, py - world.y);
+        if (d < bestDist) { bestDist = d; best = rel.id; }
+      }
     }
     return best;
   }
@@ -747,10 +798,18 @@ class MonossGraph {
       if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(null); // clear the rect overlay
 
       if (!moved) {
-        // A plain click on empty canvas: deselect (shift-click on empty
-        // space is a no-op rather than clearing an existing selection --
-        // shift means "add to", and there's nothing under the cursor to add).
+        // A plain click on empty canvas: try an edge first (relationships
+        // have no multi-select, so this only applies outside shift-click),
+        // then fall back to deselect. Shift-click on empty space is a
+        // no-op rather than clearing an existing selection -- shift means
+        // "add to", and there's nothing under the cursor to add.
         if (!additive) {
+          const relId = this._hitTestEdge(e.clientX, e.clientY);
+          if (relId) {
+            this.selectRelationship(relId);
+            if (this.callbacks.onRelationshipSelected) this.callbacks.onRelationshipSelected(relId);
+            return;
+          }
           this.select(null);
           if (this.callbacks.onSelectionChanged) this.callbacks.onSelectionChanged([]);
         }

@@ -216,6 +216,12 @@ main { flex: 1; min-height: 0; display: flex; }
   border: 1px solid var(--border); border-radius: 12px; padding: 16px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
 }
+/* "New mote here" (right-click on empty canvas) opens the form near the
+   click instead of always at the bottom-left corner -- fixed positioning
+   escapes #quick-add-wrap's own flex flow, same idea as #context-menu. */
+#quick-add.floating {
+  position: fixed; top: 0; left: 0; /* overridden inline per-open */
+}
 #quick-add-btn {
   width: 46px; height: 46px; border-radius: 50%; padding: 0;
   background: var(--accent); border: none; color: oklch(0.16 0 0);
@@ -240,9 +246,18 @@ main { flex: 1; min-height: 0; display: flex; }
 
 #detail-panel {
   position: absolute; top: 0; right: 0; bottom: 0;
-  width: 360px; background: var(--panel);
+  width: var(--detail-width, 360px); background: var(--panel);
   border-left: 1px solid var(--border);
   padding: 20px 20px 28px; overflow-y: auto; z-index: 6;
+}
+/* Straddles the panel's left border rather than sitting flush inside it,
+   so the grab target isn't fighting the panel's own 20px content padding. */
+#detail-resize-handle {
+  position: absolute; top: 0; bottom: 0; left: -3px; width: 6px;
+  cursor: ew-resize; z-index: 7;
+}
+#detail-resize-handle:hover, #detail-resize-handle.dragging {
+  background: var(--accent); opacity: 0.3;
 }
 #close-panel {
   position: absolute; top: 12px; right: 12px;
@@ -331,6 +346,23 @@ main { flex: 1; min-height: 0; display: flex; }
 
 #connect-btn { margin-top: 8px; }
 #delete-mote-btn { margin-top: 24px; }
+
+#detail-rel-endpoints { margin-bottom: 20px; }
+.rel-endpoint {
+  font-family: var(--serif); font-size: 18px; color: var(--fg-bright);
+  cursor: pointer; word-break: break-word; padding: 6px 0;
+}
+.rel-endpoint:hover { text-decoration: underline; }
+#detail-rel-type-row {
+  display: flex; align-items: center; gap: 6px; margin: 2px 0;
+  font-size: 12.5px; color: var(--faint);
+}
+#detail-rel-type-row .arrow { flex-shrink: 0; }
+#detail-rel-type-row .rel-type {
+  color: var(--accent); cursor: pointer;
+  border-bottom: 1px dashed var(--border);
+}
+#delete-relationship-btn { margin-top: 8px; }
 
 /* ---- search palette ---- */
 

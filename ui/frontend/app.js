@@ -24,6 +24,9 @@ let reservedProperties = new Set();    // property keys recognized by convention
 let reservedRelTypes = new Set();      // relationship types recognized by convention
 
 const DEPTH_KEY = "monoss:depth";
+const DETAIL_WIDTH_KEY = "monoss:detailWidth";
+const DETAIL_WIDTH_MIN = 280;
+const DETAIL_WIDTH_MAX = 640;
 const SIM_ERROR_TOAST_MS = 12000;
 
 window.addEventListener("error", (e) => {
@@ -272,6 +275,7 @@ async function openDetailPanel(moteId) {
 
   multiSelectIds = null;
   $("detail-multi").classList.add("hidden");
+  $("detail-relationship").classList.add("hidden");
   $("detail-single").classList.remove("hidden");
 
   $("detail-dot").style.background = graph.colorFor(moteId);
@@ -294,6 +298,7 @@ async function openDetailPanel(moteId) {
 function renderMultiSelectPanel(ids) {
   multiSelectIds = ids;
   $("detail-single").classList.add("hidden");
+  $("detail-relationship").classList.add("hidden");
   $("detail-multi").classList.remove("hidden");
   hideSpeciesPicker();
 
@@ -332,9 +337,106 @@ function renderMultiSelectPanel(ids) {
 
 function closeDetailPanel() {
   $("detail-panel").classList.add("hidden");
+  $("detail-relationship").classList.add("hidden");
   hideSpeciesPicker();
   multiSelectIds = null;
   if (graph) graph.select(null);
+}
+
+/** Mirrors openDetailPanel, but for a relationship rather than a mote --
+ *  its own render function for the same reason renderMultiSelectPanel is
+ *  its own: a relationship's panel shows genuinely different things
+ *  (endpoints instead of properties) and forcing it through the mote
+ *  code path would tangle both. Looks the relationship up in
+ *  graph.relationships (already the full in-memory list from the last
+ *  refocus -- no separate fetch needed). */
+async function openRelationshipPanel(relId) {
+  const rel = graph.relationships.find((r) => r.id === relId);
+  if (!rel) { closeDetailPanel(); return; }
+
+  graph.selectRelationship(relId);
+  multiSelectIds = null;
+  $("detail-single").classList.add("hidden");
+  $("detail-multi").classList.add("hidden");
+  $("detail-relationship").classList.remove("hidden");
+  hideSpeciesPicker();
+
+  const from = moteById(rel.from_id);
+  const to = moteById(rel.to_id);
+
+  const fromEl = $("detail-rel-from");
+  fromEl.textContent = from ? nodeLabel(from) : rel.from_id.slice(0, 8) + "…";
+  fromEl.title = rel.from_id;
+  fromEl.onclick = () => selectMote(rel.from_id);
+
+  const toEl = $("detail-rel-to");
+  toEl.textContent = to ? nodeLabel(to) : rel.to_id.slice(0, 8) + "…";
+  toEl.title = rel.to_id;
+  toEl.onclick = () => selectMote(rel.to_id);
+
+  const typeRow = $("detail-rel-type-row");
+  typeRow.innerHTML = "";
+  const arrow = document.createElement("span");
+  arrow.className = "arrow";
+  arrow.textContent = "↓";
+  const type = document.createElement("span");
+  type.className = "rel-type";
+  type.textContent = rel.type;
+  type.title = "Click to rename";
+  maybeAddReservedBadge(type, rel.type, reservedRelTypes);
+  type.addEventListener("click", async () => {
+    const next = window.prompt("Relationship type:", rel.type);
+    if (!next || next === rel.type) return;
+    await call(api.update_relationship(rel.id, null, null, next));
+    await refreshMoteCache();
+    await refocus(focusId, { pan: false, select: false });
+    await openRelationshipPanel(rel.id);
+  });
+  typeRow.append(arrow, type);
+
+  $("delete-relationship-btn").onclick = async () => {
+    await call(api.delete_relationship(rel.id));
+    await refreshMoteCache();
+    await refocus(focusId, { pan: false, select: false });
+    closeDetailPanel();
+  };
+
+  $("detail-panel").classList.remove("hidden");
+}
+
+/** Drag-to-resize on the panel's left edge. A CSS custom property rather
+ *  than a plain inline width so #detail-panel's own `width: var(...)`
+ *  rule stays the single source of truth. Not per-garden like positions
+ *  are -- it's a UI preference about the panel itself, not the data. */
+function setupDetailResize() {
+  const panel = $("detail-panel");
+  const handle = $("detail-resize-handle");
+
+  const stored = parseInt(localStorage.getItem(DETAIL_WIDTH_KEY), 10);
+  if (Number.isFinite(stored)) {
+    panel.style.setProperty("--detail-width", `${Math.min(DETAIL_WIDTH_MAX, Math.max(DETAIL_WIDTH_MIN, stored))}px`);
+  }
+
+  let dragState = null;
+  handle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    dragState = { startX: e.clientX, startWidth: panel.getBoundingClientRect().width };
+    handle.classList.add("dragging");
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragState) return;
+    // The panel is right-anchored, so dragging the left edge leftward
+    // (a shrinking clientX) is what grows it.
+    const width = Math.min(DETAIL_WIDTH_MAX, Math.max(DETAIL_WIDTH_MIN,
+      dragState.startWidth - (e.clientX - dragState.startX)));
+    panel.style.setProperty("--detail-width", `${width}px`);
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragState) return;
+    dragState = null;
+    handle.classList.remove("dragging");
+    localStorage.setItem(DETAIL_WIDTH_KEY, parseInt(getComputedStyle(panel).width, 10));
+  });
 }
 
 /** A textarea only reports a usable scrollHeight once it is attached and
@@ -650,8 +752,16 @@ function setupQuickAdd() {
     const opening = panel.classList.contains("hidden");
     panel.classList.toggle("hidden", !opening);
     $("quick-add-btn").textContent = opening ? "×" : "+";
-    if (opening) renderSpeciesChips();
-    else contextMenuWorldPos = null; // closing without creating cancels any pending placement
+    if (opening) {
+      // The ordinary + button always opens at its usual bottom-left spot,
+      // even if a right-click left the panel floating near the cursor.
+      panel.classList.remove("floating");
+      panel.style.left = "";
+      panel.style.top = "";
+      renderSpeciesChips();
+    } else {
+      contextMenuWorldPos = null; // closing without creating cancels any pending placement
+    }
   });
 
   $("add-property-row").addEventListener("click", () => addQuickAddRow());
@@ -681,12 +791,29 @@ function setupQuickAdd() {
 
 /** Opens the existing quick-add panel (so species/template selection stays
  *  in one place) but remembers where the click happened, so the mote it
- *  produces lands there instead of at its usual hash-seeded spot. */
-function openQuickAddAt(worldX, worldY) {
+ *  produces lands there instead of at its usual hash-seeded spot -- and
+ *  floats the form itself near the click too, rather than leaving it
+ *  pinned at the bottom-left corner where it's awkward to reach after
+ *  right-clicking somewhere else on a large graph. */
+function openQuickAddAt(worldX, worldY, clientX, clientY) {
   contextMenuWorldPos = { x: worldX, y: worldY };
-  $("quick-add").classList.remove("hidden");
+  const panel = $("quick-add");
+  panel.classList.remove("hidden");
+  panel.classList.add("floating");
+  panel.style.left = clientX + "px";
+  panel.style.top = clientY + "px";
   $("quick-add-btn").textContent = "×";
   renderSpeciesChips();
+
+  // Clamp into the viewport the same way the context menu does, once the
+  // panel has real dimensions to measure.
+  const rect = panel.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    panel.style.left = Math.max(8, window.innerWidth - rect.width - 8) + "px";
+  }
+  if (rect.bottom > window.innerHeight) {
+    panel.style.top = Math.max(8, window.innerHeight - rect.height - 8) + "px";
+  }
 }
 
 // ---- species picker + new instance ----
@@ -970,7 +1097,7 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     menu.appendChild(sep);
     addMenuItem(menu, "Delete", () => deleteSelection(), { danger: true });
   } else {
-    addMenuItem(menu, "New mote here", () => openQuickAddAt(worldX, worldY));
+    addMenuItem(menu, "New mote here", () => openQuickAddAt(worldX, worldY, clientX, clientY));
     const pasteLabel = clipboard && clipboard.length > 1 ? `Paste ${clipboard.length} motes` : "Paste";
     addMenuItem(menu, pasteLabel, () => pasteAt(worldX, worldY), { disabled: !clipboard });
   }
@@ -1394,10 +1521,12 @@ async function init() {
     onBoxSelect: updateSelectBox,
     onSelectionChanged: syncSelectionPanel,
     onContextMenu: openContextMenu,
+    onRelationshipSelected: (id) => openRelationshipPanel(id),
   });
   window.graph = graph;
 
   setupGardensModal();
+  setupDetailResize();
   setupQuickAdd();
   setupSpeciesControls();
   setupSearch();

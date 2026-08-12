@@ -84,6 +84,7 @@
     </div>
 
     <aside id="detail-panel" class="hidden">
+      <div id="detail-resize-handle" title="Drag to resize"></div>
       <button id="close-panel" type="button" title="Close">×</button>
 
       <div id="detail-single">
@@ -125,6 +126,16 @@
         <div class="panel-heading">Species</div>
         <div id="detail-multi-species"></div>
         <button id="delete-selection-btn" type="button" class="danger wide">Delete selected</button>
+      </div>
+
+      <div id="detail-relationship">
+        <div class="panel-heading">Relationship</div>
+        <div id="detail-rel-endpoints">
+          <div id="detail-rel-from" class="rel-endpoint"></div>
+          <div id="detail-rel-type-row"></div>
+          <div id="detail-rel-to" class="rel-endpoint"></div>
+        </div>
+        <button id="delete-relationship-btn" type="button" class="danger wide">Delete relationship</button>
       </div>
     </aside>
   </div>
