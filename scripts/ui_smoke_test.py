@@ -715,7 +715,7 @@ def run_checks(window):
 
     check("depth control limits how much of the graph is visible", depth_control_limits_the_graph)
 
-    def simulation_previews_then_commits_from_the_scrub_overlay():
+    def simulation_previews_then_commits_from_the_sim_bar():
         result = js_async(window, """
             async () => {
                 const species = await api.create_mote({name: 'Box', unknowns: 'area'});
@@ -734,7 +734,12 @@ def run_checks(window):
 
         js(window, "document.getElementById('sim-steps-input').value = '1';")
         js(window, "document.getElementById('run-sim-btn').click();")
-        wait_until(lambda: js(window, "!document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
+
+        # The bar is non-blocking -- the graph itself should stay visible
+        # and the whole page reachable, unlike the old fullscreen modal.
+        graph_visible = js(window, "getComputedStyle(document.getElementById('graph')).display !== 'none'")
+        assert graph_visible is True, "the graph must stay visible while previewing, not be covered by a modal"
 
         area_present_before_commit = json.loads(js_async(window, """
             async () => {
@@ -743,11 +748,58 @@ def run_checks(window):
         """))
         assert area_present_before_commit is False, "previewing must not write anything to the mote"
 
-        summary = js(window, "document.getElementById('sim-step-summary').textContent")
-        assert "Solved" in summary, f"expected a solved summary in the overlay, got {summary!r}"
+        # Default view is the real, unprojected state -- nothing to commit yet.
+        badge = js(window, "document.getElementById('sim-badge-label').textContent")
+        assert badge == "Real", f"the bar should default to the real/unprojected view, got {badge!r}"
+        commit_disabled = js(window, "document.getElementById('sim-commit-btn').disabled")
+        assert commit_disabled is True, "Commit should be disabled at the real (step 0) view"
+
+        # Step forward to the only computed tick.
+        js(window, "document.getElementById('sim-next-btn').click();")
+        time.sleep(0.2)
+        caption = js(window, "document.getElementById('sim-caption').textContent")
+        assert "Solved" in caption, f"expected a solved summary in the bar's caption, got {caption!r}"
+        highlighted = js(window, "graph.simHighlightIds.has(window.__seed.boxId)")
+        assert highlighted is True, "the changed mote should get a highlight ring while scrubbed forward"
+
+        # The inspector should show the *projected* value in place, with a
+        # read-only banner -- not require closing the panel to see it.
+        banner_hidden = js(window, "document.getElementById('detail-sim-banner').classList.contains('hidden')")
+        assert banner_hidden is False, "the inspector should warn it's read-only while previewing"
+        projected_area = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const row of rows) {
+                    if (row.querySelector('.key').textContent === 'area') {
+                        return row.querySelector('input, textarea').value;
+                    }
+                }
+                return null;
+            })()
+        """)
+        assert projected_area == "12", f"inspector should show the projected area=12, got {projected_area!r}"
+
+        # Editing while previewing must be blocked, not silently accepted.
+        js(window, """
+            const rows = document.querySelectorAll('#detail-properties .detail-row');
+            for (const row of rows) {
+                if (row.querySelector('.key').textContent === 'area') {
+                    const field = row.querySelector('input, textarea');
+                    field.value = '999';
+                    field.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+            }
+        """)
+        time.sleep(0.2)
+        blocked_toast = js(window, "document.getElementById('toast').textContent")
+        assert "commit or discard" in blocked_toast, f"expected an edit-blocked toast, got {blocked_toast!r}"
+        area_unchanged = json.loads(js_async(window, """
+            async () => { window.__result = 'area' in (await api.get_mote(window.__seed.boxId)).properties; }
+        """))
+        assert area_unchanged is False, "a blocked edit must not reach the database"
 
         js(window, "document.getElementById('sim-commit-btn').click();")
-        wait_until(lambda: js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+        wait_until(lambda: js(window, "document.getElementById('sim-bar').classList.contains('hidden')") is True)
 
         area = json.loads(js_async(window, """
             async () => { window.__result = (await api.get_mote(window.__seed.boxId)).properties.area ?? null; }
@@ -755,6 +807,8 @@ def run_checks(window):
         assert area == 12.0, f"expected the solver to write area=12 after commit, got {area!r}"
         toast = js(window, "document.getElementById('toast').textContent")
         assert "Solved" in toast, f"expected a success toast after commit, got {toast!r}"
+        banner_hidden_after = js(window, "document.getElementById('detail-sim-banner').classList.contains('hidden')")
+        assert banner_hidden_after is True, "the read-only banner should clear once the preview is committed"
 
         shown = js(window, """
             (function() {
@@ -769,8 +823,8 @@ def run_checks(window):
         """)
         assert shown == "12", f"open panel should refresh to show area=12, got {shown!r}"
 
-    check("simulation: previewing then committing from the scrub overlay solves and refreshes the panel",
-          simulation_previews_then_commits_from_the_scrub_overlay)
+    check("simulation: previewing then committing from the sim bar solves and refreshes the panel",
+          simulation_previews_then_commits_from_the_sim_bar)
 
     def unsolvable_garden_reports_instead_of_crashing():
         js_async(window, """
@@ -788,14 +842,14 @@ def run_checks(window):
         wait_until(lambda: js(window, "!document.getElementById('run-sim-btn').disabled") is True)
         toast = js(window, "document.getElementById('toast').textContent")
         assert "underdetermined" in toast, f"expected an underdetermined message, got {toast!r}"
-        overlay_hidden = js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')")
-        assert overlay_hidden is True, "the scrub overlay should not open when nothing could be solved"
+        bar_hidden = js(window, "document.getElementById('sim-bar').classList.contains('hidden')")
+        assert bar_hidden is True, "the sim bar should not open when nothing could be solved"
         enabled = js(window, "!document.getElementById('run-sim-btn').disabled")
         assert enabled is True, "Run button should be re-enabled after a failed run"
 
     check("simulation: unsolvable garden reports instead of crashing", unsolvable_garden_reports_instead_of_crashing)
 
-    def simulation_scrubbing_and_cancel_and_earlier_step_commit():
+    def simulation_scrubbing_and_discard_and_earlier_step_commit():
         # A dedicated garden, not the shared one -- an earlier check
         # (unsolvable_garden_reports_instead_of_crashing) deliberately
         # leaves an unsolvable rule behind in the shared garden forever,
@@ -811,6 +865,8 @@ def run_checks(window):
                 await api.set_species(mote.id, species.id);
                 window.__acctId = mote.id;
                 await loadGarden('smoke-sim');
+                await refocus(mote.id);
+                await openDetailPanel(mote.id);
                 window.__result = 'ok';
             }
         """, wait=2.0)
@@ -818,56 +874,70 @@ def run_checks(window):
 
         js(window, "document.getElementById('sim-steps-input').value = '5';")
         js(window, "document.getElementById('run-sim-btn').click();")
-        wait_until(lambda: js(window, "!document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
 
         slider_max = js(window, "document.getElementById('sim-step-slider').max")
-        assert slider_max == "4", f"5 steps should give a slider max of 4 (0-indexed), got {slider_max!r}"
+        assert slider_max == "5", f"5 steps should give a slider max of 5 (0 = real, 1..5 = ticks), got {slider_max!r}"
+        not_highlighted_yet = js(window, "graph.simHighlightIds.has(window.__acctId)")
+        assert not_highlighted_yet is False, "nothing should be highlighted at the real (step 0) view"
 
         balance = json.loads(js_async(window, """
             async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
         """))
         assert balance == 100.0, f"previewing must not touch the mote yet, got {balance!r}"
 
-        # Scrub to step index 2 (the 3rd step) and check the display updates.
+        # Scrub to tick 3 (cumulative through 3 ticks) and check the display updates.
         js(window, """
             const slider = document.getElementById('sim-step-slider');
-            slider.value = '2';
+            slider.value = '3';
             slider.dispatchEvent(new Event('input', {bubbles: true}));
         """)
         time.sleep(0.3)
-        label = js(window, "document.getElementById('sim-step-label').textContent")
-        assert label == "Step 3 of 5", f"expected the label to track the slider, got {label!r}"
-        changes_text = js(window, "document.getElementById('sim-step-changes').textContent")
-        assert "115.7625" in changes_text, f"expected step 3's cumulative balance in the changes list, got {changes_text!r}"
+        badge = js(window, "document.getElementById('sim-badge-label').textContent")
+        assert badge == "Projected · tick 3 of 5", f"expected the badge to track the slider, got {badge!r}"
+        highlighted = js(window, "graph.simHighlightIds.has(window.__acctId)")
+        assert highlighted is True, "the changed mote should be highlighted once scrubbed forward"
+        shown_balance = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const row of rows) {
+                    if (row.querySelector('.key').textContent === 'balance') {
+                        return row.querySelector('input, textarea').value;
+                    }
+                }
+                return null;
+            })()
+        """)
+        assert "115.7625" in shown_balance, f"expected tick 3's projected balance in the inspector, got {shown_balance!r}"
 
-        # Cancel: nothing should be written.
-        js(window, "document.getElementById('sim-cancel-btn').click();")
+        # Discard: nothing should be written.
+        js(window, "document.getElementById('sim-discard-btn').click();")
         time.sleep(0.3)
-        overlay_hidden = js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')")
-        assert overlay_hidden is True, "Cancel should close the overlay"
-        balance_after_cancel = json.loads(js_async(window, """
+        bar_hidden = js(window, "document.getElementById('sim-bar').classList.contains('hidden')")
+        assert bar_hidden is True, "Discard should close the bar"
+        balance_after_discard = json.loads(js_async(window, """
             async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
         """))
-        assert balance_after_cancel == 100.0, "Cancel must not write anything"
+        assert balance_after_discard == 100.0, "Discard must not write anything"
 
-        # Re-run, scrub to the same earlier step, and commit -- the mote
-        # should land on step 3's value, not step 5's.
+        # Re-run, scrub to the same earlier tick, and commit -- the mote
+        # should land on tick 3's value, not tick 5's.
         js(window, "document.getElementById('run-sim-btn').click();")
-        wait_until(lambda: js(window, "!document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
         js(window, """
             const slider = document.getElementById('sim-step-slider');
-            slider.value = '2';
+            slider.value = '3';
             slider.dispatchEvent(new Event('input', {bubbles: true}));
         """)
         time.sleep(0.3)
         js(window, "document.getElementById('sim-commit-btn').click();")
-        wait_until(lambda: js(window, "document.getElementById('simulation-overlay').classList.contains('hidden')") is True)
+        wait_until(lambda: js(window, "document.getElementById('sim-bar').classList.contains('hidden')") is True)
 
         committed_balance = json.loads(js_async(window, """
             async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
         """))
         assert abs(committed_balance - 115.7625) < 1e-6, (
-            f"committing at the scrubbed step should land on that step's value, not the last step's, got {committed_balance!r}"
+            f"committing at the scrubbed tick should land on that tick's value, not the last tick's, got {committed_balance!r}"
         )
 
         js_async(window, """
@@ -879,8 +949,8 @@ def run_checks(window):
             }
         """, wait=2.0)
 
-    check("simulation: scrubbing updates the display, Cancel writes nothing, committing an earlier step lands on that step",
-          simulation_scrubbing_and_cancel_and_earlier_step_commit)
+    check("simulation: scrubbing updates the graph and inspector, Discard writes nothing, committing an earlier tick lands on that tick",
+          simulation_scrubbing_and_discard_and_earlier_step_commit)
 
     def garden_switch_isolates_data():
         result = js_async(window, """

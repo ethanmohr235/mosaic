@@ -2,11 +2,15 @@
 
 MonOSS can solve for unknown mote properties from equations you write yourself. The engine knows nothing about circuits, thermodynamics, or any other domain -- all of that lives in ordinary motes.
 
-Enter a number of steps and click **Run simulation** to preview a
-time-based run: every step is solved in memory, nothing is written to
-the garden yet, and a scrub overlay lets you step through the whole
-sequence before choosing **Commit this step** to write it for real (or
-**Cancel** to discard the preview). See "Time-based simulation" below.
+Enter a number of steps and click **Simulate** to preview a time-based
+run: every step is solved in memory, nothing is written to the garden
+yet, and a bar at the bottom of the graph lets you step or play through
+the whole sequence -- the graph itself stays visible and interactive
+throughout, with changed motes getting a dashed ring on the canvas and
+their projected values readable straight from the inspector panel
+(which flags itself read-only while previewing). Choose **Commit this
+tick to real graph** to write the scrubbed tick for real, or **Discard**
+to throw the preview away. See "Time-based simulation" below.
 Programmatically, a single steady-state solve is
 `core.simulation.run_simulation(conn)`; a time-based run is
 `core.simulation.run_time_series(conn, step_count, commit)`.
@@ -114,7 +118,15 @@ to and commit an earlier good one rather than losing the whole preview.
 
 **Scrubbing** moves through the already-computed steps client-side (no
 further solving) to see how far each property has come from where it
-started, at whichever step you're looking at.
+started, at whichever step you're looking at. The slider's own tick 0
+is the real, unprojected garden -- exactly what's in the database right
+now -- with tick 1 through N being the cumulative state after that many
+steps. Motes touched as of the current tick get a dashed ring on the
+graph canvas, and selecting one shows its projected values directly in
+the inspector panel rather than requiring a separate changes list; the
+panel marks itself read-only while a preview is open, since committing
+always re-solves from whatever is in the database at that moment --
+editing mid-preview could silently diverge from what was previewed.
 
 **Commit** re-solves up to whichever step you chose -- deterministic,
 since it starts from the same garden state and rules every time -- and
@@ -145,7 +157,6 @@ numbering) comes from that log.
 ## Not built yet
 
 - **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration.
-- **Live scrub visualization on the graph.** The scrub overlay's own summary/changes list is the display; the graph canvas itself doesn't yet recolor or reposition nodes as you drag the slider.
 - **Units.** Properties are plain numbers. Use naming conventions (`resistance_ohms`) if it helps; nothing enforces or converts.
 - **Nonlinear systems.** Only nonlinearity over already-known values works. Genuinely nonlinear systems would need an iterative solver.
 - **Species inheritance.** Species are flat.

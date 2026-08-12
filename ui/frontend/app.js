@@ -22,8 +22,10 @@ let pasteRepeatCount = 0;              // steps repeated Ctrl+V pastes apart so 
 let contextMenuWorldPos = null;        // world coords the context menu was opened at
 let reservedProperties = new Set();    // property keys recognized by convention (core/reserved.py)
 let reservedRelTypes = new Set();      // relationship types recognized by convention
-let simPreview = null;                 // the last preview_simulation() payload, while the scrub overlay is open
-let simScrubStep = 0;                  // which step of simPreview.steps is currently shown
+let simPreview = null;                 // the last preview_simulation() payload, while the sim bar is showing
+let simStep = 0;                       // 0 = real/unprojected; k>0 = cumulative state through steps[k-1]
+let simPlaying = false;
+let simPlayTimer = null;
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -93,8 +95,20 @@ function showUndoToast(message, perform, durationMs = 6000) {
   showToast._timer = setTimeout(() => { toast.classList.add("hidden"); lastUndo = null; }, durationMs);
 }
 
+/** True (after showing a toast) whenever a simulation preview is open --
+ *  gates every mutating action while previewing. Not just while scrubbed
+ *  to a projected step: committing always re-solves from the *current* DB
+ *  state, so an edit made mid-preview (even at the real/step-0 view) would
+ *  silently diverge from what the preview actually showed. */
+function simBlocked() {
+  if (!simPreview) return false;
+  showToast("Previewing a simulation — commit or discard to edit.", 2600);
+  return true;
+}
+
 async function runUndo() {
   if (!lastUndo) return;
+  if (simBlocked()) return;
   const { perform } = lastUndo;
   lastUndo = null;
   $("toast").classList.add("hidden");
@@ -156,6 +170,7 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
 async function loadGarden(garden) {
   currentGarden = garden;
   $("garden-label").textContent = garden;
+  closeSimBar();
   closeDetailPanel();
   graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
@@ -274,17 +289,33 @@ async function openDetailPanel(moteId) {
   $("detail-multi").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
   $("detail-single").classList.remove("hidden");
+  $("detail-sim-banner").classList.toggle("hidden", !simPreview);
+
+  // While scrubbed past the real/step-0 view, show the mote as the preview
+  // projects it rather than its actual DB properties -- this is the
+  // inspector's own read of "inspect the new values directly," alongside
+  // the canvas highlight ring. Species/relationships aren't touched by
+  // simulation, so only properties need the overlay.
+  const displayMote = simStep > 0 ? withSimOverlay(mote) : mote;
 
   $("detail-dot").style.background = graph.colorFor(moteId);
-  $("detail-type-label").textContent = kindLabel(mote);
-  $("detail-title").textContent = nodeLabel(mote);
+  $("detail-type-label").textContent = kindLabel(displayMote);
+  $("detail-title").textContent = nodeLabel(displayMote);
   $("detail-id").textContent = mote.id;
 
-  renderProperties(mote);
+  renderProperties(displayMote);
   renderSpeciesSection(mote, species, instances);
   renderRelationships(moteId, rels);
   $("detail-panel").classList.remove("hidden");
   fitAllTextareas();
+}
+
+function withSimOverlay(mote) {
+  const overlay = {};
+  for (const c of cumulativeSimChanges()) {
+    if (c.mote_id === mote.id) overlay[c.key] = c.new_value;
+  }
+  return { ...mote, properties: { ...mote.properties, ...overlay } };
 }
 
 /** Shown instead of the single-mote panel once a box-select (or shift-add)
@@ -346,6 +377,7 @@ function closeDetailPanel() {
  *  anything if the prompt was cancelled or unchanged, so callers know
  *  whether to bother re-rendering. */
 async function renameRelationshipType(rel) {
+  if (simBlocked()) return false;
   const next = window.prompt("Relationship type:", rel.type);
   if (!next || next === rel.type) return false;
   await call(api.update_relationship(rel.id, null, null, next));
@@ -354,10 +386,13 @@ async function renameRelationshipType(rel) {
 }
 
 /** Shared by both places a relationship can be deleted -- see
- *  renameRelationshipType above. */
+ *  renameRelationshipType above. Returns whether it actually deleted
+ *  anything, so callers know whether to bother refreshing/closing. */
 async function deleteRelationshipAndRefresh(rel) {
+  if (simBlocked()) return false;
   await call(api.delete_relationship(rel.id));
   await refocus(focusId, { pan: false });
+  return true;
 }
 
 /** Mirrors openDetailPanel, but for a relationship rather than a mote --
@@ -407,8 +442,7 @@ async function openRelationshipPanel(relId) {
   typeRow.append(arrow, type);
 
   $("delete-relationship-btn").onclick = async () => {
-    await deleteRelationshipAndRefresh(rel);
-    closeDetailPanel();
+    if (await deleteRelationshipAndRefresh(rel)) closeDetailPanel();
   };
 
   $("detail-panel").classList.remove("hidden");
@@ -502,7 +536,9 @@ function renderProperties(mote) {
     keyEl.title = key;
     maybeAddReservedBadge(keyEl, key, reservedProperties);
 
+    const displayedText = typeof value === "string" ? value : JSON.stringify(value);
     const field = valueField(value, async (next) => {
+      if (simBlocked()) { field.value = displayedText; return; }
       await call(api.update_mote(mote.id, { [key]: next }));
       await refocus(focusId, { pan: false });
       await refreshMoteCache();
@@ -513,6 +549,7 @@ function renderProperties(mote) {
     del.textContent = "×";
     del.title = `Delete ${key}`;
     del.addEventListener("click", async () => {
+      if (simBlocked()) return;
       await call(api.delete_property(mote.id, key));
       await refocus(focusId, { pan: false });
       await openDetailPanel(mote.id);
@@ -557,6 +594,7 @@ function renderSpeciesSection(mote, species, instances) {
     del.textContent = "×";
     del.title = "Remove from this species";
     del.addEventListener("click", async () => {
+      if (simBlocked()) return;
       if (rel) await call(api.delete_relationship(rel.id));
       await refocus(focusId, { pan: false });
       await openDetailPanel(mote.id);
@@ -609,8 +647,7 @@ function renderRelationships(moteId, rels) {
     const del = document.createElement("button");
     del.textContent = "×";
     del.addEventListener("click", async () => {
-      await deleteRelationshipAndRefresh(rel);
-      await openDetailPanel(moteId);
+      if (await deleteRelationshipAndRefresh(rel)) await openDetailPanel(moteId);
     });
 
     row.append(arrow, type, label, del);
@@ -624,6 +661,7 @@ async function selectMote(moteId, opts = {}) {
 }
 
 async function connectNodes(sourceId, targetId) {
+  if (simBlocked()) return;
   const type = window.prompt("Relationship type:");
   if (!type) return;
   await call(api.create_relationship(sourceId, targetId, type));
@@ -636,6 +674,7 @@ async function connectNodes(sourceId, targetId) {
  *  Del/Backspace key all call this, rather than each having its own
  *  inline delete-and-refresh logic. */
 async function deleteSelection() {
+  if (simBlocked()) return;
   const ids = [...graph.selectedIds];
   if (ids.length === 0) return;
   const prompt = ids.length === 1
@@ -753,6 +792,7 @@ function collectQuickAddProperties() {
 function setupQuickAdd() {
   resetQuickAddRows();
   $("quick-add-btn").addEventListener("click", () => {
+    if (simBlocked()) return;
     const panel = $("quick-add");
     const opening = panel.classList.contains("hidden");
     panel.classList.toggle("hidden", !opening);
@@ -772,6 +812,7 @@ function setupQuickAdd() {
   $("add-property-row").addEventListener("click", () => addQuickAddRow());
 
   $("create-mote-btn").addEventListener("click", async () => {
+    if (simBlocked()) return;
     const props = collectQuickAddProperties();
     const mote = quickAddSpeciesId
       ? await call(api.create_instance(quickAddSpeciesId, props))
@@ -801,6 +842,7 @@ function setupQuickAdd() {
  *  pinned at the bottom-left corner where it's awkward to reach after
  *  right-clicking somewhere else on a large graph. */
 function openQuickAddAt(worldX, worldY, clientX, clientY) {
+  if (simBlocked()) return;
   contextMenuWorldPos = { x: worldX, y: worldY };
   const panel = $("quick-add");
   panel.classList.remove("hidden");
@@ -850,6 +892,7 @@ function renderSpeciesPickerResults(query) {
     row.querySelector(".label").textContent = nodeLabel(mote);
     row.addEventListener("mousedown", async (e) => {
       e.preventDefault();
+      if (simBlocked()) return;
       const targetId = speciesPickerTargetId;
       await call(api.set_species(targetId, mote.id));
       hideSpeciesPicker();
@@ -862,6 +905,7 @@ function renderSpeciesPickerResults(query) {
 
 function setupSpeciesControls() {
   $("set-species-btn").addEventListener("click", () => {
+    if (simBlocked()) return;
     if (!focusId) return;
     speciesPickerTargetId = focusId;
     $("species-picker-wrap").classList.remove("hidden");
@@ -876,6 +920,7 @@ function setupSpeciesControls() {
   });
 
   $("new-instance-btn").addEventListener("click", async () => {
+    if (simBlocked()) return;
     if (!focusId) return;
     const mote = await call(api.create_instance(focusId, {}));
     await refreshMoteCache();
@@ -1154,6 +1199,7 @@ async function copySelection(ids) {
 
 async function pasteAt(worldX, worldY) {
   if (!clipboard) return;
+  if (simBlocked()) return;
   const placed = [];
   const idMap = new Map(); // original mote id -> newly pasted mote id
   for (const entry of clipboard) {
@@ -1315,6 +1361,7 @@ function setupViewControls() {
   });
 
   $("detail-add-property-btn").addEventListener("click", async () => {
+    if (simBlocked()) return;
     const key = $("detail-new-key").value.trim();
     if (!key || !focusId) return;
     await call(api.update_mote(focusId, { [key]: $("detail-new-value").value }));
@@ -1348,33 +1395,42 @@ function setupSimulation() {
         showToast(result.error ? `Simulation failed: ${result.error}` : "Nothing to simulate.", SIM_ERROR_TOAST_MS);
         return;
       }
-      openSimulationScrub(result);
+      openSimBar(result);
     } finally {
-      button.disabled = false;
-      button.textContent = "Run simulation";
+      // openSimBar() already disabled it (and keeps it disabled) on success;
+      // this only matters for the "nothing to simulate" early return above.
+      button.disabled = !!simPreview;
+      button.textContent = "Simulate";
     }
   });
 
   $("sim-step-slider").addEventListener("input", () => {
-    simScrubStep = parseInt($("sim-step-slider").value, 10);
-    renderSimStep();
+    stopSimPlay();
+    setSimStep(parseInt($("sim-step-slider").value, 10));
+  });
+  $("sim-prev-btn").addEventListener("click", () => { stopSimPlay(); setSimStep(simStep - 1); });
+  $("sim-next-btn").addEventListener("click", () => { stopSimPlay(); setSimStep(simStep + 1); });
+  $("sim-play-btn").addEventListener("click", () => {
+    if (simPlaying) stopSimPlay(); else startSimPlay();
   });
 
-  $("sim-cancel-btn").addEventListener("click", closeSimulationScrub);
-  $("simulation-overlay").addEventListener("mousedown", (e) => {
-    if (e.target === $("simulation-overlay")) closeSimulationScrub();
+  $("sim-discard-btn").addEventListener("click", async () => {
+    closeSimBar();
+    if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
+      await openDetailPanel(focusId);
+    }
   });
 
   $("sim-commit-btn").addEventListener("click", async () => {
-    if (!simPreview) return;
+    if (!simPreview || simStep === 0) return;
     const btn = $("sim-commit-btn");
     btn.disabled = true;
     try {
-      // The scrub slider is a step *index*; the API takes a step *count*.
-      const result = await call(api.commit_simulation(simScrubStep + 1));
+      const result = await call(api.commit_simulation(simStep));
       const committed = result.steps[result.steps.length - 1];
-      closeSimulationScrub();
-      showToast(committed ? committed.summary : "Committed.", 3500);
+      const committedStep = simStep;
+      closeSimBar();
+      showToast(committed ? committed.summary : `Committed tick ${committedStep}.`, 3500);
       await refreshMoteCache();
       await refocus(focusId, { pan: false });
       if (!$("detail-panel").classList.contains("hidden") && focusId) {
@@ -1387,33 +1443,73 @@ function setupSimulation() {
 }
 
 /** Nondestructive: nothing was written by the preview call that produced
- *  `result`, so opening this is purely a display action. Scrubbing moves
- *  through `result.steps` entirely client-side -- no further API calls
- *  until Commit. */
-function openSimulationScrub(result) {
+ *  `result`, so opening this is purely a display action. Starts at the
+ *  real/unprojected view (step 0) rather than jumping to where the run
+ *  ended up -- the whole graph is still visible and interactive, so the
+ *  natural thing is to let the user step or play forward through it. */
+function openSimBar(result) {
   simPreview = result;
-  simScrubStep = result.steps.length - 1; // default to where the run ended up
+  simStep = 0;
   const slider = $("sim-step-slider");
-  slider.max = String(result.steps.length - 1);
-  slider.value = String(simScrubStep);
-  renderSimStep();
-  $("simulation-overlay").classList.remove("hidden");
+  slider.max = String(result.steps.length);
+  slider.value = "0";
+  $("run-sim-btn").disabled = true;
+  graph.setSimActive(true);
+  $("sim-bar").classList.remove("hidden");
+  renderSimBar();
+  if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
+    openDetailPanel(focusId);
+  }
 }
 
-function closeSimulationScrub() {
-  $("simulation-overlay").classList.add("hidden");
+function closeSimBar() {
+  stopSimPlay();
+  $("sim-bar").classList.add("hidden");
+  $("run-sim-btn").disabled = false;
   simPreview = null;
-  simScrubStep = 0;
+  simStep = 0;
+  graph.setSimActive(false);
+  graph.setSimHighlight([]);
 }
 
-/** Every property touched from step 0 through simScrubStep, with the
- *  value it had entering the whole run and its value as of the
- *  currently scrubbed step -- not just that one step's own delta, so
- *  scrubbing shows the state of the garden at that point in time, not a
- *  single frame's diff. */
+function setSimStep(idx) {
+  if (!simPreview) return;
+  simStep = Math.max(0, Math.min(idx, simPreview.steps.length));
+  $("sim-step-slider").value = String(simStep);
+  renderSimBar();
+  if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
+    openDetailPanel(focusId);
+  }
+}
+
+function startSimPlay() {
+  if (!simPreview) return;
+  simPlaying = true;
+  $("sim-play-btn").textContent = "Pause";
+  simPlayTimer = setInterval(() => {
+    const next = simStep + 1;
+    if (!simPreview || next > simPreview.steps.length) { stopSimPlay(); return; }
+    setSimStep(next);
+  }, 900);
+}
+
+function stopSimPlay() {
+  clearInterval(simPlayTimer);
+  simPlaying = false;
+  $("sim-play-btn").textContent = "Play";
+}
+
+/** Every property touched from step 0 through simStep (exclusive of
+ *  simStep 0 itself, which is the real/unprojected view), with the value
+ *  it had entering the whole run and its value as of the currently
+ *  scrubbed step -- not just that one step's own delta, so scrubbing
+ *  shows the state of the garden at that point in time, not a single
+ *  frame's diff. Feeds both the inspector's projected values and the
+ *  graph's changed-mote ring. */
 function cumulativeSimChanges() {
+  if (!simPreview || simStep === 0) return [];
   const byKey = new Map();
-  for (let i = 0; i <= simScrubStep; i++) {
+  for (let i = 0; i < simStep; i++) {
     for (const c of simPreview.steps[i].changes) {
       const key = `${c.mote_id}|${c.key}`;
       const existing = byKey.get(key);
@@ -1425,52 +1521,31 @@ function cumulativeSimChanges() {
     a.mote_id.localeCompare(b.mote_id) || a.key.localeCompare(b.key));
 }
 
-function formatSimValue(value) {
-  if (Number.isInteger(value)) return String(value);
-  return value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-}
+function renderSimBar() {
+  const projected = simStep > 0;
+  $("sim-bar").classList.toggle("projected", projected);
+  $("sim-badge").classList.toggle("projected", projected);
+  $("sim-badge-label").textContent = projected
+    ? `Projected · tick ${simStep} of ${simPreview.steps.length}`
+    : "Real";
 
-function renderSimStep() {
-  const step = simPreview.steps[simScrubStep];
-  $("sim-step-summary").textContent = step.summary;
-  $("sim-step-label").textContent = `Step ${simScrubStep + 1} of ${simPreview.steps.length}`;
+  const step = projected ? simPreview.steps[simStep - 1] : null;
+  $("sim-caption").textContent = step ? step.summary : "Current state of the garden";
 
-  const errorEl = $("sim-step-error");
+  const errorEl = $("sim-bar-error");
   if (simPreview.failed_at !== null) {
-    errorEl.textContent = `The run stopped at step ${simPreview.failed_at + 1}: ${simPreview.error}`;
+    errorEl.textContent = `Run stopped at step ${simPreview.failed_at + 1}: ${simPreview.error}`;
     errorEl.classList.remove("hidden");
   } else {
     errorEl.classList.add("hidden");
   }
 
-  const container = $("sim-step-changes");
-  container.innerHTML = "";
-  const changes = cumulativeSimChanges();
-  if (changes.length === 0) {
-    container.innerHTML = '<div class="empty-note">No properties changed yet.</div>';
-    return;
-  }
-  for (const c of changes) {
-    const row = document.createElement("div");
-    row.className = "sim-change-row";
+  $("sim-step-count").textContent = `${simStep}/${simPreview.steps.length}`;
+  $("sim-prev-btn").disabled = simStep <= 0;
+  $("sim-next-btn").disabled = simStep >= simPreview.steps.length;
+  $("sim-commit-btn").disabled = simStep === 0;
 
-    const mote = moteById(c.mote_id);
-    const moteEl = document.createElement("span");
-    moteEl.className = "mote";
-    moteEl.textContent = mote ? nodeLabel(mote) : c.mote_id.slice(0, 8) + "…";
-
-    const keyEl = document.createElement("span");
-    keyEl.className = "key";
-    keyEl.textContent = c.key;
-
-    const valuesEl = document.createElement("span");
-    valuesEl.className = "values";
-    const oldText = c.old_value === null || c.old_value === undefined ? "—" : formatSimValue(c.old_value);
-    valuesEl.textContent = `${oldText} → ${formatSimValue(c.new_value)}`;
-
-    row.append(moteEl, keyEl, valuesEl);
-    container.appendChild(row);
-  }
+  graph.setSimHighlight(new Set(cumulativeSimChanges().map((c) => c.mote_id)));
 }
 
 function setupCalendarExport() {
@@ -1606,7 +1681,6 @@ function setupKeyboard() {
     if (e.key !== "Escape") return;
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
-    if (!$("simulation-overlay").classList.contains("hidden")) { closeSimulationScrub(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (!$("quick-add").classList.contains("hidden")) {
@@ -1616,6 +1690,10 @@ function setupKeyboard() {
       return;
     }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
+    // The sim bar is non-blocking (the rest of the UI stays usable while
+    // it's open), so it sits behind every other panel in the Esc chain --
+    // dismissed only once nothing more local is open.
+    if (simPreview) { closeSimBar(); return; }
     // Nothing else was open -- Esc's last job is to deselect.
     graph.select(null);
   });

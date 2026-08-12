@@ -434,40 +434,64 @@ main { flex: 1; min-height: 0; display: flex; }
 #gardens-modal-actions { display: flex; align-items: center; gap: 8px; }
 
 /* ---- simulation ---- */
+/*
+ * A non-blocking bottom bar rather than a modal: the graph stays fully
+ * visible and interactive while previewing, changed motes get a dashed
+ * accent ring drawn directly on the canvas (graph.js's setSimHighlight),
+ * and the detail panel shows each mote's projected values in place, with
+ * a banner marking them read-only. Modeled on the imported Claude Design
+ * mockup (MonOSS Graph.dc.html).
+ */
 
 #sim-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 #sim-steps-input { width: 56px; text-align: center; padding: 7px 4px; }
 
-#simulation-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
-}
-#simulation-modal {
-  width: 480px; max-width: 90vw; max-height: 78vh;
+#sim-bar {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  z-index: 7; width: 560px; max-width: 92vw;
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  display: flex; flex-direction: column; overflow: hidden;
-  padding: 20px;
+  border-radius: 14px; padding: 14px 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  display: flex; flex-direction: column; gap: 11px;
 }
-#sim-step-summary { font-size: 13px; color: var(--fg-bright); min-height: 18px; }
-#sim-step-error {
-  color: var(--danger); font-size: 12.5px; margin-top: 6px;
-  padding: 8px 10px; background: oklch(0.65 0.15 25 / 0.1); border-radius: 7px;
+#sim-bar.projected { border-color: oklch(0.55 0.14 70 / 0.6); }
+
+#sim-bar-top { display: flex; align-items: center; gap: 10px; }
+#sim-badge {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--muted);
 }
-#sim-step-slider { width: 100%; margin: 14px 0 4px; accent-color: var(--accent); }
-#sim-step-label {
-  text-align: center; color: var(--muted); font-size: 11.5px;
-  margin-bottom: 12px; font-variant-numeric: tabular-nums;
+#sim-badge.projected { color: var(--accent); }
+#sim-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+#sim-caption {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 12px; color: var(--muted); text-align: right;
 }
-#sim-step-changes { flex: 1; overflow-y: auto; min-height: 0; margin-bottom: 14px; }
-.sim-change-row {
-  display: flex; align-items: baseline; gap: 6px;
-  padding: 6px 0; font-size: 12.5px; border-bottom: 1px solid var(--border-soft);
+#sim-bar-error {
+  color: var(--danger); font-size: 12px;
+  padding: 6px 9px; background: oklch(0.65 0.15 25 / 0.1); border-radius: 6px;
 }
-.sim-change-row .mote { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sim-change-row .key { color: var(--muted); flex-shrink: 0; }
-.sim-change-row .values { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--fg-bright); }
-#sim-modal-actions { display: flex; align-items: center; gap: 8px; }
+
+#sim-bar-controls { display: flex; align-items: center; gap: 10px; }
+#sim-bar-controls button { padding: 5px 10px; font-size: 12.5px; flex-shrink: 0; }
+#sim-play-btn { width: 56px; }
+#sim-step-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
+#sim-step-count {
+  flex-shrink: 0; width: 42px; text-align: right;
+  color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums;
+}
+
+#sim-bar-actions { display: flex; gap: 8px; }
+#sim-bar-actions button { flex: 1; }
+
+/* ---- detail panel: simulation read-only banner ---- */
+
+#detail-sim-banner {
+  background: var(--raised); border: 1px solid oklch(0.55 0.14 70 / 0.5);
+  border-radius: 7px; padding: 8px 10px; font-size: 11.5px;
+  color: var(--accent); margin-bottom: 16px;
+}
 
 /* ---- toast ---- */
 

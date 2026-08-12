@@ -66,6 +66,8 @@ class MonossGraph {
     this.selectedRelId = null;
     this.hoverId = null;
     this.connectSourceId = null;
+    this.simActive = false;        // a preview is open -- draws the dashed viewport border
+    this.simHighlightIds = new Set(); // motes with a property changed as of the scrubbed step
     this.camera = { x: 0, y: 0, scale: INITIAL_SCALE };
     this.alpha = 1;
     this.panTarget = null;
@@ -211,6 +213,16 @@ class MonossGraph {
   setHiddenRelTypes(types) {
     this.hiddenRelTypes = new Set(types);
     this.alpha = Math.max(this.alpha, 0.4);
+  }
+
+  // ---- simulation preview ----
+
+  setSimActive(active) {
+    this.simActive = active;
+  }
+
+  setSimHighlight(ids) {
+    this.simHighlightIds = ids instanceof Set ? ids : new Set(ids);
   }
 
   isMoteVisible(moteId) {
@@ -416,6 +428,15 @@ class MonossGraph {
     this._drawEdges(ctx, bg, neighbours);
     this._drawNodes(ctx, labelBg, neighbours);
     ctx.restore();
+
+    if (this.simActive) {
+      ctx.save();
+      ctx.strokeStyle = "oklch(0.78 0.13 70 / 0.5)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 7]);
+      ctx.strokeRect(4, 4, this.cssWidth - 8, this.cssHeight - 8);
+      ctx.restore();
+    }
   }
 
   /** Parallel edges between the same pair get bowed apart by an increasing
@@ -542,6 +563,17 @@ class MonossGraph {
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + 3.5, 0, Math.PI * 2);
         ctx.stroke();
+      }
+      if (this.simHighlightIds.has(id)) {
+        // A projected tick changed this mote's properties -- dashed so it
+        // reads as "provisional" rather than the solid selection/pinned rings.
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "oklch(0.80 0.13 70 / 0.9)";
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + (node.pinned ? 6.5 : 3.5), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
       ctx.globalAlpha = 1;
 
