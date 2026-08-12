@@ -960,6 +960,47 @@ def run_checks(window):
 
     check("context menu: Copy then Paste duplicates a mote", context_menu_copy_paste)
 
+    def copy_paste_a_mote_with_a_non_string_property():
+        # Regression: copySelection/pasteAt spread a mote's *already
+        # JSON-coerced* properties (numbers, bools, ...) straight into
+        # create_mote, which used to unconditionally re-run json.loads()
+        # on every value -- crashing with "the JSON object must be str,
+        # bytes or bytearray, not int" for anything that wasn't a string.
+        result = js_async(window, """
+            async () => {
+                const src = await api.create_mote({name: 'num-src', age: '21'});
+                window.__numSrcId = src.id;
+                await refreshMoteCache();
+                await refocus(src.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"numeric-property copy/paste setup failed: {result}"
+        src_id = json.loads(js(window, "JSON.stringify(window.__numSrcId)"))
+        src_age = js(window, "moteById(window.__numSrcId).properties.age")
+        assert src_age == 21, f"setup: age should already be coerced to an int, got {src_age!r}"
+
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        x, y = node_xy(window, "window.__numSrcId")
+        right_click(window, x, y)
+        time.sleep(0.5)
+        click_menu_item(window, "Copy")
+        time.sleep(0.5)
+        right_click(window, 60, 60)
+        time.sleep(0.5)
+        click_menu_item(window, "Paste")
+        time.sleep(2.0)
+
+        motes = json.loads(js_async(window, "async () => { window.__result = await api.list_motes(); }"))
+        pasted = [m for m in motes if m["id"] != src_id and m["properties"].get("name") == "num-src"]
+        assert len(pasted) == 1, f"pasting a mote with a numeric property should not silently fail, got {pasted}"
+        assert pasted[0]["properties"]["age"] == 21, (
+            f"pasted numeric property should keep its type, got {pasted[0]['properties']}"
+        )
+
+    check("copy/paste a mote with a non-string property doesn't error", copy_paste_a_mote_with_a_non_string_property)
+
     def multi_copy_paste_preserves_relative_layout():
         result = js_async(window, """
             async () => {

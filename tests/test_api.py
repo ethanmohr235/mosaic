@@ -177,6 +177,25 @@ def test_coerce_properties_matches_repl_json_fallback_semantics():
     assert coerced == {"age": 21, "active": True, "name": "blank", "tags": [1, 2]}
 
 
+def test_coerce_properties_passes_through_already_typed_values():
+    # Copy/paste (app.js::copySelection/pasteAt) sends a mote's already-
+    # coerced properties straight back through create_mote, not raw text
+    # -- json.loads() raises TypeError (not JSONDecodeError) on a
+    # non-string, so these must be passed through rather than re-parsed.
+    coerced = _coerce_properties({"age": 21, "active": True, "tags": [1, 2], "meta": None})
+    assert coerced == {"age": 21, "active": True, "tags": [1, 2], "meta": None}
+
+
+def test_create_mote_accepts_a_copy_pasted_motes_already_typed_properties(api):
+    original = api.create_mote({"name": "Box", "age": "21"})
+    assert original["properties"]["age"] == 21  # coerced to an int on creation
+
+    # This is exactly what pasteAt() does: spread the source mote's
+    # already-typed properties dict and hand it straight to create_mote.
+    pasted = api.create_mote(dict(original["properties"]))
+    assert pasted["properties"] == original["properties"]
+
+
 def test_switch_garden_swaps_connection(api):
     create_garden("other")
     api.create_mote({"name": "InTest"})

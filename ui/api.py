@@ -23,14 +23,24 @@ from core import simulation as simulation_repo
 from core import species as species_repo
 
 
-def _coerce(raw: str):
+def _coerce(raw):
+    # Text-field input arrives as a string and gets interpreted as JSON
+    # where possible (so typing "21" produces an int). Copy/paste
+    # (app.js::copySelection/pasteAt) instead sends a mote's already-typed
+    # properties straight back through create_mote -- those aren't raw
+    # text to interpret, they're already the right type (an int, a bool,
+    # a list, ...), and json.loads() raises TypeError on anything that
+    # isn't str/bytes/bytearray. Only strings need coercing; anything
+    # else is passed through as-is.
+    if not isinstance(raw, str):
+        return raw
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         return raw
 
 
-def _coerce_properties(raw_properties: dict[str, str]) -> dict:
+def _coerce_properties(raw_properties: dict) -> dict:
     return {k: _coerce(v) for k, v in raw_properties.items()}
 
 
