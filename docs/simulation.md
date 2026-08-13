@@ -60,6 +60,7 @@ Every equation is `left == right`, exactly one `==`.
 | `abs`, `min`, `max` | Only on values that are already known. |
 | `t` | The current step's index within a time-based run (0 for the first step). A reserved word -- shadows a property literally named `t` inside a formula specifically, though that property is still ordinary and visible everywhere else. Always 0 in a plain (non-time-based) run. |
 | `prev(x)` | The value `x` had *entering* the current step -- `x` must be a bare property/unknown name on the mote the rule is running against (not `targets(...)`'s result). This is how a rule expresses a recurrence: `balance == prev(balance) * 1.05`. Only meaningful in a time-based run; raises an error otherwise. |
+| `property('rel', 'operation', ...)` | Evaluates `operation` (e.g. `'pressure'`) through the property model of the single mote reached by relationship type `'rel'`, e.g. `property('working_fluid', 'pressure', density, temperature)`. The relationship type and operation must be quoted string literals; the remaining arguments must already be known numbers -- a property model is an opaque function of its inputs, so like `abs`/`min`/`max` this is deferred (retried by the substitution loop) until they are. See "Physical property models" below. |
 
 Anything else -- indexing, comprehensions, attribute access, `import`, calling arbitrary functions -- is rejected when the formula is parsed. The parser uses Python's `ast` module against a whitelist and never calls `eval`.
 
@@ -153,6 +154,48 @@ Only a *committed* run is ever logged to `simulation_runs` and
 new values for each change. A discarded preview leaves no trace. The
 per-garden tick counter (unrelated to a time-based run's own step
 numbering) comes from that log.
+
+## Physical property models
+
+A mote can reference a **property model** -- another mote describing how
+one of its physical properties is determined -- via a `uses_model`
+relationship:
+
+```
+name:          Air
+uses_model  --> Ideal Air
+```
+
+```
+name:           Ideal Air
+provider:       ideal_gas
+configuration:  {"gas_constant": 287.05}
+```
+
+`provider` names a registered `PropertyProvider` (`core/providers.py`);
+`configuration` is whatever that provider needs to construct itself.
+`ideal_gas` is the first (and currently only) built-in provider
+(`core/ideal_gas_provider.py`), supporting `pressure(density,
+temperature)`, `density(pressure, temperature)`, and
+`temperature(pressure, density)`, all in SI units (Pa, kg/m³, K).
+
+A rule reaches this through the `property()` builtin rather than
+knowing anything about `ideal_gas` itself:
+
+```
+name:      Ideal gas law
+equation:  pressure == property('gas', 'pressure', density, temperature)
+
+  --applies_to--> Container
+```
+
+Resolution (`core/model_resolver.py`) is a pure, DB-free lookup with the
+same shape as everything else in this table -- it follows `uses_model`
+from the mote `property()` navigated to, reads `provider`/`configuration`
+off that model mote, and constructs the provider. A provider is
+constructed at most once per simulation run (cached across every
+substitution pass and, for a time-based run, every step), not once per
+formula evaluation.
 
 ## Not built yet
 

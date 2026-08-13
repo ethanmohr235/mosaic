@@ -32,7 +32,20 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of` and `applies_to` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence` and `gcal_event_id` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to` and `uses_model` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider` and `configuration` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+
+# Physical property models
+
+A mote can reference a **property model** -- another mote describing how
+one of its physical properties (e.g. a fluid's enthalpy) is determined --
+via a `uses_model` relationship. The property-model mote itself carries a
+`provider` property (which registered provider implements it, e.g.
+`ideal_gas`) and a `configuration` property (whatever that provider needs
+to instantiate, e.g. a gas constant). `core/model_resolver.py` turns that
+relationship into an executable `PropertyProvider` (`core/providers.py`);
+simulation rules never see the provider directly, only the `property()`
+builtin described in `docs/simulation.md`. See
+`docs/physical_property_proposal` for the full design.
 
 Equations are written in a small expression language parsed against a strict whitelist -- never `eval`. Evaluating one produces a weighted sum of unknowns plus a constant, so an expression that happens to contain no unknowns is simply a number. That is why there is only one kind of rule: an assignment and a coupled equation are the same thing to the solver.
 

@@ -372,3 +372,94 @@ def test_t_is_available_in_a_time_series_rule(conn):
     result = run_time_series(conn, step_count=3, commit=False)
     heights = [s.values[(mote, "height")] for s in result.steps]
     assert heights == pytest.approx([10.0, 8.0, 6.0])
+
+
+# ---- physical property models ----
+
+def _wire_ideal_air(conn, provider="ideal_gas"):
+    """An 'Air' mote whose uses_model relationship resolves to an Ideal
+    Gas property model. Returns the Air mote's id."""
+    air = create_mote(conn, {"name": "Air"})
+    model = create_mote(
+        conn, {"name": "Ideal Air", "provider": provider, "configuration": {"gas_constant": 287.05}}
+    )
+    create_relationship(conn, air, model, "uses_model")
+    return air
+
+
+def test_property_builtin_solves_the_ideal_gas_law(conn):
+    air = _wire_ideal_air(conn)
+
+    container = create_mote(conn, {"name": "Container", "unknowns": "pressure"})
+    add_rule(
+        conn, container, "Ideal gas law",
+        "pressure == property('gas', 'pressure', density, temperature)",
+    )
+
+    c1 = create_mote(conn, {"name": "C1", "density": 1.2, "temperature": 293.15})
+    set_species(conn, c1, container)
+    create_relationship(conn, c1, air, "gas")
+
+    run_simulation(conn)
+
+    assert prop(conn, c1, "pressure") == pytest.approx(1.2 * 287.05 * 293.15)
+
+
+def test_property_builtin_reports_a_missing_model_clearly(conn):
+    container = create_mote(conn, {"name": "Container", "unknowns": "pressure"})
+    add_rule(
+        conn, container, "Ideal gas law",
+        "pressure == property('gas', 'pressure', density, temperature)",
+    )
+    c1 = create_mote(conn, {"name": "C1", "density": 1.2, "temperature": 293.15})
+    set_species(conn, c1, container)
+    # No 'gas' relationship at all -- property() has nothing to navigate to.
+
+    with pytest.raises(SimulationError, match="gas"):
+        run_simulation(conn)
+
+
+def test_property_builtin_reports_an_unsupported_operation_clearly(conn):
+    air = _wire_ideal_air(conn)
+    container = create_mote(conn, {"name": "Container", "unknowns": "enthalpy"})
+    add_rule(
+        conn, container, "Bogus lookup",
+        "enthalpy == property('gas', 'enthalpy', density, temperature)",
+    )
+    c1 = create_mote(conn, {"name": "C1", "density": 1.2, "temperature": 293.15})
+    set_species(conn, c1, container)
+    create_relationship(conn, c1, air, "gas")
+
+    with pytest.raises(SimulationError, match="enthalpy"):
+        run_simulation(conn)
+
+
+def test_property_model_provider_is_resolved_at_most_once_per_run(conn):
+    from core.ideal_gas_provider import IdealGasProvider
+    from core.providers import register_provider
+
+    instances = []
+
+    class _CountingIdealGas(IdealGasProvider):
+        def __init__(self, configuration):
+            super().__init__(configuration)
+            instances.append(self)
+
+    register_provider("_counting_ideal_gas_test", _CountingIdealGas)
+    air = _wire_ideal_air(conn, provider="_counting_ideal_gas_test")
+
+    container = create_mote(conn, {"name": "Container", "unknowns": "pressure"})
+    add_rule(
+        conn, container, "Ideal gas law",
+        "pressure == property('gas', 'pressure', density, temperature)",
+    )
+
+    # Two instances, both referencing the same Air mote -- the provider
+    # should still only be constructed once for the whole run.
+    for name, density, temperature in [("C1", 1.2, 293.15), ("C2", 1.0, 300.0)]:
+        c = create_mote(conn, {"name": name, "density": density, "temperature": temperature})
+        set_species(conn, c, container)
+        create_relationship(conn, c, air, "gas")
+
+    run_simulation(conn)
+    assert len(instances) == 1

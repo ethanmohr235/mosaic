@@ -6,8 +6,11 @@ sync with. Exposed to the frontend via Api.reserved_names() so the
 detail panel can flag them instead of leaving them looking like
 ordinary user data."""
 from core.google_calendar import RESERVED_KEYS as _GCAL_RESERVED_PROPERTIES
+from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.rules import APPLIES_TO, EQUATION_KEY, UNKNOWNS_KEY
 from core.species import INSTANCE_OF, TEMPLATE_OF
 
-RESERVED_PROPERTIES = _GCAL_RESERVED_PROPERTIES | {EQUATION_KEY, UNKNOWNS_KEY}
-RESERVED_RELATIONSHIP_TYPES = {INSTANCE_OF, TEMPLATE_OF, APPLIES_TO}
+RESERVED_PROPERTIES = _GCAL_RESERVED_PROPERTIES | {
+    EQUATION_KEY, UNKNOWNS_KEY, PROVIDER_KEY, CONFIGURATION_KEY,
+}
+RESERVED_RELATIONSHIP_TYPES = {INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL}

@@ -137,6 +137,10 @@ class TermList:
     label: str
 
 
+def _model_evaluation_unavailable(*_args, **_kwargs):
+    raise FormulaError("model evaluation is not available in this context")
+
+
 @dataclass(frozen=True)
 class Context:
     """Everything a formula can see. Plain callables rather than a
@@ -159,6 +163,7 @@ class Context:
     solved: dict[Unknown, float] = field(default_factory=dict)
     tick: float = 0.0
     previous: Callable[[str], dict] = lambda mote_id: {}
+    evaluate_model: Callable[[str, str, str, list[float]], float] = _model_evaluation_unavailable
 
 
 def parse_equation(text: str) -> tuple[ast.AST, ast.AST]:
@@ -274,6 +279,8 @@ def _call(node: ast.Call, ctx: Context):
         return _numeric(name, node, ctx)
     if name == "prev":
         return _previous(node, ctx)
+    if name == "property":
+        return _property(node, ctx)
     raise FormulaError(f"unknown function {name!r} in formula")
 
 
@@ -293,6 +300,45 @@ def _previous(node: ast.Call, ctx: Context) -> LinearExpr:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise FormulaError(f"previous value of {key!r} is {value!r}, which is not a number")
     return LinearExpr.number(value)
+
+
+def _property(node: ast.Call, ctx: Context) -> LinearExpr:
+    """property(<relationship type>, <operation>, <arg>, ...) -- reads a
+    physical property off the single mote reached by navigating
+    <relationship type> from the current mote, via that mote's resolved
+    property model. The relationship type and operation must be quoted
+    string literals, the same constraint _navigate() already puts on
+    targets()/sources()'s argument. The remaining arguments must already
+    be known numbers: a property model is an opaque, nonlinear function
+    of its inputs, so -- like abs()/min()/max() in _numeric() -- this
+    defers via NonlinearError until the substitution loop has determined
+    them, rather than trying to invert the model itself."""
+    if len(node.args) < 2:
+        raise FormulaError(
+            "property() takes a relationship type, an operation name, and its "
+            "inputs, e.g. property('working_fluid', 'enthalpy', pressure, temperature)"
+        )
+    relationship_arg, operation_arg, *value_nodes = node.args
+    if not isinstance(relationship_arg, ast.Constant) or not isinstance(relationship_arg.value, str):
+        raise FormulaError("property()'s first argument must be a relationship type in quotes")
+    if not isinstance(operation_arg, ast.Constant) or not isinstance(operation_arg.value, str):
+        raise FormulaError("property()'s second argument must be an operation name in quotes")
+
+    args = [_as_expr(_evaluate(a, ctx)) for a in value_nodes]
+    if any(not a.is_constant for a in args):
+        raise NonlinearError(
+            f"property({operation_arg.value!r}, ...) cannot be evaluated until its "
+            f"inputs are known"
+        )
+
+    result = ctx.evaluate_model(
+        ctx.mote_id, relationship_arg.value, operation_arg.value, [a.constant for a in args]
+    )
+    if isinstance(result, bool) or not isinstance(result, (int, float)):
+        raise FormulaError(
+            f"property({operation_arg.value!r}, ...) returned {result!r}, which is not a number"
+        )
+    return LinearExpr.number(result)
 
 
 def _navigate(name: str, node: ast.Call, ctx: Context) -> MoteSet:

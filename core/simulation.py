@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from core import model_resolver
 from core import rules as rules_repo
 from core import species as species_repo
 from core.db import generate_uuid
@@ -35,6 +36,7 @@ from core.formula import (
 )
 from core.models import Relationship
 from core.motes import list_motes, update_mote
+from core.providers import PropertyProvider
 from core.relationships import list_relationships
 
 logger = logging.getLogger(__name__)
@@ -137,7 +139,8 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
 
     try:
         solved: dict[Unknown, float] = {}
-        equations = _resolve(view, pairs, solved)
+        model_cache: dict[str, PropertyProvider] = {}
+        equations = _resolve(view, pairs, solved, model_cache=model_cache)
         solved.update(_matrix_solve(equations, solved))
     except SimulationError as e:
         _log_run(conn, tick, "error", str(e), [])
@@ -178,6 +181,11 @@ def run_time_series(conn: sqlite3.Connection, step_count: int, commit: bool) -> 
     baseline = {m.id: dict(m.properties) for m in list_motes(conn)}
     running = {mid: dict(props) for mid, props in baseline.items()}
     cumulative: dict[Unknown, float] = {}
+    # Built once and reused across every step: the `uses_model` graph and
+    # provider configuration don't change step-to-step (only solved
+    # values do), so a provider should be constructed at most once per
+    # run rather than re-resolved on every step.
+    model_cache: dict[str, PropertyProvider] = {}
 
     steps: list[StepResult] = []
     failed_at: int | None = None
@@ -188,7 +196,9 @@ def run_time_series(conn: sqlite3.Connection, step_count: int, commit: bool) -> 
         pairs = _rule_instances(rules, view)
         try:
             solved: dict[Unknown, float] = {}
-            equations = _resolve(view, pairs, solved, tick=float(step), previous=running)
+            equations = _resolve(
+                view, pairs, solved, tick=float(step), previous=running, model_cache=model_cache
+            )
             solved.update(_matrix_solve(equations, solved))
         except SimulationError as e:
             failed_at, error = step, str(e)
@@ -259,11 +269,17 @@ def _context(
     solved: dict[Unknown, float],
     tick: float = 0.0,
     previous: dict[str, dict] | None = None,
+    *,
+    model_cache: dict[str, PropertyProvider],
 ) -> Context:
     """tick/previous default to values that make a plain run_simulation()
     call behave exactly as it always has: t reads as 0, and prev(x) is
     simply unavailable (there is no "previous step" for a one-shot
-    solve)."""
+    solve). model_cache is mandatory and keyword-only -- it's the same
+    dict for every rule/mote pair and every substitution pass within one
+    run (see run_simulation()/run_time_series()), which is what lets a
+    provider be constructed once per run rather than once per formula
+    evaluation."""
     return Context(
         mote_id=mote_id,
         properties=lambda mid: view.properties.get(mid, {}),
@@ -273,7 +289,48 @@ def _context(
         solved=solved,
         tick=tick,
         previous=lambda mid: (previous or {}).get(mid, {}),
+        evaluate_model=lambda mid, relationship_type, operation, args: _evaluate_model(
+            view, model_cache, mid, relationship_type, operation, args
+        ),
     )
+
+
+def _evaluate_model(
+    view: _GardenView,
+    cache: dict[str, PropertyProvider],
+    mote_id: str,
+    relationship_type: str,
+    operation: str,
+    args: list[float],
+) -> float:
+    """Backs the property() formula builtin. Navigates relationship_type
+    from mote_id the same way targets() does, resolves (and caches) that
+    single target's property model, and evaluates the requested
+    operation. Every error case here is a FormulaError subclass (see
+    core/providers.py, core/model_resolver.py), so it flows straight
+    through _evaluate_all()'s existing `except FormulaError` handling
+    with no changes needed there."""
+    target_ids = view.out_edges.get((mote_id, relationship_type), [])
+    if len(target_ids) != 1:
+        raise FormulaError(
+            f"property() needs exactly one mote via {relationship_type!r} from "
+            f"mote {mote_id[:8]}, found {len(target_ids)}"
+        )
+    target_id = target_ids[0]
+    if target_id not in cache:
+        cache[target_id] = model_resolver.resolve(
+            target_id,
+            lambda mid: view.properties.get(mid, {}),
+            lambda mid, type_: view.out_edges.get((mid, type_), []),
+        )
+    provider = cache[target_id]
+    capability = provider.capability(operation)
+    if len(args) != len(capability.inputs):
+        raise FormulaError(
+            f"{operation}({', '.join(capability.inputs)}) takes {len(capability.inputs)} "
+            f"argument(s), got {len(args)}"
+        )
+    return provider.evaluate(operation, dict(zip(capability.inputs, args)))
 
 
 def _resolve(
@@ -282,6 +339,8 @@ def _resolve(
     solved: dict[Unknown, float],
     tick: float = 0.0,
     previous: dict[str, dict] | None = None,
+    *,
+    model_cache: dict[str, PropertyProvider],
 ) -> list[Equation]:
     """Substitution loop. Returns the equations as evaluated against the
     final set of substituted values, ready for the matrix solve."""
@@ -289,7 +348,7 @@ def _resolve(
     deferred: list[tuple[rules_repo.Rule, str, Exception]] = []
 
     while True:
-        equations, deferred = _evaluate_all(view, pairs, solved, tick, previous)
+        equations, deferred = _evaluate_all(view, pairs, solved, tick, previous, model_cache=model_cache)
         newly = _solve_singletons(equations, solved)
         if not newly:
             break
@@ -309,6 +368,8 @@ def _evaluate_all(
     solved: dict[Unknown, float],
     tick: float = 0.0,
     previous: dict[str, dict] | None = None,
+    *,
+    model_cache: dict[str, PropertyProvider],
 ) -> tuple[list[Equation], list[tuple[rules_repo.Rule, str, Exception]]]:
     """Nonlinear failures are deferred rather than fatal -- the offending
     unknown may still be determined by another equation, which would make
@@ -316,7 +377,7 @@ def _evaluate_all(
     equations, deferred = [], []
     for rule, mote_id in pairs:
         try:
-            ctx = _context(view, mote_id, solved, tick, previous)
+            ctx = _context(view, mote_id, solved, tick, previous, model_cache=model_cache)
             equations.append(evaluate_equation(rule.equation, ctx))
         except NonlinearError as e:
             deferred.append((rule, mote_id, e))

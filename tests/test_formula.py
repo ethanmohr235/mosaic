@@ -22,8 +22,8 @@ UNKNOWNS = {"R1": {"current"}, "N1": {"voltage"}, "N2": {"voltage"}, "N3": {"vol
 RELATIONSHIPS = [("R1", "N1", "a"), ("R1", "N2", "b"), ("R1", "N3", "b")]
 
 
-def context(mote_id="R1", solved=None, tick=0.0, previous=None):
-    return Context(
+def context(mote_id="R1", solved=None, tick=0.0, previous=None, evaluate_model=None):
+    kwargs = dict(
         mote_id=mote_id,
         properties=lambda mid: PROPERTIES.get(mid, {}),
         unknown_keys=lambda mid: UNKNOWNS.get(mid, set()),
@@ -33,6 +33,11 @@ def context(mote_id="R1", solved=None, tick=0.0, previous=None):
         tick=tick,
         previous=lambda mid: (previous or {}).get(mid, {}),
     )
+    # Omitted rather than passed as None, so callers that don't care about
+    # property() still exercise Context's real "not wired up" default.
+    if evaluate_model is not None:
+        kwargs["evaluate_model"] = evaluate_model
+    return Context(**kwargs)
 
 
 # ---- LinearExpr algebra ----
@@ -290,3 +295,59 @@ def test_keyword_arguments_are_rejected():
 def test_min_max_reject_unknowns():
     with pytest.raises(NonlinearError):
         evaluate_expression("max(current, 1)", context())
+
+
+# ---- property() ----
+
+def test_property_calls_evaluate_model_with_constant_args():
+    calls = []
+
+    def fake_evaluate_model(mote_id, relationship_type, operation, args):
+        calls.append((mote_id, relationship_type, operation, args))
+        return 42.0
+
+    expr = evaluate_expression(
+        "property('working_fluid', 'enthalpy', 8000000, 500)",
+        context(evaluate_model=fake_evaluate_model),
+    )
+    assert expr.is_constant
+    assert expr.constant == 42.0
+    assert calls == [("R1", "working_fluid", "enthalpy", [8000000.0, 500.0])]
+
+
+def test_property_defers_until_its_arguments_are_known():
+    # "current" is R1's declared unknown, so it isn't a constant yet --
+    # property() must behave like abs()/min()/max() and defer rather than
+    # calling evaluate_model with a symbolic argument.
+    ctx = context(evaluate_model=lambda *a: 1.0)
+    with pytest.raises(NonlinearError):
+        evaluate_expression("property('a', 'op', current)", ctx)
+
+
+def test_property_requires_at_least_two_arguments():
+    with pytest.raises(FormulaError, match="relationship type"):
+        evaluate_expression("property('a')", context())
+
+
+def test_property_requires_a_quoted_relationship_type():
+    with pytest.raises(FormulaError, match="relationship type"):
+        evaluate_expression("property(resistance, 'op', 1)", context())
+
+
+def test_property_requires_a_quoted_operation_name():
+    with pytest.raises(FormulaError, match="operation name"):
+        evaluate_expression("property('a', resistance, 1)", context())
+
+
+def test_property_unavailable_by_default_when_not_wired_up():
+    # Mirrors prev()'s "unavailable unless wired up" default -- a caller
+    # that doesn't pass evaluate_model gets a clear error, not an
+    # AttributeError.
+    with pytest.raises(FormulaError, match="not available"):
+        evaluate_expression("property('a', 'op', 1)", context())
+
+
+def test_property_rejects_a_non_numeric_result():
+    ctx = context(evaluate_model=lambda *a: "not a number")
+    with pytest.raises(FormulaError, match="not a number"):
+        evaluate_expression("property('a', 'op', 1)", ctx)

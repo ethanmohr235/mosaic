@@ -1,0 +1,1167 @@
+# MonOSS Physical Property Model and Provider Architecture
+
+> **Revision note:** This draft has been checked against the actual
+> `core/formula.py`, `core/simulation.py`, `core/rules.py`,
+> `core/species.py`, and `core/reserved.py`. The biggest correction:
+> simulation rules are **not** Python code. A rule's `equation` is a
+> string parsed by `ast` against a closed, hardcoded whitelist of
+> callable names (`targets`, `sources`, `sum`, `count`, `abs`, `min`,
+> `max`, `prev`) and folded into a linear expression -- "never `eval`"
+> is a hard constraint, not a style preference. Every place below that
+> showed a rule calling `fluid_model.evaluate(...)` like a Python method
+> has been rewritten around a single new formula builtin instead. Other
+> corrections are called out inline where they depart from the original
+> draft.
+
+## Objective
+
+Implement a generic **physical property model system** in MonOSS that allows motes to reference external or internal models for physical properties.
+
+The immediate use case is thermodynamic simulation, particularly turbines, compressors, boilers, condensers, pumps, and working fluids. The architecture must be general enough to support future domains such as:
+
+* Thermodynamics
+* Fluid properties
+* Materials
+* Heat transfer
+* Chemical kinetics
+* Nuclear data
+* Mechanical constitutive models
+* Empirical correlations
+* Other external scientific libraries
+
+The central architectural principle is:
+
+> **Motes describe physical entities. Property models describe how physical properties of those entities are determined. Providers/adapters connect those models to actual computational implementations or external libraries.**
+
+A MonOSS simulation rule should never need to know that a property came from CoolProp, a lookup table, an equation of state, or a custom implementation.
+
+---
+
+# 1. Core Architecture
+
+Implement the following conceptual layers:
+
+```text
+Mote
+  │
+  │ uses_model
+  ▼
+Property Model
+  │
+  │ implemented_by
+  ▼
+Provider / Adapter
+  │
+  ▼
+External Library / Dataset / Algorithm
+```
+
+Example:
+
+```text
+Water
+  │
+  └── uses_model ──> IAPWS Water Model
+                           │
+                           └── implemented_by ──> CoolProp
+```
+
+The simulation engine should interact only with the **Property Model interface**.
+
+The provider/adapter is responsible for translating between the MonOSS interface and the implementation-specific API.
+
+---
+
+# 2. Property Models Must Be First-Class Motes
+
+Do not hardcode property models into the database schema as special fields.
+
+A property model should itself be represented by a mote.
+
+**Correction:** MonOSS has no generic `species` property field. A mote
+*is* a species purely by being the target of an `instance_of`
+relationship (`core/species.py`) -- nothing marks it as special
+structurally, and nothing reads a `species` key. So a property-model
+mote needs no `species` property at all; `provider` and `configuration`
+are sufficient on their own:
+
+```text
+Mote:
+    id = water
+    (no species property needed -- water can optionally be
+     instance_of a Fluid species mote if that grouping is useful)
+
+Mote:
+    id = iapws-water
+    name = IAPWS Water
+    provider = coolprop
+```
+
+Optionally, make property-model motes discoverable as a group the same
+way MonOSS already groups things -- by making each one `instance_of` a
+"Property Model" species mote. That's idiomatic (reuses the existing
+mechanism instead of inventing a new one) but is sugar for listing/UI
+purposes, not a structural requirement.
+
+Relationships:
+
+```text
+water ──uses_model──> iapws-water
+iapws-water ──implemented_by──> coolprop
+```
+
+This allows models to participate in the normal MonOSS object graph.
+
+Do not create a dedicated `water_property_model` database column.
+
+Use the existing relationship system.
+
+---
+
+# 3. Generic Model Relationship
+
+Use a generic relationship such as:
+
+```text
+uses_model
+```
+
+rather than something thermodynamics-specific such as:
+
+```text
+uses_property_model
+```
+
+The initial implementation can use it for property models, but the architecture should allow future model types.
+
+Examples:
+
+```text
+Water ──uses_model──> IAPWS Water
+CO2 ──uses_model──> CO2 EOS
+Steel ──uses_model──> Johnson-Cook Steel
+Air ──uses_model──> Ideal Gas
+Fuel ──uses_model──> Combustion Model
+```
+
+This allows MonOSS to eventually support multiple types of physical models without creating a new relationship mechanism for every domain.
+
+**Addition:** `uses_model` needs to be added to
+`core/reserved.py`'s `RESERVED_RELATIONSHIP_TYPES` (alongside
+`instance_of`, `template_of`, `applies_to`) and to the reserved-name
+list in `docs/architecture.md`. That's the actual mechanism this
+codebase uses to flag special names centrally -- `reserved.py` is
+already exposed to the frontend via `Api.reserved_names()` so the
+inspector panel can flag reserved keys/relationships instead of
+showing them as ordinary user data. Likewise, `provider` and
+`configuration` should be added as reserved property keys if the
+engine looks for them by exact name the way it already does for
+`equation`/`unknowns`.
+
+---
+
+# 4. Property Model Interface
+
+Create a generic Python interface/abstract base class for property models.
+
+Conceptually:
+
+```python
+class PropertyModel:
+    def capabilities(self):
+        ...
+
+    def evaluate(self, operation, state):
+        ...
+```
+
+The exact implementation should follow the existing MonOSS architecture and coding conventions.
+
+The model must provide:
+
+1. Identity
+2. Supported operations
+3. Input requirements
+4. Output property
+5. Validity/domain information where possible
+6. A mechanism for evaluating the operation
+
+The simulation engine must not depend on provider-specific APIs.
+
+**Note on scope:** this `PropertyModel`/`evaluate()` interface is
+internal Python -- it is what the model resolver and the formula-layer
+builtin (§14) call *into*. It is never called directly from a rule's
+equation text, since equations aren't Python (see the revision note at
+the top of this document).
+
+---
+
+# 5. Capability System
+
+Do not represent capabilities as merely a list of property names.
+
+A capability describes a complete operation.
+
+For example:
+
+```text
+enthalpy(P, T) -> h
+enthalpy(P, s) -> h
+enthalpy(P, x) -> h
+temperature(P, h) -> T
+pressure(h, s) -> P
+density(P, T) -> rho
+entropy(P, T) -> s
+```
+
+A capability should contain at least:
+
+```text
+operation name
+input variables
+output variable
+units
+validity/domain information
+```
+
+Conceptually:
+
+```python
+Capability(
+    operation="enthalpy",
+    inputs=["pressure", "temperature"],
+    output="enthalpy",
+    units="J/kg",
+)
+```
+
+If useful to the existing architecture, allow additional metadata such as:
+
+```text
+phase requirements
+minimum/maximum values
+required fluid
+numerical precision
+preferred solver
+```
+
+Do not over-engineer the first implementation. The basic capability structure should be extensible.
+
+---
+
+# 6. State Representation
+
+Introduce a normalized representation for physical state.
+
+For example:
+
+```python
+state = {
+    "pressure": P,
+    "temperature": T,
+}
+```
+
+or, if the existing simulation architecture has a better representation, integrate with that.
+
+The property model should accept normalized MonOSS quantities rather than provider-specific arguments.
+
+For example:
+
+```python
+model.evaluate(
+    "enthalpy",
+    {
+        "pressure": 8e6,
+        "temperature": 500,
+    }
+)
+```
+
+The model/provider adapter translates this into whatever the underlying implementation expects.
+
+---
+
+# 7. Provider / Adapter Architecture
+
+Create a provider interface responsible for actual computation.
+
+Conceptually:
+
+```python
+class PropertyProvider:
+    def capabilities(self):
+        ...
+
+    def evaluate(self, operation, state):
+        ...
+```
+
+The provider should be unaware of the broader MonOSS mote graph.
+
+For example:
+
+```text
+CoolPropProvider
+TableProvider
+IdealGasProvider
+IAPWSProvider
+```
+
+The provider is the compatibility layer between MonOSS and an external library.
+
+Do not allow simulation rules to import CoolProp directly.
+
+Bad:
+
+```python
+from CoolProp.CoolProp import PropsSI
+```
+
+inside a turbine rule.
+
+Good:
+
+```python
+fluid_model.evaluate(
+    "enthalpy",
+    {
+        "pressure": pressure,
+        "temperature": temperature,
+    }
+)
+```
+
+The rule should not know which provider is being used.
+
+---
+
+# 8. Provider Registry
+
+Implement a provider registry.
+
+Conceptually:
+
+```python
+PROPERTY_PROVIDERS = {
+    "coolprop": CoolPropProvider,
+    "table": TableProvider,
+    "ideal_gas": IdealGasProvider,
+}
+```
+
+Prefer a proper registry abstraction over a global dictionary if MonOSS already has a registry/plugin mechanism.
+
+The registry should support:
+
+```text register provider
+resolve provider by identifier
+list providers
+check whether provider exists
+```
+
+Providers should be registered explicitly.
+
+Do not use arbitrary dynamic imports based on database strings unless there is a deliberate plugin system later.
+
+---
+
+# 9. Provider Configuration
+
+A property model mote should contain configuration necessary to instantiate its provider.
+
+For example:
+
+```text
+species = property_model
+provider = coolprop
+
+configuration = {
+    "fluid": "Water",
+    "backend": "HEOS"
+}
+```
+
+Another model:
+
+```text
+species = property_model
+provider = coolprop
+
+configuration = {
+    "fluid": "CO2"
+}
+```
+
+The provider should receive this configuration when instantiated.
+
+Do not hardcode `Water` into `CoolPropProvider`.
+
+The provider should be generic.
+
+---
+
+# 10. Model Resolution
+
+Implement a model resolver that starts from a mote and follows the graph.
+
+For example:
+
+```text
+Water
+  │
+  └── uses_model
+        │
+        ▼
+IAPWS Water
+        │
+        └── provider = coolprop
+```
+
+The resolver should produce an executable property-model object.
+
+Conceptually:
+
+```python
+model = model_resolver.resolve(water_mote)
+```
+
+Then:
+
+```python
+model.evaluate(
+    "enthalpy",
+    pressure=P,
+    temperature=T,
+)
+```
+
+The resolver is responsible for:
+
+1. Finding the model relationship
+2. Loading the property-model mote
+3. Resolving its provider
+4. Loading provider configuration
+5. Constructing the provider/model object
+6. Validating that the provider exists
+7. Returning the executable model
+
+Keep this resolution logic out of individual simulation rules.
+
+**Correction -- where resolution actually has to happen:**
+`core/formula.py`'s `Context` is deliberately free of any database
+import ("plain callables... so this module stays trivially testable
+with dicts"), and its per-equation evaluation runs many times per
+simulation call: the substitution loop (`core/simulation.py:
+_resolve()`) re-evaluates every pending equation on each pass until
+nothing new resolves, and a time-based run rebuilds this per step. The
+resolver must not walk the mote graph or construct provider objects
+(e.g. a CoolProp `AbstractState`) from inside a formula evaluation --
+that would mean reconstructing/re-resolving providers repeatedly per
+run.
+
+Instead, resolve once per run, up front, the same way
+`core/simulation.py: _build_view()` already precomputes `unknowns`,
+`out_edges`, and `in_edges` from a single read of the garden. Add a
+resolved-models map to `_GardenView`, and give `Context` one more
+plain callable (e.g. `evaluate_model(mote_id, operation, args) ->
+float`) that closes over that pre-resolved map. This keeps
+`formula.py` pure and DB-free, and means each provider is constructed
+at most once per run rather than once per substitution pass.
+
+---
+
+# 11. Error Handling
+
+Property-model errors must be explicit and useful.
+
+Distinguish at least:
+
+```text
+ModelNotFound
+ProviderNotFound
+CapabilityNotSupported
+InvalidState
+OutsideDomain
+ProviderExecutionError
+InvalidModelConfiguration
+```
+
+For example, if a turbine asks for:
+
+```text
+enthalpy(P, s)
+```
+
+and the selected model only supports:
+
+```text
+enthalpy(P, T)
+```
+
+the engine should report:
+
+```text
+Property model 'IAPWS Water' does not support:
+    enthalpy(pressure, entropy)
+
+Available operations:
+    enthalpy(pressure, temperature)
+    enthalpy(pressure, quality)
+    ...
+```
+
+Do not allow obscure provider exceptions to leak directly into the simulation layer.
+
+Wrap them in MonOSS-level exceptions while preserving the original exception as debugging context.
+
+---
+
+# 12. Units
+
+Do not allow individual providers to invent their own unit conventions.
+
+Establish a MonOSS convention.
+
+For the first implementation, use SI internally.
+
+For example:
+
+```text
+pressure      Pa
+temperature   K
+enthalpy      J/kg
+entropy       J/(kg K)
+density       kg/m³
+mass_flow     kg/s
+power         W
+```
+
+Adapters are responsible for converting between MonOSS units and provider units when necessary.
+
+Keep unit handling modular so a proper unit system can be introduced later.
+
+Do not make units part of every database field unless the existing architecture already does so.
+
+---
+
+# 13. Thermodynamic State Operations
+
+The capability system must support multiple independent-variable combinations.
+
+Do not assume that every property is simply:
+
+```text
+property(P, T)
+```
+
+Thermodynamics commonly requires combinations such as:
+
+```text
+h(P, T)
+h(P, s)
+h(P, x)
+
+T(P, h)
+T(P, s)
+
+P(T, h)
+P(T, s)
+
+rho(P, T)
+s(P, T)
+```
+
+Represent each as a distinct capability.
+
+This is important because the future simulation solver should be able to determine which property operation can satisfy a dependency from the variables currently known.
+
+**Correction -- this is not just a nice refinement, it's mandatory.**
+The solver (`core/formula.py`) folds equations into a weighted sum of
+unknowns and solves linearly; nonlinear terms are only tolerated once
+their inputs collapse to plain numbers (see `abs`/`min`/`max` in
+`_numeric()`, which require fully-known arguments and defer via
+`NonlinearError` otherwise). A property-model call is exactly this
+kind of opaque, nonlinear black box: the solver can never invert
+`h(P,T)` to find `T` given a known `h` on its own. So if a rule needs
+`T` from `h`, the model **must** separately expose `temperature(P,h)`
+as its own capability -- the rule author picks the right direction
+explicitly, the solver never infers it. Automatic direction-selection
+is listed correctly in §22 as a future extension, not something the
+first version can lean on.
+
+---
+
+# 14. Integration With the Existing Rule Engine
+
+**Correction -- rules are equation strings, not Python.** A rule is a
+mote with an `equation` property (`lhs == rhs`, exactly one `==`),
+parsed by `ast` against a closed, hardcoded whitelist of callable
+names in `core/formula.py: _call()`: `targets`, `sources`, `sum`,
+`count`, `abs`, `min`, `max`, `prev`. Nothing else is callable --
+that whitelist *is* the security boundary ("never `eval`"). A rule
+cannot call `properties.evaluate(...)` as a Python method; there is no
+such thing inside a formula.
+
+Property-model access needs to become one more entry in that
+whitelist: a single generic builtin, not one dynamically-registered
+function per capability name (a dynamic per-capability whitelist would
+defeat the closed-whitelist security model). Something like:
+
+```text
+property(<relationship type>, <operation>, <arg>, <arg>, ...)
+```
+
+mirroring how existing builtins already work: `targets`/`sources` take
+a bare string-literal relationship type (`_navigate()`), and
+`abs`/`min`/`max` require every argument to already be a known number,
+raising `NonlinearError` (not a fatal `FormulaError`) otherwise so the
+substitution loop can retry once those values become known
+(`_numeric()`). `property()` follows the same shape: it navigates from
+the current mote via the given relationship (collapsing to one target
+mote, the same way `targets('a').voltage` already collapses), resolves
+that mote's model through the pre-resolved map from §10, and calls the
+provider's `evaluate()` -- but only once every numeric argument is
+already constant.
+
+A turbine rule mote (`applies_to Turbine`) could then read:
+
+```text
+name:      Turbine inlet enthalpy
+equation:  h_in == property('working_fluid', 'enthalpy', pressure_in, temperature_in)
+
+  --applies_to--> Turbine
+```
+
+The turbine species declares `h_in` (and similarly `h_out`, `work`,
+...) as `unknowns`; the rule mote never imports or names CoolProp.
+Consistent with the existing convention (Ohm's law / KCL / source /
+ground are four separate single-equation rule motes, not one big
+procedural rule -- see §15), a turbine's thermodynamics should be
+several small rule motes, one property lookup or one physical relation
+per equation, not a single rule performing all of "obtain fluid,
+resolve model, evaluate, apply equations" in one step.
+
+---
+
+# 15. Example: Turbine
+
+A turbine mote might have:
+
+```text
+species = turbine
+
+working_fluid → Water
+inlet → SteamPipeA
+outlet → SteamPipeB
+
+efficiency = 0.85
+```
+
+The simulation sees:
+
+```text
+Turbine
+  │
+  └── working_fluid
+          │
+          ▼
+        Water
+          │
+          └── uses_model
+                  │
+                  ▼
+            IAPWS Water
+                  │
+                  ▼
+            CoolProp
+```
+
+Per §14, this "turbine rule" is really several rule motes, each
+`applies_to Turbine` with its own single equation, e.g.:
+
+```text
+h_in   == property('working_fluid', 'enthalpy', pressure_in, temperature_in)
+s_in   == property('working_fluid', 'entropy',  pressure_in, temperature_in)
+h_out  == property('working_fluid', 'enthalpy', pressure_out, s_in)
+work   == efficiency * (h_in - h_out)
+```
+
+each contributing one solved unknown, the same granularity as the
+existing Ohm's-law/KCL/source/ground example in
+`scripts/example_voltage_divider.py`. None of them know how the water
+properties were obtained.
+
+---
+
+# 16. First Provider: CoolProp
+
+Implement CoolProp as the first external provider.
+
+**Note:** CoolProp would be MonOSS's first "heavy" scientific
+dependency. This project's dev guide (`docs/rules.md`) says "never
+introduce new dependencies without approval" -- get that approval
+explicitly (which version to pin in `requirements.txt`) before this
+phase, and make sure it's installed into the actual virtualenv the app
+runs from, not whatever `python3` resolves to on `PATH`.
+
+Do not make CoolProp special in the core architecture.
+
+Create something analogous to:
+
+```text
+providers/
+    coolprop.py
+```
+
+The adapter should:
+
+1. Accept model configuration
+2. Construct/use the requested CoolProp fluid
+3. Expose supported operations as MonOSS capabilities
+4. Convert MonOSS state representations to CoolProp inputs
+5. Convert CoolProp results back into MonOSS units
+6. Translate CoolProp exceptions into MonOSS property-model exceptions
+
+Initially support only a useful subset of operations required by the turbine simulation.
+
+For example:
+
+```text
+enthalpy(P,T)
+entropy(P,T)
+density(P,T)
+temperature(P,h)
+pressure(P,T) where appropriate
+```
+
+Expand the capability set as required.
+
+Do not attempt to expose every CoolProp function during the initial implementation.
+
+---
+
+# 17. Do Not Start With a Generic Database of Scientific Data
+
+The system should support table-based providers eventually, but do not initially put every external property dataset into SQLite.
+
+There should be a distinction between:
+
+```text
+Property Model
+```
+
+and:
+
+```text
+Property Dataset
+```
+
+A provider may use:
+
+* an external library
+* a local dataset
+* a table
+* an equation
+* a numerical solver
+
+without changing the simulation interface.
+
+A future table provider could look like:
+
+```text
+Water
+  uses_model → Steam Table Model
+                  │
+                  └── provider → CSV/Table Provider
+```
+
+This should require no change to the turbine rules.
+
+---
+
+# 18. Model Scope and Overrides
+
+Property models should eventually be overridable at the Garden/simulation level.
+
+For example:
+
+```text
+Global:
+    Water → IAPWS Water
+
+Garden A:
+    Water → IAPWS Water
+
+Garden B:
+    Water → Simplified Water
+
+Garden C:
+    Water → Experimental Water Model
+```
+
+The immediate implementation does not necessarily need full override semantics, but the database and resolver architecture must not prevent them.
+
+This allows different simulations to use different fidelity models for the same physical entity.
+
+---
+
+# 19. Testing Strategy
+
+Build tests in layers.
+
+## Unit tests
+
+Test:
+
+```text
+Capability definition
+Provider registration
+Provider resolution
+Model resolution
+Configuration loading
+Error handling
+Unit conversion
+```
+
+## CoolProp adapter tests
+
+Test representative calls such as:
+
+```text
+Water enthalpy(P,T)
+Water entropy(P,T)
+Water density(P,T)
+```
+
+Compare against known expected values with appropriate tolerances.
+
+Do not rely exclusively on exact floating-point equality.
+
+## Integration tests
+
+Create a minimal graph:
+
+```text
+Water
+  → uses_model
+IAPWS Water
+  → provider
+CoolProp
+```
+
+Then resolve the model through the actual MonOSS database/relationship system and request a property.
+
+The test must prove that:
+
+```text
+database graph
+    ↓
+model resolver
+    ↓
+provider registry
+    ↓
+CoolProp adapter
+    ↓
+property result
+```
+
+works end-to-end.
+
+## Simulation test
+
+Construct a minimal thermodynamic system using:
+
+```text
+Boiler
+Turbine
+Condenser
+Pump
+Water
+```
+
+and demonstrate that the turbine can request thermodynamic properties through the model system.
+
+Do not build the complete Rankine-cycle solver as part of this feature unless required by the existing codebase. The goal is to establish the property architecture first.
+
+---
+
+# 20. CLI / Inspection
+
+Add a way to inspect property models through the MonOSS CLI.
+
+For example, something conceptually like:
+
+```text
+model list
+model show <id>
+model capabilities <id>
+```
+
+A useful output might be:
+
+```text
+Model: IAPWS Water
+Provider: coolprop
+Configuration:
+    fluid: Water
+    backend: HEOS
+
+Capabilities:
+    enthalpy(P,T) -> J/kg
+    entropy(P,T) -> J/(kg K)
+    density(P,T) -> kg/m³
+    temperature(P,h) -> K
+```
+
+Also make it possible to inspect the relationship:
+
+```text
+mote show Water
+```
+
+and see:
+
+```text
+Models:
+    IAPWS Water
+```
+
+This will make debugging the object graph substantially easier.
+
+---
+
+# 21. Suggested Package Structure
+
+Adapt this to the existing project structure rather than blindly creating these exact files.
+
+Conceptually:
+
+```text
+monoss/
+    models/
+        property_model.py
+        capability.py
+
+    providers/
+        base.py
+        registry.py
+        coolprop.py
+
+    simulation/
+        model_resolver.py
+
+    exceptions/
+        property_model.py
+```
+
+Avoid creating unnecessary abstractions until the first implementation requires them.
+
+The architecture is important, but the implementation should remain small.
+
+---
+
+# 22. Implementation Order
+
+Implement in this order:
+
+### Phase 1: Interfaces
+
+Create:
+
+```text
+PropertyModel
+PropertyProvider
+Capability
+```
+
+and the associated error types.
+
+No CoolProp yet.
+
+### Phase 2: Provider Registry
+
+Implement:
+
+```text
+register
+resolve
+list
+```
+
+for providers.
+
+Create a trivial test provider.
+
+### Phase 3: Database Representation
+
+Create the `property_model` mote convention.
+
+Use the existing relationship system:
+
+```text
+uses_model
+```
+
+Store provider identity and configuration as mote properties.
+
+Do not modify the database schema unless absolutely necessary.
+
+### Phase 4: Model Resolver
+
+Implement:
+
+```text
+Mote → uses_model → PropertyModel → provider → executable model
+```
+
+resolution.
+
+Test it using the trivial provider.
+
+### Phase 5: CoolProp Adapter
+
+Implement the first real external provider.
+
+Expose a deliberately small capability set.
+
+### Phase 6: Integration
+
+Connect the property-model system to the existing simulation/rule engine:
+
+1. Add a resolved-models map to `_GardenView` in `core/simulation.py`,
+   built once per run from the `uses_model` graph (§10).
+2. Add one plain callable to `Context` (`core/formula.py`) that closes
+   over that map.
+3. Add the `property(...)` builtin to `_call()`'s whitelist (§14),
+   returning `NonlinearError` when its arguments aren't fully known
+   yet, exactly like `abs`/`min`/`max` already do.
+
+Allow rules to request properties through the resolved model, entirely
+through the formula language -- no rule ever contains Python.
+
+### Phase 7: Turbine Demonstration
+
+Implement enough turbine thermodynamic behavior to prove the architecture works.
+
+Use:
+
+```text
+Water
+IAPWS/CoolProp
+Boiler
+Turbine
+Condenser
+```
+
+as the initial demonstration.
+
+### Phase 8: CLI
+
+Add model inspection and capability inspection.
+
+### Phase 9: Future Extensions
+
+Only after the architecture is working, consider:
+
+```text
+table provider
+ideal gas provider
+additional CoolProp operations
+model inheritance
+Garden-level model overrides
+automatic capability selection
+unit system
+provider plugins
+```
+
+---
+
+# 23. Important Architectural Constraints
+
+Do not:
+
+* Hardcode CoolProp into the simulation engine
+* Add thermodynamic-specific columns to the core mote schema
+* Make turbine rules directly import CoolProp
+* Store Python class names in the database
+* Assume every property model supports the same operations
+* Assume all thermodynamic properties use `(P,T)` as inputs
+* Build a giant universal scientific-data schema before a real use case requires it
+* Couple the property system directly to SQLite
+* Make the first implementation unnecessarily generic
+* Give a rule's `equation` string any way to call Python directly -- the
+  `_call()` whitelist in `core/formula.py` is a closed, hardcoded list;
+  add exactly one generic `property(...)` entry to it rather than one
+  entry per capability
+* Resolve providers (walk `uses_model`, construct a CoolProp state)
+  from inside a formula evaluation -- it runs many times per run
+  (substitution passes, time-series steps); resolve once per run instead
+* Add `uses_model` (or `provider`/`configuration`) without registering
+  them in `core/reserved.py`
+
+Do:
+
+* Treat models as first-class motes
+* Use relationships to attach models to physical entities
+* Keep external libraries behind adapters
+* Represent capabilities explicitly
+* Keep provider configuration data-driven
+* Keep simulation rules provider-agnostic
+* Keep the database representation separate from executable Python objects
+* Make the system extensible without making the first version enormous
+* Keep `core/formula.py` free of database access -- inject a
+  pre-resolved model map as a plain callable on `Context`, same as
+  `targets`/`sources`/`properties` already are
+* Have a property-model call raise `NonlinearError` (not a fatal
+  `FormulaError`) when its inputs aren't fully known yet, so the
+  substitution loop can retry it
+
+---
+
+# 24. Definition of Done
+
+The feature is complete when the following works end-to-end:
+
+```text
+Water mote
+    │
+    └── uses_model
+            │
+            ▼
+IAPWS Water model mote
+            │
+            └── provider = CoolProp
+                         │
+                         ▼
+                   CoolProp adapter
+                         │
+                         ▼
+                  thermodynamic value
+```
+
+Specifically, the system must be able to:
+
+1. Store a property model as a mote.
+2. Associate that model with a physical mote through a relationship.
+3. Store provider identity and configuration on the model.
+4. Resolve the provider through a registry.
+5. Inspect the model's capabilities.
+6. Request a property using normalized MonOSS inputs.
+7. Have the adapter translate the request to the external implementation.
+8. Return a normalized result to the simulation engine.
+9. Produce useful errors when a requested operation is unsupported or invalid.
+10. Allow a turbine rule's `equation` string to obtain a property via the `property(...)` formula builtin, without the rule (or anything in `core/formula.py`) importing or knowing anything about CoolProp.
+
+The resulting architecture should make this possible:
+
+```text
+Water ────────→ IAPWS ────────→ CoolProp
+CO2 ──────────→ Peng-Robinson → Custom EOS
+Air ──────────→ Ideal Gas ────→ Internal implementation
+Steel ────────→ Johnson-Cook ─→ Material provider
+```
+
+without modifying the fundamental simulation engine for each new model.
+
+The goal is not merely to "add steam tables." The goal is to establish **MonOSS's general mechanism for attaching computational physical models to objects in its simulation graph.**
