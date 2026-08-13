@@ -752,6 +752,169 @@ def run_checks(window):
 
     check("shift+click multi-selects relationships, with bulk delete", shift_click_multiselects_relationships)
 
+    def shift_drag_box_selects_only_relationships():
+        result = js_async(window, """
+            async () => {
+                const p = await api.create_mote({name: 'ShiftBox-P'});
+                const q = await api.create_mote({name: 'ShiftBox-Q'});
+                const r = await api.create_mote({name: 'ShiftBox-R'});
+                const rel1 = await api.create_relationship(p.id, q.id, 'knows');
+                const rel2 = await api.create_relationship(q.id, r.id, 'knows');
+                window.__shiftBox = {p: p.id, q: q.id, r: r.id, rel1: rel1.id, rel2: rel2.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"shift-drag relation box-select setup failed: {result}"
+        ids = json.loads(js(window, "JSON.stringify(window.__shiftBox)"))
+
+        js(window, "graph.pin(window.__shiftBox.p); graph.placeAt(window.__shiftBox.p, -5000, -5000);")
+        js(window, "graph.pin(window.__shiftBox.q); graph.placeAt(window.__shiftBox.q, -4900, -5000);")
+        js(window, "graph.pin(window.__shiftBox.r); graph.placeAt(window.__shiftBox.r, -4800, -5000);")
+        time.sleep(0.3)
+        js(window, "graph.resetView();")
+        time.sleep(1.2)
+
+        px, py = node_xy(window, "window.__shiftBox.p")
+        rx, ry = node_xy(window, "window.__shiftBox.r")
+        drag(window, min(px, rx) - 30, py - 30, max(px, rx) + 30, py + 30, shift=True)
+        time.sleep(1.0)
+
+        selected_rels = json.loads(js(window, "JSON.stringify([...graph.selectedRelIds])"))
+        assert sorted(selected_rels) == sorted([ids["rel1"], ids["rel2"]]), (
+            f"shift+drag should box-select both relationships, got {selected_rels}"
+        )
+        assert js(window, "graph.selectedIds.size") == 0, "shift+drag box-select should not also select motes"
+        count_text = js(window, "document.getElementById('detail-relationship-multi-count').textContent")
+        assert count_text == "2 relationships selected", f"expected the relationship aggregate panel, got {count_text!r}"
+
+    check("shift+drag box-selects only relationships, with the aggregate panel", shift_drag_box_selects_only_relationships)
+
+    def plain_drag_box_still_selects_only_motes():
+        """Regression guard for the shift+drag relation box-select: plain
+        drag over the exact same rectangle must still behave like ordinary
+        mote box-select, now that additive mote box-select (shift+drag's
+        old meaning) is gone."""
+        ids = json.loads(js(window, "JSON.stringify(window.__shiftBox)"))
+        px, py = node_xy(window, "window.__shiftBox.p")
+        rx, ry = node_xy(window, "window.__shiftBox.r")
+        drag(window, min(px, rx) - 30, py - 30, max(px, rx) + 30, py + 30)
+        time.sleep(1.0)
+
+        selected_motes = json.loads(js(window, "JSON.stringify([...graph.selectedIds])"))
+        assert sorted(selected_motes) == sorted([ids["p"], ids["q"], ids["r"]]), (
+            f"plain drag should box-select the motes, got {selected_motes}"
+        )
+        assert js(window, "graph.selectedRelIds.size") == 0, "plain drag box-select should not select any relationships"
+
+    check("plain drag still box-selects only motes (shift+drag is relations-only)", plain_drag_box_still_selects_only_motes)
+
+    def shift_drag_highlights_relationships_live_during_the_drag():
+        result = js_async(window, """
+            async () => {
+                const p = await api.create_mote({name: 'LiveRel-P'});
+                const q = await api.create_mote({name: 'LiveRel-Q'});
+                const r = await api.create_mote({name: 'LiveRel-R'});
+                const rel1 = await api.create_relationship(p.id, q.id, 'knows');
+                const rel2 = await api.create_relationship(q.id, r.id, 'knows');
+                window.__liveRel = {p: p.id, q: q.id, r: r.id, rel1: rel1.id, rel2: rel2.id};
+                await refreshMoteCache();
+                await refocus(null);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"live relation box-select setup failed: {result}"
+        ids = json.loads(js(window, "JSON.stringify(window.__liveRel)"))
+
+        js(window, "graph.pin(window.__liveRel.p); graph.placeAt(window.__liveRel.p, -100, 0);")
+        js(window, "graph.pin(window.__liveRel.q); graph.placeAt(window.__liveRel.q, 0, 0);")
+        js(window, "graph.pin(window.__liveRel.r); graph.placeAt(window.__liveRel.r, 100, 0);")
+        time.sleep(0.3)
+        # A fixed camera (world (0,0) at screen center, generous scale)
+        # rather than resetView()'s fitToContent() -- fitting *everything*
+        # accumulated by this point in the suite would zoom out far enough
+        # to compress p/q/r's carefully-spaced world coordinates down to a
+        # handful of screen pixels, defeating the "partial box" step below
+        # regardless of margins.
+        js(window, "graph._fitUntilAlpha = 0; graph.camera = {x: 0, y: 0, scale: 3};")
+        time.sleep(0.3)
+
+        px, py = node_xy(window, "window.__liveRel.p")
+        qx, qy = node_xy(window, "window.__liveRel.q")
+        rx, ry = node_xy(window, "window.__liveRel.r")
+        # Midpoint of rel1 (p-q) in screen space -- the box's right edge
+        # stops here, short of q itself. q is rel2's *other* endpoint too,
+        # so a box reaching all the way to q would inherently graze rel2's
+        # curve sample there as well, even though none of rel2 is "really"
+        # covered -- stopping at the midpoint keeps the two edges' shared
+        # vertex out of the box entirely.
+        pq_mid_x = (px + qx) / 2
+
+        def fire(event_type, x, y, buttons=1):
+            js(window, f"""
+                document.getElementById('graph').dispatchEvent(new MouseEvent({json.dumps(event_type)}, {{
+                    clientX: {x}, clientY: {y}, bubbles: true, cancelable: true,
+                    button: 0, buttons: {buttons}, shiftKey: true,
+                }}));
+            """)
+
+        fire("mousedown", px - 30, py - 40)
+        time.sleep(0.1)
+        # Grow the box just far enough to cover part of rel1 (p-q) but
+        # nowhere near q or rel2 (q-r).
+        fire("mousemove", pq_mid_x, py + 40)
+        time.sleep(0.3)
+        mid_selection = json.loads(js(window, "JSON.stringify([...graph.selectedRelIds])"))
+        assert mid_selection == [ids["rel1"]], (
+            f"mid-drag, only rel1 should be highlighted yet, got {mid_selection}"
+        )
+        box_is_rel_colored = js(window, "document.getElementById('select-box').classList.contains('rel')")
+        assert box_is_rel_colored is True, "the box overlay should carry the distinct relation-select color mid-drag"
+
+        # Grow it to cover both, still without releasing the mouse.
+        fire("mousemove", rx + 40, ry + 40)
+        time.sleep(0.3)
+        grown_selection = json.loads(js(window, "JSON.stringify([...graph.selectedRelIds])"))
+        assert sorted(grown_selection) == sorted([ids["rel1"], ids["rel2"]]), (
+            f"mid-drag, growing the box should add rel2 live, got {grown_selection}"
+        )
+        assert js(window, "graph.selectedIds.size") == 0, "relation box-select must never touch mote selection mid-drag"
+
+        fire("mouseup", rx + 40, ry + 40)
+        time.sleep(0.5)
+
+    check("shift+drag highlights relationships live during the drag, with the distinct box color",
+          shift_drag_highlights_relationships_live_during_the_drag)
+
+    def shift_drag_over_empty_space_clears_the_relationship_selection():
+        # Select rel1 first (a plain click), so there's something to clear.
+        mid = json.loads(js(window, """
+            (function() {
+                const a = graph.screenPositionOf(window.__liveRel.p);
+                const b = graph.screenPositionOf(window.__liveRel.q);
+                return JSON.stringify({x: (a.x + b.x) / 2, y: (a.y + b.y) / 2});
+            })()
+        """))
+        drag(window, mid["x"], mid["y"], mid["x"], mid["y"])
+        time.sleep(0.5)
+        assert js(window, "graph.selectedRelIds.size") == 1, "setup: rel1 should be selected before the empty shift+drag"
+
+        # A shift+drag far from any mote/edge (computed via the camera
+        # transform itself, so it's empty regardless of the current pan/
+        # zoom) should box-select zero relationships and clear the panel,
+        # not leave rel1 selected.
+        far = json.loads(js(window, "JSON.stringify(graph._worldToScreen(80000, 80000))"))
+        drag(window, far["x"], far["y"], far["x"] + 100, far["y"] + 80, shift=True)
+        time.sleep(0.5)
+
+        assert js(window, "graph.selectedRelIds.size") == 0, "an empty relation box-select should clear the selection"
+        hidden = js(window, "document.getElementById('detail-panel').classList.contains('hidden')")
+        assert hidden is True, "an empty relation box-select should close the detail panel"
+
+    check("shift+drag over empty space clears the relationship selection",
+          shift_drag_over_empty_space_clears_the_relationship_selection)
+
     def reserved_names_get_a_badge():
         result = js_async(window, """
             async () => {
@@ -824,6 +987,15 @@ def run_checks(window):
         assert enabled is True, "the button should re-enable once export finishes"
 
         js(window, "api.export_to_google_calendar = window.__origExportToGoogleCalendar;")
+
+        # The mockup this topbar redesign was based on marked this item
+        # "coming soon" (its demo never built calendar export); the real,
+        # already-working export above must not have regressed into that
+        # stub -- guard that structurally, not just by eyeball.
+        in_file_menu = js(window, "document.getElementById('file-menu').contains(document.getElementById('export-calendar-btn'))")
+        assert in_file_menu is True, "Export to Calendar should be a real item in the File menu"
+        is_soon = js(window, "document.getElementById('export-calendar-btn').classList.contains('soon')")
+        assert is_soon is False, "Export to Calendar must stay a real action, not a 'soon' stub"
 
     check("Export to Calendar button calls the API and reports the result", export_to_calendar_button_calls_the_api_and_reports_the_result)
 
@@ -1110,11 +1282,16 @@ def run_checks(window):
 
     def gardens_modal_lists_switches_and_guards_delete():
         # Two gardens exist at this point: 'default' (current) and
-        # 'smoke-second', left behind by the check above.
+        # 'smoke-second', left behind by the check above. The garden
+        # button itself now opens a quick switch/create dropdown, not the
+        # modal directly -- "Manage gardens…" inside it is the bridge to
+        # the modal, which is still where Export/Delete live.
         js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(0.5)
+        js(window, "document.getElementById('garden-menu-manage').click();")
         time.sleep(1.0)
         visible = js(window, "!document.getElementById('gardens-overlay').classList.contains('hidden')")
-        assert visible is True, "clicking the garden button should open the modal"
+        assert visible is True, "Manage gardens… should open the modal"
 
         rows = json.loads(js(window, """
             JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => [
@@ -1153,6 +1330,8 @@ def run_checks(window):
             }
         """, wait=1.0)
         js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(0.5)
+        js(window, "document.getElementById('garden-menu-manage').click();")
         time.sleep(1.0)
         js(window, "window.confirm = () => true;")
         js(window, """
@@ -1193,6 +1372,8 @@ def run_checks(window):
     def gardens_modal_creates_and_switches():
         js(window, "window.prompt = () => 'smoke-third';")
         js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(0.5)
+        js(window, "document.getElementById('garden-menu-manage').click();")
         time.sleep(1.0)
         js(window, "document.getElementById('new-garden-btn').click();")
         time.sleep(2.5)
@@ -2014,6 +2195,175 @@ def run_checks(window):
 
     check("hiding a species freezes its instances instead of still simulating them invisibly",
           hidden_motes_are_excluded_from_physics)
+
+    def topbar_menus_open_one_at_a_time():
+        js(window, "document.getElementById('file-btn').click();")
+        time.sleep(0.3)
+        file_open = js(window, "!document.getElementById('file-menu').classList.contains('hidden')")
+        file_marked_open = js(window, "document.getElementById('file-btn').classList.contains('open')")
+        assert file_open is True and file_marked_open is True, "clicking File should open its menu"
+
+        js(window, "document.getElementById('view-btn').click();")
+        time.sleep(0.3)
+        file_closed = js(window, "document.getElementById('file-menu').classList.contains('hidden')")
+        view_open = js(window, "!document.getElementById('view-menu').classList.contains('hidden')")
+        assert file_closed is True and view_open is True, "opening View should close File -- only one menu open at a time"
+
+        press_key(window, "Escape")
+        time.sleep(0.3)
+        any_open = js(window, """
+            ['garden-menu', 'file-menu', 'view-menu', 'tools-menu']
+                .some(id => !document.getElementById(id).classList.contains('hidden'))
+        """)
+        assert any_open is False, "Esc should close whichever topbar menu is open"
+
+    check("topbar menus open one at a time, and Esc closes them", topbar_menus_open_one_at_a_time)
+
+    def topbar_menu_closes_on_outside_click():
+        js(window, "document.getElementById('tools-btn').click();")
+        time.sleep(0.3)
+        opened = js(window, "!document.getElementById('tools-menu').classList.contains('hidden')")
+        assert opened is True, "Tools menu should be open before this check"
+
+        # A real click (mousedown+mouseup from an actual user) fires a
+        # 'click' event that bubbles to document -- drag()'s synthetic
+        # mousedown/mousemove/mouseup doesn't, so this dispatches the
+        # 'click' itself, same as quick-add's own outside-click check.
+        js(window, """
+            document.getElementById('graph').dispatchEvent(new MouseEvent('click', {
+                clientX: 60, clientY: 60, bubbles: true, cancelable: true,
+            }));
+        """)
+        time.sleep(0.3)
+        closed = js(window, "document.getElementById('tools-menu').classList.contains('hidden')")
+        assert closed is True, "clicking outside an open topbar menu should close it"
+
+    check("a topbar menu closes on outside click", topbar_menu_closes_on_outside_click)
+
+    def garden_dropdown_lists_and_switches():
+        js_async(window, "async () => { await api.create_garden('smoke-dropdown'); window.__result = 'ok'; }", wait=1.0)
+
+        js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(1.0)
+        rows = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#garden-menu-list .menu-item')).map(
+                r => [r.querySelector('.name').textContent, r.querySelector('.check').textContent]
+            ))
+        """))
+        assert dict(rows).get("default") == "✓", f"the current garden should be checked, got {rows}"
+        assert "smoke-dropdown" in dict(rows), f"the new garden should be listed, got {rows}"
+
+        js(window, """
+            Array.from(document.querySelectorAll('#garden-menu-list .menu-item'))
+                .find(r => r.querySelector('.name').textContent === 'smoke-dropdown').click();
+        """)
+        time.sleep(2.0)
+        assert js(window, "currentGarden") == "smoke-dropdown", "clicking a garden row should switch to it"
+        closed = js(window, "document.getElementById('garden-menu').classList.contains('hidden')")
+        assert closed is True, "switching gardens from the dropdown should close it"
+
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("garden dropdown lists gardens and switches", garden_dropdown_lists_and_switches)
+
+    def view_menu_toggles_the_control_panel():
+        js(window, "document.getElementById('view-btn').click();")
+        time.sleep(0.5)
+        assert js(window, "document.getElementById('view-toggle-panel').textContent") == "Hide controls", \
+            "the toggle should read 'Hide controls' while the panel is visible"
+
+        js(window, "document.getElementById('view-toggle-panel').click();")
+        time.sleep(0.3)
+        hidden = js(window, "document.getElementById('control-panel').classList.contains('hidden')")
+        assert hidden is True, "clicking it should hide the controls panel"
+        persisted = js(window, "localStorage.getItem('monoss:controlPanel')")
+        assert persisted == "hidden", "the hidden state should persist to localStorage"
+
+        js(window, "document.getElementById('view-btn').click();")
+        time.sleep(0.5)
+        assert js(window, "document.getElementById('view-toggle-panel').textContent") == "Show controls", \
+            "the toggle should relabel itself once the panel is hidden"
+
+        js(window, "document.getElementById('view-toggle-panel').click();")
+        time.sleep(0.3)
+        visible = js(window, "!document.getElementById('control-panel').classList.contains('hidden')")
+        assert visible is True, "clicking it again should show the controls panel"
+
+    check("the View menu's Hide/Show controls toggles the controls panel and persists", view_menu_toggles_the_control_panel)
+
+    def tools_menu_hosts_the_sim_controls():
+        # A dedicated garden, not the shared one -- unsolvable_garden_
+        # reports_instead_of_crashing (above) deliberately leaves an
+        # unsolvable rule behind in 'default' forever, which would make
+        # preview_simulation() fail here for data reasons that have
+        # nothing to do with the Tools menu wiring this check exists to
+        # verify.
+        js_async(window, """
+            async () => {
+                await api.create_garden('smoke-toolsmenu');
+                await api.switch_garden('smoke-toolsmenu');
+                const species = await api.create_mote({name: 'Widget', unknowns: 'count'});
+                const rule = await api.create_mote({name: 'Grow', equation: 'count == prev(count) + 1'});
+                await api.create_relationship(rule.id, species.id, 'applies_to');
+                const mote = await api.create_mote({name: 'w1', count: 0});
+                await api.set_species(mote.id, species.id);
+                await loadGarden('smoke-toolsmenu');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+        contains_steps = js(window, "document.getElementById('tools-menu').contains(document.getElementById('sim-steps-input'))")
+        contains_run = js(window, "document.getElementById('tools-menu').contains(document.getElementById('run-sim-btn'))")
+        assert contains_steps is True and contains_run is True, "the Tools menu should host the real sim controls"
+
+        js(window, "document.getElementById('tools-btn').click();")
+        time.sleep(0.3)
+        run_visible = js(window, "!document.getElementById('run-sim-btn').classList.contains('hidden')")
+        exit_hidden = js(window, "document.getElementById('exit-sim-btn').classList.contains('hidden')")
+        assert run_visible is True and exit_hidden is True, "with no preview active, Simulate… should show and Exit simulation should not"
+
+        js(window, "document.getElementById('sim-steps-input').value = '1';")
+        js(window, "document.getElementById('run-sim-btn').click();")
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
+        js(window, "document.getElementById('tools-btn').click();")
+        time.sleep(0.3)
+        run_hidden = js(window, "document.getElementById('run-sim-btn').classList.contains('hidden')")
+        exit_visible = js(window, "!document.getElementById('exit-sim-btn').classList.contains('hidden')")
+        assert run_hidden is True and exit_visible is True, "once a preview is active, Exit simulation should replace Simulate…"
+
+        js(window, "document.getElementById('exit-sim-btn').click();")
+        time.sleep(1.0)
+        bar_hidden = js(window, "document.getElementById('sim-bar').classList.contains('hidden')")
+        assert bar_hidden is True, "Exit simulation should close the sim bar, same as its own Discard button"
+
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("the Tools menu hosts the real sim controls and swaps Simulate/Exit", tools_menu_hosts_the_sim_controls)
+
+    def soon_stubs_toast_instead_of_doing_nothing():
+        js(window, "document.getElementById('file-btn').click();")
+        time.sleep(0.3)
+        js(window, "document.querySelector('#file-menu [data-soon=\\'Import motes\\']').click();")
+        time.sleep(0.5)
+
+        toast = js(window, "document.getElementById('toast').textContent")
+        assert "Import motes" in toast, f"a 'soon' stub should toast an explanation, got {toast!r}"
+        closed = js(window, "document.getElementById('file-menu').classList.contains('hidden')")
+        assert closed is True, "clicking a 'soon' stub should close the menu like any other action"
+
+    check("a 'soon' stub toasts instead of silently doing nothing", soon_stubs_toast_instead_of_doing_nothing)
 
     def no_uncaught_errors():
         errors = js(window, "JSON.stringify(window.__uiErrors || [])")

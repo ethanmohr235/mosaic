@@ -20,9 +20,59 @@
     <span id="brand-name">MonOSS</span>
   </div>
 
-  <button id="garden-btn" type="button" title="Manage gardens">
-    <span id="garden-label">…</span><span class="caret">⌄</span>
-  </button>
+  <div class="topbar-menu">
+    <button id="garden-btn" class="topbar-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+      <span id="garden-label">…</span><span class="caret">⌄</span>
+    </button>
+    <div id="garden-menu" class="menu hidden">
+      <div id="garden-menu-list"></div>
+      <div class="menu-sep"></div>
+      <button id="garden-menu-new" class="menu-item" type="button">+ New garden…</button>
+      <button id="garden-menu-manage" class="menu-item" type="button" title="Manage gardens">Manage gardens…</button>
+    </div>
+  </div>
+
+  <nav id="topbar-menus">
+    <div class="topbar-menu">
+      <button id="file-btn" class="topbar-trigger" type="button" data-menu="file" aria-haspopup="menu" aria-expanded="false">File</button>
+      <div id="file-menu" class="menu hidden">
+        <button id="file-new-garden" class="menu-item" type="button">New garden…</button>
+        <button class="menu-item soon" type="button" data-soon="Import motes">Import motes…<span class="menu-badge">soon</span></button>
+        <div class="menu-sep"></div>
+        <button id="export-calendar-btn" class="menu-item" type="button">Export to Calendar</button>
+        <button class="menu-item soon" type="button" data-soon="Export as CSV">Export as CSV<span class="menu-badge">soon</span></button>
+        <button class="menu-item soon" type="button" data-soon="Export as JSON">Export as JSON<span class="menu-badge">soon</span></button>
+        <button class="menu-item soon" type="button" data-soon="Print graph">Print graph…<span class="menu-badge">soon</span></button>
+      </div>
+    </div>
+
+    <div class="topbar-menu">
+      <button id="view-btn" class="topbar-trigger" type="button" data-menu="view" aria-haspopup="menu" aria-expanded="false">View</button>
+      <div id="view-menu" class="menu hidden">
+        <button id="view-reset-view" class="menu-item" type="button">Reset view</button>
+        <button id="view-toggle-panel" class="menu-item" type="button">Hide controls</button>
+        <div class="menu-sep"></div>
+        <button class="menu-item soon" type="button" data-soon="Timeline view">Timeline view<span class="menu-badge">soon</span></button>
+        <button class="menu-item soon" type="button" data-soon="Group by type">Group by type<span class="menu-badge">soon</span></button>
+      </div>
+    </div>
+
+    <div class="topbar-menu">
+      <button id="tools-btn" class="topbar-trigger" type="button" data-menu="tools" aria-haspopup="menu" aria-expanded="false">Tools</button>
+      <div id="tools-menu" class="menu hidden">
+        <div class="menu-row">
+          <span>Steps</span>
+          <input type="number" id="sim-steps-input" min="1" max="500" value="10" title="Steps to simulate">
+        </div>
+        <button id="run-sim-btn" class="menu-item accent" type="button">Simulate…</button>
+        <button id="exit-sim-btn" class="menu-item hidden" type="button">Exit simulation</button>
+        <div class="menu-sep"></div>
+        <button class="menu-item soon" type="button" data-soon="Automations">Automations<span class="menu-badge">soon</span></button>
+        <button class="menu-item soon" type="button" data-soon="Webhooks">Webhooks<span class="menu-badge">soon</span></button>
+        <button class="menu-item soon" type="button" data-soon="API access">API access<span class="menu-badge">soon</span></button>
+      </div>
+    </div>
+  </nav>
 
   <div class="spacer"></div>
 
@@ -31,12 +81,6 @@
     <span>Search motes…</span>
     <kbd>⌘K</kbd>
   </button>
-
-  <div id="sim-controls">
-    <input type="number" id="sim-steps-input" min="1" max="500" value="10" title="Steps to simulate">
-    <button id="run-sim-btn" type="button">Simulate</button>
-  </div>
-  <button id="export-calendar-btn" type="button">Export to Calendar</button>
 </header>
 
 <main>

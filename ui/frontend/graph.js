@@ -268,15 +268,23 @@ class MonossGraph {
     this.selectedRelIds = new Set([id]);
   }
 
-  /** Shift+click on an edge, mirroring how shift+drag unions motes via
-   *  box-select -- adds/removes just that one relationship rather than
-   *  replacing the whole selection. Still mutually exclusive with node
-   *  selection. */
+  /** Shift+click on an edge -- adds/removes just that one relationship
+   *  rather than replacing the whole selection. Still mutually exclusive
+   *  with node selection. */
   toggleRelationshipSelection(id) {
     this.selectedIds = new Set();
     const next = new Set(this.selectedRelIds);
     next.has(id) ? next.delete(id) : next.add(id);
     this.selectedRelIds = next;
+  }
+
+  /** Bulk analogue of select(), for relationships -- the relation
+   *  box-select's live-preview-during-drag calls this directly (no pan,
+   *  no callback) for the same race-freedom reason select() already is
+   *  mid-drag: see the comment in _onMouseMove's box-select branch. */
+  setRelationshipSelection(ids) {
+    this.selectedIds = new Set();
+    this.selectedRelIds = new Set(ids);
   }
 
   /** The single selected id, or null if zero or several are selected --
@@ -289,17 +297,24 @@ class MonossGraph {
     this.fitToContent();
   }
 
+  /** World -> page-relative screen coordinates, the inverse of _worldAt.
+   *  Shared by screenPositionOf (a single node) and _edgesInRect (arbitrary
+   *  points sampled along an edge's curve). */
+  _worldToScreen(x, y) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: rect.left + this.cssWidth / 2 + this.camera.x + x * this.camera.scale,
+      y: rect.top + this.cssHeight / 2 + this.camera.y + y * this.camera.scale,
+    };
+  }
+
   /** Screen coordinates of a node, relative to the page. Exists so the
    *  smoke test can aim synthetic mouse events at a node the same way a
    *  person would -- there is no DOM element to click on a canvas. */
   screenPositionOf(id) {
     const node = this.nodes.get(id);
     if (!node) return null;
-    const rect = this.canvas.getBoundingClientRect();
-    return {
-      x: rect.left + this.cssWidth / 2 + this.camera.x + node.x * this.camera.scale,
-      y: rect.top + this.cssHeight / 2 + this.camera.y + node.y * this.camera.scale,
-    };
+    return this._worldToScreen(node.x, node.y);
   }
 
   pinnedPositions() {
@@ -410,6 +425,12 @@ class MonossGraph {
     // is silently ignored by canvas, leaving whatever colour was set last
     // (the node's), which drew every label on a bright coloured slab.
     this._labelBg = style.getPropertyValue("--graph-label-bg").trim() || this._bg;
+    // Stroke color for a directly-selected relationship (click, shift+
+    // click, or relation box-select) -- kept in sync with #select-box.rel's
+    // fill/border via the same --select-rel-* tokens so the canvas and the
+    // DOM overlay never disagree about what color "relationship selected"
+    // means.
+    this._edgeSelected = style.getPropertyValue("--select-rel-edge").trim() || "oklch(0.72 0.13 235 / 0.95)";
   }
 
   _draw() {
@@ -442,7 +463,7 @@ class MonossGraph {
 
     if (this.simActive) {
       ctx.save();
-      ctx.strokeStyle = "oklch(0.78 0.13 70 / 0.5)";
+      ctx.strokeStyle = "oklch(0.74 0.10 68 / 0.5)";
       ctx.lineWidth = 2;
       ctx.setLineDash([10, 7]);
       ctx.strokeRect(4, 4, this.cssWidth - 8, this.cssHeight - 8);
@@ -490,15 +511,23 @@ class MonossGraph {
       const a = this.nodes.get(rel.from_id), b = this.nodes.get(rel.to_id);
       if (!a || !b) continue;
 
-      const emphasized =
+      // A relationship the user directly selected (click, shift+click, or
+      // relation box-select) gets its own distinct color rather than the
+      // amber used for "this edge touches a selected/hovered mote" -- box-
+      // selecting several relationships would otherwise look identical to
+      // just hovering one node.
+      const relSelected = this.selectedRelIds.has(rel.id);
+      const moteEmphasized =
         this.selectedIds.has(rel.from_id) || this.selectedIds.has(rel.to_id) ||
-        rel.from_id === this.hoverId || rel.to_id === this.hoverId ||
-        this.selectedRelIds.has(rel.id);
+        rel.from_id === this.hoverId || rel.to_id === this.hoverId;
+      const emphasized = relSelected || moteEmphasized;
       const dimmed = anyFocus && !emphasized;
-      ctx.strokeStyle = emphasized
-        ? "oklch(0.80 0.13 70 / 0.95)"
+      ctx.strokeStyle = relSelected
+        ? this._edgeSelected
+        : moteEmphasized
+        ? "oklch(0.78 0.10 68 / 0.95)"
         : dimmed ? "oklch(0.55 0 0 / 0.18)" : "oklch(0.55 0 0 / 0.5)";
-      ctx.lineWidth = emphasized ? 1.8 : 1;
+      ctx.lineWidth = relSelected ? 2.4 : emphasized ? 1.8 : 1;
 
       const bow = (parallel.get(rel.id) || 0) * PARALLEL_EDGE_BOW;
       const { mx, my, cx, cy } = this._edgeCurve(a, b, bow);
@@ -565,7 +594,7 @@ class MonossGraph {
 
       if (isSelected || isHover || isSource) {
         ctx.lineWidth = 2;
-        ctx.strokeStyle = isSource ? "oklch(0.80 0.13 70)" : "oklch(0.95 0 0)";
+        ctx.strokeStyle = isSource ? "oklch(0.78 0.10 68)" : "oklch(0.95 0 0)";
         ctx.stroke();
       }
       if (node.pinned) {
@@ -580,7 +609,7 @@ class MonossGraph {
         // reads as "provisional" rather than the solid selection/pinned rings.
         ctx.setLineDash([3, 3]);
         ctx.lineWidth = 2;
-        ctx.strokeStyle = "oklch(0.80 0.13 70 / 0.9)";
+        ctx.strokeStyle = "oklch(0.78 0.10 68 / 0.9)";
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + (node.pinned ? 6.5 : 3.5), 0, Math.PI * 2);
         ctx.stroke();
@@ -685,6 +714,33 @@ class MonossGraph {
     return hits;
   }
 
+  /** Edge counterpart to _hitsInRect, for the relation box-select -- an
+   *  edge is in the box if any of the 16 curve samples _hitTestEdge
+   *  already takes falls inside it, so a long edge crossing the box
+   *  counts even when neither endpoint does. */
+  _edgesInRect(rect) {
+    const hits = [];
+    const parallel = this._parallelIndex();
+    for (const rel of this.relationships) {
+      if (!this.isRelVisible(rel)) continue;
+      const a = this.nodes.get(rel.from_id), b = this.nodes.get(rel.to_id);
+      if (!a || !b) continue;
+      const bow = (parallel.get(rel.id) || 0) * PARALLEL_EDGE_BOW;
+      const { cx, cy } = this._edgeCurve(a, b, bow);
+      for (let i = 0; i <= 16; i++) {
+        const t = i / 16, it = 1 - t;
+        const px = it * it * a.x + 2 * it * t * cx + t * t * b.x;
+        const py = it * it * a.y + 2 * it * t * cy + t * t * b.y;
+        const { x, y } = this._worldToScreen(px, py);
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          hits.push(rel.id);
+          break;
+        }
+      }
+    }
+    return hits;
+  }
+
   _onMouseDown = (e) => {
     // Unconditional and first: a click or drag anywhere is the user
     // telling the camera what they want, which always wins over the
@@ -729,14 +785,14 @@ class MonossGraph {
       };
       return;
     }
-    // Empty canvas, plain left button -> box-select. Shift keeps whatever
-    // was already selected and adds to it; otherwise a completed box (or a
-    // plain click, handled in _onMouseUp) replaces the selection. baseIds
-    // snapshots the pre-drag selection so the live preview below has
-    // something to union against in additive mode.
+    // Empty canvas, plain left button -> box-select. Plain drag box-selects
+    // motes, replacing the mote selection; shift+drag box-selects
+    // relationships instead (with a distinct highlight color), replacing
+    // the relationship selection. The two are mutually exclusive, same as
+    // a single click already is.
     this.boxState = {
       startX: e.clientX, startY: e.clientY, moved: false,
-      additive: e.shiftKey, baseIds: [...this.selectedIds],
+      mode: e.shiftKey ? "rel" : "mote",
     };
   };
 
@@ -784,24 +840,28 @@ class MonossGraph {
       }
       if (this.boxState.moved) {
         const rect = this._normalizedRect(this.boxState.startX, this.boxState.startY, e.clientX, e.clientY);
-        if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(rect);
+        if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(rect, this.boxState.mode);
 
-        // Live preview: motes highlight on the canvas as they enter the
-        // box, not only once the mouse is released. Deliberately does NOT
-        // fire onSelectionChanged on every intermediate step -- for a
-        // single hit, app.js's handler goes through the full selectMote()
-        // -> refocus() path, a real async round trip to the backend. A
-        // fast box-drag can queue several of those, and an earlier one
-        // resolving after a later mousemove already moved on would clobber
-        // the in-progress selection with stale data. select() alone is
-        // synchronous and just touches render state, so it's race-free;
-        // the panel catches up once, authoritatively, at mouseup.
-        const hits = this._hitsInRect(rect);
-        const finalIds = this.boxState.additive
-          ? [...new Set([...this.boxState.baseIds, ...hits])]
-          : hits;
-        if (!_sameIds(finalIds, this.selectedIds)) {
-          this.select(finalIds, { pan: false });
+        // Live preview: motes/edges highlight on the canvas as they enter
+        // the box, not only once the mouse is released. Deliberately does
+        // NOT fire onSelectionChanged/onRelationshipsSelected on every
+        // intermediate step -- for a single hit, app.js's handler goes
+        // through a real async round trip (selectMote() -> refocus(), or
+        // openRelationshipPanel/renderMultiRelationshipPanel churning the
+        // DOM, or closeDetailPanel() clobbering the selection it's still
+        // building via its own graph.select(null)). A fast box-drag can
+        // queue several of those, and an earlier one resolving after a
+        // later mousemove already moved on would stomp the in-progress
+        // selection with stale data. select()/setRelationshipSelection()
+        // alone are synchronous and just touch render state, so they're
+        // race-free; the panel catches up once, authoritatively, at
+        // mouseup.
+        if (this.boxState.mode === "rel") {
+          const hits = this._edgesInRect(rect);
+          if (!_sameIds(hits, this.selectedRelIds)) this.setRelationshipSelection(hits);
+        } else {
+          const hits = this._hitsInRect(rect);
+          if (!_sameIds(hits, this.selectedIds)) this.select(hits, { pan: false });
         }
       }
       return;
@@ -841,17 +901,20 @@ class MonossGraph {
       return;
     }
     if (this.boxState) {
-      const { startX, startY, moved, additive, baseIds } = this.boxState;
+      const { startX, startY, moved, mode } = this.boxState;
       this.boxState = null;
-      if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(null); // clear the rect overlay
+      if (this.callbacks.onBoxSelect) this.callbacks.onBoxSelect(null, mode); // clear the rect overlay
 
       if (!moved) {
         // A plain click on empty canvas: try an edge first, then fall back
-        // to deselect. Shift+click on an edge toggles it into/out of the
-        // relationship selection instead of replacing it. Shift-click on
-        // truly empty space (no edge under the cursor) is a no-op rather
-        // than clearing an existing selection -- shift means "add to", and
-        // there's nothing under the cursor to add.
+        // to deselect. A click that started as a shift+drag-relations
+        // gesture (mode "rel") but never moved toggles that one edge into/
+        // out of the relationship selection instead of replacing it, same
+        // as an ordinary shift+click -- see toggleRelationshipSelection.
+        // Shift-click on truly empty space (no edge under the cursor) is a
+        // no-op rather than clearing an existing selection -- shift means
+        // "add to", and there's nothing under the cursor to add.
+        const additive = mode === "rel";
         const relId = this._hitTestEdge(e.clientX, e.clientY);
         if (relId) {
           if (additive) this.toggleRelationshipSelection(relId);
@@ -872,10 +935,15 @@ class MonossGraph {
       // the right ids in place; this is the authoritative final call in
       // case no mousemove landed exactly on the release point.
       const rect = this._normalizedRect(startX, startY, e.clientX, e.clientY);
+      if (mode === "rel") {
+        const hits = this._edgesInRect(rect);
+        this.setRelationshipSelection(hits);
+        if (this.callbacks.onRelationshipsSelected) this.callbacks.onRelationshipsSelected(hits);
+        return;
+      }
       const hits = this._hitsInRect(rect);
-      const finalIds = additive ? [...new Set([...baseIds, ...hits])] : hits;
-      this.select(finalIds, { pan: false });
-      if (this.callbacks.onSelectionChanged) this.callbacks.onSelectionChanged(finalIds);
+      this.select(hits, { pan: false });
+      if (this.callbacks.onSelectionChanged) this.callbacks.onSelectionChanged(hits);
       return;
     }
   };

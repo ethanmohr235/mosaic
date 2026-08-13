@@ -26,6 +26,7 @@ let simPreview = null;                 // the last preview_simulation() payload,
 let simStep = 0;                       // 0 = real/unprojected; k>0 = cumulative state through steps[k-1]
 let simPlaying = false;
 let simPlayTimer = null;
+let openMenuName = null;               // 'garden' | 'file' | 'view' | 'tools' | null -- which topbar dropdown is open
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -33,6 +34,7 @@ const DETAIL_WIDTH_MIN = 280;
 const DETAIL_WIDTH_MAX = 640;
 const SIM_STEPS_KEY = "monoss:simSteps";
 const SIM_ERROR_TOAST_MS = 12000;
+const CONTROL_PANEL_KEY = "monoss:controlPanel";
 
 window.addEventListener("error", (e) => {
   console.error(e.error || e.message);
@@ -1191,8 +1193,9 @@ async function syncSelectionPanel(ids) {
   renderMultiSelectPanel(ids);
 }
 
-function updateSelectBox(rect) {
+function updateSelectBox(rect, mode) {
   const box = $("select-box");
+  box.classList.toggle("rel", mode === "rel");
   if (!rect) { box.classList.add("hidden"); return; }
   const wrapRect = $("graph-wrap").getBoundingClientRect();
   box.style.left = (rect.left - wrapRect.left) + "px";
@@ -1219,6 +1222,7 @@ function addMenuItem(menu, label, onClick, { danger = false, disabled = false } 
 }
 
 async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
+  closeTopMenus(); // mutual exclusion with the topbar dropdowns, both ways
   // graph.js may have just replaced the selection with the right-clicked
   // mote (or left an existing multi-selection that includes it) -- the
   // panel needs to catch up before the menu's actions read graph.selectedIds.
@@ -1342,12 +1346,159 @@ function setupContextMenu() {
   });
 }
 
+// ---- topbar menus ----
+//
+// The garden switcher and the File/View/Tools menus are anchored dropdowns
+// (reusing the .menu/.menu-item classes #context-menu already established)
+// with only one open at a time -- opening any one closes the rest, mutually
+// exclusive with the right-click context menu too. Most of their real
+// items are static markup pointing at ids that predate this section
+// (#run-sim-btn, #export-calendar-btn, ...) so the setup functions that
+// already own those elements' behavior need no changes, only a leading
+// closeTopMenus() so choosing an action closes the menu it came from.
+
+function closeTopMenus() {
+  for (const name of ["garden", "file", "view", "tools"]) {
+    $(`${name}-menu`).classList.add("hidden");
+    const btn = $(`${name}-btn`);
+    btn.classList.remove("open");
+    btn.setAttribute("aria-expanded", "false");
+  }
+  openMenuName = null;
+}
+
+function openTopMenu(name) {
+  closeTopMenus();
+  hideContextMenu();
+  if (name === "garden") renderGardenMenu();
+  else if (name === "view") refreshViewMenu();
+  else if (name === "tools") refreshToolsMenu();
+  $(`${name}-menu`).classList.remove("hidden");
+  const btn = $(`${name}-btn`);
+  btn.classList.add("open");
+  btn.setAttribute("aria-expanded", "true");
+  openMenuName = name;
+}
+
+function toggleTopMenu(name) {
+  if (openMenuName === name) closeTopMenus();
+  else openTopMenu(name);
+}
+
+/** Switch/create only -- Export/Delete stay in the gardens modal (reached
+ *  via "Manage gardens…"), which has room for them as real per-row
+ *  buttons instead of crammed into a narrow menu item. */
+async function renderGardenMenu() {
+  const gardens = await call(api.list_gardens());
+  const container = $("garden-menu-list");
+  container.innerHTML = "";
+  for (const name of gardens) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "menu-item";
+    row.innerHTML = '<span class="check"></span><span class="name"></span>';
+    row.querySelector(".check").textContent = name === currentGarden ? "✓" : "";
+    row.querySelector(".name").textContent = name;
+    row.addEventListener("click", async () => {
+      closeTopMenus();
+      if (name === currentGarden) return;
+      await call(api.switch_garden(name));
+      await loadGarden(name);
+    });
+    container.appendChild(row);
+  }
+}
+
+function refreshViewMenu() {
+  const hidden = $("control-panel").classList.contains("hidden");
+  $("view-toggle-panel").textContent = hidden ? "Show controls" : "Hide controls";
+}
+
+/** Computed at open time rather than kept in sync continuously -- simpler
+ *  than threading a menu refresh into every place simPreview changes,
+ *  and the menu is closed the rest of the time anyway. */
+function refreshToolsMenu() {
+  $("run-sim-btn").classList.toggle("hidden", !!simPreview);
+  $("exit-sim-btn").classList.toggle("hidden", !simPreview);
+}
+
+/** #control-panel (species legend, relationship filters, depth, reset
+ *  view) has always been permanently visible; this is the first way to
+ *  reclaim the screen space it docks over (top-right, the same corner
+ *  #detail-panel covers at a higher z-index). Toggles the whole panel,
+ *  not just the legend -- it's one visual box, and hiding only part of it
+ *  would leave a half-empty box floating in the corner. */
+function applyControlPanelVisibility() {
+  const hidden = localStorage.getItem(CONTROL_PANEL_KEY) === "hidden";
+  $("control-panel").classList.toggle("hidden", hidden);
+}
+
+function toggleControlPanel() {
+  const panel = $("control-panel");
+  const hidden = !panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", hidden);
+  localStorage.setItem(CONTROL_PANEL_KEY, hidden ? "hidden" : "shown");
+}
+
+/** Shared by every "soon" stub item (Import motes, Export as CSV/JSON,
+ *  Print graph, Timeline view, Group by type, Automations, Webhooks, API
+ *  access) -- these have no real implementation yet, so a toast explains
+ *  that rather than leaving the click silently do nothing. */
+function comingSoon(label) {
+  showToast(`${label} isn't built yet.`);
+}
+
+/** Shared by the garden dropdown's "+ New garden…" and the File menu's
+ *  "New garden…" -- two entry points to the same action, so they can't
+ *  drift. closeGardensModal() is a harmless no-op if the modal isn't the
+ *  one open (it's the gardens modal's own #new-garden-btn that also calls
+ *  this, and that one *is* inside the modal). */
+async function createGardenFlow() {
+  const name = window.prompt("New garden name:");
+  if (!name) return;
+  await call(api.create_garden(name));
+  await call(api.switch_garden(name));
+  closeGardensModal();
+  await loadGarden(name);
+}
+
+function setupTopMenus() {
+  for (const name of ["garden", "file", "view", "tools"]) {
+    $(`${name}-btn`).addEventListener("click", () => toggleTopMenu(name));
+  }
+
+  // Matches the context menu's own dismiss-on-outside-click pattern. A
+  // click anywhere inside the open menu's own .topbar-menu wrapper --
+  // including its trigger button -- is excluded so opening/using a menu
+  // never immediately closes itself on the same bubble.
+  document.addEventListener("click", (e) => {
+    if (!openMenuName) return;
+    if (e.target.closest(".topbar-menu")) return;
+    closeTopMenus();
+  });
+
+  for (const el of document.querySelectorAll("[data-soon]")) {
+    el.addEventListener("click", () => {
+      closeTopMenus();
+      comingSoon(el.dataset.soon);
+    });
+  }
+
+  $("garden-menu-new").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
+  $("garden-menu-manage").addEventListener("click", () => { closeTopMenus(); openGardensModal(); });
+  $("file-new-garden").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
+  $("view-reset-view").addEventListener("click", () => { closeTopMenus(); graph.resetView(); });
+  $("view-toggle-panel").addEventListener("click", () => { closeTopMenus(); toggleControlPanel(); });
+  $("exit-sim-btn").addEventListener("click", () => { closeTopMenus(); discardSimPreview(); });
+}
+
 // ---- gardens modal ----
 //
-// A centered modal like the search palette, not an anchored dropdown --
-// consistent with how every other panel in this app works, and gives
-// Export/Delete room to sit as real per-row buttons instead of being
-// crammed into a narrow menu item.
+// Reached from the garden dropdown's "Manage gardens…" (and, for New
+// garden specifically, duplicated as a quick entry point in both that
+// dropdown and the File menu) -- a centered modal, not an anchored
+// dropdown, gives Export/Delete room to sit as real per-row buttons
+// instead of being crammed into a narrow menu item.
 
 async function renderGardensList() {
   const gardens = await call(api.list_gardens());
@@ -1415,19 +1566,11 @@ function closeGardensModal() {
 }
 
 function setupGardensModal() {
-  $("garden-btn").addEventListener("click", openGardensModal);
   $("gardens-overlay").addEventListener("mousedown", (e) => {
     if (e.target === $("gardens-overlay")) closeGardensModal();
   });
 
-  $("new-garden-btn").addEventListener("click", async () => {
-    const name = window.prompt("New garden name:");
-    if (!name) return;
-    await call(api.create_garden(name));
-    await call(api.switch_garden(name));
-    closeGardensModal();
-    await loadGarden(name);
-  });
+  $("new-garden-btn").addEventListener("click", createGardenFlow);
 
   $("import-garden-btn").addEventListener("click", async () => {
     const name = window.prompt("Import into a new garden named:");
@@ -1488,6 +1631,7 @@ function setupSimulation() {
   });
 
   button.addEventListener("click", async () => {
+    closeTopMenus();
     const steps = Math.max(1, parseInt(stepsInput.value, 10) || 1);
     button.disabled = true;
     button.textContent = "Running…";
@@ -1516,12 +1660,7 @@ function setupSimulation() {
     if (simPlaying) stopSimPlay(); else startSimPlay();
   });
 
-  $("sim-discard-btn").addEventListener("click", async () => {
-    closeSimBar();
-    if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
-      await openDetailPanel(focusId);
-    }
-  });
+  $("sim-discard-btn").addEventListener("click", discardSimPreview);
 
   $("sim-commit-btn").addEventListener("click", async () => {
     if (!simPreview || simStep === 0) return;
@@ -1572,6 +1711,15 @@ function closeSimBar() {
   simStep = 0;
   graph.setSimActive(false);
   graph.setSimHighlight([]);
+}
+
+/** Shared by the sim bar's own Discard button and the Tools menu's "Exit
+ *  simulation" item -- two entry points to the same action. */
+async function discardSimPreview() {
+  closeSimBar();
+  if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
+    await openDetailPanel(focusId);
+  }
 }
 
 function setSimStep(idx) {
@@ -1653,6 +1801,7 @@ function renderSimBar() {
 function setupCalendarExport() {
   const button = $("export-calendar-btn");
   button.addEventListener("click", async () => {
+    closeTopMenus();
     button.disabled = true;
     button.textContent = "Exporting…";
     // Shown immediately, not just on completion: the very first export
@@ -1788,6 +1937,7 @@ function setupKeyboard() {
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
+    if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
     // The sim bar is non-blocking (the rest of the UI stays usable while
@@ -1830,11 +1980,14 @@ async function init() {
     onSelectionChanged: syncSelectionPanel,
     onContextMenu: openContextMenu,
     onRelationshipsSelected: (ids) =>
-      ids.length === 1 ? openRelationshipPanel(ids[0]) : renderMultiRelationshipPanel(ids),
+      ids.length === 0 ? closeDetailPanel()
+      : ids.length === 1 ? openRelationshipPanel(ids[0])
+      : renderMultiRelationshipPanel(ids),
   });
   window.graph = graph;
 
   setupGardensModal();
+  setupTopMenus();
   setupDetailResize();
   setupQuickAdd();
   setupSpeciesControls();
@@ -1844,6 +1997,7 @@ async function init() {
   setupCalendarExport();
   setupContextMenu();
   setupKeyboard();
+  applyControlPanelVisibility();
 
   currentGarden = await call(api.current_garden());
   await loadGarden(currentGarden);

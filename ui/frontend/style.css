@@ -41,9 +41,17 @@
   --fg-bright: oklch(0.96 0 0);
   --muted: oklch(0.68 0 0);
   --faint: oklch(0.48 0 0);
-  --accent: oklch(0.78 0.13 70);
-  --accent-bright: oklch(0.85 0.13 70);
+  --accent: oklch(0.74 0.10 68);
+  --accent-bright: oklch(0.82 0.11 68);
   --danger: oklch(0.65 0.15 25);
+  /* Relationship-selection accent -- deliberately a different hue from
+     --accent (amber) and --danger (red), so a directly-selected edge (via
+     click, shift+click, or the shift+drag relation box-select) never
+     reads as "this edge touches a selected mote" or "destructive." */
+  --select-rel: oklch(0.72 0.13 235);
+  --select-rel-soft: oklch(0.72 0.13 235 / 0.14);
+  --select-rel-edge: oklch(0.72 0.13 235 / 0.95);
+  --accent-soft: oklch(0.74 0.10 68 / 0.12);
   --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --serif: "IBM Plex Serif", Georgia, serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -96,7 +104,7 @@ button.linkish:hover { color: var(--fg); }
 /* ---- topbar ---- */
 
 #topbar {
-  display: flex; align-items: center; gap: 16px;
+  display: flex; align-items: center; gap: 10px;
   padding: 11px 18px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0; position: relative; z-index: 8;
@@ -105,7 +113,22 @@ button.linkish:hover { color: var(--fg); }
 #brand { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
 #brand-name { font-family: var(--serif); font-size: 19px; font-weight: 500; letter-spacing: 0.01em; }
 
-#garden-btn { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-shrink: 0; }
+#topbar-menus { display: flex; align-items: center; gap: 2px; }
+/* Anchors each dropdown's .menu (position:absolute) to its own trigger
+   rather than the topbar as a whole. */
+.topbar-menu { position: relative; flex-shrink: 0; }
+
+/* Transparent-until-active, replacing the generic bordered-button look
+   for the topbar's own dropdown triggers -- the accent-colored label
+   when open is a second, color-independent cue alongside the fill. */
+.topbar-trigger {
+  display: flex; align-items: center; gap: 8px;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 7px; padding: 6px 10px;
+  font-size: 13px; color: var(--muted);
+}
+.topbar-trigger:hover { background: var(--panel); border-color: transparent; color: var(--fg); }
+.topbar-trigger.open { background: var(--raised); color: var(--accent); }
 #garden-btn .caret { color: var(--faint); font-size: 11px; }
 
 .menu {
@@ -125,6 +148,39 @@ button.linkish:hover { color: var(--fg); }
 .menu-item.disabled { color: var(--faint); cursor: default; pointer-events: none; }
 .menu-sep { border-top: 1px solid var(--border-soft); }
 
+/* The topbar's File/View/Tools/garden menus build their real items as
+   actual <button>s (unlike #context-menu, which builds divs from JS) so
+   disabled/soon rows get native semantics for free -- this resets the
+   generic button look back to .menu-item's. */
+.menu button.menu-item {
+  width: 100%; background: none; border: none; border-radius: 0;
+  padding: 9px 14px; font: inherit; color: inherit; text-align: left;
+}
+.menu-item:disabled { color: var(--faint); cursor: default; }
+
+/* "Soon" stub rows stay clickable (comingSoon() toasts an explanation) --
+   a dead click in a desktop app is indistinguishable from a bug, so these
+   are deliberately not .disabled. */
+.menu-item.soon { color: var(--faint); }
+.menu-badge {
+  margin-left: auto; flex-shrink: 0;
+  font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--faint); border: 1px solid var(--border-soft);
+  border-radius: 4px; padding: 1px 5px;
+}
+
+/* Non-clickable row inside a menu, for the sim step-count input now that
+   there's no dedicated #sim-controls topbar slot. */
+.menu-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 14px; font-size: 13px; color: var(--muted); cursor: default;
+}
+.menu-row input { width: 64px; text-align: center; padding: 4px 6px; font-size: 12px; }
+
+#garden-menu-list { max-height: 260px; overflow-y: auto; }
+#garden-menu-list .check { color: var(--accent); width: 14px; flex-shrink: 0; text-align: center; }
+#garden-menu-list .name { flex: 1; text-align: left; }
+
 #context-menu {
   position: fixed; top: 0; left: 0; /* overridden inline per-open */
   min-width: 170px;
@@ -132,8 +188,14 @@ button.linkish:hover { color: var(--fg); }
 
 #select-box {
   position: absolute; border: 1px solid var(--accent);
-  background: oklch(0.78 0.13 70 / 0.12);
+  background: var(--accent-soft);
   pointer-events: none; z-index: 3;
+}
+/* Shift+drag box-selects relationships instead of motes -- a distinct
+   color so it's never mistaken for the mote box-select above. */
+#select-box.rel {
+  border-color: var(--select-rel);
+  background: var(--select-rel-soft);
 }
 
 #search-btn {
@@ -443,9 +505,6 @@ main { flex: 1; min-height: 0; display: flex; }
  * mockup (MonOSS Graph.dc.html).
  */
 
-#sim-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-#sim-steps-input { width: 56px; text-align: center; padding: 7px 4px; }
-
 #sim-bar {
   position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
   z-index: 7; width: 560px; max-width: 92vw;
@@ -454,7 +513,7 @@ main { flex: 1; min-height: 0; display: flex; }
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
   display: flex; flex-direction: column; gap: 11px;
 }
-#sim-bar.projected { border-color: oklch(0.55 0.14 70 / 0.6); }
+#sim-bar.projected { border-color: oklch(0.55 0.14 68 / 0.6); }
 
 #sim-bar-top { display: flex; align-items: center; gap: 10px; }
 #sim-badge {
@@ -488,7 +547,7 @@ main { flex: 1; min-height: 0; display: flex; }
 /* ---- detail panel: simulation read-only banner ---- */
 
 #detail-sim-banner {
-  background: var(--raised); border: 1px solid oklch(0.55 0.14 70 / 0.5);
+  background: var(--raised); border: 1px solid oklch(0.55 0.14 68 / 0.5);
   border-radius: 7px; padding: 8px 10px; font-size: 11.5px;
   color: var(--accent); margin-bottom: 16px;
 }

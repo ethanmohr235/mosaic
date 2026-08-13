@@ -18,7 +18,8 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 | Shift+Left-click an edge | Add/remove that relationship from the selection |
 | Left-click empty canvas | Deselect |
 | Left-drag a mote | Move + pin it (drags the whole selection together if it's part of one) |
-| Left-drag empty canvas | Box-select (hold Shift to add to the current selection) |
+| Left-drag empty canvas | Box-select motes |
+| Shift+Left-drag empty canvas | Box-select relationships (distinct highlight color; mote and relationship selection stay mutually exclusive) |
 | Ctrl+Left-drag from a mote | Connect it to another mote |
 | Middle-drag | Pan |
 | Right-click a mote | Context menu: Copy, Pin/Unpin, Delete (acts on the whole selection if the mote is part of one) |
@@ -30,18 +31,20 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 | Esc | Close the frontmost menu/panel, or deselect if nothing else is open |
 | Scroll | Zoom |
 
-Motes highlight live as a box-select drag grows over them, not only once
-the mouse is released. Copying more than one mote preserves their
-relative layout on paste. Gardens (switch/create/export/import/delete)
-live in a modal opened from the topbar's garden button, not a dropdown.
+Motes/relationships highlight live as a box-select drag grows over them,
+not only once the mouse is released. Copying more than one mote preserves
+their relative layout on paste. The topbar's garden button opens a quick
+switch/create dropdown; its "Manage gardens…" item (also reachable from
+the File menu) opens the fuller modal that Export/Delete/Import still
+live in, since those need real per-row buttons a narrow menu item can't
+give them.
 
-Shift+clicking edges builds up a relationship selection the same way
-box-select does for motes, just one at a time rather than by dragging a
-rectangle -- there's no edge-aware box-select. Selecting relationships
-and selecting motes are mutually exclusive, same as a single relationship
-and a single mote already were: picking one kind clears the other. The
-detail panel's bulk delete button (and Delete/Backspace) act on whichever
-kind is currently selected.
+Shift+clicking an edge, or shift-dragging a box, builds up a relationship
+selection the same way plain box-select does for motes. Selecting
+relationships and selecting motes are mutually exclusive, same as a
+single relationship and a single mote already were: picking one kind
+clears the other. The detail panel's bulk delete button (and
+Delete/Backspace) act on whichever kind is currently selected.
 
 The search palette (Ctrl/Cmd+K) also accepts a `key = value` query (e.g.
 `priority = high`) instead of the usual substring match across every
@@ -59,6 +62,28 @@ relationships) doesn't need to be reconnected by hand. Garden delete
 works the same way at the file level: the garden's `.db` file is moved
 aside rather than removed, so `restore_garden` can move it back; only the
 most recently trashed copy of a given name is kept.
+
+### Topbar menus
+
+The topbar is brand · garden dropdown · File · View · Tools · search, each
+of File/View/Tools an anchored dropdown reusing the same `.menu`/
+`.menu-item` styling the right-click context menu already established.
+Only one of these (plus the garden dropdown, plus the context menu) is
+ever open at a time -- opening any one closes the rest, and Esc or a
+click outside the open one closes it too.
+
+Most items are real, existing actions relocated rather than rebuilt:
+File hosts "New garden…" and "Export to Calendar"; View hosts "Reset
+view" and a new "Hide/Show controls" toggle for the always-docked
+top-right panel (species legend, relationship filters, depth, reset
+view) -- the first way to reclaim that screen space, persisted across
+restarts; Tools hosts the simulation step count and the Simulate…/Exit
+simulation trigger for the same non-blocking preview/scrub/commit bar
+described above. A handful of items (Import motes, Export as CSV/JSON,
+Print graph, Timeline view, Group by type, Automations, Webhooks, API
+access) are inert placeholders with a small "soon" badge, staged for
+future expansion -- clicking one just toasts an explanation rather than
+doing nothing silently.
 
 ### Linking out to files and websites
 
@@ -90,7 +115,7 @@ drop yet; the path/URL has to be pasted in by hand.
 
 ### Exporting dated motes to Google Calendar
 
-The topbar's "Export to Calendar" button pushes every mote with a `date`
+The File menu's "Export to Calendar" item pushes every mote with a `date`
 property in the current garden to Google Calendar (one-way, manual).
 Deleting a dated mote, or removing its `date`, deletes the corresponding
 event on the next export. See `docs/google-calendar.md` for the reserved
@@ -190,13 +215,20 @@ Esc/Del, arrow-key navigation, the gardens modal's list/switch/
 create/delete, undoing a delete via the toast button and Ctrl+Z, the
 url property's Open button, dragging/pinning a whole multi-selection
 together, reserved-name badges, the resizable detail panel, selecting
-and inspecting a relationship by clicking its edge, shift+click building
-a multi-relationship selection and bulk-deleting it, the "New mote here"
-form opening near the click, creating a mote by pressing Enter in that
-form instead of clicking Create, that form closing on an outside click,
-the search palette's `key = value` exact-match query, a hidden species'
-instances actually dropping out of the physics loop instead of just not
-being drawn, and the Export to Calendar button -- with
+and inspecting a relationship by clicking its edge, shift+click and
+shift+drag both building a multi-relationship selection (live, and with
+the distinct box/edge color) and bulk-deleting it, a plain drag still
+box-selecting only motes, the "New mote here" form opening near the
+click, creating a mote by pressing Enter in that form instead of clicking
+Create, that form closing on an outside click, the search palette's
+`key = value` exact-match query, the topbar's File/View/Tools/garden
+dropdowns opening one at a time, closing on Esc or an outside click, the
+garden dropdown listing/switching gardens, the View menu's Hide/Show
+controls toggle and its persistence, the Tools menu swapping Simulate…/
+Exit simulation with the real preview state, a "soon" stub toasting
+instead of doing nothing, a hidden species' instances actually dropping
+out of the physics loop instead of just not being drawn, and the Export
+to Calendar item -- with
 `api.export_to_google_calendar` itself stubbed, since the real OAuth/
 network path needs a real Google account and has no place in an
 automated, offline suite) against a throwaway temp `GARDENS_DIR` and
