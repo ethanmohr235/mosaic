@@ -402,7 +402,14 @@ class Api:
         (list_motes, update_mote) are synchronized, individually."""
         garden_at_start = self._current_garden
         all_motes = self.list_motes()
-        motes = gcal_repo.dated_motes(all_motes)
+        # Templates hold starting properties for a species, not real data
+        # (usually incomplete fields that would break other behavior) --
+        # excluded here even if dated, same as any other non-eligible mote.
+        # Lock held only for this brief read, same discipline as every
+        # other DB touch in this deliberately-not-@_synchronized method.
+        with self._lock:
+            template_ids = species_repo.template_mote_ids(self._conn)
+        motes = [m for m in gcal_repo.dated_motes(all_motes) if m["id"] not in template_ids]
         dated_ids = {m["id"] for m in motes}
         credentials = gcal_repo.get_credentials()
 

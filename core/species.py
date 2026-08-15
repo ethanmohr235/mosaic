@@ -48,6 +48,14 @@ def list_species(conn: sqlite3.Connection) -> list[Mote]:
     return get_motes(conn, list(species_ids))
 
 
+def template_mote_ids(conn: sqlite3.Connection) -> set[str]:
+    """Every mote currently acting as a template -- the source of at
+    least one template_of relationship. These hold starting properties
+    for a species, not real data, so a caller that only wants "real"
+    motes (e.g. calendar export) should exclude them."""
+    return {r.from_id for r in list_relationships(conn, type_=TEMPLATE_OF)}
+
+
 def set_template(conn: sqlite3.Connection, mote_id: str, species_id: str) -> str:
     """Make mote_id the template for species_id -- the mote whose properties
     new instances start from."""

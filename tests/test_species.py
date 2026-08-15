@@ -7,6 +7,7 @@ from core.species import (
     set_template,
     species_of,
     template_for,
+    template_mote_ids,
 )
 
 
@@ -152,6 +153,23 @@ def test_species_with_only_a_template_still_lists_as_a_species(conn):
     set_template(conn, template, species)
 
     assert [m.id for m in list_species(conn)] == [species]
+
+
+def test_template_mote_ids_returns_only_templates(conn):
+    species = create_mote(conn, {"name": "Resistor"})
+    template = create_mote(conn, {"name": "R", "resistance": 100})
+    set_template(conn, template, species)
+    instance = create_instance(conn, species)
+
+    assert template_mote_ids(conn) == {template}
+    assert species not in template_mote_ids(conn)
+    assert instance not in template_mote_ids(conn)
+
+
+def test_template_mote_ids_empty_without_any_templates(conn):
+    species = create_mote(conn, {"name": "Resistor"})
+    create_instance(conn, species)
+    assert template_mote_ids(conn) == set()
 
 
 def test_simulation_ignores_template_motes(conn):

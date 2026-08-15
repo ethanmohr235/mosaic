@@ -330,6 +330,27 @@ def test_export_to_google_calendar_creates_events_and_writes_back_ids(api, monke
     assert "gcal_event_id" not in api.get_mote(b["id"])["properties"]
 
 
+def test_export_to_google_calendar_excludes_a_dated_template_mote(api, monkeypatch):
+    species = api.create_mote({"name": "Deadline"})
+    template = api.create_mote({"name": "template", "date": "2026-08-15"})
+    api.set_template(template["id"], species["id"])
+    real = api.create_mote({"name": "Real deadline", "date": "2026-08-20"})
+
+    pushed = []
+    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
+    monkeypatch.setattr(
+        ui.api.gcal_repo, "push_event",
+        lambda credentials, payload, existing_event_id: pushed.append(payload["summary"]) or "evt",
+    )
+
+    result = api.export_to_google_calendar()
+
+    assert result == {"created": 1, "updated": 0, "skipped": 0, "deleted": 0, "total": 1}
+    assert pushed == ["Real deadline"]
+    assert "gcal_event_id" not in api.get_mote(template["id"])["properties"]
+
+
 def test_export_to_google_calendar_reuses_the_existing_event_id_on_a_second_run(api, monkeypatch):
     a = api.create_mote({"name": "Exam", "date": "2026-08-15T09:00:00"})
     calls = []
