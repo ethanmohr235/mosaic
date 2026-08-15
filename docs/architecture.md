@@ -64,11 +64,21 @@ can call (`run_mcp.py`), over stdio by default or streamable HTTP with
 translation between an MCP call and the function the CLI or UI already
 calls.
 
-Nothing here authenticates. Over stdio that is fine -- the client starts
-the process and talks to it over a pipe -- but the HTTP transport binds
-loopback for that reason, and is meant to be reached over a private
-network (see `docs/mcp.md`), not published. DNS-rebinding protection is
-on so a browser page can't drive the loopback port.
+By default nothing here authenticates. Over stdio that is fine -- the
+client starts the process and talks to it over a pipe -- and the HTTP
+transport binds loopback for the same reason, meant to be reached over a
+private network (see `docs/mcp.md`), not published. DNS-rebinding
+protection is on so a browser page can't drive the loopback port.
+
+`run_mcp.py --http --public-url <url>` turns on OAuth (`mcp_server/auth.py`)
+for clients that require it protocol-level rather than accepting a plain
+connection -- Claude Desktop's remote-connector UI does, Claude Code's
+`mcp add --transport http` doesn't. `authorize()` grants every request
+immediately, with no login or consent step: there's no second party on
+this server to protect the resource from, so the token exists to satisfy
+the client's requirement, not as an access boundary beyond the one the
+network already provides (Tailscale, `--allowed-host`). Every client
+registration and token lives in memory and is forgotten on restart.
 
 The package is deliberately not named `mcp/`: `run_mcp.py` puts the
 project root on `sys.path`, so a top-level package by that name would

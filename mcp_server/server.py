@@ -15,11 +15,13 @@ on a SQLite lock while the user works in the GUI on the same file.
 """
 import dataclasses
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.auth.provider import OAuthAuthorizationServerProvider
+from mcp.server.auth.settings import AuthSettings
 
 from core import garden_io
 from core import gardens as gardens_repo
@@ -37,20 +39,15 @@ from core.db import get_connection, initialize_database
 # behavior exactly.
 _BUSY_TIMEOUT_MS = 5000
 
-# The SDK's tool registry. Module-level because the decorator form
-# requires it, the same way cli/main.py's parser is built once.
-mcp = MCPServer(
-    "monoss",
-    instructions=(
-        "MonOSS is a knowledge graph where every entity -- person, task, note, "
-        "meeting, idea -- is one object type called a mote, carrying free-form "
-        "JSON properties and connected by typed relationships. Separate graphs "
-        "are called gardens; every tool takes an optional `garden` and defaults "
-        "to 'default'. A mote acts as a species when others point at it with an "
-        "`instance_of` relationship, giving it a type; a species may have a "
-        "template whose properties new instances start from. Prefer neighborhood() "
-        "over list_motes() to explore a large garden."
-    ),
+_INSTRUCTIONS = (
+    "MonOSS is a knowledge graph where every entity -- person, task, note, "
+    "meeting, idea -- is one object type called a mote, carrying free-form "
+    "JSON properties and connected by typed relationships. Separate graphs "
+    "are called gardens; every tool takes an optional `garden` and defaults "
+    "to 'default'. A mote acts as a species when others point at it with an "
+    "`instance_of` relationship, giving it a type; a species may have a "
+    "template whose properties new instances start from. Prefer neighborhood() "
+    "over list_motes() to explore a large garden."
 )
 
 
@@ -87,21 +84,18 @@ def _steps_payload(steps: list) -> list[dict[str, Any]]:
 # ---- gardens ----
 
 
-@mcp.tool()
 def list_gardens() -> list[str]:
     """Names of every garden (separate, self-contained graph) on this
     machine. Call this first when unsure which garden holds the data."""
     return gardens_repo.list_gardens()
 
 
-@mcp.tool()
 def create_garden(name: str) -> dict[str, Any]:
     """Create a new empty garden. Names allow 1-64 letters, digits, '_'
     or '-'. Fails if one by that name already exists."""
     return {"garden": gardens_repo.create_garden(name)}
 
 
-@mcp.tool()
 def export_garden(garden: str | None = None) -> dict[str, Any]:
     """Every mote and relationship in one JSON document, in MonOSS's
     import/export format. This is the whole garden, so prefer
@@ -114,7 +108,6 @@ def export_garden(garden: str | None = None) -> dict[str, Any]:
 # ---- motes ----
 
 
-@mcp.tool()
 def list_motes(garden: str | None = None) -> list[dict[str, Any]]:
     """Every mote in the garden with its properties. Can be large --
     neighborhood() is usually the better way to explore."""
@@ -122,7 +115,6 @@ def list_motes(garden: str | None = None) -> list[dict[str, Any]]:
         return [dataclasses.asdict(m) for m in motes_repo.list_motes(conn)]
 
 
-@mcp.tool()
 def get_mote(mote_id: str, garden: str | None = None) -> dict[str, Any] | None:
     """One mote's id and properties, or null if no mote has that id."""
     with _connect(garden) as conn:
@@ -130,7 +122,6 @@ def get_mote(mote_id: str, garden: str | None = None) -> dict[str, Any] | None:
         return dataclasses.asdict(mote) if mote is not None else None
 
 
-@mcp.tool()
 def create_mote(properties: dict[str, Any], garden: str | None = None) -> dict[str, Any]:
     """Create a mote with the given properties and return it, including
     its generated id. Property values keep the JSON type you send: 21 is
@@ -142,7 +133,6 @@ def create_mote(properties: dict[str, Any], garden: str | None = None) -> dict[s
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
 
 
-@mcp.tool()
 def update_mote(
     mote_id: str, properties: dict[str, Any], garden: str | None = None
 ) -> dict[str, Any]:
@@ -154,7 +144,6 @@ def update_mote(
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
 
 
-@mcp.tool()
 def delete_property(mote_id: str, key: str, garden: str | None = None) -> bool:
     """Remove a single property from a mote. Returns false if the mote
     had no such key."""
@@ -162,7 +151,6 @@ def delete_property(mote_id: str, key: str, garden: str | None = None) -> bool:
         return motes_repo.delete_property(conn, mote_id, key)
 
 
-@mcp.tool()
 def delete_mote(mote_id: str, garden: str | None = None) -> bool:
     """Delete a mote and every relationship touching it. Returns false if
     no mote had that id. This is not undoable."""
@@ -173,7 +161,6 @@ def delete_mote(mote_id: str, garden: str | None = None) -> bool:
 # ---- relationships ----
 
 
-@mcp.tool()
 def list_relationships(
     from_id: str | None = None,
     relationship_type: str | None = None,
@@ -186,7 +173,6 @@ def list_relationships(
         return [dataclasses.asdict(r) for r in rels]
 
 
-@mcp.tool()
 def mote_relationships(mote_id: str, garden: str | None = None) -> list[dict[str, Any]]:
     """Every relationship where this mote is either endpoint -- incoming
     as well as outgoing, which list_relationships(from_id=...) won't
@@ -196,7 +182,6 @@ def mote_relationships(mote_id: str, garden: str | None = None) -> list[dict[str
         return [dataclasses.asdict(r) for r in rels]
 
 
-@mcp.tool()
 def create_relationship(
     from_id: str, to_id: str, relationship_type: str, garden: str | None = None
 ) -> dict[str, Any]:
@@ -209,7 +194,6 @@ def create_relationship(
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
 
 
-@mcp.tool()
 def update_relationship(
     rel_id: str,
     from_id: str | None = None,
@@ -225,7 +209,6 @@ def update_relationship(
         return dataclasses.asdict(rel) if rel is not None else None
 
 
-@mcp.tool()
 def delete_relationship(rel_id: str, garden: str | None = None) -> bool:
     """Delete one relationship, leaving both motes in place. Returns
     false if no relationship had that id."""
@@ -236,7 +219,6 @@ def delete_relationship(rel_id: str, garden: str | None = None) -> bool:
 # ---- species ----
 
 
-@mcp.tool()
 def list_species(garden: str | None = None) -> list[dict[str, Any]]:
     """Every mote currently acting as a species -- i.e. the target of at
     least one instance_of or template_of relationship. Species are how
@@ -245,7 +227,6 @@ def list_species(garden: str | None = None) -> list[dict[str, Any]]:
         return [dataclasses.asdict(m) for m in species_repo.list_species(conn)]
 
 
-@mcp.tool()
 def species_of(mote_id: str, garden: str | None = None) -> list[dict[str, Any]]:
     """The species this mote is declared an instance of. A mote may
     belong to more than one."""
@@ -253,7 +234,6 @@ def species_of(mote_id: str, garden: str | None = None) -> list[dict[str, Any]]:
         return [dataclasses.asdict(m) for m in species_repo.species_of(conn, mote_id)]
 
 
-@mcp.tool()
 def instances_of(species_id: str, garden: str | None = None) -> list[dict[str, Any]]:
     """Every mote declared an instance of this species. Excludes the
     species' template, which holds placeholder values rather than real
@@ -262,7 +242,6 @@ def instances_of(species_id: str, garden: str | None = None) -> list[dict[str, A
         return [dataclasses.asdict(m) for m in species_repo.instances_of(conn, species_id)]
 
 
-@mcp.tool()
 def set_species(mote_id: str, species_id: str, garden: str | None = None) -> dict[str, Any]:
     """Declare an existing mote an instance of a species. Additive -- it
     does not replace species the mote already belongs to."""
@@ -271,7 +250,6 @@ def set_species(mote_id: str, species_id: str, garden: str | None = None) -> dic
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
 
 
-@mcp.tool()
 def set_template(mote_id: str, species_id: str, garden: str | None = None) -> dict[str, Any]:
     """Make a mote the template for a species -- the mote whose
     properties new instances start from. A template is not itself an
@@ -281,7 +259,6 @@ def set_template(mote_id: str, species_id: str, garden: str | None = None) -> di
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
 
 
-@mcp.tool()
 def template_for(species_id: str, garden: str | None = None) -> dict[str, Any] | None:
     """This species' template mote, or null if it has none."""
     with _connect(garden) as conn:
@@ -289,7 +266,6 @@ def template_for(species_id: str, garden: str | None = None) -> dict[str, Any] |
         return dataclasses.asdict(template) if template is not None else None
 
 
-@mcp.tool()
 def create_instance(
     species_id: str, overrides: dict[str, Any] | None = None, garden: str | None = None
 ) -> dict[str, Any]:
@@ -305,7 +281,6 @@ def create_instance(
 # ---- graph ----
 
 
-@mcp.tool()
 def neighborhood(mote_id: str, hops: int = 2, garden: str | None = None) -> dict[str, Any]:
     """The motes and relationships within `hops` edges of a starting
     mote. Hop-counting is undirected, so a relationship pointing *into*
@@ -319,7 +294,6 @@ def neighborhood(mote_id: str, hops: int = 2, garden: str | None = None) -> dict
         }
 
 
-@mcp.tool()
 def whole_garden(garden: str | None = None) -> dict[str, Any]:
     """Every mote and relationship at once. Unlike neighborhood(), this
     reaches motes with no connections, which no amount of hopping can."""
@@ -334,7 +308,6 @@ def whole_garden(garden: str | None = None) -> dict[str, Any]:
 # ---- simulation (read and preview only) ----
 
 
-@mcp.tool()
 def preview_simulation(step_count: int = 1, garden: str | None = None) -> dict[str, Any]:
     """Solve the garden's rules for `step_count` steps entirely in
     memory and return what *would* change. Writes nothing and logs
@@ -351,7 +324,6 @@ def preview_simulation(step_count: int = 1, garden: str | None = None) -> dict[s
         }
 
 
-@mcp.tool()
 def list_runs(limit: int | None = None, garden: str | None = None) -> list[dict[str, Any]]:
     """Past simulation runs, most recent first. Includes failed runs and
     runs that were saved for review without being applied to the graph
@@ -361,7 +333,6 @@ def list_runs(limit: int | None = None, garden: str | None = None) -> list[dict[
         return [dataclasses.asdict(r) for r in runs]
 
 
-@mcp.tool()
 def get_run(run_id: str, garden: str | None = None) -> dict[str, Any] | None:
     """One logged run's status and metadata, or null if no run has that
     id."""
@@ -370,7 +341,6 @@ def get_run(run_id: str, garden: str | None = None) -> dict[str, Any] | None:
         return dataclasses.asdict(run) if run is not None else None
 
 
-@mcp.tool()
 def run_changes(run_id: str, garden: str | None = None) -> list[dict[str, Any]]:
     """A logged run's net old -> new property changes. For the
     tick-by-tick breakdown of a multi-step run, use run_ticks()."""
@@ -379,7 +349,6 @@ def run_changes(run_id: str, garden: str | None = None) -> list[dict[str, Any]]:
         return [dataclasses.asdict(c) for c in changes]
 
 
-@mcp.tool()
 def run_ticks(run_id: str, garden: str | None = None) -> list[dict[str, Any]]:
     """A logged run's individual steps, oldest first. A steady-state run
     has exactly one; a run committed from an N-step preview has N."""
@@ -387,7 +356,6 @@ def run_ticks(run_id: str, garden: str | None = None) -> list[dict[str, Any]]:
         return _steps_payload(simulation_repo.run_ticks(conn, run_id))
 
 
-@mcp.tool()
 def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[float]]:
     """Every value this mote's properties have taken across the garden's
     committed run history, oldest first per key. Excludes saved-only
@@ -399,7 +367,6 @@ def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[floa
 # ---- conventions ----
 
 
-@mcp.tool()
 def reserved_names() -> dict[str, Any]:
     """Property keys and relationship types the engine and UI interpret
     specially (species membership, equations, links, calendar dates,
@@ -410,3 +377,46 @@ def reserved_names() -> dict[str, Any]:
         "properties": sorted(reserved_repo.RESERVED_PROPERTIES),
         "relationshipTypes": sorted(reserved_repo.RESERVED_RELATIONSHIP_TYPES),
     }
+
+
+# Registered by build_server() below rather than the @mcp.tool() decorator,
+# so the same 30 tools can be mounted on either the plain instance (stdio,
+# tests, `mcp dev`) or an OAuth-wired one (see run_mcp.py --public-url)
+# without duplicating every signature and docstring.
+_TOOLS: tuple[Callable[..., Any], ...] = (
+    list_gardens, create_garden, export_garden,
+    list_motes, get_mote, create_mote, update_mote, delete_property, delete_mote,
+    list_relationships, mote_relationships, create_relationship, update_relationship,
+    delete_relationship,
+    list_species, species_of, instances_of, set_species, set_template, template_for,
+    create_instance,
+    neighborhood, whole_garden,
+    preview_simulation, list_runs, get_run, run_changes, run_ticks, mote_history,
+    reserved_names,
+)
+
+
+def build_server(
+    *,
+    auth_server_provider: OAuthAuthorizationServerProvider[Any, Any, Any] | None = None,
+    auth_settings: AuthSettings | None = None,
+) -> MCPServer:
+    """A fresh MCPServer with every tool registered. auth_server_provider
+    and auth_settings are given together or not at all (MCPServer itself
+    enforces this) -- see mcp_server/auth.py for what the OAuth path is
+    and isn't."""
+    server = MCPServer(
+        "monoss",
+        instructions=_INSTRUCTIONS,
+        auth_server_provider=auth_server_provider,
+        auth=auth_settings,
+    )
+    for tool in _TOOLS:
+        server.add_tool(tool)
+    return server
+
+
+# The plain, unauthenticated instance: used by stdio (run_mcp.py with no
+# flags), by `tests/test_mcp.py` importing tool functions directly, and by
+# `uv run mcp dev mcp_server/server.py` for interactive inspection.
+mcp = build_server()

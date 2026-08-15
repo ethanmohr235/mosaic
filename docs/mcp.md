@@ -111,6 +111,49 @@ The machine serving this has to be awake. Nothing here changes where the
 gardens live: they stay in `gardens/` on this machine, and the desktop
 app keeps reading the same files.
 
+## Connecting Claude Desktop's remote connector
+
+Desktop has two separate ways to reach an MCP server, and only one of
+them needs anything below. A server entry in Desktop's own config file
+(the same shape as `.mcp.json` above) spawns `run_mcp.py` over stdio
+exactly like Claude Code does, and needs nothing extra. Desktop's
+**Custom Connector** UI (Settings → Connectors) is different: it always
+speaks HTTP and always insists on OAuth — dynamic client registration
+plus an authorize/token exchange — even for a server with one trusted
+user on a private network. Without it, adding the connector fails with
+something like *"Couldn't register with MonOSS's sign-in service."*
+
+`--public-url` turns that on:
+
+```
+python run_mcp.py --http --public-url https://<machine>.<tailnet>.ts.net \
+  --allowed-host "$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')"
+```
+
+(`--allowed-host` is still needed alongside `--public-url` — the flags
+answer different questions. `--public-url` is what the server tells
+*clients* to use as its OAuth issuer; `--allowed-host` is what the
+server itself accepts in an incoming `Host` header. The two happen to
+name the same machine here, which is why they look redundant, but
+nothing derives one from the other.)
+
+Point the connector at `https://<machine>.<tailnet>.ts.net/mcp`, same as
+the Claude Code command above.
+
+**This is not real access control, and doesn't try to be.** `mcp_server/auth.py`
+implements enough of OAuth 2.1 to satisfy a client that insists on the
+protocol — dynamic registration, PKCE, token issuance and refresh — but
+`authorize()` grants every request immediately, with no login screen and
+no consent step. There's no second party to ask: whoever can reach this
+port already has the access the CLI and GUI have on this machine, same
+as the plain-HTTP path above. The token exists because the client
+demands one, not because it gates anything the network boundary
+(Tailscale, `--allowed-host`) wasn't already gating. Everything the
+provider issues lives in memory, so restarting the server forgets every
+registered client and token — Desktop will need to reconnect the
+connector, the same inconvenience as any other locally-run dev server
+restarting under it.
+
 ## Running it alongside the app
 
 Both can be open on the same garden. Writes from the MCP server wait out
