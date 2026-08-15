@@ -562,9 +562,9 @@ function fitAllTextareas() {
 
 /** Values long enough to wrap get a textarea sized to its content, so a
  *  rule's equation is readable in full instead of scrolling sideways in a
- *  one-line input. */
-function valueField(rawValue, onCommit) {
-  const text = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue);
+ *  one-line input. Shared by the plain fallback below and the recurrence
+ *  picker's raw-rule mode. */
+function plainField(text, onCommit) {
   const multiline = text.length > 38 || text.includes("\n");
   const field = document.createElement(multiline ? "textarea" : "input");
   if (!multiline) field.type = "text";
@@ -576,6 +576,204 @@ function valueField(rawValue, onCommit) {
   }
   field.addEventListener("change", () => onCommit(field.value));
   return field;
+}
+
+/** `date` and `recurrence` get a small picker instead of hand-typed
+ *  syntax (dateField/recurrenceField below); every other property keeps
+ *  the plain text/textarea field. Falls back to plainField for a `date`
+ *  value that doesn't parse -- a picker that can't represent an existing
+ *  value shouldn't clobber it. */
+function valueField(key, rawValue, onCommit) {
+  const text = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue);
+  if (key === "date") {
+    const parsed = parseDateValue(text);
+    if (parsed) return dateField(parsed, onCommit);
+  }
+  if (key === "recurrence") return recurrenceField(text, onCommit);
+  return plainField(text, onCommit);
+}
+
+/** Parses MonOSS's two `date` shapes (docs/google-calendar.md): a bare
+ *  "YYYY-MM-DD" (all-day) or a full "YYYY-MM-DDTHH:MM[:SS]" (timed,
+ *  local time, no offset). Returns null for anything else so callers can
+ *  fall back to plain text rather than force a picker on an unparseable
+ *  value. */
+function parseDateValue(text) {
+  if (text === "") return { date: "", time: "", allDay: true };
+  const timed = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?$/.exec(text);
+  if (timed) return { date: timed[1], time: timed[2], allDay: false };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return { date: text, time: "", allDay: true };
+  return null;
+}
+
+/** Native date/time inputs plus an "All day" toggle -- mirrors
+ *  event_payload()'s own "T" in raw_date branch
+ *  (core/google_calendar.py) so the two stay in sync. Defines its own
+ *  `value` getter/setter so the revert-on-block call site in
+ *  renderProperties() (`field.value = displayedText`) works unmodified,
+ *  same as it does for a plain <input>. */
+function dateField(parsed, onCommit) {
+  const wrap = document.createElement("div");
+  wrap.className = "picker-field date-field";
+
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.value = parsed.date;
+
+  const allDayLabel = document.createElement("label");
+  allDayLabel.className = "picker-checkbox";
+  const allDayCheckbox = document.createElement("input");
+  allDayCheckbox.type = "checkbox";
+  allDayCheckbox.checked = parsed.allDay;
+  allDayLabel.append(allDayCheckbox, document.createTextNode("All day"));
+
+  const timeInput = document.createElement("input");
+  timeInput.type = "time";
+  timeInput.value = parsed.time;
+  timeInput.classList.toggle("hidden", allDayCheckbox.checked);
+
+  // Seconds appended explicitly so the stored value always matches
+  // MonOSS's existing "YYYY-MM-DDTHH:MM:SS" shape, regardless of what
+  // precision the native time input happens to report.
+  const compose = () => (
+    allDayCheckbox.checked ? dateInput.value : `${dateInput.value}T${timeInput.value || "00:00"}:00`
+  );
+  const commit = () => onCommit(compose());
+
+  dateInput.addEventListener("change", commit);
+  timeInput.addEventListener("change", commit);
+  allDayCheckbox.addEventListener("change", () => {
+    timeInput.classList.toggle("hidden", allDayCheckbox.checked);
+    commit();
+  });
+
+  wrap.append(dateInput, allDayLabel, timeInput);
+
+  Object.defineProperty(wrap, "value", {
+    get: compose,
+    set(v) {
+      const next = parseDateValue(v) || { date: "", time: "", allDay: true };
+      dateInput.value = next.date;
+      timeInput.value = next.time;
+      allDayCheckbox.checked = next.allDay;
+      timeInput.classList.toggle("hidden", next.allDay);
+    },
+  });
+  return wrap;
+}
+
+const SIMPLE_RECURRENCE_FREQUENCIES = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"];
+
+/** Recognizes only "FREQ=<X>" or "FREQ=<X>;UNTIL=<YYYYMMDD>" (a leading
+ *  "RRULE:" stripped the same way core/google_calendar.py's
+ *  event_payload() does server-side) -- anything else (BYDAY, COUNT,
+ *  INTERVAL, ...) returns null so the picker can tell "simple enough to
+ *  edit structurally" from "must stay a raw rule". */
+function parseSimpleRecurrence(text) {
+  if (!text) return { freq: "", until: "" };
+  const rule = text.trim().replace(/^RRULE:/i, "");
+  const parts = {};
+  for (const piece of rule.split(";")) {
+    const [k, v] = piece.split("=");
+    if (!k || v === undefined) return null;
+    parts[k] = v;
+  }
+  const keys = Object.keys(parts);
+  if (keys.some((k) => k !== "FREQ" && k !== "UNTIL") || !SIMPLE_RECURRENCE_FREQUENCIES.includes(parts.FREQ)) {
+    return null;
+  }
+  let until = "";
+  if (parts.UNTIL) {
+    const m = /^(\d{4})(\d{2})(\d{2})/.exec(parts.UNTIL);
+    if (!m) return null;
+    until = `${m[1]}-${m[2]}-${m[3]}`;
+  }
+  return { freq: parts.FREQ, until };
+}
+
+function buildSimpleRecurrence(freq, until) {
+  if (!freq) return "";
+  return until ? `FREQ=${freq};UNTIL=${until.replace(/-/g, "")}` : `FREQ=${freq}`;
+}
+
+/** Structured Frequency+Until picker for the common case, with a raw-text
+ *  fallback (today's plain field, via plainField) for anything
+ *  parseSimpleRecurrence can't express -- so an existing BYDAY/COUNT/...
+ *  rule is never silently offered a lossy downgrade. Same `value`
+ *  getter/setter contract as dateField. */
+function recurrenceField(text, onCommit) {
+  let currentText = text;
+  let mode = parseSimpleRecurrence(currentText) !== null ? "simple" : "raw";
+  const wrap = document.createElement("div");
+  wrap.className = "picker-field recurrence-field";
+
+  function commit(next) {
+    currentText = next;
+    onCommit(next);
+  }
+
+  function renderSimple() {
+    wrap.innerHTML = "";
+    const parsed = parseSimpleRecurrence(currentText) || { freq: "", until: "" };
+
+    const select = document.createElement("select");
+    for (const [value, label] of [
+      ["", "Does not repeat"], ["DAILY", "Daily"], ["WEEKLY", "Weekly"],
+      ["MONTHLY", "Monthly"], ["YEARLY", "Yearly"],
+    ]) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = label;
+      if (value === parsed.freq) opt.selected = true;
+      select.appendChild(opt);
+    }
+
+    const until = document.createElement("input");
+    until.type = "date";
+    until.title = "Repeat until (optional)";
+    until.value = parsed.until;
+    until.classList.toggle("hidden", !parsed.freq);
+
+    const compose = () => buildSimpleRecurrence(select.value, until.value);
+    select.addEventListener("change", () => {
+      until.classList.toggle("hidden", !select.value);
+      commit(compose());
+    });
+    until.addEventListener("change", () => commit(compose()));
+
+    const customBtn = document.createElement("button");
+    customBtn.type = "button";
+    customBtn.className = "linkish picker-mode-toggle";
+    customBtn.textContent = "Custom rule…";
+    customBtn.addEventListener("click", () => { mode = "raw"; renderRaw(); });
+
+    wrap.append(select, until, customBtn);
+  }
+
+  function renderRaw() {
+    wrap.innerHTML = "";
+    wrap.appendChild(plainField(currentText, commit));
+    if (parseSimpleRecurrence(currentText) !== null) {
+      const simpleBtn = document.createElement("button");
+      simpleBtn.type = "button";
+      simpleBtn.className = "linkish picker-mode-toggle";
+      simpleBtn.textContent = "Use simple picker";
+      simpleBtn.addEventListener("click", () => { mode = "simple"; renderSimple(); });
+      wrap.appendChild(simpleBtn);
+    }
+  }
+
+  mode === "simple" ? renderSimple() : renderRaw();
+
+  Object.defineProperty(wrap, "value", {
+    get: () => currentText,
+    set(v) {
+      currentText = v;
+      mode = parseSimpleRecurrence(v) !== null ? "simple" : "raw";
+      mode === "simple" ? renderSimple() : renderRaw();
+    },
+  });
+  return wrap;
 }
 
 function openLink(url) {
@@ -652,7 +850,7 @@ function renderProperties(mote, history, baseMote) {
     maybeAddReservedBadge(keyEl, key, reservedProperties);
 
     const displayedText = typeof value === "string" ? value : JSON.stringify(value);
-    const field = valueField(value, async (next) => {
+    const field = valueField(key, value, async (next) => {
       if (simBlocked()) { field.value = displayedText; return; }
       await call(api.update_mote(mote.id, { [key]: next }));
       await refocus(focusId, { pan: false });

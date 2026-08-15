@@ -584,6 +584,142 @@ def run_checks(window):
 
     check("detail panel: a url property gets a working Open button", url_property_gets_an_open_button)
 
+    def date_property_gets_a_picker_and_round_trips():
+        result = js_async(window, """
+            async () => {
+                const dated = await api.create_mote({name: 'dated', date: '2026-08-15'});
+                window.__seed.datedId = dated.id;
+                await refreshMoteCache();
+                await refocus(dated.id);
+                await openDetailPanel(dated.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"date mote setup failed: {result}"
+
+        info = json.loads(js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const r of rows) {
+                    if (r.querySelector('.key').textContent === 'date') {
+                        const field = r.querySelector('.date-field');
+                        if (!field) return JSON.stringify({found: false});
+                        const dateInput = field.querySelector('input[type=\"date\"]');
+                        const allDay = field.querySelector('input[type=\"checkbox\"]');
+                        const timeInput = field.querySelector('input[type=\"time\"]');
+                        return JSON.stringify({
+                            found: true, date: dateInput.value, allDay: allDay.checked,
+                            timeHidden: timeInput.classList.contains('hidden'),
+                        });
+                    }
+                }
+                return JSON.stringify({found: false});
+            })()
+        """))
+        assert info["found"], "an all-day date property should render a picker (.date-field)"
+        assert info["date"] == "2026-08-15", f"date input should show the stored date, got {info}"
+        assert info["allDay"] is True, f"a bare YYYY-MM-DD value should check All day, got {info}"
+        assert info["timeHidden"] is True, f"the time input should be hidden while All day is checked, got {info}"
+
+        # Uncheck All day and set a time -- should commit a full timed value.
+        js(window, """
+            const field = document.querySelector('#detail-properties .date-field');
+            const allDay = field.querySelector('input[type=\"checkbox\"]');
+            allDay.checked = false;
+            allDay.dispatchEvent(new Event('change', {bubbles: true}));
+            const timeInput = field.querySelector('input[type=\"time\"]');
+            timeInput.value = '14:30';
+            timeInput.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        time.sleep(1.0)
+        updated = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__seed.datedId)).properties.date; }
+        """))
+        assert updated == "2026-08-15T14:30:00", f"toggling to timed should store a full datetime, got {updated!r}"
+
+    check("detail panel: date property gets a picker and round-trips all-day/timed",
+          date_property_gets_a_picker_and_round_trips)
+
+    def recurrence_property_gets_a_simple_picker():
+        result = js_async(window, """
+            async () => {
+                const recurring = await api.create_mote({
+                    name: 'recurring', date: '2026-08-15', recurrence: 'FREQ=WEEKLY',
+                });
+                window.__seed.recurringId = recurring.id;
+                await refreshMoteCache();
+                await refocus(recurring.id);
+                await openDetailPanel(recurring.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"recurrence mote setup failed: {result}"
+
+        freq = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const r of rows) {
+                    if (r.querySelector('.key').textContent === 'recurrence') {
+                        const select = r.querySelector('.recurrence-field select');
+                        return select ? select.value : null;
+                    }
+                }
+                return null;
+            })()
+        """)
+        assert freq == "WEEKLY", f"a simple rule should show its frequency in a <select>, got {freq!r}"
+
+        js(window, """
+            const select = document.querySelector('#detail-properties .recurrence-field select');
+            select.value = 'MONTHLY';
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        time.sleep(1.0)
+        updated = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__seed.recurringId)).properties.recurrence; }
+        """))
+        assert updated == "FREQ=MONTHLY", f"changing frequency should commit a new simple rule, got {updated!r}"
+
+    check("detail panel: simple recurrence property gets a Frequency picker", recurrence_property_gets_a_simple_picker)
+
+    def complex_recurrence_stays_raw_and_round_trips():
+        result = js_async(window, """
+            async () => {
+                const complex = await api.create_mote({
+                    name: 'complex recurring', date: '2026-08-15', recurrence: 'FREQ=WEEKLY;BYDAY=TU,TH',
+                });
+                window.__seed.complexId = complex.id;
+                await refreshMoteCache();
+                await refocus(complex.id);
+                await openDetailPanel(complex.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"complex recurrence mote setup failed: {result}"
+
+        info = json.loads(js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const r of rows) {
+                    if (r.querySelector('.key').textContent === 'recurrence') {
+                        const field = r.querySelector('.recurrence-field');
+                        const select = field.querySelector('select');
+                        const raw = field.querySelector('input, textarea');
+                        const buttons = Array.from(field.querySelectorAll('button')).map(b => b.textContent);
+                        return JSON.stringify({hasSelect: !!select, rawValue: raw ? raw.value : null, buttons});
+                    }
+                }
+                return JSON.stringify({hasSelect: null});
+            })()
+        """))
+        assert info["hasSelect"] is False, f"a rule with BYDAY should stay in raw mode, not the simple <select>, got {info}"
+        assert info["rawValue"] == "FREQ=WEEKLY;BYDAY=TU,TH", f"a complex rule should round-trip unchanged, got {info}"
+        assert "Use simple picker" not in info["buttons"], \
+            f"a rule the simple picker can't express shouldn't offer a lossy downgrade, got {info}"
+
+    check("detail panel: a complex recurrence rule stays in raw mode with no simple-picker downgrade",
+          complex_recurrence_stays_raw_and_round_trips)
+
     def detail_panel_is_resizable():
         result = js_async(window, """
             async () => {
