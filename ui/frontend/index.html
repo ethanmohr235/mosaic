@@ -66,6 +66,7 @@
         </div>
         <button id="run-sim-btn" class="menu-item accent" type="button">Simulate…</button>
         <button id="exit-sim-btn" class="menu-item hidden" type="button">Exit simulation</button>
+        <button id="toggle-runs-panel-btn" class="menu-item" type="button">Run history…</button>
         <div class="menu-sep"></div>
         <button class="menu-item soon" type="button" data-soon="Automations">Automations<span class="menu-badge">soon</span></button>
         <button class="menu-item soon" type="button" data-soon="Webhooks">Webhooks<span class="menu-badge">soon</span></button>
@@ -116,6 +117,13 @@
       <button id="reset-view-btn" type="button" class="linkish">⤢ Reset view</button>
     </section>
 
+    <section id="runs-panel" class="hidden">
+      <div class="panel-title">Run history</div>
+      <button id="close-runs-panel" type="button" title="Close">×</button>
+      <div id="runs-list"></div>
+      <div id="runs-empty" class="hidden">No simulation runs logged yet.</div>
+    </section>
+
     <div id="quick-add-wrap">
       <section id="quick-add" class="hidden">
         <div class="panel-title">New mote</div>
@@ -145,6 +153,7 @@
       </div>
       <div id="sim-bar-actions">
         <button id="sim-discard-btn" type="button" class="ghost">Discard</button>
+        <button id="sim-save-btn" type="button" class="ghost" title="Log the whole simulation for later review, without writing it to the graph">Save simulation</button>
         <button id="sim-commit-btn" type="button" class="primary">Commit this tick to real graph →</button>
       </div>
     </div>

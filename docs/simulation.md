@@ -13,7 +13,8 @@ tick to real graph** to write the scrubbed tick for real, or **Discard**
 to throw the preview away. See "Time-based simulation" below.
 Programmatically, a single steady-state solve is
 `core.simulation.run_simulation(conn)`; a time-based run is
-`core.simulation.run_time_series(conn, step_count, commit)`.
+`core.simulation.run_time_series(conn, step_count, commit)` (see "Run
+history" below for its `save` option).
 
 ## The three pieces
 
@@ -149,11 +150,38 @@ straight onto the motes and is idempotent: unknowns are re-derived from
 the species every time, so a solved value never gets mistaken for a
 fixed input.
 
-Only a *committed* run is ever logged to `simulation_runs` and
-`simulation_changes` -- including a failed single-step run, with old and
-new values for each change. A discarded preview leaves no trace. The
-per-garden tick counter (unrelated to a time-based run's own step
-numbering) comes from that log.
+A committed or *saved* run (see "Run history" below) is logged to
+`simulation_runs`/`simulation_changes` -- including a failed single-step
+run, with old and new values for each change. A discarded preview leaves
+no trace. The per-garden run counter (`run_number` -- unrelated to a
+time-based run's own step/tick numbering, a different thing that used to
+confusingly share the same name) comes from that log.
+
+## Run history
+
+Every logged run can be reviewed later, independent of whether it's still
+the graph's current state:
+
+- **Entering a run** (from the runs panel) drops into the same scrub bar
+  used for live previews, but walking through *that run's own ticks
+  only* -- unrelated to any other run. A steady-state run has exactly
+  one tick (before/after); a run committed or saved from an N-step
+  time-series has N, each logged individually rather than only their net
+  result, specifically so this is possible.
+- **Save simulation**, next to Discard/Commit on the sim bar, logs the
+  *entire* previewed run for later review without writing anything to
+  the graph -- unlike Commit, which always writes up to whichever tick
+  is currently scrubbed to. This is for comparing hypothetical parameter
+  sets (e.g. running the same turbine with several different inlet
+  conditions) where no single result needs to become the graph's
+  canonical state just to keep a record of it. Programmatically:
+  `core.simulation.run_time_series(conn, step_count, commit=False,
+  save=True)`.
+
+A run's `committed` flag (`core.simulation.RunRecord.committed`)
+distinguishes the two in the runs panel and CLI history: `True` for a
+normal commit (or any plain `run_simulation()` call, which always
+writes), `False` for a saved-only run.
 
 ## Physical property models
 

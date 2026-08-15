@@ -84,19 +84,31 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     # up is exactly the one worth looking back at. simulation_changes
     # deliberately has no foreign key on mote_id, so the history of what a
     # run did survives deleting the mote it touched.
+    #
+    # `run_number` is this garden's own run counter (the Nth run ever
+    # logged), unrelated to `step` below -- which tick *within* a run a
+    # change belongs to. Both used to be called "tick", which conflated
+    # two different things; see the migration below.
+    #
+    # `committed` distinguishes a run whose final values were actually
+    # written to the graph from one only logged for later review (e.g.
+    # comparing a few hypothetical parameter sets without any of them
+    # becoming canon) -- see core/simulation.py's run_time_series(save=).
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS simulation_runs (
         id TEXT PRIMARY KEY,
-        tick INTEGER NOT NULL,
+        run_number INTEGER NOT NULL,
         ran_at TEXT NOT NULL,
         status TEXT NOT NULL,
-        detail TEXT
+        detail TEXT,
+        committed INTEGER NOT NULL DEFAULT 1
     );
     """)
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS simulation_changes (
         run_id TEXT NOT NULL,
+        step INTEGER NOT NULL DEFAULT 0,
         mote_id TEXT NOT NULL,
         key TEXT NOT NULL,
         old_value TEXT,
@@ -108,5 +120,26 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     cursor.execute("""
     CREATE INDEX IF NOT EXISTS idx_simulation_changes_run ON simulation_changes(run_id);
     """)
+
+    # Migrate a garden created before run_number/committed/step existed.
+    # No-ops on both a fresh garden (already created with the new shape
+    # above) and one already migrated.
+    cursor.execute("PRAGMA table_info(simulation_runs)")
+    run_columns = {row["name"] for row in cursor.fetchall()}
+    if "tick" in run_columns:
+        cursor.execute("ALTER TABLE simulation_runs RENAME COLUMN tick TO run_number")
+        run_columns.discard("tick")
+        run_columns.add("run_number")
+    if "committed" not in run_columns:
+        # Every run logged before this column existed was a write -- there
+        # was no other kind -- so DEFAULT 1 is the correct backfill.
+        cursor.execute("ALTER TABLE simulation_runs ADD COLUMN committed INTEGER NOT NULL DEFAULT 1")
+
+    cursor.execute("PRAGMA table_info(simulation_changes)")
+    change_columns = {row["name"] for row in cursor.fetchall()}
+    if "step" not in change_columns:
+        # Old rows only ever represented one net step, so DEFAULT 0 is
+        # correct, not just a placeholder.
+        cursor.execute("ALTER TABLE simulation_changes ADD COLUMN step INTEGER NOT NULL DEFAULT 0")
 
     conn.commit()

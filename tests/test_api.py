@@ -5,6 +5,7 @@ import pytest
 
 import ui.api
 from core.gardens import create_garden
+from core.simulation import SimulationError, run_simulation
 from ui.api import Api, _coerce_properties
 
 
@@ -487,3 +488,115 @@ def test_preview_simulation_reports_a_failure_without_raising(api):
     assert result["failed_at"] == 0
     assert "underdetermined" in result["error"]
     assert result["steps"] == []
+
+
+# ---- run history: list_runs / get_run / run_changes ----
+
+def test_list_runs_and_get_run_see_a_committed_run(api):
+    mote_id = _seed_compounding_rule(api)
+    result = api.commit_simulation(3)
+
+    runs = api.list_runs()
+    assert [r["run_id"] for r in runs] == [result["run_id"]]
+    assert runs[0]["status"] == "ok"
+
+    run = api.get_run(result["run_id"])
+    assert run == runs[0]
+
+    changes = api.run_changes(result["run_id"])
+    assert any(c["mote_id"] == mote_id and c["key"] == "balance" for c in changes)
+
+
+def test_list_runs_respects_limit(api):
+    _seed_compounding_rule(api)
+    api.commit_simulation(1)
+    api.commit_simulation(1)
+    assert len(api.list_runs(limit=1)) == 1
+
+
+def test_get_run_returns_none_for_an_unknown_id(api):
+    assert api.get_run("nonexistent") is None
+
+
+def test_list_runs_includes_a_failed_run_with_no_changes(api):
+    species = api.create_mote({"name": "S", "unknowns": "a, b"})
+    rule = api.create_mote({"name": "underdetermined", "equation": "a + b == 10"})
+    api.create_relationship(rule["id"], species["id"], "applies_to")
+    mote = api.create_mote({"name": "m"})
+    api.set_species(mote["id"], species["id"])
+
+    # run_simulation (unlike commit_simulation/run_time_series, which never
+    # logs a run that fails on its very first step) always logs failures --
+    # exercised directly here since Api has no bare run_simulation wrapper.
+    with pytest.raises(SimulationError):
+        run_simulation(api._conn)
+
+    [run] = api.list_runs()
+    assert run["status"] == "error"
+    assert "underdetermined" in run["detail"]
+    assert api.run_changes(run["run_id"]) == []
+
+
+# ---- saving a simulation without applying it ----
+
+def test_save_simulation_logs_without_writing_the_graph(api):
+    mote_id = _seed_compounding_rule(api)
+    before = api.get_mote(mote_id)
+
+    result = api.save_simulation(3)
+
+    assert result["run_id"] is not None
+    assert api.get_mote(mote_id) == before  # graph untouched
+
+    run = api.get_run(result["run_id"])
+    assert run["committed"] is False
+
+    ticks = api.run_ticks(result["run_id"])
+    assert [s["step"] for s in ticks["steps"]] == [0, 1, 2]
+
+
+def test_committed_run_has_committed_true(api):
+    _seed_compounding_rule(api)
+    result = api.commit_simulation(1)
+    run = api.get_run(result["run_id"])
+    assert run["committed"] is True
+
+
+# ---- entering a run: run_ticks ----
+
+def test_run_ticks_backs_a_multi_tick_scrub_session(api):
+    mote_id = _seed_compounding_rule(api)
+    result = api.commit_simulation(3)
+
+    ticks = api.run_ticks(result["run_id"])
+    steps = ticks["steps"]
+    assert [s["step"] for s in steps] == [0, 1, 2]
+    balances = [
+        next(c["new_value"] for c in s["changes"] if c["mote_id"] == mote_id and c["key"] == "balance")
+        for s in steps
+    ]
+    assert balances == pytest.approx([105.0, 110.25, 115.7625])
+
+
+def test_run_ticks_for_a_one_step_run_has_one_tick(api):
+    _seed_compounding_rule(api)
+    result = api.commit_simulation(1)
+    ticks = api.run_ticks(result["run_id"])
+    assert [s["step"] for s in ticks["steps"]] == [0]
+
+
+# ---- sparklines: mote_history ----
+
+def test_mote_history_tracks_a_property_across_committed_runs(api):
+    mote_id = _seed_compounding_rule(api)
+    api.commit_simulation(1)
+    api.commit_simulation(1)
+
+    history = api.mote_history(mote_id)
+    assert history["balance"] == pytest.approx([105.0, 110.25])
+
+
+def test_mote_history_excludes_saved_runs(api):
+    mote_id = _seed_compounding_rule(api)
+    api.save_simulation(2)
+    assert api.mote_history(mote_id) == {}

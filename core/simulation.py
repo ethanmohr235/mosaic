@@ -10,7 +10,7 @@ nonlinear part involves values that are already known (`T2 == T1 *
 never touches NumPy at all. Whatever is left must be linear, and goes to
 a single least-squares solve.
 
-Static only: there is no notion of a previous timestep yet. The tick
+Static only: there is no notion of a previous timestep yet. The run
 counter is recorded for provenance so time-dependent behaviour can build
 on it later.
 """
@@ -60,7 +60,7 @@ class Change:
 @dataclass(frozen=True)
 class SimulationResult:
     run_id: str
-    tick: int
+    run_number: int
     values: dict[Unknown, float]
     changes: list[Change]
     equation_count: int
@@ -73,7 +73,7 @@ class SimulationResult:
             f"Solved {len(self.values)} value{'' if len(self.values) == 1 else 's'} "
             f"across {motes} mote{'' if motes == 1 else 's'} "
             f"from {self.equation_count} equation{'' if self.equation_count == 1 else 's'} "
-            f"(tick {self.tick})."
+            f"(run #{self.run_number})."
         )
         if self.unsolved:
             text += f" {len(self.unsolved)} declared unknown(s) had no equation."
@@ -83,9 +83,9 @@ class SimulationResult:
 @dataclass(frozen=True)
 class StepResult:
     """One step of a time-based run -- the same shape as SimulationResult
-    minus the audit-log fields (run_id/tick), since only a committed
-    run's *final* cumulative state ever gets logged, not every
-    intermediate step of a preview."""
+    minus the audit-log fields (run_id/run_number), since only a
+    committed run's *final* cumulative state used to get logged -- now
+    every step does, see run_time_series()'s save parameter."""
     step: int
     values: dict[Unknown, float]
     changes: list[Change]
@@ -114,7 +114,7 @@ class TimeSeriesResult:
     steps: list[StepResult]
     failed_at: int | None = None   # step index that raised, if the run stopped early
     error: str | None = None
-    run_id: str | None = None      # set only when commit=True and at least one step succeeded
+    run_id: str | None = None      # set when commit=True or save=True and at least one step succeeded
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,7 @@ class _GardenView:
 def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
     """Solve the garden and write the results back. Raises SimulationError
     (after logging the failed run) if the rules can't be satisfied."""
-    tick = _next_tick(conn)
+    run_number = _next_run_number(conn)
     properties = {m.id: m.properties for m in list_motes(conn)}
     relationships = list_relationships(conn)
     view = _build_view(properties, relationships)
@@ -143,16 +143,16 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
         equations = _resolve(view, pairs, solved, model_cache=model_cache)
         solved.update(_matrix_solve(equations, solved))
     except SimulationError as e:
-        _log_run(conn, tick, "error", str(e), [])
-        logger.warning("simulation tick %s failed: %s", tick, e)
+        _log_run(conn, run_number, "error", str(e), [], committed=False)
+        logger.warning("simulation run #%s failed: %s", run_number, e)
         raise
 
     changes = _write_back(conn, view.properties, solved)
-    run_id = _log_run(conn, tick, "ok", None, changes)
-    logger.info("simulation tick %s solved %s values", tick, len(solved))
+    run_id = _log_run(conn, run_number, "ok", None, [changes], committed=True)
+    logger.info("simulation run #%s solved %s values", run_number, len(solved))
     return SimulationResult(
         run_id=run_id,
-        tick=tick,
+        run_number=run_number,
         values=solved,
         changes=changes,
         equation_count=len(equations),
@@ -160,19 +160,33 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
     )
 
 
-def run_time_series(conn: sqlite3.Connection, step_count: int, commit: bool) -> TimeSeriesResult:
+def run_time_series(
+    conn: sqlite3.Connection, step_count: int, commit: bool, save: bool = False
+) -> TimeSeriesResult:
     """Runs step_count steps entirely in memory, each step's solve
     starting from the *previous* step's solved values rather than
     re-reading the database -- this is what lets a rule use prev(x) to
-    express a recurrence. Nothing is written to the database unless
-    commit=True, in which case only the *cumulative* result (start state
-    -> however far the run got) is written in one shot and logged as a
-    single entry, exactly like an ordinary run_simulation() call.
+    express a recurrence.
+
+    Three mutually exclusive modes:
+    - commit=False, save=False (default): a pure preview. Nothing is
+      written or logged.
+    - commit=True: writes the *cumulative* result (start state -> however
+      far the run got) to the graph, and logs every computed step
+      individually (see _log_run) so it can later be scrubbed through
+      via run_ticks() -- exactly like an ordinary run_simulation() call,
+      just with more than one tick.
+    - save=True: logs every computed step individually, same as commit,
+      but never writes the graph -- for keeping a hypothetical run (e.g.
+      one of several parameter sets being compared) around for later
+      review without it becoming the garden's canonical state.
 
     A step that fails to solve stops the run there but keeps every step
     computed before it (see TimeSeriesResult.failed_at/error), so a
-    caller can still commit an earlier successful step rather than
-    losing the whole run."""
+    caller can still commit or save an earlier successful step rather
+    than losing the whole run."""
+    if commit and save:
+        raise ValueError("commit and save are mutually exclusive")
     if step_count < 1:
         raise ValueError("step_count must be at least 1")
 
@@ -214,13 +228,14 @@ def run_time_series(conn: sqlite3.Connection, step_count: int, commit: bool) -> 
         steps.append(StepResult(step, solved, changes, len(equations), _unsolved(view, solved)))
 
     run_id = None
-    if commit and steps:
-        tick = _next_tick(conn)
-        committed_changes = _write_back(conn, baseline, cumulative)
-        run_id = _log_run(conn, tick, "ok", None, committed_changes)
+    if (commit or save) and steps:
+        run_number = _next_run_number(conn)
+        if commit:
+            _write_back(conn, baseline, cumulative)
+        run_id = _log_run(conn, run_number, "ok", None, [s.changes for s in steps], committed=commit)
         logger.info(
-            "simulation time series committed %s steps, %s values",
-            len(steps), len(cumulative),
+            "simulation time series %s %s steps, %s values",
+            "committed" if commit else "saved", len(steps), len(cumulative),
         )
 
     return TimeSeriesResult(steps, failed_at, error, run_id)
@@ -482,32 +497,43 @@ def _unsolved(view: _GardenView, solved: dict[Unknown, float]) -> list[Unknown]:
     return sorted(declared - set(solved))
 
 
-def _next_tick(conn: sqlite3.Connection) -> int:
+def _next_run_number(conn: sqlite3.Connection) -> int:
     """Derived rather than stored -- the log already knows how many runs
     this garden has seen."""
     cursor = conn.cursor()
-    cursor.execute("SELECT COALESCE(MAX(tick), 0) + 1 AS next FROM simulation_runs")
+    cursor.execute("SELECT COALESCE(MAX(run_number), 0) + 1 AS next FROM simulation_runs")
     return int(cursor.fetchone()["next"])
 
 
 def _log_run(
     conn: sqlite3.Connection,
-    tick: int,
+    run_number: int,
     status: str,
     detail: str | None,
-    changes: list[Change],
+    step_changes: list[list[Change]],
+    committed: bool,
 ) -> str:
+    """step_changes[i] is tick i's own changes (0-indexed, oldest first).
+    A steady-state run logs a single tick; a committed or saved
+    time-series run logs one per computed step, so a later run_ticks()
+    can scrub through exactly what happened tick by tick. `committed`
+    records whether these values were actually written to the graph
+    (core/db.py's simulation_runs.committed) -- a saved-only run (see
+    run_time_series's save parameter) never touches motes/mote_properties
+    at all, only this log."""
     run_id = generate_uuid()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO simulation_runs (id, tick, ran_at, status, detail) VALUES (?, ?, ?, ?, ?)",
-        (run_id, tick, datetime.now(timezone.utc).isoformat(), status, detail),
+        "INSERT INTO simulation_runs (id, run_number, ran_at, status, detail, committed) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (run_id, run_number, datetime.now(timezone.utc).isoformat(), status, detail, int(committed)),
     )
     cursor.executemany(
-        "INSERT INTO simulation_changes (run_id, mote_id, key, old_value, new_value) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO simulation_changes (run_id, step, mote_id, key, old_value, new_value) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         [
-            (run_id, c.mote_id, c.key, _text(c.old_value), _text(c.new_value))
+            (run_id, step, c.mote_id, c.key, _text(c.old_value), _text(c.new_value))
+            for step, changes in enumerate(step_changes)
             for c in changes
         ],
     )
@@ -517,3 +543,142 @@ def _log_run(
 
 def _text(value: float | None) -> str | None:
     return None if value is None else repr(value)
+
+
+def _parse(value: str | None) -> float | None:
+    return None if value is None else float(value)
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """One logged row from simulation_runs (core/db.py) -- every run is
+    kept, successful or not, since a failed run is exactly the one worth
+    looking back at. change_count is folded in via a join so listing runs
+    doesn't need a separate query per row -- counted as distinct
+    (mote_id, key) pairs touched overall, not raw simulation_changes rows,
+    since a multi-tick run has one row per property per tick."""
+    run_id: str
+    run_number: int
+    ran_at: str
+    status: str
+    detail: str | None
+    committed: bool
+    change_count: int
+
+
+_RUN_COLUMNS = (
+    "r.id AS id, r.run_number AS run_number, r.ran_at AS ran_at, r.status AS status, "
+    "r.detail AS detail, r.committed AS committed, "
+    "COUNT(DISTINCT c.mote_id || ':' || c.key) AS change_count"
+)
+
+
+def _row_to_run(row: sqlite3.Row) -> RunRecord:
+    return RunRecord(
+        run_id=row["id"], run_number=row["run_number"], ran_at=row["ran_at"],
+        status=row["status"], detail=row["detail"], committed=bool(row["committed"]),
+        change_count=row["change_count"],
+    )
+
+
+def list_runs(conn: sqlite3.Connection, limit: int | None = None) -> list[RunRecord]:
+    """Every logged run, most recent first."""
+    query = (
+        f"SELECT {_RUN_COLUMNS} FROM simulation_runs r "
+        "LEFT JOIN simulation_changes c ON c.run_id = r.id "
+        "GROUP BY r.id ORDER BY r.ran_at DESC"
+    )
+    params: tuple = ()
+    if limit is not None:
+        query += " LIMIT ?"
+        params = (limit,)
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    return [_row_to_run(row) for row in cursor.fetchall()]
+
+
+def get_run(conn: sqlite3.Connection, run_id: str) -> RunRecord | None:
+    cursor = conn.cursor()
+    cursor.execute(
+        f"SELECT {_RUN_COLUMNS} FROM simulation_runs r "
+        "LEFT JOIN simulation_changes c ON c.run_id = r.id "
+        "WHERE r.id = ? GROUP BY r.id",
+        (run_id,),
+    )
+    row = cursor.fetchone()
+    return _row_to_run(row) if row else None
+
+
+def run_changes(conn: sqlite3.Connection, run_id: str) -> list[Change]:
+    """The net old->new change per property across a run's whole
+    duration -- old_value from its earliest tick, new_value from its
+    latest -- the same shape run_simulation() itself returns, just read
+    back rather than freshly solved. For a single-tick run this is
+    identical to that tick's own changes. See run_ticks() for the
+    tick-by-tick breakdown instead of this folded net view."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT mote_id, key, old_value, new_value FROM simulation_changes "
+        "WHERE run_id = ? ORDER BY step ASC, mote_id, key",
+        (run_id,),
+    )
+    net: dict[tuple[str, str], Change] = {}
+    for row in cursor.fetchall():
+        key = (row["mote_id"], row["key"])
+        new_value = _parse(row["new_value"])
+        old_value = net[key].old_value if key in net else _parse(row["old_value"])
+        net[key] = Change(row["mote_id"], row["key"], old_value, new_value)
+    return sorted(net.values(), key=lambda c: (c.mote_id, c.key))
+
+
+@dataclass(frozen=True)
+class RunTick:
+    """One tick within a logged run -- what "entering" a run in the UI
+    scrubs through. A steady-state run has exactly one (step 0); a run
+    committed or saved from an N-step time-series preview has N."""
+    step: int
+    changes: list[Change]
+    summary: str
+
+
+def run_ticks(conn: sqlite3.Connection, run_id: str) -> list[RunTick]:
+    """A run's own internal ticks, oldest first -- unrelated to any other
+    run in the garden's history."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT step, mote_id, key, old_value, new_value FROM simulation_changes "
+        "WHERE run_id = ? ORDER BY step ASC, mote_id, key",
+        (run_id,),
+    )
+    by_step: dict[int, list[Change]] = {}
+    for row in cursor.fetchall():
+        by_step.setdefault(row["step"], []).append(
+            Change(row["mote_id"], row["key"], _parse(row["old_value"]), _parse(row["new_value"]))
+        )
+    return [
+        RunTick(
+            step=step, changes=changes,
+            summary=f"Tick {step + 1} · {len(changes)} change{'' if len(changes) == 1 else 's'}",
+        )
+        for step, changes in sorted(by_step.items())
+    ]
+
+
+def mote_history(conn: sqlite3.Connection, mote_id: str) -> dict[str, list[float]]:
+    """Every value a mote's properties have taken across the garden's
+    *committed* run history, oldest first per key -- feeds the
+    inspector's sparklines. Excludes saved-only (uncommitted) runs: those
+    are hypothetical and were never this mote's real state, so mixing
+    them in would misrepresent the trend."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT c.key AS key, c.new_value AS new_value FROM simulation_changes c "
+        "JOIN simulation_runs r ON r.id = c.run_id "
+        "WHERE c.mote_id = ? AND r.committed = 1 "
+        "ORDER BY r.ran_at ASC, c.step ASC",
+        (mote_id,),
+    )
+    history: dict[str, list[float]] = {}
+    for row in cursor.fetchall():
+        history.setdefault(row["key"], []).append(_parse(row["new_value"]))
+    return history

@@ -338,6 +338,58 @@ class Api:
         result = simulation_repo.run_time_series(self._conn, step_count, commit=True)
         return _time_series_payload(result)
 
+    @_synchronized
+    def save_simulation(self, step_count: int) -> dict:
+        """Like commit_simulation, but never writes the graph -- logs
+        every computed tick for later review (e.g. comparing a few
+        hypothetical parameter sets) without any of them becoming the
+        garden's canonical state. Always re-runs the full step_count
+        (unlike commit, which only re-runs up to whichever tick was
+        scrubbed to), since there's no "committed position" for a save."""
+        result = simulation_repo.run_time_series(self._conn, step_count, commit=False, save=True)
+        return _time_series_payload(result)
+
+    @_synchronized
+    def list_runs(self, limit: int | None = None) -> list[dict]:
+        """Every logged run (run_simulation or a committed run_time_series),
+        most recent first -- backs the runs panel's list."""
+        return [dataclasses.asdict(r) for r in simulation_repo.list_runs(self._conn, limit=limit)]
+
+    @_synchronized
+    def get_run(self, run_id: str) -> dict | None:
+        run = simulation_repo.get_run(self._conn, run_id)
+        return dataclasses.asdict(run) if run is not None else None
+
+    @_synchronized
+    def run_changes(self, run_id: str) -> list[dict]:
+        """A logged run's net old->new changes -- backs the runs panel's
+        list view. For the tick-by-tick breakdown, see run_ticks."""
+        return [dataclasses.asdict(c) for c in simulation_repo.run_changes(self._conn, run_id)]
+
+    @_synchronized
+    def run_ticks(self, run_id: str) -> dict:
+        """A run's own internal ticks, shaped like _time_series_payload's
+        steps so the frontend's existing scrub-bar rendering needs
+        nothing new to "enter" a run -- unrelated to any other run in
+        the garden's history."""
+        return {
+            "steps": [
+                {
+                    "step": t.step,
+                    "changes": [dataclasses.asdict(c) for c in t.changes],
+                    "summary": t.summary,
+                }
+                for t in simulation_repo.run_ticks(self._conn, run_id)
+            ],
+        }
+
+    @_synchronized
+    def mote_history(self, mote_id: str) -> dict[str, list[float]]:
+        """Every value a mote's properties have taken across the
+        garden's committed run history -- backs the inspector's
+        sparklines."""
+        return simulation_repo.mote_history(self._conn, mote_id)
+
     # ---- google calendar ----
 
     def export_to_google_calendar(self) -> dict:

@@ -27,6 +27,8 @@ let simStep = 0;                       // 0 = real/unprojected; k>0 = cumulative
 let simPlaying = false;
 let simPlayTimer = null;
 let openMenuName = null;               // 'garden' | 'file' | 'view' | 'tools' | null -- which topbar dropdown is open
+let allRuns = [];                      // cached list_runs() result, while the runs panel is open
+let selectedRunId = null;              // the run currently entered in history-scrub mode (simPreview.mode === 'history'), if any
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -104,7 +106,12 @@ function showUndoToast(message, perform, durationMs = 6000) {
  *  silently diverge from what the preview actually showed. */
 function simBlocked() {
   if (!simPreview) return false;
-  showToast("Previewing a simulation — commit or discard to edit.", 2600);
+  showToast(
+    simPreview.mode === "history"
+      ? "Viewing a past run — exit to edit."
+      : "Previewing a simulation — commit or discard to edit.",
+    2600,
+  );
   return true;
 }
 
@@ -174,6 +181,7 @@ async function loadGarden(garden) {
   $("garden-label").textContent = garden;
   closeSimBar();
   closeDetailPanel();
+  closeRunsPanel();
   graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
   const stored = localStorage.getItem(lastFocusKey(garden)) || null;
@@ -279,11 +287,12 @@ function renderRelFilters() {
 // ---- detail panel ----
 
 async function openDetailPanel(moteId) {
-  const [mote, rels, species, instances] = await Promise.all([
+  const [mote, rels, species, instances, history] = await Promise.all([
     call(api.get_mote(moteId)),
     call(api.mote_relationships(moteId)),
     call(api.species_of(moteId)),
     call(api.instances_of(moteId)),
+    call(api.mote_history(moteId)),
   ]);
   if (!mote) return;
 
@@ -306,7 +315,7 @@ async function openDetailPanel(moteId) {
   $("detail-title").textContent = nodeLabel(displayMote);
   $("detail-id").textContent = mote.id;
 
-  renderProperties(displayMote);
+  renderProperties(displayMote, history, mote);
   renderSpeciesSection(mote, species, instances);
   renderRelationships(moteId, rels);
   $("detail-panel").classList.remove("hidden");
@@ -573,7 +582,58 @@ function openLink(url) {
   call(api.open_link(url));
 }
 
-function renderProperties(mote) {
+/** A tiny inline trend line for one property's history -- hand-rolled
+ *  canvas draw, no charting library, same spirit as graph.js's own
+ *  from-scratch renderer. min/max-scaled so a flat run of identical
+ *  values still draws as a flat (not division-by-zero) line. */
+function renderSparkline(values, unitLabel = "runs", color = "oklch(0.74 0.10 68)") {
+  const canvas = document.createElement("canvas");
+  canvas.className = "sparkline";
+  canvas.width = 52;
+  canvas.height = 18;
+  canvas.title = `${values[0]} → ${values[values.length - 1]} (${values.length} ${unitLabel})`;
+
+  const ctx = canvas.getContext("2d");
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const w = canvas.width, h = canvas.height, pad = 2;
+
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = pad + (i / (values.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.3;
+  ctx.stroke();
+
+  return canvas;
+}
+
+/** While a simulation (preview or entered-run history) is open, a
+ *  property's sparkline should trace that property's own trajectory
+ *  across this simulation's ticks rather than the garden's committed
+ *  run history -- the two are read from different places entirely, so
+ *  this walks simPreview.steps directly instead of going through
+ *  cumulativeSimChanges (which only folds up to the current scrub
+ *  position). Returns null if the property never moves, matching the
+ *  "nothing to show" gate used for garden history. */
+function simTrajectoryFor(moteId, key, baseValue) {
+  if (typeof baseValue !== "number") return null;
+  const values = [baseValue];
+  let current = baseValue;
+  for (const step of simPreview.steps) {
+    for (const c of step.changes) {
+      if (c.mote_id === moteId && c.key === key) current = c.new_value;
+    }
+    values.push(current);
+  }
+  return values.some((v) => v !== values[0]) ? values : null;
+}
+
+function renderProperties(mote, history, baseMote) {
   const container = $("detail-properties");
   container.innerHTML = "";
   const entries = Object.entries(mote.properties);
@@ -613,16 +673,23 @@ function renderProperties(mote) {
     // "url" is a reserved property name -- a mote holding one, whether a
     // web link or a local path, gets a one-click way to launch it via the
     // OS's default handler instead of only being able to read/edit it.
+    const trailing = [];
+    const values = simPreview
+      ? simTrajectoryFor(mote.id, key, (baseMote || mote).properties[key])
+      : history && history[key];
+    if (values && values.length > 1) {
+      const color = simPreview && simPreview.mode === "history" ? "oklch(0.62 0.19 300)" : undefined;
+      trailing.push(renderSparkline(values, simPreview ? "ticks" : "runs", color));
+    }
     if (key === "url" && typeof value === "string" && value.trim()) {
       const open = document.createElement("button");
       open.className = "open-link";
       open.textContent = "↗";
       open.title = "Open";
       open.addEventListener("click", () => openLink(value));
-      row.append(keyEl, field, open, del);
-    } else {
-      row.append(keyEl, field, del);
+      trailing.push(open);
     }
+    row.append(keyEl, field, ...trailing, del);
     container.appendChild(row);
   }
 }
@@ -1641,7 +1708,7 @@ function setupSimulation() {
         showToast(result.error ? `Simulation failed: ${result.error}` : "Nothing to simulate.", SIM_ERROR_TOAST_MS);
         return;
       }
-      openSimBar(result);
+      openSimBar({ ...result, mode: "preview" });
     } finally {
       // openSimBar() already disabled it (and keeps it disabled) on success;
       // this only matters for the "nothing to simulate" early return above.
@@ -1663,7 +1730,7 @@ function setupSimulation() {
   $("sim-discard-btn").addEventListener("click", discardSimPreview);
 
   $("sim-commit-btn").addEventListener("click", async () => {
-    if (!simPreview || simStep === 0) return;
+    if (!simPreview || simPreview.mode !== "preview" || simStep === 0) return;
     const btn = $("sim-commit-btn");
     btn.disabled = true;
     try {
@@ -1673,6 +1740,7 @@ function setupSimulation() {
       closeSimBar();
       showToast(committed ? committed.summary : `Committed tick ${committedStep}.`, 3500);
       await refreshMoteCache();
+      if (!$("runs-panel").classList.contains("hidden")) await refreshRuns();
       await refocus(focusId, { pan: false });
       if (!$("detail-panel").classList.contains("hidden") && focusId) {
         await openDetailPanel(focusId);
@@ -1681,13 +1749,33 @@ function setupSimulation() {
       btn.disabled = false;
     }
   });
+
+  $("sim-save-btn").addEventListener("click", async () => {
+    if (!simPreview || simPreview.mode !== "preview") return;
+    const btn = $("sim-save-btn");
+    btn.disabled = true;
+    try {
+      const result = await call(api.save_simulation(simPreview.steps.length));
+      closeSimBar();
+      showToast(
+        result.run_id ? "Simulation saved for later review." : "Nothing to save.",
+        3000,
+      );
+      if (!$("runs-panel").classList.contains("hidden")) await refreshRuns();
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
-/** Nondestructive: nothing was written by the preview call that produced
- *  `result`, so opening this is purely a display action. Starts at the
- *  real/unprojected view (step 0) rather than jumping to where the run
- *  ended up -- the whole graph is still visible and interactive, so the
- *  natural thing is to let the user step or play forward through it. */
+/** Shared by both scrub modes -- `result.mode` is 'preview' (a fresh,
+ *  nondestructive preview_simulation() call) or 'history' (an already-
+ *  logged run's own ticks, from enterRunScrub()). Either way nothing is
+ *  written here, so opening this is purely a display action. Starts at
+ *  step 0 (the real state before anything in `result.steps` happened)
+ *  rather than jumping to where the run ended up -- the whole graph
+ *  stays visible and interactive, so the natural thing is to let the
+ *  user step or play forward through it. */
 function openSimBar(result) {
   simPreview = result;
   simStep = 0;
@@ -1711,6 +1799,10 @@ function closeSimBar() {
   simStep = 0;
   graph.setSimActive(false);
   graph.setSimHighlight([]);
+  if (selectedRunId !== null) {
+    selectedRunId = null;
+    renderRunsPanel();
+  }
 }
 
 /** Shared by the sim bar's own Discard button and the Tools menu's "Exit
@@ -1772,15 +1864,27 @@ function cumulativeSimChanges() {
 }
 
 function renderSimBar() {
+  const isHistory = simPreview.mode === "history";
   const projected = simStep > 0;
-  $("sim-bar").classList.toggle("projected", projected);
-  $("sim-badge").classList.toggle("projected", projected);
-  $("sim-badge-label").textContent = projected
-    ? `Projected · tick ${simStep} of ${simPreview.steps.length}`
-    : "Real";
+  $("sim-bar").classList.toggle("projected", projected && !isHistory);
+  $("sim-bar").classList.toggle("history", isHistory);
+  $("sim-badge").classList.toggle("projected", projected && !isHistory);
+  $("sim-badge").classList.toggle("history", isHistory);
+
+  if (isHistory) {
+    $("sim-badge-label").textContent = projected
+      ? `Tick ${simStep} of ${simPreview.steps.length}`
+      : "Before this run";
+  } else {
+    $("sim-badge-label").textContent = projected
+      ? `Projected · tick ${simStep} of ${simPreview.steps.length}`
+      : "Real";
+  }
 
   const step = projected ? simPreview.steps[simStep - 1] : null;
-  $("sim-caption").textContent = step ? step.summary : "Current state of the garden";
+  $("sim-caption").textContent = step
+    ? step.summary
+    : isHistory ? "State entering this run" : "Current state of the garden";
 
   const errorEl = $("sim-bar-error");
   if (simPreview.failed_at !== null) {
@@ -1793,9 +1897,86 @@ function renderSimBar() {
   $("sim-step-count").textContent = `${simStep}/${simPreview.steps.length}`;
   $("sim-prev-btn").disabled = simStep <= 0;
   $("sim-next-btn").disabled = simStep >= simPreview.steps.length;
+  $("sim-commit-btn").classList.toggle("hidden", isHistory);
   $("sim-commit-btn").disabled = simStep === 0;
+  $("sim-save-btn").classList.toggle("hidden", isHistory);
+  $("sim-discard-btn").textContent = isHistory ? "Exit" : "Discard";
 
   graph.setSimHighlight(new Set(cumulativeSimChanges().map((c) => c.mote_id)));
+}
+
+// ---- run history ----
+
+async function refreshRuns() {
+  allRuns = await call(api.list_runs());
+  renderRunsPanel();
+}
+
+function renderRunsPanel() {
+  const container = $("runs-list");
+  container.innerHTML = "";
+  $("runs-empty").classList.toggle("hidden", allRuns.length > 0);
+
+  for (const run of allRuns) {
+    const row = document.createElement("div");
+    row.className = "run-row" + (run.run_id === selectedRunId ? " highlighted" : "");
+    row.innerHTML =
+      `<span class="dot ${run.status}"></span>` +
+      '<span class="label"><span class="number"></span><span class="applied"></span><span class="time"></span></span>' +
+      '<span class="meta"></span>';
+    row.querySelector(".number").textContent = `Run #${run.run_number}`;
+    row.querySelector(".applied").textContent = run.committed ? "applied" : "saved";
+    row.querySelector(".time").textContent = new Date(run.ran_at).toLocaleString();
+    const meta = row.querySelector(".meta");
+    if (run.status === "ok") {
+      meta.textContent = `${run.change_count} change${run.change_count === 1 ? "" : "s"}`;
+    } else {
+      meta.textContent = "failed";
+      meta.classList.add("error");
+      meta.title = run.detail || "";
+    }
+    row.addEventListener("mousedown", (e) => { e.preventDefault(); enterRunScrub(run.run_id); });
+    container.appendChild(row);
+  }
+}
+
+function openRunsPanel() {
+  $("runs-panel").classList.remove("hidden");
+  refreshRuns();
+}
+
+function closeRunsPanel() {
+  $("runs-panel").classList.add("hidden");
+}
+
+/** "Entering" a run drops into the same scrub bar a live preview uses,
+ *  but walking only *this run's own ticks* -- unrelated to any other
+ *  run in the garden's history. A steady-state run has exactly one tick
+ *  (before/after); a run committed or saved from an N-step time-series
+ *  has N, each logged individually (core/simulation.py's run_ticks())
+ *  specifically so this is possible. */
+async function enterRunScrub(runId) {
+  if (simPreview && simPreview.mode === "preview") {
+    showToast("Commit or discard the current preview first.", 2600);
+    return;
+  }
+  const result = await call(api.run_ticks(runId));
+  if (result.steps.length === 0) {
+    showToast("Nothing to show for this run.", 2600);
+    return;
+  }
+  openSimBar({ ...result, mode: "history", run_id: runId, failed_at: null, error: null });
+  selectedRunId = runId;
+  renderRunsPanel();
+}
+
+function setupRunsPanel() {
+  $("toggle-runs-panel-btn").addEventListener("click", () => {
+    closeTopMenus();
+    if ($("runs-panel").classList.contains("hidden")) openRunsPanel();
+    else closeRunsPanel();
+  });
+  $("close-runs-panel").addEventListener("click", closeRunsPanel);
 }
 
 function setupCalendarExport() {
@@ -1994,6 +2175,7 @@ async function init() {
   setupSearch();
   setupViewControls();
   setupSimulation();
+  setupRunsPanel();
   setupCalendarExport();
   setupContextMenu();
   setupKeyboard();

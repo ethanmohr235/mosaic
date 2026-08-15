@@ -3,7 +3,16 @@ import pytest
 from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
-from core.simulation import SimulationError, run_simulation, run_time_series
+from core.simulation import (
+    SimulationError,
+    get_run,
+    list_runs,
+    mote_history,
+    run_changes,
+    run_simulation,
+    run_ticks,
+    run_time_series,
+)
 from core.species import set_species
 
 OHMS_LAW = "targets('a').voltage - targets('b').voltage == current * resistance"
@@ -203,7 +212,7 @@ def test_successful_run_is_logged_with_its_changes(conn, divider):
     result = run_simulation(conn)
 
     cursor = conn.cursor()
-    cursor.execute("SELECT tick, status FROM simulation_runs")
+    cursor.execute("SELECT run_number, status FROM simulation_runs")
     runs = [tuple(row) for row in cursor.fetchall()]
     assert runs == [(1, "ok")]
 
@@ -227,10 +236,10 @@ def test_failed_run_is_logged_too(conn):
     assert "underdetermined" in row["detail"]
 
 
-def test_tick_advances_across_runs(conn, divider):
-    assert run_simulation(conn).tick == 1
-    assert run_simulation(conn).tick == 2
-    assert run_simulation(conn).tick == 3
+def test_run_number_advances_across_runs(conn, divider):
+    assert run_simulation(conn).run_number == 1
+    assert run_simulation(conn).run_number == 2
+    assert run_simulation(conn).run_number == 3
 
 
 def test_change_log_records_old_and_new_values(conn):
@@ -248,6 +257,87 @@ def test_change_log_records_old_and_new_values(conn):
     change = next(c for c in result.changes if c.key == "x")
     assert change.old_value == pytest.approx(10.0)
     assert change.new_value == pytest.approx(20.0)
+
+
+# ---- reading the audit log back: list_runs / get_run / run_changes ----
+
+def test_list_runs_orders_most_recent_first(conn, divider):
+    first = run_simulation(conn).run_id
+    second = run_simulation(conn).run_id
+
+    runs = list_runs(conn)
+    assert [r.run_id for r in runs] == [second, first]
+
+
+def test_list_runs_respects_limit(conn, divider):
+    run_simulation(conn)
+    run_simulation(conn)
+    run_simulation(conn)
+
+    assert len(list_runs(conn, limit=2)) == 2
+
+
+def test_list_runs_reports_change_count_and_status(conn, divider):
+    result = run_simulation(conn)
+    [run] = list_runs(conn)
+    assert run.run_id == result.run_id
+    assert run.status == "ok"
+    assert run.change_count == len(result.changes)
+
+
+def test_list_runs_includes_failed_runs_with_zero_changes(conn):
+    species = create_mote(conn, {"name": "S", "unknowns": "x, y"})
+    add_rule(conn, species, "one equation", "x + y == 10")
+    set_species(conn, create_mote(conn, {"name": "m"}), species)
+
+    with pytest.raises(SimulationError):
+        run_simulation(conn)
+
+    [run] = list_runs(conn)
+    assert run.status == "error"
+    assert run.change_count == 0
+    assert "underdetermined" in run.detail
+
+
+def test_get_run_returns_none_for_missing_id(conn):
+    assert get_run(conn, "nonexistent") is None
+
+
+def test_get_run_matches_the_corresponding_list_runs_entry(conn, divider):
+    result = run_simulation(conn)
+    run = get_run(conn, result.run_id)
+    assert run is not None
+    assert run.run_number == result.run_number
+    assert run.change_count == len(result.changes)
+
+
+def test_run_changes_round_trips_old_and_new_values(conn):
+    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    add_rule(conn, species, "r", "x == width * 2")
+    mote = create_mote(conn, {"name": "m", "width": 5})
+    set_species(conn, mote, species)
+
+    run_simulation(conn)
+    update_mote(conn, mote, {"width": 10})
+    result = run_simulation(conn)
+
+    [change] = run_changes(conn, result.run_id)
+    assert change.mote_id == mote
+    assert change.key == "x"
+    assert change.old_value == pytest.approx(10.0)
+    assert change.new_value == pytest.approx(20.0)
+
+
+def test_run_changes_empty_for_a_failed_run(conn):
+    species = create_mote(conn, {"name": "S", "unknowns": "x, y"})
+    add_rule(conn, species, "one equation", "x + y == 10")
+    set_species(conn, create_mote(conn, {"name": "m"}), species)
+
+    with pytest.raises(SimulationError):
+        run_simulation(conn)
+
+    [run] = list_runs(conn)
+    assert run_changes(conn, run.run_id) == []
 
 
 # ---- time-based simulation: run_time_series ----
@@ -288,7 +378,7 @@ def test_time_series_preview_never_writes(conn, compounding):
     assert _rows(conn, "simulation_changes") == before_changes
 
 
-def test_time_series_commit_writes_only_the_final_cumulative_step(conn, compounding):
+def test_time_series_commit_writes_the_final_value_and_logs_each_tick(conn, compounding):
     result = run_time_series(conn, step_count=3, commit=True)
     # step 2 (the 3rd, 0-indexed) is the final step of a 3-step run.
     assert prop(conn, compounding, "balance") == pytest.approx(result.steps[2].values[(compounding, "balance")])
@@ -297,9 +387,14 @@ def test_time_series_commit_writes_only_the_final_cumulative_step(conn, compound
     runs = _rows(conn, "simulation_runs")
     assert len(runs) == 1
     assert runs[0]["status"] == "ok"
+    assert runs[0]["committed"] == 1
 
+    # One row per tick (not just the net), so the run can be scrubbed
+    # through later via run_ticks() -- unlike the graph write above,
+    # which only ever reflects the final cumulative value.
     changes = _rows(conn, "simulation_changes")
-    assert len(changes) == 1  # one property touched, not one row per step
+    assert len(changes) == 3
+    assert sorted(c["step"] for c in changes) == [0, 1, 2]
 
 
 def test_time_series_commit_continues_from_the_previously_committed_value(conn, compounding):
@@ -361,6 +456,76 @@ def test_time_series_commit_is_a_noop_when_every_step_fails(conn):
 def test_time_series_rejects_a_non_positive_step_count(conn, compounding):
     with pytest.raises(ValueError):
         run_time_series(conn, step_count=0, commit=False)
+
+
+def test_time_series_rejects_commit_and_save_together(conn, compounding):
+    with pytest.raises(ValueError):
+        run_time_series(conn, step_count=1, commit=True, save=True)
+
+
+# ---- saving a simulation for review without applying it ----
+
+def test_save_logs_every_tick_without_writing_the_graph(conn, compounding):
+    before = get_mote(conn, compounding).properties
+    result = run_time_series(conn, step_count=3, commit=False, save=True)
+
+    assert result.run_id is not None
+    assert get_mote(conn, compounding).properties == before  # graph untouched
+
+    runs = _rows(conn, "simulation_runs")
+    assert len(runs) == 1
+    assert runs[0]["committed"] == 0
+
+    changes = _rows(conn, "simulation_changes")
+    assert len(changes) == 3
+    assert sorted(c["step"] for c in changes) == [0, 1, 2]
+
+
+def test_save_is_a_noop_when_every_step_fails(conn):
+    species = create_mote(conn, {"name": "S", "unknowns": "a, b"})
+    add_rule(conn, species, "underdetermined", "a + b == 10")
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+
+    result = run_time_series(conn, step_count=5, commit=False, save=True)
+    assert result.run_id is None
+    assert _rows(conn, "simulation_runs") == []
+
+
+def test_saved_run_is_excluded_from_mote_history(conn, compounding):
+    run_time_series(conn, step_count=2, commit=False, save=True)
+    assert mote_history(conn, compounding) == {}
+
+
+def test_mote_history_tracks_committed_values_across_runs(conn, compounding):
+    run_time_series(conn, step_count=1, commit=True)
+    run_time_series(conn, step_count=1, commit=True)
+    history = mote_history(conn, compounding)
+    assert history["balance"] == pytest.approx([105.0, 110.25])
+
+
+def test_run_changes_folds_a_multi_tick_run_to_its_net_effect(conn, compounding):
+    result = run_time_series(conn, step_count=3, commit=True)
+    changes = run_changes(conn, result.run_id)
+    [change] = [c for c in changes if c.key == "balance"]
+    assert change.old_value == pytest.approx(100.0)  # entering the run
+    assert change.new_value == pytest.approx(115.7625)  # after all 3 ticks
+
+
+def test_run_ticks_returns_the_per_tick_breakdown(conn, compounding):
+    result = run_time_series(conn, step_count=3, commit=True)
+    ticks = run_ticks(conn, result.run_id)
+
+    assert [t.step for t in ticks] == [0, 1, 2]
+    balances = [next(c.new_value for c in t.changes if c.key == "balance") for t in ticks]
+    assert balances == pytest.approx([105.0, 110.25, 115.7625])
+
+
+def test_run_ticks_for_a_steady_state_run_has_exactly_one_tick(conn, divider):
+    result = run_simulation(conn)
+    ticks = run_ticks(conn, result.run_id)
+    assert [t.step for t in ticks] == [0]
+    assert len(ticks[0].changes) == len(result.changes)
 
 
 def test_t_is_available_in_a_time_series_rule(conn):

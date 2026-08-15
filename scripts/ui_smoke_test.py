@@ -1256,6 +1256,144 @@ def run_checks(window):
     check("simulation: scrubbing updates the graph and inspector, Discard writes nothing, committing an earlier tick lands on that tick",
           simulation_scrubbing_and_discard_and_earlier_step_commit)
 
+    def run_history_save_enter_and_sparklines():
+        # A dedicated garden -- these checks need several committed/saved
+        # runs of their own recurrence, which would add noise to (and be
+        # disrupted by) the shared garden's other checks.
+        result = js_async(window, """
+            async () => {
+                await api.create_garden('smoke-history');
+                await api.switch_garden('smoke-history');
+                const species = await api.create_mote({name: 'Account', unknowns: 'balance'});
+                const rule = await api.create_mote({name: 'Growth', equation: 'balance == prev(balance) * 1.05'});
+                await api.create_relationship(rule.id, species.id, 'applies_to');
+                const mote = await api.create_mote({name: 'acct1', balance: 100.0});
+                await api.set_species(mote.id, species.id);
+                window.__acctId = mote.id;
+                await loadGarden('smoke-history');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"run-history setup failed: {result}"
+
+        # ---- Save simulation: logs without touching the graph ----
+        js(window, "document.getElementById('sim-steps-input').value = '3';")
+        js(window, "document.getElementById('run-sim-btn').click();")
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
+
+        balance_before_save = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
+        """))
+        assert balance_before_save == 100.0
+
+        js(window, "document.getElementById('sim-save-btn').click();")
+        wait_until(lambda: js(window, "document.getElementById('sim-bar').classList.contains('hidden')") is True)
+
+        balance_after_save = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
+        """))
+        assert balance_after_save == 100.0, "Save simulation must not write to the graph"
+
+        toast = js(window, "document.getElementById('toast').textContent")
+        assert "saved" in toast.lower(), f"expected a saved-for-review toast, got {toast!r}"
+
+        # ---- Runs panel distinguishes saved from applied ----
+        js(window, "document.getElementById('tools-btn').click();")
+        js(window, "document.getElementById('toggle-runs-panel-btn').click();")
+        wait_until(lambda: js(window, "document.querySelectorAll('.run-row').length") == 1)
+        saved_tag = js(window, "document.querySelector('.run-row .applied').textContent")
+        assert saved_tag == "saved", f"a save_simulation() run should show as 'saved', got {saved_tag!r}"
+
+        # Now actually commit two runs so there's real graph history too.
+        js(window, "document.getElementById('run-sim-btn').click();")
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
+        js(window, "document.getElementById('sim-next-btn').click();")
+        js(window, "document.getElementById('sim-commit-btn').click();")
+        wait_until(lambda: js(window, "document.getElementById('sim-bar').classList.contains('hidden')") is True)
+
+        js(window, "document.getElementById('sim-steps-input').value = '3';")
+        js(window, "document.getElementById('run-sim-btn').click();")
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
+        js(window, "document.getElementById('sim-step-slider').value = '3';")
+        js(window, "document.getElementById('sim-step-slider').dispatchEvent(new Event('input', {bubbles: true}));")
+        js(window, "document.getElementById('sim-commit-btn').click();")
+        wait_until(lambda: js(window, "document.getElementById('sim-bar').classList.contains('hidden')") is True)
+
+        refresh_result = js_async(window, "async () => { await refreshRuns(); window.__result = 'ok'; }")
+        assert refresh_result == '"ok"'
+        wait_until(lambda: js(window, "document.querySelectorAll('.run-row').length") == 3)
+
+        # ---- Entering a run scrubs only *that run's own* ticks ----
+        # The most recent row is the 3-tick commit -- entering it must
+        # offer exactly 3 ticks, unrelated to the other two runs.
+        js(window, "document.querySelector('.run-row').dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));")
+        wait_until(lambda: js(window, "!document.getElementById('sim-bar').classList.contains('hidden')") is True)
+        slider_max = js(window, "document.getElementById('sim-step-slider').max")
+        assert slider_max == "3", f"entering the 3-tick run should give a slider max of 3, got {slider_max!r}"
+        assert js(window, "document.getElementById('sim-commit-btn').classList.contains('hidden')") is True, \
+            "history mode must not offer Commit -- it's already logged"
+        assert js(window, "document.getElementById('sim-save-btn').classList.contains('hidden')") is True, \
+            "history mode must not offer Save -- there's nothing new to save"
+        discard_label = js(window, "document.getElementById('sim-discard-btn').textContent")
+        assert discard_label == "Exit", f"history mode's leave-button should read 'Exit', got {discard_label!r}"
+
+        # While inside this run's own scrub session, the sparkline should
+        # trace *this run's* ticks (growth compounds balance each tick) --
+        # not the garden's committed run history.
+        js_async(window, "async () => { await selectMote(window.__acctId); window.__result = 'ok'; }")
+        wait_until(lambda: js(window, "!document.getElementById('detail-panel').classList.contains('hidden')") is True)
+        sim_sparkline_title = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const row of rows) {
+                    if (row.querySelector('.key').textContent === 'balance') {
+                        const canvas = row.querySelector('canvas.sparkline');
+                        return canvas ? canvas.title : null;
+                    }
+                }
+                return null;
+            })()
+        """)
+        assert sim_sparkline_title is not None and "ticks" in sim_sparkline_title, \
+            f"in history-scrub mode the sparkline should trace this run's own ticks, got {sim_sparkline_title!r}"
+
+        js(window, "document.getElementById('sim-discard-btn').click();")
+        wait_until(lambda: js(window, "document.getElementById('sim-bar').classList.contains('hidden')") is True)
+        balance_unaffected = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__acctId)).properties.balance; }
+        """))
+        assert abs(balance_unaffected - 121.55062500000001) < 1e-6, "entering/exiting history must not alter the graph"
+
+        # ---- Sparkline appears once a property has more than one committed value ----
+        js(window, "document.getElementById('close-runs-panel').click();")
+        js_async(window, "async () => { await selectMote(window.__acctId); window.__result = 'ok'; }")
+        wait_until(lambda: js(window, "!document.getElementById('detail-panel').classList.contains('hidden')") is True)
+        has_sparkline = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const row of rows) {
+                    if (row.querySelector('.key').textContent === 'balance') {
+                        return !!row.querySelector('canvas.sparkline');
+                    }
+                }
+                return false;
+            })()
+        """)
+        assert has_sparkline is True, "balance has 3 committed values by now and should show a sparkline"
+
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                await api.delete_garden('smoke-history');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("run history: Save simulation logs without writing, the runs panel distinguishes saved/applied, "
+          "entering a run scrubs only its own ticks, and a sparkline appears once a property has history",
+          run_history_save_enter_and_sparklines)
+
     def garden_switch_isolates_data():
         result = js_async(window, """
             async () => {

@@ -66,8 +66,8 @@ class MonossGraph {
     this.selectedRelIds = new Set();
     this.hoverId = null;
     this.connectSourceId = null;
-    this.simActive = false;        // a preview is open -- draws the dashed viewport border
-    this.simHighlightIds = new Set(); // motes with a property changed as of the scrubbed step
+    this.simActive = false;        // a preview or history scrub is open -- draws the dashed viewport border
+    this.simHighlightIds = new Set(); // motes with a property changed as of the scrubbed tick
     this.camera = { x: 0, y: 0, scale: INITIAL_SCALE };
     this.alpha = 1;
     this.panTarget = null;
@@ -215,7 +215,7 @@ class MonossGraph {
     this.alpha = Math.max(this.alpha, 0.4);
   }
 
-  // ---- simulation preview ----
+  // ---- simulation preview / history scrub ----
 
   setSimActive(active) {
     this.simActive = active;
@@ -605,8 +605,9 @@ class MonossGraph {
         ctx.stroke();
       }
       if (this.simHighlightIds.has(id)) {
-        // A projected tick changed this mote's properties -- dashed so it
-        // reads as "provisional" rather than the solid selection/pinned rings.
+        // A scrubbed tick (a live preview or an entered history run
+        // alike) changed this mote's properties -- dashed so it reads as
+        // "not the live state" rather than the solid selection/pinned rings.
         ctx.setLineDash([3, 3]);
         ctx.lineWidth = 2;
         ctx.strokeStyle = "oklch(0.78 0.10 68 / 0.9)";
