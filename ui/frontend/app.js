@@ -953,12 +953,21 @@ function setupQuickAdd() {
   // excluded too, since "New mote here" is itself the click that opens
   // this panel and would otherwise immediately close it again on the
   // same bubble.
+  //
+  // Uses composedPath() rather than a live .contains(e.target) check:
+  // a property row's × button removes its own row, and a species chip
+  // click rebuilds the whole chip strip (renderSpeciesChips()'s
+  // innerHTML = "") -- both detach e.target from the tree before this
+  // listener runs, which would make a live .contains() check wrongly
+  // see the click as "outside". composedPath() is captured at dispatch
+  // time and isn't affected by DOM mutations that happen while bubbling.
   document.addEventListener("click", (e) => {
     if ($("quick-add").classList.contains("hidden")) return;
+    const path = e.composedPath();
     if (
-      $("quick-add").contains(e.target) ||
-      $("quick-add-btn").contains(e.target) ||
-      $("context-menu").contains(e.target)
+      path.includes($("quick-add")) ||
+      path.includes($("quick-add-btn")) ||
+      path.includes($("context-menu"))
     ) return;
     closeQuickAdd();
   });

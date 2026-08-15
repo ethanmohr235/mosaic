@@ -365,6 +365,39 @@ def run_checks(window):
 
     check("quick add: clicking outside the panel closes it", quick_add_closes_on_outside_click)
 
+    def quick_add_property_delete_and_species_pick_dont_close_panel():
+        # Regression check: a property row's remove button detaches its
+        # own row from the DOM, and a species chip click rebuilds the
+        # whole chip strip -- both used to be misread as "outside" clicks
+        # by the outside-click listener because it checked .contains()
+        # after the target was already gone. See app.js::setupQuickAdd.
+        js(window, "document.getElementById('quick-add-btn').click();")
+        time.sleep(1.0)
+        js(window, "document.getElementById('add-property-row').click();")
+        time.sleep(0.3)
+        js(window, """
+            const rows = document.querySelectorAll('#quick-add-rows .prop-row');
+            rows[rows.length - 1].querySelector('button').click();
+        """)
+        time.sleep(0.5)
+        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
+        assert hidden is False, "removing a property row should not close the quick-add panel"
+
+        js(window, """
+            const chip = document.querySelector(
+                '#species-chips .chip[data-species-id=\"' + window.__seed.speciesId + '\"]');
+            chip.click();
+        """)
+        time.sleep(0.5)
+        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
+        assert hidden is False, "picking a species chip should not close the quick-add panel"
+
+        js(window, "document.getElementById('quick-add-btn').click();")  # close for later checks
+        time.sleep(0.5)
+
+    check("quick add: removing a property row or picking a species doesn't close the panel",
+          quick_add_property_delete_and_species_pick_dont_close_panel)
+
     def legend_and_relationship_filters():
         js(window, "(async () => { await refocus(window.__seed.aliceId); })()")
         time.sleep(2.0)
