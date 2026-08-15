@@ -1,3 +1,4 @@
+CoolProp
 google-auth
 google-auth-oauthlib
 numpy

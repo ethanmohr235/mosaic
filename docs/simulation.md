@@ -174,10 +174,24 @@ configuration:  {"gas_constant": 287.05}
 
 `provider` names a registered `PropertyProvider` (`core/providers.py`);
 `configuration` is whatever that provider needs to construct itself.
-`ideal_gas` is the first (and currently only) built-in provider
-(`core/ideal_gas_provider.py`), supporting `pressure(density,
-temperature)`, `density(pressure, temperature)`, and
-`temperature(pressure, density)`, all in SI units (Pa, kg/m³, K).
+Two providers are built in, both in SI units:
+
+- `ideal_gas` (`core/ideal_gas_provider.py`), needing no external
+  dependency: `pressure(density, temperature)`, `density(pressure,
+  temperature)`, `temperature(pressure, density)`.
+- `coolprop` (`core/coolprop_provider.py`), wrapping the CoolProp library
+  for real fluids such as water/steam. Configuration is `{"fluid":
+  "Water", "backend": "HEOS"}` (`backend` optional, defaults to `HEOS`).
+  Operations are named `<output>_<input-initials>` rather than a bare
+  output name, since a fluid property is commonly reachable from more
+  than one input pair (`h(P,T)` and `h(P,s)` are different lookups that
+  happen to share an output) and `PropertyProvider.capability()` resolves
+  purely by matching the operation string: `enthalpy_pt(pressure,
+  temperature)`, `entropy_pt(pressure, temperature)`, `density_pt
+  (pressure, temperature)`, `temperature_ph(pressure, enthalpy)`, and
+  `enthalpy_ps(pressure, entropy)` (the isentropic lookup a turbine uses
+  to get its ideal outlet enthalpy). See
+  `scripts/example_steam_turbine.py`.
 
 A rule reaches this through the `property()` builtin rather than
 knowing anything about `ideal_gas` itself:

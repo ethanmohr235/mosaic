@@ -6,14 +6,15 @@ than a connection, so it stays trivially testable with dicts and never
 gets re-resolved from the database mid-formula-evaluation. See
 docs/physical_property_proposal.
 
-Importing this module registers every built-in provider (currently just
-Ideal Gas) -- the single explicit registration point. Anything that
+Importing this module registers every built-in provider (currently Ideal
+Gas and CoolProp) -- the single explicit registration point. Anything that
 resolves a model imports this module first, so registration always
 happens before resolution; providers are never resolved via dynamic
 import from a database string.
 """
 from collections.abc import Callable
 
+from core.coolprop_provider import CoolPropProvider
 from core.ideal_gas_provider import IdealGasProvider
 from core.providers import InvalidModelConfiguration, PropertyModelError, PropertyProvider, register_provider, resolve_provider
 
@@ -22,6 +23,7 @@ PROVIDER_KEY = "provider"
 CONFIGURATION_KEY = "configuration"
 
 register_provider("ideal_gas", IdealGasProvider)
+register_provider("coolprop", CoolPropProvider)
 
 
 class ModelNotFound(PropertyModelError):
@@ -45,8 +47,15 @@ def resolve(
             f"mote {mote_id[:8]} has no {USES_MODEL!r} relationship to a property model"
         )
     model_id = model_ids[0]
-    model_properties = properties(model_id)
+    return construct(model_id, properties(model_id))
 
+
+def construct(model_id: str, model_properties: dict) -> PropertyProvider:
+    """Build the provider a property-model mote names, from its own
+    properties -- split out of resolve() so a caller that already has the
+    model mote in hand (e.g. the CLI's `model show`/`model capabilities`,
+    inspecting the model mote directly rather than following `uses_model`
+    to it) doesn't have to duplicate this validation."""
     provider_name = model_properties.get(PROVIDER_KEY)
     if not isinstance(provider_name, str) or not provider_name.strip():
         raise InvalidModelConfiguration(

@@ -1,6 +1,6 @@
 import pytest
 
-from core.model_resolver import ModelNotFound, resolve
+from core.model_resolver import ModelNotFound, construct, resolve
 from core.providers import InvalidModelConfiguration, ProviderNotFound
 
 # Dict-based, no DB -- core/model_resolver.py takes the same plain-callable
@@ -63,3 +63,17 @@ def test_resolve_defaults_missing_configuration_to_empty_dict():
     # that provider's own InvalidModelConfiguration, not a resolver error.
     with pytest.raises(InvalidModelConfiguration, match="gas_constant"):
         resolve("no-config", properties, targets)
+
+
+def test_construct_builds_the_same_provider_resolve_uses():
+    # resolve() is just "follow uses_model, then construct()" -- this
+    # confirms the split didn't change resolve()'s behavior.
+    provider = construct("ideal-air", properties("ideal-air"))
+    assert provider.evaluate("pressure", {"density": 1.0, "temperature": 300.0}) == pytest.approx(
+        1.0 * 287.05 * 300.0
+    )
+
+
+def test_construct_raises_invalid_configuration_without_provider_key():
+    with pytest.raises(InvalidModelConfiguration, match="provider"):
+        construct("no-provider-model", properties("no-provider-model"))
