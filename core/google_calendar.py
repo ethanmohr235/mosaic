@@ -1,5 +1,6 @@
 # core/google_calendar.py
 import json
+import os
 from datetime import date, datetime, timedelta
 
 import requests
@@ -48,6 +49,24 @@ def _description_for(mote: dict) -> str:
     return "\n".join(lines)
 
 
+def _local_timezone_name() -> str | None:
+    """Best-effort IANA zone name (e.g. "America/Denver"). Google requires
+    an explicit timeZone -- not just a UTC offset -- for a *recurring*
+    event, since a fixed offset can't project future occurrences across
+    DST; this is why creating a recurring event used to fail on its very
+    first export (no existing event to inherit a timeZone from) while a
+    later update of that same event, once it already had one, succeeded.
+    Reads the /etc/localtime symlink standard on Linux/macOS rather than
+    adding a dependency (docs/rules.md) just for this; returns None
+    (falling back to the offset-only payload below) wherever that
+    doesn't resolve to one."""
+    try:
+        target = os.path.realpath("/etc/localtime")
+    except OSError:
+        return None
+    return target.split("zoneinfo/", 1)[1] if "zoneinfo/" in target else None
+
+
 def event_payload(mote: dict) -> dict:
     """Builds a Calendar v3 event body from a mote's properties. Raises
     ValueError if `date` is missing or unparseable."""
@@ -65,14 +84,18 @@ def event_payload(mote: dict) -> dict:
         except ValueError as e:
             raise ValueError(f"Mote {mote.get('id')!r} has an unparseable date: {raw_date!r}") from e
         # Attaches the system's local UTC offset (DST-correct for that
-        # instant) so Google can interpret it unambiguously without also
-        # needing an IANA timeZone name, which there's no portable
-        # stdlib way to detect.
+        # instant) so Google can interpret it unambiguously even without
+        # an IANA timeZone name below (_local_timezone_name() is only
+        # best-effort).
         start_dt = start_dt.astimezone()
         minutes = duration if isinstance(duration, (int, float)) else 60
         end_dt = start_dt + timedelta(minutes=minutes)
         payload["start"] = {"dateTime": start_dt.isoformat()}
         payload["end"] = {"dateTime": end_dt.isoformat()}
+        timezone_name = _local_timezone_name()
+        if timezone_name:
+            payload["start"]["timeZone"] = timezone_name
+            payload["end"]["timeZone"] = timezone_name
     else:
         try:
             start_d = date.fromisoformat(raw_date)

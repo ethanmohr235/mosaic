@@ -30,6 +30,57 @@ def test_event_payload_timed_uses_duration_in_minutes():
     assert end - start == timedelta(minutes=90)
 
 
+def test_event_payload_includes_timezone_for_timed_events_when_detectable(monkeypatch):
+    # Google requires an explicit timeZone for recurring events specifically
+    # (a bare UTC offset can't project future occurrences across DST) --
+    # this is what made a recurring event fail on its first-ever export.
+    monkeypatch.setattr(gcal, "_local_timezone_name", lambda: "America/Denver")
+    mote = _mote({"date": "2026-08-15T09:00:00"})
+    payload = event_payload(mote)
+
+    assert payload["start"]["timeZone"] == "America/Denver"
+    assert payload["end"]["timeZone"] == "America/Denver"
+
+
+def test_event_payload_omits_timezone_when_undetectable(monkeypatch):
+    monkeypatch.setattr(gcal, "_local_timezone_name", lambda: None)
+    mote = _mote({"date": "2026-08-15T09:00:00"})
+    payload = event_payload(mote)
+
+    assert "timeZone" not in payload["start"]
+    assert "timeZone" not in payload["end"]
+
+
+def test_event_payload_all_day_events_have_no_timezone(monkeypatch):
+    # date-only start/end has nothing for a timeZone to qualify.
+    monkeypatch.setattr(gcal, "_local_timezone_name", lambda: "America/Denver")
+    mote = _mote({"date": "2026-08-15"})
+    payload = event_payload(mote)
+
+    assert "timeZone" not in payload["start"]
+    assert "timeZone" not in payload["end"]
+
+
+def test_local_timezone_name_reads_the_etc_localtime_symlink(monkeypatch):
+    monkeypatch.setattr(
+        gcal.os.path, "realpath", lambda path: "/usr/share/zoneinfo/America/Denver"
+    )
+    assert gcal._local_timezone_name() == "America/Denver"
+
+
+def test_local_timezone_name_returns_none_outside_zoneinfo(monkeypatch):
+    monkeypatch.setattr(gcal.os.path, "realpath", lambda path: "/etc/localtime")
+    assert gcal._local_timezone_name() is None
+
+
+def test_local_timezone_name_returns_none_on_oserror(monkeypatch):
+    def raise_oserror(path):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(gcal.os.path, "realpath", raise_oserror)
+    assert gcal._local_timezone_name() is None
+
+
 def test_event_payload_all_day_defaults_to_a_1_day_span_with_exclusive_end():
     mote = _mote({"name": "Deadline", "date": "2026-08-15"})
     payload = event_payload(mote)
