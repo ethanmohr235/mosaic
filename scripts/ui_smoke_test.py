@@ -996,17 +996,28 @@ def run_checks(window):
         assert result == '"ok"', f"live relation box-select setup failed: {result}"
         ids = json.loads(js(window, "JSON.stringify(window.__liveRel)"))
 
-        js(window, "graph.pin(window.__liveRel.p); graph.placeAt(window.__liveRel.p, -100, 0);")
-        js(window, "graph.pin(window.__liveRel.q); graph.placeAt(window.__liveRel.q, 0, 0);")
-        js(window, "graph.pin(window.__liveRel.r); graph.placeAt(window.__liveRel.r, 100, 0);")
+        # Parked far out in empty world space, like the shift+drag box-select
+        # check above -- and in a *different* empty spot from that one, since
+        # its three motes are still pinned where it left them. Everything the
+        # suite has created with no species anchors at world (0, 0), so a box
+        # drawn around three motes left near the origin catches whatever else
+        # the layout has pushed through that spot: a coin flip, not a property
+        # of the code under test.
+        js(window, "graph.pin(window.__liveRel.p); graph.placeAt(window.__liveRel.p, 5900, -6000);")
+        js(window, "graph.pin(window.__liveRel.q); graph.placeAt(window.__liveRel.q, 6000, -6000);")
+        js(window, "graph.pin(window.__liveRel.r); graph.placeAt(window.__liveRel.r, 6100, -6000);")
         time.sleep(0.3)
-        # A fixed camera (world (0,0) at screen center, generous scale)
-        # rather than resetView()'s fitToContent() -- fitting *everything*
-        # accumulated by this point in the suite would zoom out far enough
-        # to compress p/q/r's carefully-spaced world coordinates down to a
-        # handful of screen pixels, defeating the "partial box" step below
-        # regardless of margins.
-        js(window, "graph._fitUntilAlpha = 0; graph.camera = {x: 0, y: 0, scale: 3};")
+        # A fixed camera (q at screen center, generous scale) rather than
+        # resetView()'s fitToContent() -- fitting *everything* accumulated
+        # by this point in the suite would zoom out far enough to compress
+        # p/q/r's carefully-spaced world coordinates down to a handful of
+        # screen pixels, defeating the "partial box" step below regardless
+        # of margins.
+        # panTarget too, not just the auto-fit: refocus() above panned the
+        # camera toward the focused mote, and that animation would keep
+        # dragging this fixed camera back off these three motes for as
+        # long as the drag below takes.
+        js(window, "graph._fitUntilAlpha = 0; graph.panTarget = null; graph.camera = {x: -18000, y: 18000, scale: 3};")
         time.sleep(0.3)
 
         px, py = node_xy(window, "window.__liveRel.p")
@@ -2658,6 +2669,235 @@ def run_checks(window):
         """, wait=2.0)
 
     check("the Tools menu hosts the real sim controls and swaps Simulate/Exit", tools_menu_hosts_the_sim_controls)
+
+    def _set_slider(row_selector, name, value):
+        """Drive one of the settings panel's sliders the way a pointer
+        does: input while dragging, change on release."""
+        js(window, f"""
+            (function() {{
+                const row = Array.from(document.querySelectorAll({json.dumps(row_selector)}))
+                    .find(r => r.querySelector('.name').textContent === {json.dumps(name)});
+                const slider = row.querySelector('input[type=range]');
+                slider.value = {json.dumps(str(value))};
+                slider.dispatchEvent(new Event('input', {{bubbles: true}}));
+                slider.dispatchEvent(new Event('change', {{bubbles: true}}));
+            }})();
+        """)
+
+    def view_settings_tunes_forces_per_relationship_type():
+        # Its own garden: these checks assert on exact slider values and
+        # stored settings, which the shared 'default' garden's accumulated
+        # species/relationships would make brittle.
+        js_async(window, """
+            async () => {
+                await api.create_garden('smoke-viewsettings');
+                await api.switch_garden('smoke-viewsettings');
+                const species = await api.create_mote({name: 'Task'});
+                const a = await api.create_mote({name: 'a1', status: 'open'});
+                const b = await api.create_mote({name: 'b1', status: 'done'});
+                const c = await api.create_mote({name: 'c1'});
+                await api.set_species(a.id, species.id);
+                await api.set_species(b.id, species.id);
+                await api.create_relationship(a.id, b.id, 'blocks');
+                window.__vs = {speciesId: species.id, aId: a.id, bId: b.id, cId: c.id};
+                await loadGarden('smoke-viewsettings');
+                window.__result = 'ok';
+            }
+        """, wait=3.0)
+
+        js(window, "document.getElementById('open-view-settings-btn').click();")
+        time.sleep(0.4)
+        opened = js(window, "!document.getElementById('view-settings-panel').classList.contains('hidden')")
+        assert opened is True, "the control panel's button should open the view settings panel"
+
+        types = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#force-rel-rows .slider-row .name'))
+                .map(e => e.textContent))
+        """))
+        assert "blocks" in types and "instance_of" in types, (
+            f"every relationship type in the garden should get a force row, got {types}"
+        )
+
+        _set_slider("#force-rel-rows .slider-row", "blocks", 0.1)
+        time.sleep(0.3)
+        applied = js(window, "graph.forces.relStrength.blocks")
+        assert abs(applied - 0.1) < 1e-9, f"the slider should reach the layout, got {applied}"
+        stored = json.loads(js(window, "localStorage.getItem('monoss:viewSettings:' + currentGarden)"))
+        assert abs(stored["forces"]["relStrength"]["blocks"] - 0.1) < 1e-9, (
+            f"the override should persist, got {stored}"
+        )
+
+        _set_slider("#force-globals .slider-row", "Repulsion", 3000)
+        time.sleep(0.3)
+        repulsion = js(window, "graph.forces.repulsion")
+        assert repulsion == 3000, f"a global force slider should reach the layout, got {repulsion}"
+
+        # ...and ↺ puts the type back on the species-aware default, which
+        # is an absence rather than a number.
+        js(window, """
+            Array.from(document.querySelectorAll('#force-rel-rows .slider-row'))
+                .find(r => r.querySelector('.name').textContent === 'blocks')
+                .querySelector('.reset-btn').click();
+        """)
+        time.sleep(0.3)
+        cleared = js(window, "graph.forces.relStrength.blocks === undefined")
+        assert cleared is True, "resetting a type should drop the override, not zero it"
+
+    check("view settings: a per-type force slider reaches the layout and persists",
+          view_settings_tunes_forces_per_relationship_type)
+
+    def custom_species_color_survives_a_garden_switch():
+        js(window, """
+            (function() {
+                const picker = document.querySelector('#species-colors input[type=color]');
+                picker.value = '#ff0000';
+                picker.dispatchEvent(new Event('input', {bubbles: true}));
+                picker.dispatchEvent(new Event('change', {bubbles: true}));
+            })();
+        """)
+        time.sleep(0.3)
+        instance_color = js(window, "graph.colorFor(window.__vs.aId)")
+        assert instance_color == "#ff0000", (
+            f"a custom species color should apply to its instances, got {instance_color!r}"
+        )
+
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                await api.switch_garden('smoke-viewsettings');
+                await loadGarden('smoke-viewsettings');
+                window.__result = 'ok';
+            }
+        """, wait=3.0)
+        after = js(window, "graph.colorFor(window.__vs.aId)")
+        assert after == "#ff0000", f"the color should be remembered per garden, got {after!r}"
+
+    check("view settings: a custom species color applies and survives a garden switch",
+          custom_species_color_survives_a_garden_switch)
+
+    def color_by_property_value_splits_motes_by_value():
+        js(window, "document.getElementById('open-view-settings-btn').click();")
+        time.sleep(0.3)
+        js(window, """
+            (function() {
+                const select = document.getElementById('color-mode-select');
+                select.value = 'property';
+                select.dispatchEvent(new Event('change', {bubbles: true}));
+                const input = document.getElementById('color-key-input');
+                input.value = 'status';
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            })();
+        """)
+        time.sleep(0.4)
+
+        open_color = js(window, "graph.colorFor(window.__vs.aId)")
+        done_color = js(window, "graph.colorFor(window.__vs.bId)")
+        none_color = js(window, "graph.colorFor(window.__vs.cId)")
+        assert open_color != done_color, (
+            f"different property values should get different colors, both were {open_color!r}"
+        )
+        assert none_color == "oklch(0.62 0.02 250)", (
+            f"a mote without the property should stay grey, got {none_color!r}"
+        )
+
+        hollow = js(window, """
+            document.querySelector('#legend .filter-row .dot').classList.contains('hollow')
+        """)
+        assert hollow is True, "the legend should stop presenting itself as the color key"
+
+        # Back to defaults for the attractor check below.
+        js(window, "document.getElementById('reset-view-settings-btn').click();")
+        time.sleep(0.4)
+        mode = js(window, "graph.colors.mode")
+        repulsion = js(window, "graph.forces.repulsion")
+        assert mode == "species" and repulsion == 1500, (
+            f"reset should restore every default, got mode={mode!r} repulsion={repulsion}"
+        )
+
+    check("view settings: color by property value, with a grey for motes lacking it",
+          color_by_property_value_splits_motes_by_value)
+
+    def attractor_mode_moves_a_cluster_and_blocks_editing():
+        js(window, "document.getElementById('arrange-attractors-btn').click();")
+        time.sleep(0.4)
+        assert js(window, "graph.attractorMode") is True, "the button should enter attractor mode"
+
+        point = json.loads(js(window, """
+            JSON.stringify((graph.attractorPoints().find(p => p.id === window.__vs.speciesId)) || null)
+        """))
+        assert point is not None, "the species should have a draggable attractor"
+        screen = json.loads(js(window, f"JSON.stringify(graph._worldToScreen({point['x']}, {point['y']}))"))
+
+        distance_to_attractor = """
+            (function() {
+                const n = graph.nodes.get(window.__vs.aId);
+                const a = graph._attractorPosition(window.__vs.speciesId);
+                return Math.hypot(n.x - a.x, n.y - a.y);
+            })()
+        """
+        drag(window, screen["x"], screen["y"], screen["x"] + 260, screen["y"] + 140)
+        time.sleep(0.4)   # let a frame land, so the pixel sample below reads the new state
+
+        moved = json.loads(js(window, "JSON.stringify(graph.attractors[window.__vs.speciesId] || null)"))
+        assert moved is not None, "dragging an attractor should move it"
+        stored = json.loads(js(window, "localStorage.getItem('monoss:viewSettings:' + currentGarden)"))
+        assert stored["attractors"], f"the new position should persist, got {stored}"
+
+        # The handle is actually drawn, not just tracked -- sampled where
+        # the attractor now is, while the cluster it pulls is still 260px
+        # away and can't be what's painting those pixels. Same reasoning as
+        # the canvas-paints check above: everything else here works off
+        # coordinates and would pass over an unpainted overlay.
+        ring = json.loads(js(window, """
+            (function() {
+                const c = document.getElementById('graph');
+                const rect = c.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                const a = graph._attractorPosition(window.__vs.speciesId);
+                const p = graph._worldToScreen(a.x, a.y);
+                const size = Math.round(40 * dpr);
+                const d = c.getContext('2d').getImageData(
+                    Math.round((p.x - rect.left - 20) * dpr),
+                    Math.round((p.y - rect.top - 20) * dpr), size, size).data;
+                const colors = new Set();
+                for (let i = 0; i < d.length; i += 4) colors.add(d[i] + ',' + d[i + 1] + ',' + d[i + 2]);
+                return JSON.stringify({distinct: colors.size});
+            })()
+        """))
+        assert ring["distinct"] > 1, f"the attractor handle isn't painted: {ring}"
+
+        # The cluster follows: measured right after the jump, then again
+        # once the layout has had time to chase it.
+        distance_before = js(window, distance_to_attractor)
+        time.sleep(2.5)
+        distance_after = js(window, distance_to_attractor)
+        assert distance_after < distance_before, (
+            f"instances should follow their attractor: {distance_before} -> {distance_after}"
+        )
+
+        # Read-only: clicking a mote neither selects it nor opens the panel.
+        x, y = node_xy(window, "window.__vs.aId")
+        drag(window, x, y, x, y)
+        time.sleep(0.4)
+        panel_hidden = js(window, "document.getElementById('detail-panel').classList.contains('hidden')")
+        assert panel_hidden is True, "attractor mode should not select or inspect motes"
+
+        js(window, "document.getElementById('attractor-done-btn').click();")
+        time.sleep(0.3)
+        assert js(window, "graph.attractorMode") is False, "Done arranging should leave the mode"
+
+        js(window, "document.getElementById('close-view-settings').click();")
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
+            }
+        """, wait=3.0)
+
+    check("view settings: attractor mode drags a cluster and blocks editing",
+          attractor_mode_moves_a_cluster_and_blocks_editing)
 
     def soon_stubs_toast_instead_of_doing_nothing():
         js(window, "document.getElementById('file-btn').click();")

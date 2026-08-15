@@ -30,6 +30,7 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 | Delete / Backspace | Delete the current selection |
 | Esc | Close the frontmost menu/panel, or deselect if nothing else is open |
 | Scroll | Zoom |
+| Left-drag an attractor (attractor mode only) | Move that species' cluster |
 
 Motes/relationships highlight live as a box-select drag grows over them,
 not only once the mouse is released. Copying more than one mote preserves
@@ -74,16 +75,61 @@ click outside the open one closes it too.
 
 Most items are real, existing actions relocated rather than rebuilt:
 File hosts "New garden…" and "Export to Calendar"; View hosts "Reset
-view" and a new "Hide/Show controls" toggle for the always-docked
+view", a "Hide/Show controls" toggle for the always-docked
 top-right panel (species legend, relationship filters, depth, reset
 view) -- the first way to reclaim that screen space, persisted across
-restarts; Tools hosts the simulation step count and the Simulate…/Exit
+restarts -- and "Advanced view settings…" (below); Tools hosts the
+simulation step count and the Simulate…/Exit
 simulation trigger for the same non-blocking preview/scrub/commit bar
 described above. A handful of items (Import motes, Export as CSV/JSON,
 Print graph, Timeline view, Group by type, Automations, Webhooks, API
 access) are inert placeholders with a small "soon" badge, staged for
 future expansion -- clicking one just toasts an explanation rather than
 doing nothing silently.
+
+### Advanced view settings
+
+Everything the graph's layout and colouring used to hardcode is
+adjustable per garden, from a panel opened by the control panel's
+"⚙ Advanced view settings" button or the View menu's matching item. It
+docks on the left (sharing that corner with the run-history panel, so
+opening one closes the other) rather than opening as a modal: every
+control in it is judged by what it does to the graph, so the graph has to
+stay visible while you drag a slider.
+
+**Forces.** Three global sliders -- repulsion, species pull (how hard a
+mote is drawn to its species' attractor), and edge length -- plus one
+attraction slider per relationship type in the garden. A type left alone
+reads "auto" and keeps the species-aware default (`0.05` within a
+species, `0.006` across one, since species grouping is what carries the
+layout); moving its slider replaces that with one explicit number for
+every edge of that type. Each slider has a ↺ back to its default.
+
+**Colours.** By default a mote's colour is its species', hashed from the
+species id, and each species gets a picker to override that with any
+colour. The alternative modes colour by something other than membership:
+by a chosen property's value (a hue per distinct value), by connection
+count, or by a chosen numeric property (both on a dim→bright ramp, with
+motes that have no usable value left grey). While a non-species mode is
+active the legend's dots hollow out -- the rows still filter by species,
+they just aren't a colour key any more. Colour-by-last-modified is
+deliberately absent: nothing in the schema records when a mote changed.
+
+**Layout.** "Arrange attractors…" enters a read-only mode where the point
+each species' cluster is pulled toward is drawn as a labelled ring and can
+be dragged. Only panning and zooming still work there -- selecting,
+dragging, connecting and the context menu are all off, and any edit
+attempted from elsewhere toasts instead, the same way it does mid-
+simulation-preview. Esc (or "Done arranging") leaves. A pinned mote
+ignores its anchor entirely, so a hand-arranged garden can make a moved
+attractor look broken; "Unpin all motes" is the way out of that.
+
+Settings live in `localStorage` under `monoss:viewSettings:<garden>`,
+beside the existing hidden-species and pinned-position keys, and only
+what's actually been changed is stored -- a garden nobody has adjusted has
+no key at all and renders on `graph.js`'s own defaults. This is view
+state, not garden data: it stays on this machine and is not part of a
+garden export.
 
 ### Linking out to files and websites
 
@@ -227,8 +273,14 @@ garden dropdown listing/switching gardens, the View menu's Hide/Show
 controls toggle and its persistence, the Tools menu swapping Simulate…/
 Exit simulation with the real preview state, a "soon" stub toasting
 instead of doing nothing, a hidden species' instances actually dropping
-out of the physics loop instead of just not being drawn, and the Export
-to Calendar item -- with
+out of the physics loop instead of just not being drawn, the advanced
+view settings panel (a per-relationship-type force slider reaching the
+layout and persisting, a custom species colour surviving a garden switch,
+colour-by-property-value giving different values different colours and no
+value grey, and "Reset every view setting" restoring every default),
+attractor mode (entering it, dragging an attractor so the species' motes
+follow, clicking a mote *not* opening the panel, and leaving), and the
+Export to Calendar item -- with
 `api.export_to_google_calendar` itself stubbed, since the real OAuth/
 network path needs a real Google account and has no place in an
 automated, offline suite) against a throwaway temp `GARDENS_DIR` and

@@ -51,6 +51,7 @@
       <div id="view-menu" class="menu hidden">
         <button id="view-reset-view" class="menu-item" type="button">Reset view</button>
         <button id="view-toggle-panel" class="menu-item" type="button">Hide controls</button>
+        <button id="view-advanced-settings" class="menu-item" type="button">Advanced view settings…</button>
         <div class="menu-sep"></div>
         <button class="menu-item soon" type="button" data-soon="Timeline view">Timeline view<span class="menu-badge">soon</span></button>
         <button class="menu-item soon" type="button" data-soon="Group by type">Group by type<span class="menu-badge">soon</span></button>
@@ -115,6 +116,50 @@
         </select>
       </label>
       <button id="reset-view-btn" type="button" class="linkish">⤢ Reset view</button>
+      <button id="open-view-settings-btn" type="button" class="linkish">⚙ Advanced view settings</button>
+    </section>
+
+    <section id="view-settings-panel" class="hidden">
+      <div class="panel-title">Advanced view settings</div>
+      <button id="close-view-settings" type="button" title="Close">×</button>
+      <div id="view-settings-body">
+        <div class="panel-heading">Forces</div>
+        <div id="force-globals"></div>
+        <div class="panel-subheading" id="force-rel-heading">Attraction by relationship type</div>
+        <div id="force-rel-rows"></div>
+
+        <div class="panel-divider"></div>
+        <div class="panel-heading">Colors</div>
+        <label class="settings-row">
+          <span>Color motes by</span>
+          <select id="color-mode-select">
+            <option value="species">Species</option>
+            <option value="property">Property value</option>
+            <option value="degree">Connection count</option>
+            <option value="numeric">Numeric property</option>
+          </select>
+        </label>
+        <label class="settings-row hidden" id="color-key-row">
+          <span>Property</span>
+          <input type="text" id="color-key-input" list="color-key-options" placeholder="key" autocomplete="off">
+        </label>
+        <datalist id="color-key-options"></datalist>
+        <div id="color-mode-note" class="settings-note hidden"></div>
+        <div id="species-colors"></div>
+
+        <div class="panel-divider"></div>
+        <div class="panel-heading">Layout</div>
+        <div id="attractor-mode-note" class="settings-note hidden">
+          Drag each attractor to place that species' cluster. The graph is read-only until you're done.
+        </div>
+        <button id="arrange-attractors-btn" type="button" class="ghost wide">Arrange attractors…</button>
+        <button id="attractor-done-btn" type="button" class="primary wide hidden">Done arranging</button>
+        <button id="reset-attractors-btn" type="button" class="linkish">↺ Reset attractor positions</button>
+        <button id="unpin-all-btn" type="button" class="linkish">⇲ Unpin all motes</button>
+
+        <div class="panel-divider"></div>
+        <button id="reset-view-settings-btn" type="button" class="linkish">↺ Reset every view setting</button>
+      </div>
     </section>
 
     <section id="runs-panel" class="hidden">

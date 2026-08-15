@@ -29,6 +29,8 @@ let simPlayTimer = null;
 let openMenuName = null;               // 'garden' | 'file' | 'view' | 'tools' | null -- which topbar dropdown is open
 let allRuns = [];                      // cached list_runs() result, while the runs panel is open
 let selectedRunId = null;              // the run currently entered in history-scrub mode (simPreview.mode === 'history'), if any
+let viewSettings = null;               // this garden's advanced view settings (forces/colors/attractors)
+let attractorMode = false;             // arranging species attractors -- read-only, like a sim preview
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -55,6 +57,7 @@ function positionsKey(garden) { return `monoss:positions:${garden}`; }
 function lastFocusKey(garden) { return `monoss:lastFocus:${garden}`; }
 function hiddenSpeciesKey(garden) { return `monoss:hiddenSpecies:${garden}`; }
 function hiddenRelKey(garden) { return `monoss:hiddenRels:${garden}`; }
+function viewSettingsKey(garden) { return `monoss:viewSettings:${garden}`; }
 
 function readJSON(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
@@ -115,9 +118,21 @@ function simBlocked() {
   return true;
 }
 
+/** The read-only modes, as a single gate in front of every mutation.
+ *  simBlocked() covers a simulation preview or history scrub; arranging
+ *  attractors is read-only for the same reason -- what's on screen is a
+ *  layout tool, not the editable graph. */
+function editBlocked() {
+  if (attractorMode) {
+    showToast("Arranging attractors — click Done arranging to edit.", 2600);
+    return true;
+  }
+  return simBlocked();
+}
+
 async function runUndo() {
   if (!lastUndo) return;
-  if (simBlocked()) return;
+  if (editBlocked()) return;
   const { perform } = lastUndo;
   lastUndo = null;
   $("toast").classList.add("hidden");
@@ -173,6 +188,9 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
   $("empty-state").classList.toggle("hidden", !!focusId);
   renderLegend();
   renderRelFilters();
+  // Species and relationship types are what the settings panel is a list
+  // of, so it has to follow the same data everything else here does.
+  if (viewSettingsOpen()) renderViewSettings();
   return next;
 }
 
@@ -182,8 +200,13 @@ async function loadGarden(garden) {
   closeSimBar();
   closeDetailPanel();
   closeRunsPanel();
+  // Attractors are per garden, so an arrangement in progress means
+  // nothing once a different one is open.
+  if (attractorMode) exitAttractorMode();
   graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
+  viewSettings = loadViewSettings(garden);
+  graph.setViewSettings(viewSettings);
   const stored = localStorage.getItem(lastFocusKey(garden)) || null;
   await refreshMoteCache();
   // Frame the whole garden on open rather than panning to the remembered
@@ -211,11 +234,14 @@ function speciesRows() {
     if (species.length === 0) { untyped += 1; continue; }
     for (const id of species) counts.set(id, (counts.get(id) || 0) + 1);
   }
+  // speciesColorFor, not colorFor: these rows are about species membership
+  // (they're the species filter, and the chips that pick one), which is
+  // still true when the canvas is colored by a property or a count.
   const rows = payload.species_ids.map((id) => ({
     id,
     label: nodeLabel(moteById(id) || { id, properties: {} }),
     count: counts.get(id) || 0,
-    color: graph.colorFor(id),
+    color: graph.speciesColorFor(id, { emphatic: true }),
     diamond: true,
   }));
   rows.sort((a, b) => a.label.localeCompare(b.label));
@@ -236,13 +262,17 @@ function renderLegend() {
     container.innerHTML = '<div class="empty-note">No species yet</div>';
     return;
   }
+  // A non-species color mode means node color no longer encodes species,
+  // so the legend stops presenting itself as the color key -- see the
+  // .hollow rule in style.css.
+  const hollow = graph.colors.mode !== "species";
   for (const row of rows) {
     const el = document.createElement("div");
     const hidden = graph.hiddenSpecies.has(row.id);
     el.className = "filter-row" + (hidden ? " off" : "");
     el.title = hidden ? `Show ${row.label}` : `Hide ${row.label}`;
     el.innerHTML =
-      `<span class="dot${row.diamond ? " diamond" : ""}" style="background:${row.color}"></span>` +
+      `<span class="dot${row.diamond ? " diamond" : ""}${hollow ? " hollow" : ""}" style="background:${row.color}"></span>` +
       `<span class="name"></span><span class="count">${row.count}</span>`;
     el.querySelector(".name").textContent = row.label;
     el.addEventListener("click", () => {
@@ -282,6 +312,353 @@ function renderRelFilters() {
     });
     container.appendChild(el);
   }
+}
+
+// ---- advanced view settings ----
+//
+// Per-garden control over how the graph lays itself out and colors
+// itself. Stored in localStorage beside the hidden-species and pinned-
+// position keys, because this is view state, not garden data -- it stays
+// on this machine and doesn't travel with an export. Only what's actually
+// been changed is written: a garden nobody has adjusted has no key at all
+// and renders on graph.js's own defaults.
+//
+// The panel is docked rather than modal for the same reason the sim bar
+// is: every control here is judged by what it does to the graph, so the
+// graph has to stay visible while you drag a slider.
+
+const FORCE_SLIDERS = [
+  { key: "repulsion", label: "Repulsion", min: 200, max: 6000, step: 50, decimals: 0,
+    hint: "How hard every mote pushes every other mote away" },
+  { key: "anchorPull", label: "Species pull", min: 0, max: 0.08, step: 0.002, decimals: 3,
+    hint: "How strongly a mote is drawn to its species' attractor" },
+  { key: "edgeLength", label: "Edge length", min: 20, max: 260, step: 5, decimals: 0,
+    hint: "The distance a relationship's spring is happy at" },
+];
+
+const REL_STRENGTH_MAX = 0.12;
+const REL_STRENGTH_STEP = 0.002;
+
+const COLOR_MODE_NOTES = {
+  property: "Each distinct value gets its own hue. Motes without the property stay grey.",
+  degree: "Dim = few relationships, bright = many.",
+  numeric: "Dim = lowest value on screen, bright = highest. Non-numeric motes stay grey.",
+};
+
+function defaultViewSettings() {
+  return MonossGraph.defaults();
+}
+
+function loadViewSettings(garden) {
+  const stored = readJSON(viewSettingsKey(garden), {}) || {};
+  const base = defaultViewSettings();
+  const forces = stored.forces || {};
+  const colors = stored.colors || {};
+  return {
+    forces: { ...base.forces, ...forces, relStrength: { ...(forces.relStrength || {}) } },
+    colors: { ...base.colors, ...colors, species: { ...(colors.species || {}) } },
+    attractors: { ...(stored.attractors || {}) },
+  };
+}
+
+function saveViewSettings() {
+  localStorage.setItem(viewSettingsKey(currentGarden), JSON.stringify(viewSettings));
+}
+
+/** Push settings into the graph, persist them, and rebuild whatever
+ *  displays them. Only for discrete changes (a mode switch, a reset, an
+ *  attractor drop): a slider or color picker mid-gesture updates the
+ *  graph directly instead, since rebuilding the panel's DOM under the
+ *  pointer would end the gesture halfway through. */
+function applyViewSettings() {
+  graph.setViewSettings(viewSettings);
+  saveViewSettings();
+  renderLegend();
+  renderViewSettings();
+}
+
+function viewSettingsOpen() {
+  return !$("view-settings-panel").classList.contains("hidden");
+}
+
+function openViewSettings() {
+  closeRunsPanel();   // same corner; only one of them can have it
+  $("view-settings-panel").classList.remove("hidden");
+  renderViewSettings();
+}
+
+function closeViewSettings() {
+  // "Done arranging" lives in this panel, so closing it has to end the
+  // mode too rather than stranding the graph read-only with no way out.
+  if (attractorMode) exitAttractorMode();
+  $("view-settings-panel").classList.add("hidden");
+}
+
+function toggleViewSettings() {
+  viewSettingsOpen() ? closeViewSettings() : openViewSettings();
+}
+
+function renderViewSettings() {
+  renderForceSettings();
+  renderColorSettings();
+  renderLayoutSettings();
+}
+
+// ---- forces ----
+
+/** Shared skeleton for every slider in the panel. Returns the element
+ *  plus its parts, so each caller wires up its own meaning of "changed"
+ *  and "reset" without duplicating the markup. */
+function buildSliderRow({ label, hint, min, max, step, value, valueText, isDefault }) {
+  const el = document.createElement("div");
+  el.className = "slider-row";
+  el.innerHTML =
+    '<div class="slider-label"><span class="name"></span><span class="value"></span>' +
+    '<button type="button" class="reset-btn" title="Back to the default">↺</button></div>' +
+    '<input type="range">';
+  el.title = hint;
+  el.querySelector(".name").textContent = label;
+
+  const valueEl = el.querySelector(".value");
+  valueEl.textContent = valueText;
+  valueEl.classList.toggle("auto", isDefault);
+
+  const slider = el.querySelector("input");
+  slider.min = String(min);
+  slider.max = String(max);
+  slider.step = String(step);
+  slider.value = String(value);
+
+  const reset = el.querySelector(".reset-btn");
+  reset.disabled = isDefault;
+  return { el, slider, value: valueEl, reset };
+}
+
+function forceSliderRow(spec) {
+  const fallback = defaultViewSettings().forces[spec.key];
+  const current = viewSettings.forces[spec.key];
+  const row = buildSliderRow({
+    label: spec.label, hint: spec.hint,
+    min: spec.min, max: spec.max, step: spec.step,
+    value: current, valueText: current.toFixed(spec.decimals), isDefault: current === fallback,
+  });
+
+  row.slider.addEventListener("input", () => {
+    const next = Number(row.slider.value);
+    viewSettings.forces[spec.key] = next;
+    row.value.textContent = next.toFixed(spec.decimals);
+    row.value.classList.toggle("auto", next === fallback);
+    row.reset.disabled = next === fallback;
+    graph.setViewSettings(viewSettings);
+  });
+  // Persist on release rather than on every intermediate frame of a drag,
+  // and deliberately without a re-render: a slider being driven by arrow
+  // keys fires change on each press, and rebuilding the row would drop
+  // focus after the first one.
+  row.slider.addEventListener("change", saveViewSettings);
+  row.reset.addEventListener("click", () => {
+    viewSettings.forces[spec.key] = fallback;
+    applyViewSettings();
+  });
+  return row.el;
+}
+
+function relStrengthRow(type) {
+  const override = viewSettings.forces.relStrength[type];
+  const overridden = typeof override === "number";
+  // An untouched type keeps graph.js's species-aware default, which is
+  // per-edge and so has no single number -- the slider rests at whichever
+  // case this type mostly is, labelled "auto" until it's actually moved.
+  const auto = graph.defaultRelStrength(type);
+  const row = buildSliderRow({
+    label: type, hint: `How strongly ${type} pulls its two motes together`,
+    min: 0, max: REL_STRENGTH_MAX, step: REL_STRENGTH_STEP,
+    value: overridden ? override : auto,
+    valueText: overridden ? override.toFixed(3) : "auto",
+    isDefault: !overridden,
+  });
+
+  row.slider.addEventListener("input", () => {
+    const next = Number(row.slider.value);
+    viewSettings.forces.relStrength[type] = next;
+    row.value.textContent = next.toFixed(3);
+    row.value.classList.remove("auto");
+    row.reset.disabled = false;
+    graph.setViewSettings(viewSettings);
+  });
+  row.slider.addEventListener("change", saveViewSettings);
+  row.reset.addEventListener("click", () => {
+    delete viewSettings.forces.relStrength[type];
+    applyViewSettings();
+  });
+  return row.el;
+}
+
+function renderForceSettings() {
+  const globals = $("force-globals");
+  globals.innerHTML = "";
+  for (const spec of FORCE_SLIDERS) globals.appendChild(forceSliderRow(spec));
+
+  const container = $("force-rel-rows");
+  container.innerHTML = "";
+  const types = graph.relationshipTypes();
+  $("force-rel-heading").classList.toggle("hidden", types.length === 0);
+  for (const type of types) container.appendChild(relStrengthRow(type));
+}
+
+// ---- colors ----
+
+/** Any CSS color -> #rrggbb, via canvas's own color serialization.
+ *  <input type="color"> only speaks hex, while the automatic species
+ *  colors are generated as oklch. */
+function toHexColor(color) {
+  const ctx = toHexColor._ctx ||
+    (toHexColor._ctx = document.createElement("canvas").getContext("2d"));
+  ctx.fillStyle = "#888888";     // survives an unparseable color, which canvas ignores
+  ctx.fillStyle = color;
+  const value = ctx.fillStyle;
+  return typeof value === "string" && value.startsWith("#") ? value : "#888888";
+}
+
+function speciesColorRow(row) {
+  const el = document.createElement("div");
+  el.className = "color-row";
+  el.innerHTML =
+    '<input type="color"><span class="name"></span>' +
+    '<button type="button" class="reset-btn" title="Back to the automatic color">↺</button>';
+  el.querySelector(".name").textContent = row.label;
+
+  const picker = el.querySelector("input");
+  const reset = el.querySelector(".reset-btn");
+  const custom = viewSettings.colors.species[row.id];
+  picker.value = toHexColor(custom || row.color);
+  picker.dataset.speciesId = row.id;
+  reset.disabled = !custom;
+
+  picker.addEventListener("input", () => {
+    viewSettings.colors.species[row.id] = picker.value;
+    reset.disabled = false;
+    graph.setViewSettings(viewSettings);
+    renderLegend();
+  });
+  picker.addEventListener("change", saveViewSettings);
+  reset.addEventListener("click", () => {
+    delete viewSettings.colors.species[row.id];
+    applyViewSettings();
+  });
+  return el;
+}
+
+function renderSpeciesColors() {
+  const container = $("species-colors");
+  container.innerHTML = "";
+  // Only meaningful in species mode -- in the others the canvas isn't
+  // showing species colors at all, so offering to pick one would lie.
+  if (viewSettings.colors.mode !== "species") return;
+  const rows = speciesRows().filter((row) => row.id !== "__none__");
+  if (rows.length === 0) {
+    container.innerHTML = '<div class="empty-note">No species yet</div>';
+    return;
+  }
+  for (const row of rows) container.appendChild(speciesColorRow(row));
+}
+
+function renderColorSettings() {
+  const mode = viewSettings.colors.mode;
+  $("color-mode-select").value = mode;
+  $("color-key-row").classList.toggle("hidden", mode !== "property" && mode !== "numeric");
+  $("color-key-input").value = viewSettings.colors.propertyKey || "";
+
+  const options = $("color-key-options");
+  options.innerHTML = "";
+  for (const key of graph.propertyKeys()) {
+    const option = document.createElement("option");
+    option.value = key;
+    options.appendChild(option);
+  }
+
+  const note = $("color-mode-note");
+  note.textContent = COLOR_MODE_NOTES[mode] || "";
+  note.classList.toggle("hidden", !note.textContent);
+
+  renderSpeciesColors();
+}
+
+// ---- layout / attractors ----
+
+function renderLayoutSettings() {
+  $("arrange-attractors-btn").classList.toggle("hidden", attractorMode);
+  $("attractor-done-btn").classList.toggle("hidden", !attractorMode);
+  $("attractor-mode-note").classList.toggle("hidden", !attractorMode);
+  $("reset-attractors-btn").disabled = Object.keys(viewSettings.attractors).length === 0;
+}
+
+/** A read-only mode, gated the same way a simulation preview is (see
+ *  editBlocked): the graph is there to be rearranged, not edited, so
+ *  every canvas gesture except panning and zooming is off while it's on
+ *  and every mutation elsewhere toasts instead. */
+function enterAttractorMode() {
+  if (simPreview) {
+    showToast("Exit the simulation view first.", 2600);
+    return;
+  }
+  attractorMode = true;
+  graph.setAttractorMode(true);
+  closeDetailPanel();
+  closeQuickAdd();
+  hideContextMenu();
+  if (viewSettingsOpen()) renderViewSettings();
+  else openViewSettings();
+  showToast("Arranging attractors — drag one to move that species' cluster.", 4500);
+}
+
+function exitAttractorMode() {
+  attractorMode = false;
+  graph.setAttractorMode(false);
+  renderViewSettings();
+}
+
+function setupViewSettings() {
+  $("open-view-settings-btn").addEventListener("click", toggleViewSettings);
+  $("view-advanced-settings").addEventListener("click", () => {
+    closeTopMenus();
+    openViewSettings();
+  });
+  $("close-view-settings").addEventListener("click", closeViewSettings);
+
+  $("color-mode-select").addEventListener("change", () => {
+    viewSettings.colors.mode = $("color-mode-select").value;
+    applyViewSettings();
+  });
+
+  const keyInput = $("color-key-input");
+  keyInput.addEventListener("input", () => {
+    viewSettings.colors.propertyKey = keyInput.value.trim();
+    graph.setViewSettings(viewSettings);
+    saveViewSettings();
+  });
+
+  $("arrange-attractors-btn").addEventListener("click", enterAttractorMode);
+  $("attractor-done-btn").addEventListener("click", exitAttractorMode);
+
+  $("reset-attractors-btn").addEventListener("click", () => {
+    viewSettings.attractors = {};
+    applyViewSettings();
+  });
+
+  // Pinned motes ignore their anchor entirely, so a hand-arranged garden
+  // can make a dragged attractor look broken. This is the way out.
+  $("unpin-all-btn").addEventListener("click", () => {
+    graph.unpinAll();
+    savePositions();
+    showToast("Unpinned every mote — the layout will re-settle.");
+  });
+
+  $("reset-view-settings-btn").addEventListener("click", () => {
+    viewSettings = defaultViewSettings();
+    applyViewSettings();
+    showToast("View settings reset to defaults.");
+  });
 }
 
 // ---- detail panel ----
@@ -356,7 +733,11 @@ function renderMultiSelectPanel(ids) {
   const container = $("detail-multi-species");
   container.innerHTML = "";
   const rows = [...counts.entries()]
-    .map(([sid, count]) => ({ label: nodeLabel(moteById(sid) || { id: sid, properties: {} }), count, color: graph.colorFor(sid) }))
+    .map(([sid, count]) => ({
+      label: nodeLabel(moteById(sid) || { id: sid, properties: {} }),
+      count,
+      color: graph.speciesColorFor(sid, { emphatic: true }),
+    }))
     .sort((a, b) => a.label.localeCompare(b.label));
   if (untyped > 0) rows.push({ label: "No species", count: untyped, color: "oklch(0.62 0.02 250)" });
 
@@ -391,7 +772,7 @@ function closeDetailPanel() {
  *  anything if the prompt was cancelled or unchanged, so callers know
  *  whether to bother re-rendering. */
 async function renameRelationshipType(rel) {
-  if (simBlocked()) return false;
+  if (editBlocked()) return false;
   const next = window.prompt("Relationship type:", rel.type);
   if (!next || next === rel.type) return false;
   await call(api.update_relationship(rel.id, null, null, next));
@@ -403,7 +784,7 @@ async function renameRelationshipType(rel) {
  *  renameRelationshipType above. Returns whether it actually deleted
  *  anything, so callers know whether to bother refreshing/closing. */
 async function deleteRelationshipAndRefresh(rel) {
-  if (simBlocked()) return false;
+  if (editBlocked()) return false;
   await call(api.delete_relationship(rel.id));
   await refocus(focusId, { pan: false });
   return true;
@@ -504,7 +885,7 @@ function renderMultiRelationshipPanel(ids) {
  *  matching the single-relationship delete it's built from -- deleting a
  *  relationship has no cascade, unlike a mote, so it never needed one. */
 async function deleteRelationshipSelection() {
-  if (simBlocked()) return;
+  if (editBlocked()) return;
   const ids = [...graph.selectedRelIds];
   if (ids.length === 0) return;
   for (const id of ids) await call(api.delete_relationship(id));
@@ -851,7 +1232,7 @@ function renderProperties(mote, history, baseMote) {
 
     const displayedText = typeof value === "string" ? value : JSON.stringify(value);
     const field = valueField(key, value, async (next) => {
-      if (simBlocked()) { field.value = displayedText; return; }
+      if (editBlocked()) { field.value = displayedText; return; }
       await call(api.update_mote(mote.id, { [key]: next }));
       await refocus(focusId, { pan: false });
       await refreshMoteCache();
@@ -862,7 +1243,7 @@ function renderProperties(mote, history, baseMote) {
     del.textContent = "×";
     del.title = `Delete ${key}`;
     del.addEventListener("click", async () => {
-      if (simBlocked()) return;
+      if (editBlocked()) return;
       await call(api.delete_property(mote.id, key));
       await refocus(focusId, { pan: false });
       await openDetailPanel(mote.id);
@@ -914,7 +1295,7 @@ function renderSpeciesSection(mote, species, instances) {
     del.textContent = "×";
     del.title = "Remove from this species";
     del.addEventListener("click", async () => {
-      if (simBlocked()) return;
+      if (editBlocked()) return;
       if (rel) await call(api.delete_relationship(rel.id));
       await refocus(focusId, { pan: false });
       await openDetailPanel(mote.id);
@@ -981,7 +1362,7 @@ async function selectMote(moteId, opts = {}) {
 }
 
 async function connectNodes(sourceId, targetId) {
-  if (simBlocked()) return;
+  if (editBlocked()) return;
   const type = window.prompt("Relationship type:");
   if (!type) return;
   await call(api.create_relationship(sourceId, targetId, type));
@@ -994,7 +1375,7 @@ async function connectNodes(sourceId, targetId) {
  *  Del/Backspace key all call this, rather than each having its own
  *  inline delete-and-refresh logic. */
 async function deleteSelection() {
-  if (simBlocked()) return;
+  if (editBlocked()) return;
   const ids = [...graph.selectedIds];
   if (ids.length === 0) return;
   const prompt = ids.length === 1
@@ -1120,7 +1501,7 @@ function closeQuickAdd() {
 function setupQuickAdd() {
   resetQuickAddRows();
   $("quick-add-btn").addEventListener("click", () => {
-    if (simBlocked()) return;
+    if (editBlocked()) return;
     const panel = $("quick-add");
     if (!panel.classList.contains("hidden")) { closeQuickAdd(); return; }
     panel.classList.remove("hidden");
@@ -1171,7 +1552,7 @@ function setupQuickAdd() {
   });
 
   $("create-mote-btn").addEventListener("click", async () => {
-    if (simBlocked()) return;
+    if (editBlocked()) return;
     const props = collectQuickAddProperties();
     const mote = quickAddSpeciesId
       ? await call(api.create_instance(quickAddSpeciesId, props))
@@ -1199,7 +1580,7 @@ function setupQuickAdd() {
  *  pinned at the bottom-left corner where it's awkward to reach after
  *  right-clicking somewhere else on a large graph. */
 function openQuickAddAt(worldX, worldY, clientX, clientY) {
-  if (simBlocked()) return;
+  if (editBlocked()) return;
   contextMenuWorldPos = { x: worldX, y: worldY };
   const panel = $("quick-add");
   panel.classList.remove("hidden");
@@ -1249,7 +1630,7 @@ function renderSpeciesPickerResults(query) {
     row.querySelector(".label").textContent = nodeLabel(mote);
     row.addEventListener("mousedown", async (e) => {
       e.preventDefault();
-      if (simBlocked()) return;
+      if (editBlocked()) return;
       const targetId = speciesPickerTargetId;
       await call(api.set_species(targetId, mote.id));
       hideSpeciesPicker();
@@ -1262,7 +1643,7 @@ function renderSpeciesPickerResults(query) {
 
 function setupSpeciesControls() {
   $("set-species-btn").addEventListener("click", () => {
-    if (simBlocked()) return;
+    if (editBlocked()) return;
     if (!focusId) return;
     speciesPickerTargetId = focusId;
     $("species-picker-wrap").classList.remove("hidden");
@@ -1277,7 +1658,7 @@ function setupSpeciesControls() {
   });
 
   $("new-instance-btn").addEventListener("click", async () => {
-    if (simBlocked()) return;
+    if (editBlocked()) return;
     if (!focusId) return;
     const mote = await call(api.create_instance(focusId, {}));
     await refreshMoteCache();
@@ -1578,7 +1959,7 @@ async function copySelection(ids) {
 
 async function pasteAt(worldX, worldY) {
   if (!clipboard) return;
-  if (simBlocked()) return;
+  if (editBlocked()) return;
   const placed = [];
   const idMap = new Map(); // original mote id -> newly pasted mote id
   for (const entry of clipboard) {
@@ -1879,7 +2260,7 @@ function setupViewControls() {
   });
 
   $("detail-add-property-btn").addEventListener("click", async () => {
-    if (simBlocked()) return;
+    if (editBlocked()) return;
     const key = $("detail-new-key").value.trim();
     if (!key || !focusId) return;
     await call(api.update_mote(focusId, { [key]: $("detail-new-value").value }));
@@ -2148,6 +2529,7 @@ function renderRunsPanel() {
 }
 
 function openRunsPanel() {
+  closeViewSettings();   // same corner as the view settings panel
   $("runs-panel").classList.remove("hidden");
   refreshRuns();
 }
@@ -2328,6 +2710,11 @@ function setupKeyboard() {
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
+    // Leaving attractor mode is a smaller step than closing the panel it
+    // lives in, so it comes first -- one Esc puts the graph back to
+    // editable, a second puts the panel away.
+    if (attractorMode) { exitAttractorMode(); return; }
+    if (viewSettingsOpen()) { closeViewSettings(); return; }
     // The sim bar is non-blocking (the rest of the UI stays usable while
     // it's open), so it sits behind every other panel in the Esc chain --
     // dismissed only once nothing more local is open.
@@ -2367,6 +2754,13 @@ async function init() {
     onBoxSelect: updateSelectBox,
     onSelectionChanged: syncSelectionPanel,
     onContextMenu: openContextMenu,
+    // graph.js keeps its own copy of the attractor map, so the settings
+    // this side persists have to be told where a dragged one landed.
+    onAttractorMoved: (id, x, y) => {
+      viewSettings.attractors[id] = { x, y };
+      saveViewSettings();
+      renderLayoutSettings();
+    },
     onRelationshipsSelected: (ids) =>
       ids.length === 0 ? closeDetailPanel()
       : ids.length === 1 ? openRelationshipPanel(ids[0])
@@ -2381,6 +2775,7 @@ async function init() {
   setupSpeciesControls();
   setupSearch();
   setupViewControls();
+  setupViewSettings();
   setupSimulation();
   setupRunsPanel();
   setupCalendarExport();

@@ -22,6 +22,21 @@ const HIT_RADIUS = 14;
 const EDGE_HIT_RADIUS = 12;
 const DRAG_THRESHOLD = 4;
 const PARALLEL_EDGE_BOW = 32;
+const ATTRACTOR_HIT_RADIUS = 22;
+const NO_SPECIES = "__none__";      // the untyped group, in both the legend and the attractor map
+const UNKNOWN_COLOR = "oklch(0.62 0.02 250)";
+
+// Every force the layout runs on, as it behaves with no user overrides.
+// setViewSettings() layers a garden's saved values on top of this, so an
+// untouched garden lays out exactly as it always did.
+const DEFAULT_FORCES = {
+  repulsion: REPULSION,
+  anchorPull: ANCHOR_PULL,
+  edgeLength: EDGE_REST_LENGTH,
+  relStrength: {},   // relationship type -> spring constant; absent = species-aware default
+};
+
+const DEFAULT_COLORS = { mode: "species", propertyKey: "", species: {} };
 
 // Deterministic string hash. Used for both species hues and each node's
 // starting offset, so a garden lays out the same way and keeps the same
@@ -51,6 +66,20 @@ function hueFor(seed) {
   return hashString(seed) % 360;
 }
 
+/** Sequential ramp for the measured colour modes (connection count, a
+ *  numeric property): one hue, dim at the low end and bright at the high,
+ *  so the ordering reads as an ordering. Distinct hues per value -- what
+ *  hueFor gives -- would say "these are different categories", which is
+ *  the wrong thing to say about a number. */
+function rampColor(t) {
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+  return `oklch(${(0.45 + clamped * 0.41).toFixed(3)} ${(0.04 + clamped * 0.11).toFixed(3)} 250)`;
+}
+
+function numberOr(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 class MonossGraph {
   constructor(canvas, callbacks = {}) {
     this.canvas = canvas;
@@ -72,6 +101,18 @@ class MonossGraph {
     this.alpha = 1;
     this.panTarget = null;
     this.spread = 320;
+
+    // Advanced view settings (ui/frontend/app.js persists these per
+    // garden). Defaults reproduce the layout and colours this graph had
+    // before any of it was adjustable.
+    this.forces = { ...DEFAULT_FORCES, relStrength: {} };
+    this.colors = { ...DEFAULT_COLORS, species: {} };
+    this.attractors = {};          // species id (or __none__) -> {x, y}
+    this.attractorMode = false;    // arranging attractors: read-only, no editing gestures
+    this.hoverAttractorId = null;
+    this._moteById = new Map();
+    this._colorCache = new Map();  // mote id -> colour, dropped whenever data or settings change
+    this._colorStats = null;       // degree/numeric aggregates, computed once per invalidation
 
     this._bindEvents();
     this._resize();
@@ -100,6 +141,8 @@ class MonossGraph {
     this.motes = payload.motes || [];
     this.relationships = payload.relationships || [];
     this.speciesIds = new Set(payload.species_ids || []);
+    this._moteById = new Map(this.motes.map((m) => [m.id, m]));
+    this._invalidateColors();
 
     // Species membership is derived from the instance_of edges already in
     // the payload rather than fetched separately. In whole-garden mode the
@@ -185,22 +228,307 @@ class MonossGraph {
   _anchorFor(moteId) {
     // A species sits on the same spoke as its instances but further in, so
     // a type and its members read as one radial group. Everything with no
-    // species -- rules, loose motes -- stays in the middle.
+    // species -- rules, loose motes -- stays in the middle. A species whose
+    // attractor has been dragged somewhere ignores all of that: the whole
+    // group, species mote included, goes where it was put.
     if (this.speciesIds.has(moteId)) {
+      const moved = this.attractors[moteId];
+      if (moved) return moved;
       const angle = (hueFor(moteId) * Math.PI) / 180;
       return { x: Math.cos(angle) * this.spread * 0.45, y: Math.sin(angle) * this.spread * 0.45 };
     }
     const species = this.speciesOf.get(moteId);
-    if (!species || species.length === 0) return { x: 0, y: 0 };
-    const angle = (hueFor(species[0]) * Math.PI) / 180;
+    if (!species || species.length === 0) return this.attractors[NO_SPECIES] || { x: 0, y: 0 };
+    return this._attractorPosition(species[0]);
+  }
+
+  // ---- attractors ----
+  //
+  // The point each species' cluster is pulled toward. Normally derived
+  // from the species id (see _anchorFor), which keeps a garden laying out
+  // the same way every time it opens but gives no say in *where* each
+  // group lands. Attractor mode makes those points visible and draggable;
+  // every other gesture is off while it's on, so the graph can't be
+  // edited by accident while rearranging it.
+
+  _attractorPosition(id) {
+    const moved = this.attractors[id];
+    if (moved) return { x: moved.x, y: moved.y };
+    if (id === NO_SPECIES) return { x: 0, y: 0 };
+    const angle = (hueFor(id) * Math.PI) / 180;
     return { x: Math.cos(angle) * this.spread, y: Math.sin(angle) * this.spread };
   }
 
+  /** Every attractor worth showing a handle for: one per visible species,
+   *  plus the centre group if anything on screen has no species at all.
+   *  Hidden species are skipped -- their instances aren't in the layout
+   *  loop, so dragging their attractor would visibly do nothing. */
+  attractorPoints() {
+    const points = [];
+    for (const id of this.speciesIds) {
+      if (!this.isMoteVisible(id)) continue;
+      const mote = this._moteById.get(id);
+      points.push({
+        id,
+        ...this._attractorPosition(id),
+        color: this.speciesColorFor(id, { emphatic: true }),
+        label: mote && this.callbacks.labelFor ? this.callbacks.labelFor(mote) : id.slice(0, 8),
+      });
+    }
+    const untyped = this.motes.some(
+      (m) => !this.speciesIds.has(m.id) && !(this.speciesOf.get(m.id) || []).length,
+    );
+    if (untyped && this.isMoteVisible(NO_SPECIES)) {
+      points.push({
+        id: NO_SPECIES,
+        ...this._attractorPosition(NO_SPECIES),
+        color: UNKNOWN_COLOR,
+        label: "No species",
+      });
+    }
+    return points;
+  }
+
+  setAttractorMode(active) {
+    this.attractorMode = !!active;
+    // Any half-finished gesture from before the switch would otherwise
+    // finish in the other mode's rules.
+    this.dragState = null;
+    this.connectState = null;
+    this.connectSourceId = null;
+    this.boxState = null;
+    this.attractorDrag = null;
+    this.hoverId = null;
+    this.hoverAttractorId = null;
+    this.canvas.style.cursor = "default";
+    this.alpha = Math.max(this.alpha, 0.4);
+  }
+
+  setAttractor(id, x, y) {
+    this.attractors = { ...this.attractors, [id]: { x, y } };
+    this.alpha = Math.max(this.alpha, 0.5);
+  }
+
+  resetAttractors() {
+    this.attractors = {};
+    this.alpha = Math.max(this.alpha, 0.6);
+  }
+
+  /** Release every pinned mote at once, so a layout change can actually
+   *  reflow -- a pinned mote ignores its anchor entirely, which makes a
+   *  dragged attractor look broken on a graph that's been hand-arranged. */
+  unpinAll() {
+    for (const node of this.nodes.values()) {
+      node.pinned = false;
+    }
+    this.alpha = Math.max(this.alpha, 0.7);
+  }
+
+  _hitTestAttractor(clientX, clientY) {
+    const world = this._worldAt(clientX, clientY);
+    let best = null;
+    let bestDist = ATTRACTOR_HIT_RADIUS / this.camera.scale;
+    for (const point of this.attractorPoints()) {
+      const d = Math.hypot(point.x - world.x, point.y - world.y);
+      if (d < bestDist) { bestDist = d; best = point; }
+    }
+    return best;
+  }
+
+  // ---- view settings ----
+  //
+  // Everything the "Advanced view settings" panel controls. Only the
+  // overrides a garden actually has are stored; anything absent falls
+  // back to the DEFAULT_* constants above, so a garden nobody has touched
+  // renders identically to before these existed.
+
+  /** Everything setViewSettings falls back to, as a fresh object the
+   *  caller can own -- app.js builds a garden's saved settings on top of
+   *  this rather than repeating the numbers. */
+  static defaults() {
+    return {
+      forces: { ...DEFAULT_FORCES, relStrength: {} },
+      colors: { ...DEFAULT_COLORS, species: {} },
+      attractors: {},
+    };
+  }
+
+  /** The spring constant a relationship type gets when nothing is set for
+   *  it. The real default is per-edge (see _step) -- this resolves it to
+   *  one number for the settings panel's slider to rest at, reporting
+   *  whichever case a mixed type mostly is. */
+  defaultRelStrength(type) {
+    let same = 0, cross = 0;
+    for (const rel of this.relationships) {
+      if (rel.type !== type) continue;
+      const isSame =
+        (this.speciesOf.get(rel.from_id) || [])[0] === (this.speciesOf.get(rel.to_id) || [])[0];
+      isSame ? (same += 1) : (cross += 1);
+    }
+    return same > cross ? SAME_SPECIES_SPRING : CROSS_SPECIES_SPRING;
+  }
+
+  setViewSettings(settings = {}) {
+    const forces = settings.forces || {};
+    const colors = settings.colors || {};
+    this.forces = {
+      repulsion: numberOr(forces.repulsion, DEFAULT_FORCES.repulsion),
+      anchorPull: numberOr(forces.anchorPull, DEFAULT_FORCES.anchorPull),
+      edgeLength: numberOr(forces.edgeLength, DEFAULT_FORCES.edgeLength),
+      relStrength: { ...(forces.relStrength || {}) },
+    };
+    this.colors = {
+      mode: colors.mode || DEFAULT_COLORS.mode,
+      propertyKey: colors.propertyKey || "",
+      species: { ...(colors.species || {}) },
+    };
+    this.attractors = { ...(settings.attractors || {}) };
+    this._invalidateColors();
+    // Forces only take effect while the layout is running, so a settings
+    // change has to wake it back up -- otherwise a slider dragged on a
+    // long-settled graph appears to do nothing at all.
+    this.alpha = Math.max(this.alpha, 0.5);
+  }
+
+  viewSettings() {
+    return {
+      forces: { ...this.forces, relStrength: { ...this.forces.relStrength } },
+      colors: { ...this.colors, species: { ...this.colors.species } },
+      attractors: { ...this.attractors },
+    };
+  }
+
+  // ---- colour ----
+
+  _invalidateColors() {
+    this._colorCache.clear();
+    this._colorStats = null;
+  }
+
+  /** The colour a node is actually drawn in -- which is species membership
+   *  only in the default mode. Cached per mote because _drawNodes asks for
+   *  every visible node's colour on every frame, and the measured modes
+   *  below would otherwise re-derive the same answer 60 times a second. */
   colorFor(moteId) {
-    if (this.speciesIds.has(moteId)) return `oklch(0.80 0.13 ${hueFor(moteId)})`;
+    let color = this._colorCache.get(moteId);
+    if (color === undefined) {
+      color = this._computeColor(moteId);
+      this._colorCache.set(moteId, color);
+    }
+    return color;
+  }
+
+  _computeColor(moteId) {
+    switch (this.colors.mode) {
+      case "property": return this._propertyValueColor(moteId);
+      case "degree": return this._degreeColor(moteId);
+      case "numeric": return this._numericColor(moteId);
+      default: return this._speciesModeColor(moteId);
+    }
+  }
+
+  /** The colour that means "this species", whatever the active colour mode
+   *  is. The legend, quick-add chips and search chips are about species
+   *  membership even when the canvas is coloured by a property or a count,
+   *  so they ask for this rather than colorFor(). `emphatic` is the
+   *  brighter variant the species mote itself gets; a custom colour is
+   *  used exactly as picked, for the species and its instances alike. */
+  speciesColorFor(speciesId, { emphatic = false } = {}) {
+    if (!speciesId || speciesId === NO_SPECIES) return UNKNOWN_COLOR;
+    const custom = this.colors.species[speciesId];
+    if (custom) return custom;
+    const hue = hueFor(speciesId);
+    return emphatic ? `oklch(0.80 0.13 ${hue})` : `oklch(0.72 0.11 ${hue})`;
+  }
+
+  _speciesModeColor(moteId) {
+    if (this.speciesIds.has(moteId)) return this.speciesColorFor(moteId, { emphatic: true });
     const species = this.speciesOf.get(moteId);
-    if (!species || species.length === 0) return "oklch(0.62 0.02 250)";
-    return `oklch(0.72 0.11 ${hueFor(species[0])})`;
+    if (!species || species.length === 0) return UNKNOWN_COLOR;
+    return this.speciesColorFor(species[0]);
+  }
+
+  /** Each distinct value of the chosen property gets its own hue, by the
+   *  same hash the species colours use. Motes without the property go
+   *  grey -- "not in this classification" is itself worth seeing. */
+  _propertyValueColor(moteId) {
+    const raw = this._propertyOf(moteId, this.colors.propertyKey);
+    if (raw === undefined || raw === null || raw === "") return UNKNOWN_COLOR;
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    return `oklch(0.72 0.13 ${hueFor(text)})`;
+  }
+
+  _degreeColor(moteId) {
+    const { degree, maxDegree } = this._stats();
+    if (maxDegree === 0) return rampColor(0);
+    return rampColor((degree.get(moteId) || 0) / maxDegree);
+  }
+
+  _numericColor(moteId) {
+    const value = this._numericValueOf(moteId);
+    if (value === null) return UNKNOWN_COLOR;
+    const { numericMin, numericMax } = this._stats();
+    if (numericMin === null) return UNKNOWN_COLOR;
+    // A single distinct value has no range to spread over; drawing it at
+    // the top of the ramp beats dividing by zero.
+    if (numericMax === numericMin) return rampColor(1);
+    return rampColor((value - numericMin) / (numericMax - numericMin));
+  }
+
+  _propertyOf(moteId, key) {
+    if (!key) return undefined;
+    const mote = this._moteById.get(moteId);
+    return mote && mote.properties ? mote.properties[key] : undefined;
+  }
+
+  _numericValueOf(moteId) {
+    const raw = this._propertyOf(moteId, this.colors.propertyKey);
+    if (raw === undefined || raw === null || raw === "") return null;
+    const value = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  /** Aggregates the measured colour modes need: connection counts, and the
+   *  numeric property's range. Computed once per data/settings change
+   *  rather than per mote, let alone per frame. */
+  _stats() {
+    if (this._colorStats) return this._colorStats;
+    const degree = new Map();
+    let maxDegree = 0;
+    for (const rel of this.relationships) {
+      for (const id of [rel.from_id, rel.to_id]) {
+        const next = (degree.get(id) || 0) + 1;
+        degree.set(id, next);
+        if (next > maxDegree) maxDegree = next;
+      }
+    }
+    let numericMin = null, numericMax = null;
+    if (this.colors.mode === "numeric") {
+      for (const mote of this.motes) {
+        const value = this._numericValueOf(mote.id);
+        if (value === null) continue;
+        if (numericMin === null || value < numericMin) numericMin = value;
+        if (numericMax === null || value > numericMax) numericMax = value;
+      }
+    }
+    this._colorStats = { degree, maxDegree, numericMin, numericMax };
+    return this._colorStats;
+  }
+
+  /** Distinct property keys across every mote on screen -- the datalist
+   *  behind the colour panel's property-key field, so picking one is a
+   *  choice rather than a spelling test. */
+  propertyKeys() {
+    const keys = new Set();
+    for (const mote of this.motes) {
+      for (const key of Object.keys(mote.properties || {})) keys.add(key);
+    }
+    return [...keys].sort();
+  }
+
+  /** Distinct relationship types on screen, for the per-type force rows. */
+  relationshipTypes() {
+    return [...new Set(this.relationships.map((r) => r.type))].sort();
   }
 
   // ---- visibility ----
@@ -359,7 +687,7 @@ class MonossGraph {
         let distSq = dx * dx + dy * dy;
         if (distSq < 1) distSq = 1;
         const dist = Math.sqrt(distSq);
-        const force = REPULSION / distSq;
+        const force = this.forces.repulsion / distSq;
         const fx = (dx / dist) * force, fy = (dy / dist) * force;
         if (!a.pinned) { a.vx += fx; a.vy += fy; }
         if (!b.pinned) { b.vx -= fx; b.vy -= fy; }
@@ -368,7 +696,10 @@ class MonossGraph {
 
     // Edges between motes of different species pull only weakly: species
     // grouping is what carries the layout, and letting every instance_of
-    // edge yank its instance toward the species mote would undo it.
+    // edge yank its instance toward the species mote would undo it. A
+    // relationship type with its own strength set in the view settings
+    // opts out of that rule entirely -- an explicit number means the same
+    // thing for every edge of that type, whatever it connects.
     for (const rel of this.relationships) {
       if (!this.isRelVisible(rel)) continue;
       const a = this.nodes.get(rel.from_id), b = this.nodes.get(rel.to_id);
@@ -376,10 +707,13 @@ class MonossGraph {
       const sameSpecies =
         (this.speciesOf.get(rel.from_id) || [])[0] ===
         (this.speciesOf.get(rel.to_id) || [])[0];
-      const k = sameSpecies ? SAME_SPECIES_SPRING : CROSS_SPECIES_SPRING;
+      const override = this.forces.relStrength[rel.type];
+      const k = typeof override === "number"
+        ? override
+        : sameSpecies ? SAME_SPECIES_SPRING : CROSS_SPECIES_SPRING;
       let dx = b.x - a.x, dy = b.y - a.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const diff = (dist - EDGE_REST_LENGTH) * k;
+      const diff = (dist - this.forces.edgeLength) * k;
       const fx = (dx / dist) * diff, fy = (dy / dist) * diff;
       if (!a.pinned) { a.vx += fx; a.vy += fy; }
       if (!b.pinned) { b.vx -= fx; b.vy -= fy; }
@@ -389,8 +723,8 @@ class MonossGraph {
       const node = this.nodes.get(id);
       if (node.pinned) { node.vx = 0; node.vy = 0; continue; }
       const anchor = this._anchorFor(id);
-      node.vx += (anchor.x - node.x) * ANCHOR_PULL;
-      node.vy += (anchor.y - node.y) * ANCHOR_PULL;
+      node.vx += (anchor.x - node.x) * this.forces.anchorPull;
+      node.vy += (anchor.y - node.y) * this.forces.anchorPull;
       node.vx *= DAMPING; node.vy *= DAMPING;
       node.x += node.vx; node.y += node.vy;
     }
@@ -459,15 +793,60 @@ class MonossGraph {
 
     this._drawEdges(ctx, bg, neighbours);
     this._drawNodes(ctx, labelBg, neighbours);
+    if (this.attractorMode) this._drawAttractors(ctx, labelBg);
     ctx.restore();
 
-    if (this.simActive) {
+    // Both modes fence off the viewport the same way, in their own colour:
+    // amber for a simulation preview, the relationship blue for attractor
+    // mode. Either way it means "what you're looking at isn't the ordinary
+    // editable graph".
+    const border = this.attractorMode ? this._edgeSelected : this.simActive ? "oklch(0.74 0.10 68 / 0.5)" : null;
+    if (border) {
       ctx.save();
-      ctx.strokeStyle = "oklch(0.74 0.10 68 / 0.5)";
+      ctx.strokeStyle = border;
       ctx.lineWidth = 2;
       ctx.setLineDash([10, 7]);
       ctx.strokeRect(4, 4, this.cssWidth - 8, this.cssHeight - 8);
       ctx.restore();
+    }
+  }
+
+  /** Attractor handles, drawn on top of the nodes they pull: a ringed
+   *  crosshair in the species colour with the species name under it.
+   *  Sized in screen pixels (hence the /scale) so a handle stays grabbable
+   *  at any zoom, unlike the nodes themselves. */
+  _drawAttractors(ctx, labelBg) {
+    const s = 1 / this.camera.scale;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (const point of this.attractorPoints()) {
+      const active = point.id === this.hoverAttractorId ||
+        (this.attractorDrag && this.attractorDrag.id === point.id);
+      const radius = (active ? 15 : 12) * s;
+
+      ctx.strokeStyle = point.color;
+      ctx.lineWidth = (active ? 2.6 : 1.8) * s;
+      ctx.setLineDash([5 * s, 4 * s]);
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.beginPath();
+      ctx.moveTo(point.x - radius * 0.55, point.y);
+      ctx.lineTo(point.x + radius * 0.55, point.y);
+      ctx.moveTo(point.x, point.y - radius * 0.55);
+      ctx.lineTo(point.x, point.y + radius * 0.55);
+      ctx.stroke();
+
+      ctx.font = `${(active ? 600 : 400)} ${11.5 * s}px "IBM Plex Sans", sans-serif`;
+      const label = point.label.length > 22 ? point.label.slice(0, 21) + "…" : point.label;
+      const width = ctx.measureText(label).width;
+      const y = point.y + radius + 5 * s;
+      ctx.fillStyle = labelBg;
+      ctx.fillRect(point.x - width / 2 - 3 * s, y - 1 * s, width + 6 * s, 15 * s);
+      ctx.fillStyle = point.color;
+      ctx.fillText(label, point.x, y);
     }
   }
 
@@ -562,7 +941,7 @@ class MonossGraph {
   }
 
   _drawNodes(ctx, labelBg, neighbours) {
-    const byId = new Map(this.motes.map((m) => [m.id, m]));
+    const byId = this._moteById;
     const anyFocus = this.selectedIds.size > 0 || !!this.hoverId || this.selectedRelIds.size > 0;
 
     for (const [id, node] of this.nodes) {
@@ -763,6 +1142,18 @@ class MonossGraph {
     }
     if (e.button !== 0) return; // right button is handled by contextmenu
 
+    // Attractor mode owns the left button outright: you either grab a
+    // handle or you do nothing. No node drag, no connect, no box-select --
+    // being unable to change the graph from here is the point of the mode.
+    if (this.attractorMode) {
+      const hit = this._hitTestAttractor(e.clientX, e.clientY);
+      if (hit) {
+        this.attractorDrag = { id: hit.id };
+        this.canvas.style.cursor = "grabbing";
+      }
+      return;
+    }
+
     const id = this.hitTest(e.clientX, e.clientY);
     if (id && e.ctrlKey) {
       this.connectState = { sourceId: id };
@@ -798,6 +1189,11 @@ class MonossGraph {
   };
 
   _onMouseMove = (e) => {
+    if (this.attractorDrag) {
+      const world = this._worldAt(e.clientX, e.clientY);
+      this.setAttractor(this.attractorDrag.id, world.x, world.y);
+      return;
+    }
     if (this.connectState) {
       this.hoverId = this.hitTest(e.clientX, e.clientY);
       return;
@@ -867,6 +1263,15 @@ class MonossGraph {
       }
       return;
     }
+    if (this.attractorMode) {
+      const hit = this._hitTestAttractor(e.clientX, e.clientY);
+      const hitId = hit ? hit.id : null;
+      if (hitId !== this.hoverAttractorId) {
+        this.hoverAttractorId = hitId;
+        this.canvas.style.cursor = hitId ? "grab" : "default";
+      }
+      return;
+    }
     const id = this.hitTest(e.clientX, e.clientY);
     if (id !== this.hoverId) {
       this.hoverId = id;
@@ -875,6 +1280,16 @@ class MonossGraph {
   };
 
   _onMouseUp = (e) => {
+    if (this.attractorDrag) {
+      const { id } = this.attractorDrag;
+      this.attractorDrag = null;
+      this.canvas.style.cursor = "grab";
+      const point = this.attractors[id];
+      if (point && this.callbacks.onAttractorMoved) {
+        this.callbacks.onAttractorMoved(id, point.x, point.y);
+      }
+      return;
+    }
     if (this.connectState) {
       const { sourceId } = this.connectState;
       this.connectState = null;
@@ -951,6 +1366,7 @@ class MonossGraph {
 
   _onContextMenu = (e) => {
     e.preventDefault();
+    if (this.attractorMode) return;   // nothing on that menu is available in a read-only mode
     const id = this.hitTest(e.clientX, e.clientY);
     // Right-clicking a mote that isn't already part of the selection
     // replaces the selection with just it, so it's visually obvious what
