@@ -312,7 +312,7 @@ main { flex: 1; min-height: 0; display: flex; }
   background: none; border: none; color: var(--muted);
   font-size: 16px; padding: 2px 6px;
 }
-#view-settings-body { overflow-y: auto; min-height: 0; }
+#view-settings-body { overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .panel-subheading {
   font-size: 11px; color: var(--faint); margin: 10px 0 6px;
 }
@@ -503,7 +503,7 @@ main { flex: 1; min-height: 0; display: flex; }
   flex: 1; min-width: 0;
 }
 .picker-field input[type="date"], .picker-field input[type="time"], .picker-field select {
-  flex: 1 1 auto; min-width: 92px;
+  flex: 1 1 auto; min-width: 92px; font-size: 12.5px; padding: 6px 8px;
 }
 .picker-checkbox {
   display: flex; align-items: center; gap: 4px;
@@ -633,6 +633,11 @@ main { flex: 1; min-height: 0; display: flex; }
   text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px;
 }
 .garden-row button { font-size: 12px; padding: 5px 9px; flex-shrink: 0; }
+.garden-row .star {
+  color: var(--faint); font-size: 15px; padding: 0 3px; line-height: 1;
+}
+.garden-row .star.on { color: var(--accent); }
+.garden-row .star:hover { color: var(--accent); border-color: transparent; }
 #gardens-modal-actions { display: flex; align-items: center; gap: 8px; }
 
 /* ---- simulation ---- */

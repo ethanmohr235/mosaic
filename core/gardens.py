@@ -60,8 +60,41 @@ def create_garden(name: str) -> str:
     return name
 
 
+def _default_garden_config_path() -> Path:
+    return db.GARDENS_DIR / ".default_garden"
+
+
+def get_default_garden() -> str | None:
+    """The garden set_default_garden() last pointed at, or None if the
+    user has never chosen one -- in which case resolve_garden() falls
+    back to auto-creating/using DEFAULT_GARDEN, same as before this
+    preference existed."""
+    path = _default_garden_config_path()
+    if not path.exists():
+        return None
+    return path.read_text().strip() or None
+
+
+def set_default_garden(name: str) -> None:
+    if not garden_exists(name):
+        raise LookupError(f"No such garden: {name!r}")
+    db.GARDENS_DIR.mkdir(parents=True, exist_ok=True)
+    _default_garden_config_path().write_text(name)
+
+
+def clear_default_garden() -> None:
+    _default_garden_config_path().unlink(missing_ok=True)
+
+
 def resolve_garden(name: str | None) -> str:
     if name is None:
+        preferred = get_default_garden()
+        # A preferred garden that's since been deleted falls through to
+        # the old auto-create behavior rather than erroring -- the stale
+        # preference is left in place for restore_garden() to make live
+        # again, not cleared out from under the caller.
+        if preferred is not None and garden_exists(preferred):
+            return preferred
         if not garden_exists(DEFAULT_GARDEN):
             create_garden(DEFAULT_GARDEN)
         return DEFAULT_GARDEN

@@ -314,6 +314,22 @@ function renderRelFilters() {
   }
 }
 
+/** Shared by both "Reset view" entry points (the View menu and the
+ *  control panel's own linkish button). Recentering the camera doesn't
+ *  put back anything species/relationship filters took off the graph, so
+ *  a reset that leaves half the garden hidden doesn't feel like a reset --
+ *  clear those filters too, the same way it clears pinned/attractor
+ *  layout via graph.resetView(). */
+function resetViewAndUnhideAll() {
+  graph.setHiddenSpecies(new Set());
+  graph.setHiddenRelTypes(new Set());
+  localStorage.removeItem(hiddenSpeciesKey(currentGarden));
+  localStorage.removeItem(hiddenRelKey(currentGarden));
+  renderLegend();
+  renderRelFilters();
+  graph.resetView();
+}
+
 // ---- advanced view settings ----
 //
 // Per-garden control over how the graph lays itself out and colors
@@ -2088,11 +2104,29 @@ function applyControlPanelVisibility() {
   $("control-panel").classList.toggle("hidden", hidden);
 }
 
+// Set while the control panel is hidden and it took the (still logically
+// open) advanced view settings panel down with it, so showing controls
+// again knows to bring the settings panel back too -- rather than losing
+// track of it and leaving it stranded closed.
+let viewSettingsHiddenWithControls = false;
+
 function toggleControlPanel() {
   const panel = $("control-panel");
   const hidden = !panel.classList.contains("hidden");
   panel.classList.toggle("hidden", hidden);
   localStorage.setItem(CONTROL_PANEL_KEY, hidden ? "hidden" : "shown");
+
+  // "Advanced view settings…" is opened from inside #control-panel, so
+  // hiding controls strands it with no visible way to close -- hide it
+  // alongside, and only bring it back if that's the reason it went away.
+  const settingsPanel = $("view-settings-panel");
+  if (hidden) {
+    viewSettingsHiddenWithControls = viewSettingsOpen();
+    if (viewSettingsHiddenWithControls) settingsPanel.classList.add("hidden");
+  } else if (viewSettingsHiddenWithControls) {
+    viewSettingsHiddenWithControls = false;
+    settingsPanel.classList.remove("hidden");
+  }
 }
 
 /** Shared by every "soon" stub item (Import motes, Export as CSV/JSON,
@@ -2142,7 +2176,7 @@ function setupTopMenus() {
   $("garden-menu-new").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
   $("garden-menu-manage").addEventListener("click", () => { closeTopMenus(); openGardensModal(); });
   $("file-new-garden").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
-  $("view-reset-view").addEventListener("click", () => { closeTopMenus(); graph.resetView(); });
+  $("view-reset-view").addEventListener("click", () => { closeTopMenus(); resetViewAndUnhideAll(); });
   $("view-toggle-panel").addEventListener("click", () => { closeTopMenus(); toggleControlPanel(); });
   $("exit-sim-btn").addEventListener("click", () => { closeTopMenus(); discardSimPreview(); });
 }
@@ -2156,19 +2190,45 @@ function setupTopMenus() {
 // instead of being crammed into a narrow menu item.
 
 async function renderGardensList() {
-  const gardens = await call(api.list_gardens());
+  const [gardens, defaultGarden] = await Promise.all([
+    call(api.list_gardens()),
+    call(api.get_default_garden()),
+  ]);
   const container = $("gardens-list");
   container.innerHTML = "";
 
   for (const name of gardens) {
+    const isDefault = name === defaultGarden;
     const row = document.createElement("div");
     row.className = "garden-row";
     row.innerHTML =
       '<span class="check"></span><span class="name"></span>' +
+      '<button type="button" class="linkish star"></button>' +
       '<button type="button" class="ghost">Export</button>' +
       '<button type="button" class="danger">Delete</button>';
     row.querySelector(".check").textContent = name === currentGarden ? "✓" : "";
     row.querySelector(".name").textContent = name;
+
+    // Whichever garden this points at is what a fresh launch (no
+    // --garden flag, and any MCP/CLI call that omits garden) opens on,
+    // in place of silently auto-creating an empty "default" -- see
+    // core/gardens.py::resolve_garden. Clicking the star on the current
+    // default clears the preference back to that old behavior.
+    const starBtn = row.querySelector(".star");
+    starBtn.textContent = isDefault ? "★" : "☆";
+    starBtn.title = isDefault
+      ? "Default garden -- click to unset"
+      : "Set as default garden";
+    starBtn.classList.toggle("on", isDefault);
+    starBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (isDefault) {
+        await call(api.clear_default_garden());
+      } else {
+        await call(api.set_default_garden(name));
+      }
+      await renderGardensList();
+    });
 
     row.addEventListener("click", async () => {
       if (name === currentGarden) return;
@@ -2253,7 +2313,7 @@ function setupViewControls() {
     graph.fitWhenSettled();
   });
 
-  $("reset-view-btn").addEventListener("click", () => graph.resetView());
+  $("reset-view-btn").addEventListener("click", resetViewAndUnhideAll);
   $("close-panel").addEventListener("click", closeDetailPanel);
   $("connect-btn").addEventListener("click", () => {
     showToast("Ctrl+drag from one mote to another to connect them.");

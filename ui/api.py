@@ -179,6 +179,18 @@ class Api:
         return {"restored": name}
 
     @_synchronized
+    def get_default_garden(self) -> str | None:
+        return gardens_repo.get_default_garden()
+
+    @_synchronized
+    def set_default_garden(self, name: str) -> None:
+        gardens_repo.set_default_garden(name)
+
+    @_synchronized
+    def clear_default_garden(self) -> None:
+        gardens_repo.clear_default_garden()
+
+    @_synchronized
     def export_garden(self, garden_name: str | None = None) -> dict:
         """Exports the current garden by default, or any named garden --
         via a short-lived connection, so exporting one from the gardens

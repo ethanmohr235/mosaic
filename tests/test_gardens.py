@@ -2,12 +2,15 @@ import pytest
 
 from core.db import garden_db_path
 from core.gardens import (
+    clear_default_garden,
     create_garden,
     delete_garden,
     garden_exists,
+    get_default_garden,
     list_gardens,
     resolve_garden,
     restore_garden,
+    set_default_garden,
 )
 
 
@@ -87,3 +90,41 @@ def test_restore_garden_onto_existing_name_raises():
     create_garden("work")
     with pytest.raises(FileExistsError):
         restore_garden("work")
+
+
+def test_get_default_garden_none_when_unset():
+    assert get_default_garden() is None
+
+
+def test_set_default_garden_missing_raises():
+    with pytest.raises(LookupError):
+        set_default_garden("missing")
+
+
+def test_set_default_garden_is_read_back():
+    create_garden("work")
+    set_default_garden("work")
+    assert get_default_garden() == "work"
+
+
+def test_resolve_garden_none_uses_preferred_default():
+    create_garden("work")
+    set_default_garden("work")
+    assert resolve_garden(None) == "work"
+    assert not garden_exists("default")
+
+
+def test_clear_default_garden_reverts_to_autocreate():
+    create_garden("work")
+    set_default_garden("work")
+    clear_default_garden()
+    assert get_default_garden() is None
+    assert resolve_garden(None) == "default"
+
+
+def test_resolve_garden_none_falls_back_when_preferred_deleted():
+    create_garden("work")
+    set_default_garden("work")
+    delete_garden("work")
+    assert resolve_garden(None) == "default"
+    assert garden_exists("default")
