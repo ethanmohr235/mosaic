@@ -55,6 +55,42 @@ A run can be time-based: `core.simulation.run_time_series()` solves a requested 
 
 Every logged run (failures included) is recorded in `simulation_runs` and `simulation_changes` -- a discarded preview leaves no trace, but a *saved* run (kept for review without being written to the graph -- see `docs/simulation.md`) is logged just like a committed one. The per-garden run counter (`run_number`) is derived from that log, and is a different thing from a time-based run's own step numbering (which resets to 0 every run and is never persisted on its own -- each of a run's own steps/ticks is logged individually now, so it can be scrubbed back through later). See `docs/simulation.md` for the language reference and what is deferred.
 
+# MCP server
+
+`mcp_server/` is a third adapter over `core/`, alongside `cli/` and
+`ui/`: it exposes the same repository functions as tools an MCP client
+can call (`run_mcp.py`), over stdio by default or streamable HTTP with
+`--http`. It adds no logic of its own -- every tool is a thin
+translation between an MCP call and the function the CLI or UI already
+calls.
+
+Nothing here authenticates. Over stdio that is fine -- the client starts
+the process and talks to it over a pipe -- but the HTTP transport binds
+loopback for that reason, and is meant to be reached over a private
+network (see `docs/mcp.md`), not published. DNS-rebinding protection is
+on so a browser page can't drive the loopback port.
+
+The package is deliberately not named `mcp/`: `run_mcp.py` puts the
+project root on `sys.path`, so a top-level package by that name would
+shadow the installed `mcp` SDK.
+
+Where `ui/api.py` holds one long-lived connection for the open garden,
+every tool here opens and closes its own, and takes the garden as an
+optional argument (defaulting to `default`, like the CLI). The server is
+a separate process from the GUI, so holding a connection open for its
+whole life would mean sitting on a SQLite lock while the user works in
+the app. Those connections set `busy_timeout`, so a write that collides
+with the GUI's write transaction waits it out instead of failing --
+that pragma is set in the adapter only, leaving the CLI and UI
+untouched. The GUI does not observe external changes until it refetches.
+
+The surface is reads plus graph edits: motes, relationships, species,
+templates and instances, neighborhood queries, and *previews* of
+simulation runs. Applying a simulation to the graph, deleting or
+restoring gardens, calendar export, and opening links are deliberately
+left out -- they either write results the user should approve in the
+app, or need a live window. See `docs/mcp.md` for setup.
+
 # Links and external export
 
 `url` (`core/links.py`) makes a mote openable -- a web address or a local

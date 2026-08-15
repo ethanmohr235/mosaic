@@ -1,6 +1,7 @@
 CoolProp
 google-auth
 google-auth-oauthlib
+mcp
 numpy
 pytest
 pywebview
