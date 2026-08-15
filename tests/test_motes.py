@@ -1,6 +1,6 @@
 import pytest
 
-from core.motes import create_mote, get_mote, get_motes, list_motes, update_mote, delete_mote
+from core.motes import create_mote, get_mote, get_motes, list_motes, search_motes, update_mote, delete_mote
 
 
 def _count_queries(conn, fn):
@@ -103,6 +103,66 @@ def test_get_motes_issues_a_constant_number_of_queries(conn):
     ids = [create_mote(conn, {"name": f"mote-{i}"}) for i in range(50)]
     _, query_count = _count_queries(conn, lambda: get_motes(conn, ids))
     assert query_count <= 3, f"get_motes() should not scale with id count, issued {query_count} queries"
+
+
+def test_search_motes_empty_query_returns_everything(conn):
+    create_mote(conn, {"name": "Alice"})
+    create_mote(conn, {"name": "Bob"})
+    assert len(search_motes(conn, "")) == 2
+    assert len(search_motes(conn, "   ")) == 2
+
+
+def test_search_motes_matches_substring_in_property_value(conn):
+    a = create_mote(conn, {"name": "Alice Turbine"})
+    create_mote(conn, {"name": "Bob"})
+    assert [m.id for m in search_motes(conn, "turb")] == [a]
+
+
+def test_search_motes_is_case_insensitive(conn):
+    a = create_mote(conn, {"name": "Alice"})
+    assert [m.id for m in search_motes(conn, "ALICE")] == [a]
+
+
+def test_search_motes_matches_property_key(conn):
+    a = create_mote(conn, {"resistance": 100})
+    create_mote(conn, {"name": "Bob"})
+    assert [m.id for m in search_motes(conn, "resist")] == [a]
+
+
+def test_search_motes_matches_non_string_value_via_json(conn):
+    a = create_mote(conn, {"active": True})
+    create_mote(conn, {"active": False})
+    assert [m.id for m in search_motes(conn, "true")] == [a]
+
+
+def test_search_motes_matches_mote_id(conn):
+    a = create_mote(conn, {"name": "Alice"}, id="turbine-1")
+    create_mote(conn, {"name": "Bob"}, id="pump-1")
+    assert [m.id for m in search_motes(conn, "turbine")] == [a]
+
+
+def test_search_motes_key_value_syntax_requires_exact_match(conn):
+    a = create_mote(conn, {"status": "open"})
+    create_mote(conn, {"status": "opening"})
+    assert [m.id for m in search_motes(conn, "status = open")] == [a]
+
+
+def test_search_motes_key_value_syntax_with_no_value_matches_any_value(conn):
+    a = create_mote(conn, {"status": "open"})
+    b = create_mote(conn, {"status": "closed"})
+    create_mote(conn, {"name": "no status property"})
+    assert {m.id for m in search_motes(conn, "status =")} == {a, b}
+
+
+def test_search_motes_no_match_returns_empty(conn):
+    create_mote(conn, {"name": "Alice"})
+    assert search_motes(conn, "nonexistent") == []
+
+
+def test_search_motes_respects_limit(conn):
+    for i in range(5):
+        create_mote(conn, {"name": f"item-{i}"})
+    assert len(search_motes(conn, "item", limit=2)) == 2
 
 
 def test_delete_mote_returns_true_when_found(conn):

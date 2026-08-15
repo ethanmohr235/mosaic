@@ -47,7 +47,9 @@ _INSTRUCTIONS = (
     "to 'default'. A mote acts as a species when others point at it with an "
     "`instance_of` relationship, giving it a type; a species may have a "
     "template whose properties new instances start from. Prefer neighborhood() "
-    "over list_motes() to explore a large garden."
+    "over list_motes() to explore a large garden, and search_motes() over "
+    "list_motes() when you're looking for something specific by name or "
+    "property rather than browsing."
 )
 
 
@@ -113,6 +115,19 @@ def list_motes(garden: str | None = None) -> list[dict[str, Any]]:
     neighborhood() is usually the better way to explore."""
     with _connect(garden) as conn:
         return [dataclasses.asdict(m) for m in motes_repo.list_motes(conn)]
+
+
+def search_motes(
+    query: str, limit: int = 60, garden: str | None = None
+) -> list[dict[str, Any]]:
+    """Find motes by text instead of scanning list_motes() yourself.
+    Case-insensitive substring match against every mote's id and its
+    properties' keys and values. "key = value" (e.g. "status = open")
+    matches that property's value exactly instead of as a substring;
+    "key =" with nothing after the '=' matches any mote that has that
+    key at all. An empty query matches everything, capped by `limit`."""
+    with _connect(garden) as conn:
+        return [dataclasses.asdict(m) for m in motes_repo.search_motes(conn, query, limit)]
 
 
 def get_mote(mote_id: str, garden: str | None = None) -> dict[str, Any] | None:
@@ -380,12 +395,12 @@ def reserved_names() -> dict[str, Any]:
 
 
 # Registered by build_server() below rather than the @mcp.tool() decorator,
-# so the same 30 tools can be mounted on either the plain instance (stdio,
+# so the same 31 tools can be mounted on either the plain instance (stdio,
 # tests, `mcp dev`) or an OAuth-wired one (see run_mcp.py --public-url)
 # without duplicating every signature and docstring.
 _TOOLS: tuple[Callable[..., Any], ...] = (
     list_gardens, create_garden, export_garden,
-    list_motes, get_mote, create_mote, update_mote, delete_property, delete_mote,
+    list_motes, search_motes, get_mote, create_mote, update_mote, delete_property, delete_mote,
     list_relationships, mote_relationships, create_relationship, update_relationship,
     delete_relationship,
     list_species, species_of, instances_of, set_species, set_template, template_for,

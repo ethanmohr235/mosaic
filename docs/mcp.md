@@ -35,9 +35,9 @@ both.
 
 ## Tools
 
-30 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), motes (`list_motes`, `get_mote`, `create_mote`,
-`update_mote`, `delete_property`, `delete_mote`), relationships
+31 tools, grouped: gardens (`list_gardens`, `create_garden`,
+`export_garden`), motes (`list_motes`, `search_motes`, `get_mote`,
+`create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
 `species_of`, `instances_of`, `set_species`, `set_template`,
@@ -126,7 +126,7 @@ something like *"Couldn't register with MonOSS's sign-in service."*
 `--public-url` turns that on:
 
 ```
-python run_mcp.py --http --public-url https://<machine>.<tailnet>.ts.net \
+python run_mcp.py --http --public-url https://compass.tail62282b.ts.net \
   --allowed-host "$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')"
 ```
 

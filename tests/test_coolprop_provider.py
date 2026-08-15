@@ -1,7 +1,12 @@
 import pytest
 
 from core.coolprop_provider import CoolPropProvider
-from core.providers import CapabilityNotSupported, InvalidModelConfiguration, ProviderExecutionError
+from core.providers import (
+    CapabilityNotSupported,
+    InvalidModelConfiguration,
+    OutsideDomain,
+    ProviderExecutionError,
+)
 
 # Reference values from published steam tables / CoolProp itself at
 # unambiguous single-phase states (superheated steam at 8 MPa/500 C, and
@@ -42,11 +47,12 @@ def test_backend_defaults_to_heos():
     assert provider.fluid_spec == "HEOS::Water"
 
 
-def test_capabilities_lists_all_five_operations():
+def test_capabilities_lists_all_eleven_operations():
     provider = CoolPropProvider({"fluid": "Water"})
     operations = {c.operation for c in provider.capabilities()}
     assert operations == {
         "enthalpy_pt", "entropy_pt", "density_pt", "temperature_ph", "enthalpy_ps",
+        "quality_ph", "quality_ps", "enthalpy_pq", "entropy_pq", "temperature_pq", "density_pq",
     }
 
 
@@ -99,6 +105,51 @@ def test_enthalpy_ps_isentropic_expansion_drops_enthalpy():
     )
     h_out = provider.evaluate("enthalpy_ps", {"pressure": 10e3, "entropy": s})
     assert h_out == pytest.approx(2130228.13, rel=1e-3)
+
+
+def test_enthalpy_pq_and_quality_ph_round_trip():
+    # A turbine exit at 10 kPa lands in the two-phase dome (see
+    # test_enthalpy_ps_isentropic_expansion_drops_enthalpy), which is
+    # exactly where a quality lookup is needed to check exit wetness.
+    provider = CoolPropProvider({"fluid": "Water"})
+    h = provider.evaluate("enthalpy_pq", {"pressure": 10e3, "quality": 0.8})
+    q = provider.evaluate("quality_ph", {"pressure": 10e3, "enthalpy": h})
+    assert q == pytest.approx(0.8, rel=1e-6)
+
+
+def test_entropy_pq_and_quality_ps_round_trip():
+    provider = CoolPropProvider({"fluid": "Water"})
+    s = provider.evaluate("entropy_pq", {"pressure": 10e3, "quality": 0.8})
+    q = provider.evaluate("quality_ps", {"pressure": 10e3, "entropy": s})
+    assert q == pytest.approx(0.8, rel=1e-6)
+
+
+def test_temperature_pq_saturation_temperature_is_independent_of_quality():
+    # Saturation temperature depends only on pressure along the dome, not
+    # on quality -- liquid and vapor at the same pressure boil at the
+    # same temperature.
+    provider = CoolPropProvider({"fluid": "Water"})
+    t_liquid = provider.evaluate("temperature_pq", {"pressure": 10e3, "quality": 0.0})
+    t_vapor = provider.evaluate("temperature_pq", {"pressure": 10e3, "quality": 1.0})
+    assert t_liquid == pytest.approx(t_vapor, rel=1e-9)
+
+
+def test_density_pq_liquid_denser_than_vapor():
+    provider = CoolPropProvider({"fluid": "Water"})
+    d_liquid = provider.evaluate("density_pq", {"pressure": 10e3, "quality": 0.0})
+    d_vapor = provider.evaluate("density_pq", {"pressure": 10e3, "quality": 1.0})
+    assert d_liquid > d_vapor * 100  # liquid water vs. low-pressure steam
+
+
+def test_quality_ph_rejects_a_state_outside_the_two_phase_dome():
+    # Superheated steam has no quality -- CoolProp silently returns -1
+    # rather than raising, so evaluate() has to catch that itself and
+    # surface it as OutsideDomain instead of a bogus quality value.
+    provider = CoolPropProvider({"fluid": "Water"})
+    with pytest.raises(OutsideDomain, match="quality_ph"):
+        provider.evaluate(
+            "quality_ph", {"pressure": _STEAM_PRESSURE, "enthalpy": 3399491.65}
+        )
 
 
 def test_invalid_state_wraps_coolprop_error():

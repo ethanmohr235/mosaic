@@ -219,7 +219,17 @@ Two providers are built in, both in SI units:
   (pressure, temperature)`, `temperature_ph(pressure, enthalpy)`, and
   `enthalpy_ps(pressure, entropy)` (the isentropic lookup a turbine uses
   to get its ideal outlet enthalpy). See
-  `scripts/example_steam_turbine.py`.
+  `scripts/example_steam_turbine.py`. Quality (vapor mass fraction, 0-1,
+  dimensionless) only means anything inside the two-phase dome, so it
+  appears both as an input and an output: `quality_ph(pressure,
+  enthalpy)` and `quality_ps(pressure, entropy)` read a state's quality
+  back out -- e.g. checking a turbine's exit wetness after an isentropic
+  expansion -- while `enthalpy_pq`, `entropy_pq`, `temperature_pq`, and
+  `density_pq` all take `(pressure, quality)`. A state outside the dome
+  (e.g. superheated steam has no quality) raises `OutsideDomain` --
+  CoolProp itself silently returns a `-1` sentinel there instead of
+  erroring, which `evaluate()` catches rather than letting flow through
+  as a bogus quality value.
 
 A rule reaches this through the `property()` builtin rather than
 knowing anything about `ideal_gas` itself:

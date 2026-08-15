@@ -23,7 +23,12 @@ a temperature. Suffixing the inputs keeps every operation name unique.
 from CoolProp.CoolProp import PropsSI
 
 from core.capability import Capability
-from core.providers import InvalidModelConfiguration, PropertyProvider, ProviderExecutionError
+from core.providers import (
+    InvalidModelConfiguration,
+    OutsideDomain,
+    PropertyProvider,
+    ProviderExecutionError,
+)
 
 _CAPABILITIES = [
     Capability(
@@ -56,6 +61,49 @@ _CAPABILITIES = [
         output="enthalpy",
         units="J/kg",
     ),
+    # Quality (vapor mass fraction, 0-1) only means anything inside the
+    # two-phase dome -- CoolProp raises for a state PropsSI can't place
+    # there, which evaluate() already wraps as ProviderExecutionError the
+    # same way it does any other out-of-domain state, so no new error
+    # handling is needed for these. quality_ph/quality_ps are what a
+    # turbine rule uses to check exit wetness after an isentropic
+    # expansion (core/coolprop_provider.py's own enthalpy_ps lookup).
+    Capability(
+        operation="quality_ph",
+        inputs=("pressure", "enthalpy"),
+        output="quality",
+        units="dimensionless",
+    ),
+    Capability(
+        operation="quality_ps",
+        inputs=("pressure", "entropy"),
+        output="quality",
+        units="dimensionless",
+    ),
+    Capability(
+        operation="enthalpy_pq",
+        inputs=("pressure", "quality"),
+        output="enthalpy",
+        units="J/kg",
+    ),
+    Capability(
+        operation="entropy_pq",
+        inputs=("pressure", "quality"),
+        output="entropy",
+        units="J/(kg*K)",
+    ),
+    Capability(
+        operation="temperature_pq",
+        inputs=("pressure", "quality"),
+        output="temperature",
+        units="K",
+    ),
+    Capability(
+        operation="density_pq",
+        inputs=("pressure", "quality"),
+        output="density",
+        units="kg/m^3",
+    ),
 ]
 
 # MonOSS input/output name -> PropsSI parameter code.
@@ -65,6 +113,7 @@ _PROPSI_KEY = {
     "enthalpy": "H",
     "entropy": "S",
     "density": "D",
+    "quality": "Q",
 }
 
 
@@ -93,9 +142,20 @@ class CoolPropProvider(PropertyProvider):
             (_PROPSI_KEY[key], state[key]) for key in capability.inputs
         )
         try:
-            return float(PropsSI(output_key, name1, value1, name2, value2, self.fluid_spec))
+            result = float(PropsSI(output_key, name1, value1, name2, value2, self.fluid_spec))
         except Exception as e:
             raise ProviderExecutionError(
                 f"CoolProp could not evaluate {operation}({', '.join(capability.inputs)}) "
                 f"for {self.fluid_spec!r}: {e}"
             ) from e
+        # CoolProp doesn't raise for a quality query outside the two-phase
+        # dome (a subcooled liquid or superheated vapor state) -- it
+        # silently returns -1, which would otherwise flow into a
+        # simulation looking like a real (nonsensical) 0-1 quality value.
+        if capability.output == "quality" and result < 0:
+            raise OutsideDomain(
+                f"{operation}({', '.join(capability.inputs)}) for {self.fluid_spec!r} "
+                "has no quality -- the state is outside the two-phase dome "
+                "(single-phase liquid or vapor)"
+            )
+        return result

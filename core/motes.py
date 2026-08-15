@@ -1,9 +1,16 @@
 # core/motes.py
 import json
+import re
 import sqlite3
 
 from core.db import generate_uuid
 from core.models import Mote
+
+# Matches "key = value" (or "key=value"), e.g. "priority = high" --
+# structured equality on a specific property, shared with
+# ui/frontend/app.js::matchesQuery so a query behaves the same whether
+# typed into the graph's search bar or an LLM's MCP call.
+_KEY_VALUE_QUERY_RE = re.compile(r"^\s*([^=\s][^=]*?)\s*=\s*(.*)$")
 
 
 def _encode_value(value):
@@ -92,6 +99,51 @@ def get_motes(conn: sqlite3.Connection, ids: list[str]) -> list[Mote]:
     ordered = [i for i in ids if i in existing]
     props = _properties_by_mote(conn, ordered)
     return [Mote(id=i, properties=props.get(i, {})) for i in ordered]
+
+
+def search_motes(conn: sqlite3.Connection, query: str, limit: int = 60) -> list[Mote]:
+    """Case-insensitive text search over every mote's id and properties.
+    "key = value" matches a specific property's value exactly; anything
+    else is a substring match against the mote id or any property key or
+    value. An empty/blank query matches everything, same as the UI's own
+    search palette does with nothing typed. Mirrors
+    ui/frontend/app.js::matchesQuery exactly so search results don't
+    depend on which adapter (UI, CLI, MCP) asked."""
+    motes = list_motes(conn)
+    query = (query or "").strip()
+    if not query:
+        return motes[:limit]
+
+    kv = _KEY_VALUE_QUERY_RE.match(query)
+    if kv:
+        key = kv.group(1).strip().lower()
+        value = kv.group(2).strip().lower()
+
+        def matches(mote: Mote) -> bool:
+            for k, v in mote.properties.items():
+                if k.lower() != key:
+                    continue
+                if not value:
+                    return True
+                vs = v if isinstance(v, str) else json.dumps(v)
+                if vs.lower() == value:
+                    return True
+            return False
+    else:
+        q = query.lower()
+
+        def matches(mote: Mote) -> bool:
+            if q in mote.id.lower():
+                return True
+            for k, v in mote.properties.items():
+                if q in k.lower():
+                    return True
+                vs = v if isinstance(v, str) else json.dumps(v)
+                if q in vs.lower():
+                    return True
+            return False
+
+    return [m for m in motes if matches(m)][:limit]
 
 
 def delete_mote(conn: sqlite3.Connection, id: str) -> bool:

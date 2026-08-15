@@ -1,12 +1,16 @@
-A list of random things I want to change after playing with the app for a while.
+A list of random things I want to add after playing with the app for a while.
 
-- recurrence picker does not look good. daily/weekly/monthly selector is too big, it should just match the size of the other property boxes.
+- add quality based lookups to coolprop provider if possible
 
-- advanced view panel has a horizontal slider at the bottom that doesn't really do anything since all the content is fit to the window
+- search motes by text API to help out LLMs in finding things
 
-- hide/show controls should also hide/show the advanced view window if it's open
+- "portal" mote type to reference one garden from another garden, while still remaining separate
 
-- the "reset view" button should unhide any hidden relations and motes in addition to recentering the graph.
+- simple live file preview for url properties
+    - plain text
+    - markdown
+    - pdf
 
-- should be able to just choose a default garden via the manage gardens window instead of creating an empty garden called "default" if one doesn't exist
+- cross-mote equation references, i.e. link one property to be shared between motes. one LLM thought this would be useful for syncing the output properties of one turbine component to the input properties of another, for example.
 
+- reusable motes. have a global storage section to save complex motes across gardens and reuse them later. next step: save entire groups of motes as subgraphs and reuse them.

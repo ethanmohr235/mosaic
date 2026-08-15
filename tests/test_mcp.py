@@ -25,6 +25,7 @@ from mcp_server.server import (
     neighborhood,
     preview_simulation,
     reserved_names,
+    search_motes,
     set_species,
     set_template,
     species_of,
@@ -89,6 +90,23 @@ def test_missing_ids_return_empty_rather_than_raising():
     assert delete_relationship("does-not-exist", GARDEN) is False
     assert get_run("does-not-exist", GARDEN) is None
     assert update_relationship("does-not-exist", to_id="x", garden=GARDEN) is None
+
+
+def test_search_motes_is_scoped_to_its_garden():
+    create_garden("other")
+    create_mote({"name": "Turbine A"}, GARDEN)
+    create_mote({"name": "Turbine B"}, "other")
+
+    assert [m["properties"]["name"] for m in search_motes("turbine", garden=GARDEN)] == ["Turbine A"]
+
+
+def test_search_motes_key_value_and_limit():
+    create_mote({"status": "open"}, GARDEN)
+    create_mote({"status": "closed"}, GARDEN)
+    create_mote({"status": "open"}, GARDEN)
+
+    assert len(search_motes("status = open", garden=GARDEN)) == 2
+    assert len(search_motes("status = open", limit=1, garden=GARDEN)) == 1
 
 
 # ---- gardens ----
