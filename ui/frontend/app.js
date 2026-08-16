@@ -11,6 +11,7 @@ let payload = { motes: [], relationships: [], roles: {} };
 let allMotes = [];
 let quickAddSpeciesId = null;
 let speciesPickerTargetId = null;
+let speciesPickerMode = "instance";   // 'instance' (set species) | 'template' (be a template of)
 let folderPickerTargetId = null;
 let searchVisible = [];
 let searchHighlight = -1;
@@ -24,6 +25,8 @@ let pasteRepeatCount = 0;              // steps repeated Ctrl+V pastes apart so 
 let contextMenuWorldPos = null;        // world coords the context menu was opened at
 let reservedProperties = new Set();    // property keys recognized by convention (core/reserved.py)
 let reservedRelTypes = new Set();      // relationship types recognized by convention
+let reservedMeanings = {};             // reserved name -> what it means, for tooltips
+let propertyModelProviders = {};       // provider name -> description + capabilities
 let simPreview = null;                 // the last preview_simulation() payload, while the sim bar is showing
 let simStep = 0;                       // 0 = real/unprojected; k>0 = cumulative state through steps[k-1]
 let simPlaying = false;
@@ -1048,11 +1051,11 @@ function plainField(text, onCommit) {
   return field;
 }
 
-/** `date` and `recurrence` get a small picker instead of hand-typed
- *  syntax (dateField/recurrenceField below); every other property keeps
- *  the plain text/textarea field. Falls back to plainField for a `date`
- *  value that doesn't parse -- a picker that can't represent an existing
- *  value shouldn't clobber it. */
+/** `date`, `recurrence` and `provider` get a small picker instead of
+ *  hand-typed syntax; every other property keeps the plain text/textarea
+ *  field. Falls back to plainField for a `date` value that doesn't parse
+ *  -- a picker that can't represent an existing value shouldn't clobber
+ *  it. */
 function valueField(key, rawValue, onCommit) {
   const text = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue);
   if (key === "date") {
@@ -1060,7 +1063,34 @@ function valueField(key, rawValue, onCommit) {
     if (parsed) return dateField(parsed, onCommit);
   }
   if (key === "recurrence") return recurrenceField(text, onCommit);
+  if (key === "provider") return providerField(text, onCommit);
   return plainField(text, onCommit);
+}
+
+/** A plain text box with the registered providers as completions. Text,
+ *  not a <select>: `provider` is an ordinary property like any other and
+ *  naming one MonOSS doesn't have yet has to stay possible -- the list
+ *  is help, not a constraint. */
+function providerField(text, onCommit) {
+  const field = plainField(text, onCommit);
+  const options = providerOptions();
+  if (options.length === 0) return field;
+
+  const listId = "provider-options";
+  let list = $(listId);
+  if (!list) {
+    list = document.createElement("datalist");
+    list.id = listId;
+    document.body.appendChild(list);
+  }
+  list.innerHTML = "";
+  for (const name of options) {
+    const option = document.createElement("option");
+    option.value = name;
+    list.appendChild(option);
+  }
+  field.setAttribute("list", listId);
+  return field;
 }
 
 /** Parses MonOSS's two `date` shapes (docs/google-calendar.md): a bare
@@ -1384,6 +1414,19 @@ function renderProperties(mote, history, baseMote) {
     }
     row.append(keyEl, field, ...trailing, del);
     container.appendChild(row);
+
+    // On a property-model mote, say what the named provider can actually
+    // compute, right under the box naming it -- the CLI has had `model
+    // capabilities` for this and the app had nothing.
+    if (key === "provider" && typeof value === "string") {
+      const summary = providerSummary(value.trim());
+      if (summary) {
+        const note = document.createElement("div");
+        note.className = "detail-note";
+        note.textContent = summary;
+        container.appendChild(note);
+      }
+    }
   }
 }
 
@@ -1760,6 +1803,25 @@ function hideSpeciesPicker() {
   $("species-picker-wrap").classList.add("hidden");
   $("species-picker-input").value = "";
   speciesPickerTargetId = null;
+  speciesPickerMode = "instance";
+}
+
+/** One picker, two questions. "Set species…" declares this mote an
+ *  instance of the one you pick; "Make template of…" declares it that
+ *  species' template instead. Both are "point at a species", so they
+ *  share the picker rather than the second growing its own copy of it --
+ *  templates previously had no UI at all, reachable only over MCP or by
+ *  hand-typing a template_of relationship. */
+function openSpeciesPicker(mode) {
+  if (editBlocked()) return;
+  if (!focusId) return;
+  speciesPickerMode = mode;
+  speciesPickerTargetId = focusId;
+  $("species-picker-input").placeholder =
+    mode === "template" ? "Template of which species?…" : "Search for a species…";
+  $("species-picker-wrap").classList.remove("hidden");
+  renderSpeciesPickerResults("");
+  $("species-picker-input").focus();
 }
 
 function renderSpeciesPickerResults(query) {
@@ -1785,24 +1847,24 @@ function renderSpeciesPickerResults(query) {
       e.preventDefault();
       if (editBlocked()) return;
       const targetId = speciesPickerTargetId;
-      await call(api.set_species(targetId, mote.id));
+      const mode = speciesPickerMode;
+      await call(
+        mode === "template"
+          ? api.set_template(targetId, mote.id)
+          : api.set_species(targetId, mote.id)
+      );
       hideSpeciesPicker();
       await refocus(targetId, { pan: false });
       await openDetailPanel(targetId);
+      showToast(mode === "template" ? "Template set." : "Species set.");
     });
     container.appendChild(row);
   }
 }
 
 function setupSpeciesControls() {
-  $("set-species-btn").addEventListener("click", () => {
-    if (editBlocked()) return;
-    if (!focusId) return;
-    speciesPickerTargetId = focusId;
-    $("species-picker-wrap").classList.remove("hidden");
-    renderSpeciesPickerResults("");
-    $("species-picker-input").focus();
-  });
+  $("set-species-btn").addEventListener("click", () => openSpeciesPicker("instance"));
+  $("set-template-btn").addEventListener("click", () => openSpeciesPicker("template"));
   $("species-picker-input").addEventListener("input", (e) =>
     renderSpeciesPickerResults(e.target.value)
   );
@@ -3281,13 +3343,41 @@ function setupKeyboard() {
  *  (core/reserved.py) with a small badge, so it doesn't look like
  *  ordinary user data. A dot rather than a text color: .rel-type is
  *  already accent-colored (it's clickable-to-rename), so recoloring a
- *  reserved one wouldn't read as different from an ordinary one. */
+ *  reserved one wouldn't read as different from an ordinary one.
+ *
+ *  The tooltip is the reserved name's actual meaning, straight from
+ *  core/reserved.py, rather than a generic "this is reserved" -- the
+ *  same text an MCP client gets from reserved_names(). `provider` and
+ *  `configuration` on a property-model mote used to be raw text boxes
+ *  here with nothing saying what they were for. */
 function maybeAddReservedBadge(el, name, reservedSet) {
   if (!reservedSet.has(name)) return;
   const badge = document.createElement("span");
   badge.className = "reserved-badge";
-  badge.title = "Reserved name -- recognized by MonOSS for special behavior.";
+  badge.title = reservedMeanings[name] ||
+    "Reserved name -- recognized by MonOSS for special behavior.";
   el.appendChild(badge);
+}
+
+/** The provider names core/reserved.py knows about, offered as
+ *  completions on a property-model mote's `provider` box. Not a
+ *  restriction -- the property stays free text like any other, and a
+ *  provider MonOSS doesn't have is a real thing to be able to type
+ *  while setting one up. */
+function providerOptions() {
+  return Object.keys(propertyModelProviders).sort();
+}
+
+/** A one-line summary of what a provider can do, shown under the
+ *  `provider` row of a property-model mote so its capabilities are
+ *  visible where the model is edited rather than only over MCP. */
+function providerSummary(name) {
+  const provider = propertyModelProviders[name];
+  if (!provider) return "";
+  const operations = (provider.capabilities || [])
+    .map((c) => `${c.operation}(${(c.inputs || []).join(", ")})`)
+    .join(", ");
+  return operations ? `${provider.description} Operations: ${operations}` : provider.description;
 }
 
 async function init() {
@@ -3296,6 +3386,8 @@ async function init() {
   const reserved = await call(api.reserved_names());
   reservedProperties = new Set(reserved.properties);
   reservedRelTypes = new Set(reserved.relationshipTypes);
+  reservedMeanings = { ...reserved.propertyMeanings, ...reserved.relationshipTypeMeanings };
+  propertyModelProviders = reserved.propertyModelProviders || {};
 
   graph = new MonossGraph($("graph"), {
     labelFor: nodeLabel,

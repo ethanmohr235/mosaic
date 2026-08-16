@@ -587,9 +587,18 @@ class Api:
 
     @_synchronized
     def reserved_names(self) -> dict:
+        """The same reference mcp_server.server.reserved_names() returns,
+        rather than the names alone. The app used to get a bare list and
+        so could only draw a "this is reserved" dot, while an LLM driving
+        MonOSS over MCP got the meanings, the equation language and every
+        provider's operations -- the surface with a person behind it was
+        the less informed one."""
         return {
             "properties": sorted(reserved_repo.RESERVED_PROPERTIES),
             "relationshipTypes": sorted(reserved_repo.RESERVED_RELATIONSHIP_TYPES),
+            "propertyMeanings": reserved_repo.PROPERTY_MEANINGS,
+            "relationshipTypeMeanings": reserved_repo.RELATIONSHIP_TYPE_MEANINGS,
+            "propertyModelProviders": reserved_repo.PROPERTY_MODEL_PROVIDERS,
         }
 
     # ---- graph/focus ----

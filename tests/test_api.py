@@ -828,3 +828,20 @@ def test_mote_history_excludes_saved_runs(api):
     mote_id = _seed_compounding_rule(api)
     api.save_simulation(2)
     assert api.mote_history(mote_id) == {}
+
+
+def test_reserved_names_returns_the_full_reference_not_just_names(api):
+    """The app used to get a bare name list while an MCP client got the
+    meanings, the equation language and every provider's operations --
+    the surface with a person behind it was the less informed one."""
+    reserved = api.reserved_names()
+
+    assert "in_folder" in reserved["relationshipTypes"]
+    assert "provider" in reserved["properties"]
+    # ...and now what they mean, for the detail panel's tooltips.
+    assert "provider" in reserved["propertyMeanings"]
+    assert "in_folder" in reserved["relationshipTypeMeanings"]
+    # ...plus what each provider can compute, for the property-model note.
+    assert set(reserved["propertyModelProviders"]) == {"ideal_gas", "coolprop"}
+    ideal_gas = reserved["propertyModelProviders"]["ideal_gas"]
+    assert any(c["operation"] == "pressure" for c in ideal_gas["capabilities"])
