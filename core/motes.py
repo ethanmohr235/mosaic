@@ -151,6 +151,36 @@ def search_motes(conn: sqlite3.Connection, query: str, limit: int = 60) -> list[
     return [m for m in motes if matches(m)][:limit]
 
 
+def copy_mote(
+    source: sqlite3.Connection,
+    target: sqlite3.Connection,
+    mote_id: str,
+    overrides: dict | None = None,
+) -> str:
+    """Copy a mote's properties into a new, independent mote -- possibly
+    in a different garden, since the two connections need not be the
+    same one. Returns the new mote's id. Raises LookupError if there is
+    no such mote in `source`.
+
+    Properties only: relationships are not copied, because there is no
+    general answer to what a relationship pointing outside the copied set
+    should become. This is the same seeding core/species.py's
+    create_instance() does from a template, and what the reusable-motes
+    library does in both directions (core/library.py) -- one primitive
+    rather than each writing its own read-then-create.
+
+    Nothing links the copy to the original afterward. A live cross-garden
+    reference is a portal (core/portals.py), which is a different thing
+    on purpose."""
+    mote = get_mote(source, mote_id)
+    if mote is None:
+        raise LookupError(f"No such mote: {mote_id!r}")
+
+    properties = dict(mote.properties)
+    properties.update(overrides or {})
+    return create_mote(target, properties)
+
+
 def delete_mote(conn: sqlite3.Connection, id: str) -> bool:
     cur = conn.cursor()
     cur.execute("DELETE FROM motes WHERE id=?", (id,))

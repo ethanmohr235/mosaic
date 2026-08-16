@@ -236,6 +236,14 @@ independent snapshot, the same way `core/species.py::create_instance()`
 seeds a new instance from a template. Nothing links the two afterward;
 editing either side never affects the other.
 
+Saving and reusing are both `core/motes.py::copy_mote()` -- a mote's
+properties into a new, independent mote, in the same garden or a
+different one. That primitive is also what `create_instance()` does from
+a species' template, so seeding a new mote from an existing one is one
+function rather than a read-then-create written out wherever it's needed.
+What `core/library.py` keeps is what actually belongs to the library:
+which garden it is, and bringing it into being lazily.
+
 Only a mote's properties are saved -- its relationships are never
 captured or restored. Saving a whole subgraph (a mote plus its
 relationships to other library entries) is a deferred, larger feature:

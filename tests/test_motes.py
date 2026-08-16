@@ -1,6 +1,6 @@
 import pytest
 
-from core.motes import create_mote, get_mote, get_motes, list_motes, search_motes, update_mote, delete_mote
+from core.motes import copy_mote, create_mote, get_mote, get_motes, list_motes, search_motes, update_mote, delete_mote
 
 
 def _count_queries(conn, fn):
@@ -193,3 +193,61 @@ def test_delete_mote_cascades_relationships(conn):
     delete_mote(conn, a)
 
     assert list_relationships(conn) == []
+
+
+# ---- copy_mote: one primitive for seeding a new mote from an old one ----
+
+def test_copy_mote_within_one_garden(conn):
+    original = create_mote(conn, {"name": "Standup", "duration": 15})
+
+    copy_id = copy_mote(conn, conn, original)
+
+    assert copy_id != original
+    assert get_mote(conn, copy_id).properties == {"name": "Standup", "duration": 15}
+    # Independent: editing the copy leaves the original alone.
+    update_mote(conn, copy_id, {"name": "Retro"})
+    assert get_mote(conn, original).properties["name"] == "Standup"
+
+
+def test_copy_mote_applies_overrides(conn):
+    original = create_mote(conn, {"name": "Standup", "duration": 15})
+    copy_id = copy_mote(conn, conn, original, {"name": "Monday standup"})
+    assert get_mote(conn, copy_id).properties == {"name": "Monday standup", "duration": 15}
+
+
+def test_copy_mote_across_gardens(conn):
+    """The reason this takes two connections: the library copies in and
+    out of a different garden entirely."""
+    from core.db import get_connection, initialize_database
+    from core.gardens import create_garden
+
+    original = create_mote(conn, {"name": "Reactor"})
+    create_garden("target")
+    target = get_connection("target")
+    try:
+        initialize_database(target)
+        copy_id = copy_mote(conn, target, original)
+        assert get_mote(target, copy_id).properties == {"name": "Reactor"}
+        # ...and it is genuinely over there, not here.
+        assert get_mote(conn, copy_id) is None
+    finally:
+        target.close()
+
+
+def test_copy_mote_does_not_copy_relationships(conn):
+    """Properties only -- there is no general answer to what a
+    relationship pointing outside the copied set should become."""
+    from core.relationships import create_relationship, list_relationships
+
+    a = create_mote(conn, {"name": "A"})
+    b = create_mote(conn, {"name": "B"})
+    create_relationship(conn, a, b, "mentions")
+
+    copy_mote(conn, conn, a)
+
+    assert len(list_relationships(conn)) == 1
+
+
+def test_copy_mote_raises_for_a_missing_source(conn):
+    with pytest.raises(LookupError):
+        copy_mote(conn, conn, "nonexistent")

@@ -12,6 +12,12 @@ out into a new, fully independent mote. Nothing ties the two together
 afterward, the same way core/species.py's create_instance() seeds a new
 instance from a template's properties without keeping them linked.
 
+Both directions are core/motes.py::copy_mote(), which is the whole of
+what this module does that motes.py couldn't: save is a copy into the
+library garden, reuse is a copy back out. What is left here is the two
+things that genuinely belong to the library rather than to copying --
+which garden it is, and lazily bringing it into being.
+
 Relationships are never saved or restored -- a library entry is
 properties only. Saving whole subgraphs (a mote plus its relationships
 to other library entries) is a deferred, larger feature -- see
@@ -31,7 +37,7 @@ leaves out of the user's workspaces.
 import sqlite3
 
 from core.db import get_connection, initialize_database
-from core.motes import create_mote, get_mote
+from core.motes import copy_mote
 
 LIBRARY_GARDEN = "_library"
 
@@ -45,13 +51,9 @@ def _library_connection() -> sqlite3.Connection:
 def save_to_library(conn: sqlite3.Connection, mote_id: str) -> str:
     """Snapshot mote_id's properties (from conn's garden) into a new,
     independent entry in the library. Returns the new entry's id."""
-    mote = get_mote(conn, mote_id)
-    if mote is None:
-        raise LookupError(f"No such mote: {mote_id!r}")
-
     library_conn = _library_connection()
     try:
-        return create_mote(library_conn, dict(mote.properties))
+        return copy_mote(conn, library_conn, mote_id)
     finally:
         library_conn.close()
 
@@ -66,12 +68,8 @@ def reuse_from_library(
     it afterward."""
     library_conn = _library_connection()
     try:
-        entry = get_mote(library_conn, library_mote_id)
+        return copy_mote(library_conn, conn, library_mote_id, overrides)
+    except LookupError:
+        raise LookupError(f"No such library entry: {library_mote_id!r}") from None
     finally:
         library_conn.close()
-    if entry is None:
-        raise LookupError(f"No such library entry: {library_mote_id!r}")
-
-    properties = dict(entry.properties)
-    properties.update(overrides or {})
-    return create_mote(conn, properties)
