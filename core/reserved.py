@@ -5,18 +5,24 @@ docs/architecture.md's reserved-name list, which this must be kept in
 sync with. Exposed to the frontend via Api.reserved_names() so the
 detail panel can flag them instead of leaving them looking like
 ordinary user data, and to MCP clients via mcp_server.server.reserved_
-names() -- which is also why PROPERTY_MEANINGS, EQUATION_LANGUAGE and
-PROPERTY_MODEL_PROVIDERS live here rather than as inline strings in the
-MCP layer: an LLM driving MonOSS only through MCP tools has no other way
-to reach this, since docs/simulation.md itself isn't on the MCP surface.
-Hand-synced with docs/simulation.md's own tables -- there is no dynamic
-introspection here (e.g. of core/providers.py's registry) because a
-provider's capabilities() requires a constructed instance, which needs
-provider-specific configuration this module has no business knowing."""
+names() -- which is also why PROPERTY_MEANINGS and EQUATION_LANGUAGE live
+here rather than as inline strings in the MCP layer: an LLM driving
+MonOSS only through MCP tools has no other way to reach this, since
+docs/simulation.md itself isn't on the MCP surface. Those two are
+hand-synced with docs/simulation.md's own tables.
+
+PROPERTY_MODEL_PROVIDERS is *not* written here -- it is derived from the
+registered providers themselves. It used to be a hand-copy, because
+capabilities() needed a constructed instance and constructing one needs
+provider-specific configuration this module has no business knowing;
+declaring DESCRIPTION/CONFIGURATION/CAPABILITIES on the provider class
+removed that reason, and with it the third place the same facts were
+written down."""
 from core.google_calendar import RESERVED_KEYS as _GCAL_RESERVED_PROPERTIES
 from core.folders import IN_FOLDER
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.portals import PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY
+from core.providers import describe_providers
 from core.rules import APPLIES_TO, EQUATION_KEY, UNKNOWNS_KEY
 from core.species import INSTANCE_OF, TEMPLATE_OF
 
@@ -127,41 +133,11 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
         "operations exist."},
 ]
 
-# Mirrors docs/simulation.md's "Physical property models" section. Each
-# provider is registered in core/model_resolver.py; a mote uses one by
-# pointing `uses_model` at a mote carrying `provider`=<name here> and a
-# matching `configuration`.
-PROPERTY_MODEL_PROVIDERS: dict[str, dict] = {
-    "ideal_gas": {
-        "description": "P = rho * R * T. No external dependency.",
-        "configuration": {"gas_constant": "number, J/(kg*K), e.g. 287.05 for dry air"},
-        "capabilities": [
-            {"operation": "pressure", "inputs": ["density", "temperature"], "output": "pressure", "units": "Pa"},
-            {"operation": "density", "inputs": ["pressure", "temperature"], "output": "density", "units": "kg/m^3"},
-            {"operation": "temperature", "inputs": ["pressure", "density"], "output": "temperature", "units": "K"},
-        ],
-    },
-    "coolprop": {
-        "description": "Real-fluid properties (water/steam and anything "
-            "else CoolProp knows) via the CoolProp library. Operations are "
-            "named <output>_<input-initials> since one output is often "
-            "reachable from more than one input pair.",
-        "configuration": {
-            "fluid": "CoolProp fluid name, e.g. 'Water'",
-            "backend": "optional, defaults to 'HEOS'",
-        },
-        "capabilities": [
-            {"operation": "enthalpy_pt", "inputs": ["pressure", "temperature"], "output": "enthalpy", "units": "J/kg"},
-            {"operation": "entropy_pt", "inputs": ["pressure", "temperature"], "output": "entropy", "units": "J/(kg*K)"},
-            {"operation": "density_pt", "inputs": ["pressure", "temperature"], "output": "density", "units": "kg/m^3"},
-            {"operation": "temperature_ph", "inputs": ["pressure", "enthalpy"], "output": "temperature", "units": "K"},
-            {"operation": "enthalpy_ps", "inputs": ["pressure", "entropy"], "output": "enthalpy", "units": "J/kg"},
-            {"operation": "quality_ph", "inputs": ["pressure", "enthalpy"], "output": "quality", "units": "dimensionless"},
-            {"operation": "quality_ps", "inputs": ["pressure", "entropy"], "output": "quality", "units": "dimensionless"},
-            {"operation": "enthalpy_pq", "inputs": ["pressure", "quality"], "output": "enthalpy", "units": "J/kg"},
-            {"operation": "entropy_pq", "inputs": ["pressure", "quality"], "output": "entropy", "units": "J/(kg*K)"},
-            {"operation": "temperature_pq", "inputs": ["pressure", "quality"], "output": "temperature", "units": "K"},
-            {"operation": "density_pq", "inputs": ["pressure", "quality"], "output": "density", "units": "kg/m^3"},
-        ],
-    },
-}
+# Derived, not declared: every registered provider describes itself
+# (core/providers.py::describe_providers, reading the DESCRIPTION /
+# CONFIGURATION / CAPABILITIES each provider class carries). A provider
+# added, or an operation changed, without this file being touched is
+# correct here automatically -- which is the point. Registration happens
+# on import of core.model_resolver, above, so every provider is present
+# by the time this runs.
+PROPERTY_MODEL_PROVIDERS: dict[str, dict] = describe_providers()

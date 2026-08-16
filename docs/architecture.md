@@ -74,6 +74,16 @@ simulation rules never see the provider directly, only the `property()`
 builtin described in `docs/simulation.md`. See
 `docs/physical_property_proposal` for the full design.
 
+A provider declares `DESCRIPTION`, `CONFIGURATION` and `CAPABILITIES` on
+the class, not per instance, so `core/providers.py::describe_providers()`
+can read them without constructing one -- which would need the very
+provider-specific configuration a caller asking "what providers exist?"
+doesn't have. That is what `core/reserved.py`'s provider reference is
+built from, and it is why adding a provider or an operation now updates
+the reference the UI and MCP clients see without anyone remembering to.
+It was a hand-copied table before, one of three places the same facts
+were written down.
+
 Equations are written in a small expression language parsed against a strict whitelist -- never `eval`. Evaluating one produces a weighted sum of unknowns plus a constant, so an expression that happens to contain no unknowns is simply a number. That is why there is only one kind of rule: an assignment and a coupled equation are the same thing to the solver.
 
 Solving happens in two stages. A substitution loop repeatedly resolves any equation that has come down to a single unknown and feeds the answer back, which allows nonlinear formulas as long as the nonlinear part involves values already known. Whatever remains must be linear and goes to a single least-squares solve.

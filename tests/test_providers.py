@@ -109,3 +109,83 @@ def test_ideal_gas_rejects_unknown_operation():
     provider = IdealGasProvider({"gas_constant": 287.05})
     with pytest.raises(CapabilityNotSupported):
         provider.evaluate("enthalpy", {})
+
+
+# ---- describe_providers: the reference, derived rather than copied ----
+
+def test_describe_providers_reports_every_registered_provider():
+    from core import model_resolver  # noqa: F401  (registers the built-ins)
+    from core.providers import describe_providers
+
+    described = describe_providers()
+    # A superset, not an equality: the registry is process-global and
+    # other tests in this file register fakes into it. That is
+    # describe_providers() being honest -- it reports what is registered.
+    assert {"ideal_gas", "coolprop"} <= set(described)
+
+    ideal_gas = described["ideal_gas"]
+    assert ideal_gas["description"]
+    assert ideal_gas["configuration"] == {
+        "gas_constant": "number, J/(kg*K), e.g. 287.05 for dry air"
+    }
+    assert {c["operation"] for c in ideal_gas["capabilities"]} == {
+        "pressure", "density", "temperature"
+    }
+    pressure = next(c for c in ideal_gas["capabilities"] if c["operation"] == "pressure")
+    assert pressure == {
+        "operation": "pressure",
+        "inputs": ["density", "temperature"],
+        "output": "pressure",
+        "units": "Pa",
+    }
+
+
+def test_reserved_provider_table_is_the_derived_one():
+    """core/reserved.py used to hand-copy this, so it could drift from
+    the providers it described. Now there is one source.
+
+    The constant is a snapshot taken when core.reserved is imported,
+    which is complete because every built-in registers on import of
+    core.model_resolver -- so this compares the built-ins rather than
+    whatever fakes other tests have since registered."""
+    from core.providers import describe_providers
+    from core.reserved import PROPERTY_MODEL_PROVIDERS
+
+    live = describe_providers()
+    for name in ("ideal_gas", "coolprop"):
+        assert PROPERTY_MODEL_PROVIDERS[name] == live[name]
+
+
+def test_a_providers_declared_capabilities_match_what_an_instance_reports():
+    """The class declaration is what describe_providers() reads and the
+    instance method is what the solver calls -- if those two disagreed,
+    the reference would describe operations that don't run."""
+    from core.coolprop_provider import CoolPropProvider
+    from core.ideal_gas_provider import IdealGasProvider
+
+    ideal_gas = IdealGasProvider({"gas_constant": 287.05})
+    assert ideal_gas.capabilities() == list(IdealGasProvider.CAPABILITIES)
+
+    coolprop = CoolPropProvider({"fluid": "Water"})
+    assert coolprop.capabilities() == list(CoolPropProvider.CAPABILITIES)
+
+
+def test_a_provider_may_still_override_capabilities():
+    """Nothing assumes capabilities are static -- a provider whose
+    operations depend on its configuration can override the method, and
+    the base class only supplies the default."""
+    from core.capability import Capability
+    from core.providers import PropertyProvider
+
+    class Dynamic(PropertyProvider):
+        CAPABILITIES = (Capability(operation="declared", inputs=("x",), output="y"),)
+
+        def capabilities(self):
+            return [Capability(operation=self.configuration["op"], inputs=("x",), output="y")]
+
+        def evaluate(self, operation, state):
+            return 1.0
+
+    provider = Dynamic({"op": "computed"})
+    assert [c.operation for c in provider.capabilities()] == ["computed"]
+    assert provider.capability("computed").output == "y"

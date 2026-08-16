@@ -13,7 +13,7 @@ R via `configuration = {"gas_constant": ...}`.
 from core.capability import Capability
 from core.providers import InvalidModelConfiguration, PropertyProvider
 
-_CAPABILITIES = [
+_CAPABILITIES = (
     Capability(
         operation="pressure",
         inputs=("density", "temperature"),
@@ -32,10 +32,14 @@ _CAPABILITIES = [
         output="temperature",
         units="K",
     ),
-]
+)
 
 
 class IdealGasProvider(PropertyProvider):
+    DESCRIPTION = "P = rho * R * T. No external dependency."
+    CONFIGURATION = {"gas_constant": "number, J/(kg*K), e.g. 287.05 for dry air"}
+    CAPABILITIES = _CAPABILITIES
+
     def __init__(self, configuration: dict):
         super().__init__(configuration)
         gas_constant = configuration.get("gas_constant")
@@ -45,9 +49,6 @@ class IdealGasProvider(PropertyProvider):
                 "(the specific gas constant, J/(kg*K)) in its configuration"
             )
         self.gas_constant = float(gas_constant)
-
-    def capabilities(self) -> list[Capability]:
-        return _CAPABILITIES
 
     def evaluate(self, operation: str, state: dict) -> float:
         self.capability(operation)  # raises CapabilityNotSupported if unknown

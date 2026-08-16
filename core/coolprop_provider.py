@@ -30,7 +30,7 @@ from core.providers import (
     ProviderExecutionError,
 )
 
-_CAPABILITIES = [
+_CAPABILITIES = (
     Capability(
         operation="enthalpy_pt",
         inputs=("pressure", "temperature"),
@@ -104,7 +104,7 @@ _CAPABILITIES = [
         output="density",
         units="kg/m^3",
     ),
-]
+)
 
 # MonOSS input/output name -> PropsSI parameter code.
 _PROPSI_KEY = {
@@ -118,6 +118,17 @@ _PROPSI_KEY = {
 
 
 class CoolPropProvider(PropertyProvider):
+    DESCRIPTION = (
+        "Real-fluid properties (water/steam and anything else CoolProp knows) "
+        "via the CoolProp library. Operations are named <output>_<input-initials> "
+        "since one output is often reachable from more than one input pair."
+    )
+    CONFIGURATION = {
+        "fluid": "CoolProp fluid name, e.g. 'Water'",
+        "backend": "optional, defaults to 'HEOS'",
+    }
+    CAPABILITIES = _CAPABILITIES
+
     def __init__(self, configuration: dict):
         super().__init__(configuration)
         fluid = configuration.get("fluid")
@@ -131,9 +142,6 @@ class CoolPropProvider(PropertyProvider):
                 "coolprop provider's 'backend' must be a non-empty string"
             )
         self.fluid_spec = f"{backend}::{fluid}"
-
-    def capabilities(self) -> list[Capability]:
-        return _CAPABILITIES
 
     def evaluate(self, operation: str, state: dict) -> float:
         capability = self.capability(operation)  # raises CapabilityNotSupported if unknown
