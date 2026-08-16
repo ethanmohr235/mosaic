@@ -50,7 +50,10 @@ _INSTRUCTIONS = (
     "template whose properties new instances start from. Prefer neighborhood() "
     "over list_motes() to explore a large garden, and search_motes() over "
     "list_motes() when you're looking for something specific by name or "
-    "property rather than browsing."
+    "property rather than browsing. A rule mote's `equation` can reference "
+    "another mote's property across a relationship with targets('type').prop "
+    "or sources('type').prop -- these resolve live in every simulation run, "
+    "so prefer them over hardcoding a value copied from another mote."
 )
 
 
@@ -417,14 +420,21 @@ def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[floa
 
 
 def reserved_names() -> dict[str, Any]:
-    """Property keys and relationship types the engine and UI interpret
-    specially (species membership, equations, links, calendar dates,
-    property models). They are ordinary editable properties -- nothing in
-    the schema enforces them -- but setting one turns on behavior, so
-    check here before inventing a key."""
+    """Everything the engine and UI interpret specially: reserved property
+    keys and relationship types (with what each one means and expects),
+    the full equation expression language usable inside a rule's
+    `equation` (targets/sources, property(), prev(x), t, sum/count,
+    abs/min/max), and every built-in physical-property provider with its
+    operations, required inputs, and units. Call this before writing an
+    equation or a property-model mote by hand -- it's the complete
+    reference, not just a name check."""
     return {
         "properties": sorted(reserved_repo.RESERVED_PROPERTIES),
         "relationshipTypes": sorted(reserved_repo.RESERVED_RELATIONSHIP_TYPES),
+        "propertyMeanings": reserved_repo.PROPERTY_MEANINGS,
+        "relationshipTypeMeanings": reserved_repo.RELATIONSHIP_TYPE_MEANINGS,
+        "equationLanguage": reserved_repo.EQUATION_LANGUAGE,
+        "propertyModelProviders": reserved_repo.PROPERTY_MODEL_PROVIDERS,
     }
 
 

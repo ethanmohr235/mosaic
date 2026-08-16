@@ -57,6 +57,16 @@ as JSON because GUI text fields deliver everything as text.
 *would* change — nothing is written or logged. Applying a run to the
 graph is not exposed; do that in the app or the CLI.
 
+`reserved_names()` is the complete equation/simulation reference for an
+MCP client, not just a list of reserved keys: it also returns what each
+reserved property and relationship type means, the full equation
+expression language (`targets()`/`sources()` for cross-mote references,
+`property()`, `prev(x)`, `t`, `sum()`/`count()`, `abs`/`min`/`max`), and
+every built-in physical-property provider's operations, inputs, and
+units. Call it before hand-writing an `equation` or a property-model
+mote — `docs/simulation.md` has the same content with more prose, but
+isn't itself reachable over MCP.
+
 ## Reaching it from other machines
 
 `run_mcp.py` defaults to stdio, where the client starts the process

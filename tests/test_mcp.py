@@ -315,3 +315,17 @@ def test_reserved_names_lists_the_interpreted_keys():
     assert "portal_garden" in names["properties"]
     assert "portal_mote" in names["properties"]
     assert INSTANCE_OF in names["relationshipTypes"]
+
+
+def test_reserved_names_includes_the_equation_and_provider_reference():
+    # This is what makes cross-mote references (targets()/sources()) and
+    # property-model providers discoverable to an MCP-only client, which
+    # can't read docs/simulation.md directly.
+    names = reserved_names()
+    assert names["propertyMeanings"]["equation"]
+    assert names["relationshipTypeMeanings"][INSTANCE_OF]
+    syntaxes = {entry["syntax"] for entry in names["equationLanguage"]}
+    assert any("targets(" in s for s in syntaxes)
+    assert any("prev(" in s for s in syntaxes)
+    assert "ideal_gas" in names["propertyModelProviders"]
+    assert "coolprop" in names["propertyModelProviders"]
