@@ -27,6 +27,7 @@ from core import garden_io
 from core import gardens as gardens_repo
 from core import graph as graph_repo
 from core import motes as motes_repo
+from core import portals as portals_repo
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import simulation as simulation_repo
@@ -293,6 +294,39 @@ def create_instance(
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
 
 
+# ---- portals ----
+
+
+def create_portal(
+    target_garden: str,
+    target_mote_id: str,
+    properties: dict[str, Any] | None = None,
+    garden: str | None = None,
+) -> dict[str, Any]:
+    """Create a portal mote in `garden` (default 'default') pointing at
+    target_mote_id in target_garden -- a one-way navigational reference,
+    not a relationship (relationships require both ends in the same
+    garden's motes table). Fails if target_garden doesn't exist or
+    target_mote_id isn't in it. `properties` are set on the new mote
+    alongside its pointer, same as create_instance's overrides."""
+    with _connect(garden) as conn:
+        mote_id = portals_repo.create_portal(conn, target_garden, target_mote_id, properties or {})
+        return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
+
+
+def resolve_portal(mote_id: str, garden: str | None = None) -> dict[str, Any]:
+    """Follow a portal mote's target and return the live mote it points
+    at, without switching anything -- MCP calls are stateless, so unlike
+    the app there's no "current garden" to switch. Raises if mote_id
+    isn't a portal, or if its target garden/mote no longer exists."""
+    with _connect(garden) as conn:
+        mote = motes_repo.get_mote(conn, mote_id)
+        if mote is None:
+            raise LookupError(f"No such mote: {mote_id!r}")
+        target_garden, target_mote = portals_repo.resolve_portal(mote.properties)
+        return {"garden": target_garden, "mote": dataclasses.asdict(target_mote)}
+
+
 # ---- graph ----
 
 
@@ -395,7 +429,7 @@ def reserved_names() -> dict[str, Any]:
 
 
 # Registered by build_server() below rather than the @mcp.tool() decorator,
-# so the same 31 tools can be mounted on either the plain instance (stdio,
+# so the same 33 tools can be mounted on either the plain instance (stdio,
 # tests, `mcp dev`) or an OAuth-wired one (see run_mcp.py --public-url)
 # without duplicating every signature and docstring.
 _TOOLS: tuple[Callable[..., Any], ...] = (
@@ -405,6 +439,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     delete_relationship,
     list_species, species_of, instances_of, set_species, set_template, template_for,
     create_instance,
+    create_portal, resolve_portal,
     neighborhood, whole_garden,
     preview_simulation, list_runs, get_run, run_changes, run_ticks, mote_history,
     reserved_names,

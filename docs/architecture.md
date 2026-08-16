@@ -16,7 +16,7 @@ Relationships should have the ability to modify the properties of motes programm
 
 # Gardens
 
-The user should be able to create multiple object graphs that are completely separate from each other. These are called gardens.
+The user should be able to create multiple object graphs that are completely separate from each other. These are called gardens. The one deliberate exception is a **portal**: a mote may carry a reference into another garden so the graph can be navigated there, but nothing about the two gardens' data, simulation, or history otherwise mixes -- see Portals below.
 
 # Species
 
@@ -32,7 +32,7 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of`, `applies_to` and `uses_model` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider` and `configuration` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to` and `uses_model` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden` and `portal_mote` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 # Physical property models
 
@@ -124,3 +124,23 @@ dated -- found by querying Calendar itself for everything tagged as
 MonOSS-managed (`extendedProperties.private` on each event), not a local
 record, so this stays correct even if events were edited or deleted by
 hand. See `docs/google-calendar.md` for setup and details.
+
+# Portals
+
+`portal_garden` and `portal_mote` (`core/portals.py`) turn an ordinary
+mote into a one-way link into a specific mote in a different garden.
+Both are flat reserved properties, not a relationship --
+`relationships.to_id` has a foreign key into the *same* connection's
+`motes` table (`core/db.py`), so a cross-garden reference can't be one.
+Creating a portal does not modify anything in the target garden or
+create a reciprocal link back; following a portal is UI/MCP navigation,
+not a live coupling -- the portal mote's own `name` (if any) is a
+one-time snapshot of the target's label at creation time, not kept in
+sync afterward.
+
+Portals are navigation-only for v1: `targets()`/`sources()` and the
+`property()` builtin never see through one, and a rule's `equation`
+cannot read a value across a portal. There is currently no cross-garden
+mechanism anywhere in `core/simulation.py`; extending the solver to
+resolve properties across gardens would be a substantially larger,
+separate feature.

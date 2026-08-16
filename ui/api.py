@@ -18,6 +18,7 @@ from core import google_calendar as gcal_repo
 from core import graph as graph_repo
 from core import links as links_repo
 from core import motes as motes_repo
+from core import portals as portals_repo
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import simulation as simulation_repo
@@ -229,6 +230,51 @@ class Api:
         finally:
             conn.close()
         return {"garden": new_garden_name, "motes": motes, "relationships": rels}
+
+    # ---- portals ----
+
+    @_synchronized
+    def find_portal_target(self, garden: str, query: str) -> list[dict]:
+        """Search another garden's motes for a portal's target, via a
+        short-lived connection -- same pattern export_garden(garden_name)
+        uses so browsing candidates doesn't disturb the currently open
+        garden. Raises if `garden` doesn't exist rather than silently
+        creating it (get_connection()/initialize_database() would
+        otherwise happily create an empty garden file from a bad name)."""
+        if not gardens_repo.garden_exists(garden):
+            raise LookupError(f"No such garden: {garden!r}")
+        conn = get_connection(garden)
+        try:
+            initialize_database(conn)
+            return [dataclasses.asdict(m) for m in motes_repo.search_motes(conn, query)]
+        finally:
+            conn.close()
+
+    @_synchronized
+    def create_portal(
+        self, target_garden: str, target_mote_id: str, raw_properties: dict | None = None
+    ) -> dict:
+        mote_id = portals_repo.create_portal(
+            self._conn, target_garden, target_mote_id, _coerce_properties(raw_properties or {})
+        )
+        return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
+
+    @_synchronized
+    def jump_to_portal(self, mote_id: str) -> dict:
+        """Resolve mote_id's portal target and switch the live connection
+        to it in one call -- bundles resolve+switch (the same close/
+        reopen switch_garden() does) so the frontend doesn't orchestrate
+        a multi-round-trip sequence. Errors (deleted target garden/mote)
+        propagate up through call()'s existing toast path."""
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None:
+            raise LookupError(f"No such mote: {mote_id!r}")
+        garden, target_mote = portals_repo.resolve_portal(mote.properties)
+        self._conn.close()
+        self._conn = get_connection(garden)
+        initialize_database(self._conn)
+        self._current_garden = garden
+        return {"garden": garden, "mote_id": target_mote.id}
 
     # ---- motes ----
 

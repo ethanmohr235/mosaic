@@ -765,6 +765,7 @@ class MonossGraph {
     // DOM overlay never disagree about what color "relationship selected"
     // means.
     this._edgeSelected = style.getPropertyValue("--select-rel-edge").trim() || "oklch(0.72 0.13 235 / 0.95)";
+    this._portalRing = style.getPropertyValue("--portal-ring").trim() || "oklch(0.76 0.16 300 / 0.9)";
   }
 
   _draw() {
@@ -981,6 +982,18 @@ class MonossGraph {
         ctx.strokeStyle = "oklch(0.95 0 0 / 0.45)";
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + 3.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (mote.properties && mote.properties.portal_garden && mote.properties.portal_mote) {
+        // Marks a mote as a portal into another garden -- a ring rather
+        // than a third shape, following the same "extra stroke layered on
+        // the base circle/diamond" precedent selection/pinned/sim-preview
+        // already set. Sits inside the pinned ring's +3.5 so a pinned
+        // portal still shows both distinctly.
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = this._portalRing;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 2, 0, Math.PI * 2);
         ctx.stroke();
       }
       if (this.simHighlightIds.has(id)) {

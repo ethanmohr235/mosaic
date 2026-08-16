@@ -8,6 +8,7 @@ from mcp_server.server import (
     create_garden,
     create_instance,
     create_mote,
+    create_portal,
     create_relationship,
     delete_mote,
     delete_property,
@@ -24,6 +25,7 @@ from mcp_server.server import (
     mote_relationships,
     neighborhood,
     preview_simulation,
+    resolve_portal,
     reserved_names,
     search_motes,
     set_species,
@@ -107,6 +109,30 @@ def test_search_motes_key_value_and_limit():
 
     assert len(search_motes("status = open", garden=GARDEN)) == 2
     assert len(search_motes("status = open", limit=1, garden=GARDEN)) == 1
+
+
+def test_create_portal_and_resolve_round_trip():
+    create_garden("other")
+    target = create_mote({"name": "Target"}, "other")
+
+    portal = create_portal("other", target["id"], garden=GARDEN)
+    assert portal["properties"]["portal_garden"] == "other"
+    assert portal["properties"]["portal_mote"] == target["id"]
+
+    result = resolve_portal(portal["id"], GARDEN)
+    assert result["garden"] == "other"
+    assert result["mote"]["id"] == target["id"]
+
+
+def test_create_portal_rejects_missing_target_garden():
+    with pytest.raises(LookupError):
+        create_portal("nonexistent", "some-id", garden=GARDEN)
+
+
+def test_resolve_portal_rejects_non_portal_mote():
+    plain = create_mote({"name": "Plain"}, GARDEN)
+    with pytest.raises(ValueError):
+        resolve_portal(plain["id"], GARDEN)
 
 
 # ---- gardens ----
@@ -286,4 +312,6 @@ def test_preview_simulation_rejects_a_zero_step_count(box):
 def test_reserved_names_lists_the_interpreted_keys():
     names = reserved_names()
     assert "equation" in names["properties"]
+    assert "portal_garden" in names["properties"]
+    assert "portal_mote" in names["properties"]
     assert INSTANCE_OF in names["relationshipTypes"]

@@ -194,7 +194,7 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
   return next;
 }
 
-async function loadGarden(garden) {
+async function loadGarden(garden, { focusId } = {}) {
   currentGarden = garden;
   $("garden-label").textContent = garden;
   closeSimBar();
@@ -207,12 +207,16 @@ async function loadGarden(garden) {
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
   viewSettings = loadViewSettings(garden);
   graph.setViewSettings(viewSettings);
-  const stored = localStorage.getItem(lastFocusKey(garden)) || null;
+  const stored = focusId || localStorage.getItem(lastFocusKey(garden)) || null;
   await refreshMoteCache();
-  // Frame the whole garden on open rather than panning to the remembered
-  // mote -- you want to see where you are before you go anywhere.
-  await refocus(stored, { pan: false, select: false });
-  graph.fitWhenSettled();
+  // An explicit focusId (a portal jump) means go straight there and
+  // select it, like clicking a search result would. Otherwise frame the
+  // whole garden on open rather than panning to the remembered mote --
+  // you want to see where you are before you go anywhere -- which is
+  // also why fitWhenSettled() below is skipped for a portal jump: it
+  // re-fits every tick for a couple of seconds and would fight the pan.
+  await refocus(stored, { pan: !!focusId, select: !!focusId });
+  if (!focusId) graph.fitWhenSettled();
 }
 
 async function refreshMoteCache() {
@@ -1177,6 +1181,16 @@ function openLink(url) {
   call(api.open_link(url));
 }
 
+/** Follows a portal mote: resolves+switches gardens in one backend call
+ *  (Api.jump_to_portal), then rebuilds the graph on the target garden,
+ *  landing panned/selected on the target mote itself rather than the
+ *  target garden's own last-focused one. */
+async function jumpToPortal(moteId) {
+  const result = await call(api.jump_to_portal(moteId));
+  closeDetailPanel();
+  await loadGarden(result.garden, { focusId: result.mote_id });
+}
+
 /** A tiny inline trend line for one property's history -- hand-rolled
  *  canvas draw, no charting library, same spirit as graph.js's own
  *  from-scratch renderer. min/max-scaled so a flat run of identical
@@ -1283,6 +1297,21 @@ function renderProperties(mote, history, baseMote) {
       open.title = "Open";
       open.addEventListener("click", () => openLink(value));
       trailing.push(open);
+    }
+    // "portal_garden"/"portal_mote" together mark this mote as a portal
+    // into another garden -- same one-click-to-follow treatment as url
+    // above, shown on the portal_mote row specifically since that's the
+    // half that actually identifies a destination.
+    if (
+      key === "portal_mote" && typeof value === "string" && value.trim() &&
+      typeof mote.properties.portal_garden === "string" && mote.properties.portal_garden.trim()
+    ) {
+      const jump = document.createElement("button");
+      jump.className = "open-link portal-jump";
+      jump.textContent = "↗";
+      jump.title = `Jump to ${mote.properties.portal_garden}`;
+      jump.addEventListener("click", () => jumpToPortal(mote.id));
+      trailing.push(jump);
     }
     row.append(keyEl, field, ...trailing, del);
     container.appendChild(row);
@@ -1924,6 +1953,11 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     addMenuItem(menu, "Delete", () => deleteSelection(), { danger: true });
   } else {
     addMenuItem(menu, "New mote here", () => openQuickAddAt(worldX, worldY, clientX, clientY));
+    // With only one garden there's nowhere to portal to, so the item is
+    // omitted entirely rather than shown disabled.
+    if ((await call(api.list_gardens())).length > 1) {
+      addMenuItem(menu, "New portal…", () => openPortalModalAt(worldX, worldY));
+    }
     const pasteLabel = clipboard && clipboard.length > 1 ? `Paste ${clipboard.length} motes` : "Paste";
     addMenuItem(menu, pasteLabel, () => pasteAt(worldX, worldY), { disabled: !clipboard });
   }
@@ -2296,6 +2330,96 @@ function setupGardensModal() {
     closeGardensModal();
     await loadGarden(result.garden);
     showToast(`Imported ${result.motes} motes, ${result.relationships} relationships.`);
+  });
+}
+
+// ---- portal picker ----
+//
+// Reached from "New portal…" on the empty-canvas context menu. Modeled on
+// the search palette (#search-overlay) for its result-list markup, but
+// each keystroke round-trips to Python and opens a real sqlite connection
+// against the *target* garden (Api.find_portal_target) rather than
+// filtering an already-cached array the way the in-garden search palette
+// does -- hence the debounce below, which that palette doesn't need.
+
+let portalPlaceAt = null;      // world coords from the context-menu click, for graph.placeAt
+let portalSearchTimer = null;
+
+function openPortalModalAt(worldX, worldY) {
+  portalPlaceAt = { x: worldX, y: worldY };
+  $("portal-overlay").classList.remove("hidden");
+  $("portal-search-input").value = "";
+  renderPortalResults([]);
+  renderPortalGardenOptions().then(refreshPortalResults);
+  $("portal-search-input").focus();
+}
+
+function closePortalModal() {
+  $("portal-overlay").classList.add("hidden");
+  portalPlaceAt = null;
+}
+
+async function renderPortalGardenOptions() {
+  const gardens = (await call(api.list_gardens())).filter((g) => g !== currentGarden);
+  const select = $("portal-garden-select");
+  select.innerHTML = "";
+  for (const g of gardens) {
+    const opt = document.createElement("option");
+    opt.value = g;
+    opt.textContent = g;
+    select.appendChild(opt);
+  }
+}
+
+async function refreshPortalResults() {
+  const garden = $("portal-garden-select").value;
+  if (!garden) { renderPortalResults([]); return; }
+  const results = await call(api.find_portal_target(garden, $("portal-search-input").value));
+  renderPortalResults(results);
+}
+
+function renderPortalResults(results) {
+  const container = $("portal-search-results");
+  container.innerHTML = "";
+  if (results.length === 0) {
+    container.innerHTML = '<div class="search-empty">No matches</div>';
+    return;
+  }
+  for (const mote of results) {
+    const row = document.createElement("div");
+    row.className = "search-result-row";
+    row.innerHTML = '<span class="label"></span>';
+    row.querySelector(".label").textContent = nodeLabel(mote);
+    row.addEventListener("mousedown", async (e) => {
+      e.preventDefault();
+      const garden = $("portal-garden-select").value;
+      const placeAt = portalPlaceAt;
+      closePortalModal();
+      // Snapshotted once here, not kept in sync afterward -- a portal
+      // has no live coupling to its target beyond the stored pointer.
+      // Ordering (select, then placeAt/savePositions) matches "New mote
+      // here"'s own create-mote-btn handler above.
+      const portal = await call(api.create_portal(garden, mote.id, { name: nodeLabel(mote) }));
+      await refreshMoteCache();
+      await selectMote(portal.id, { pan: !placeAt });
+      if (placeAt) {
+        graph.placeAt(portal.id, placeAt.x, placeAt.y);
+        savePositions();
+      }
+      showToast(`Portal to '${garden}' created.`);
+    });
+    container.appendChild(row);
+  }
+}
+
+function setupPortalModal() {
+  $("portal-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("portal-overlay")) closePortalModal();
+  });
+  $("portal-garden-select").addEventListener("change", refreshPortalResults);
+  $("portal-search-input").addEventListener("input", () => {
+    clearTimeout(portalSearchTimer);
+    portalSearchTimer = setTimeout(refreshPortalResults, 150);
   });
 }
 
@@ -2765,6 +2889,7 @@ function setupKeyboard() {
     if (e.key !== "Escape") return;
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
+    if (!$("portal-overlay").classList.contains("hidden")) { closePortalModal(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (openMenuName) { closeTopMenus(); return; }
@@ -2829,6 +2954,7 @@ async function init() {
   window.graph = graph;
 
   setupGardensModal();
+  setupPortalModal();
   setupTopMenus();
   setupDetailResize();
   setupQuickAdd();

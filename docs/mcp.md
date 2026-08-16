@@ -35,16 +35,16 @@ both.
 
 ## Tools
 
-31 tools, grouped: gardens (`list_gardens`, `create_garden`,
+33 tools, grouped: gardens (`list_gardens`, `create_garden`,
 `export_garden`), motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
 `species_of`, `instances_of`, `set_species`, `set_template`,
-`template_for`, `create_instance`), graph (`neighborhood`,
-`whole_garden`), simulation (`preview_simulation`, `list_runs`,
-`get_run`, `run_changes`, `run_ticks`, `mote_history`), and
-`reserved_names`.
+`template_for`, `create_instance`), portals (`create_portal`,
+`resolve_portal`), graph (`neighborhood`, `whole_garden`), simulation
+(`preview_simulation`, `list_runs`, `get_run`, `run_changes`, `run_ticks`,
+`mote_history`), and `reserved_names`.
 
 Every tool takes an optional `garden`, defaulting to `default`.
 
