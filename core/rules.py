@@ -8,15 +8,32 @@ property. Nothing else marks either as special -- same philosophy as
 `core/species.py`.
 """
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-from core.entities import Mote
+from core.entities import Mote, Relationship
 from core.motes import get_mote
 from core.relationships import list_relationships
 
 APPLIES_TO = "applies_to"
 EQUATION_KEY = "equation"
 UNKNOWNS_KEY = "unknowns"
+
+
+def rule_ids_in(relationships: Iterable[Relationship]) -> set[str]:
+    """Which motes a set of relationships points at a species from -- the
+    source of an applies_to. Being a rule also needs an `equation` (see
+    has_equation), which is why this alone isn't the whole test: a mote
+    with applies_to and no equation is a half-built rule, skipped by
+    list_rules() rather than treated as one."""
+    return {r.from_id for r in relationships if r.type == APPLIES_TO}
+
+
+def has_equation(properties: dict) -> bool:
+    """The property half of "is this a rule" -- the same check
+    list_rules() makes before accepting one."""
+    equation = properties.get(EQUATION_KEY)
+    return isinstance(equation, str) and bool(equation.strip())
 
 
 @dataclass(frozen=True)
@@ -37,12 +54,9 @@ def list_rules(conn: sqlite3.Connection) -> list[Rule]:
     rules = []
     for rel in list_relationships(conn, type_=APPLIES_TO):
         mote = get_mote(conn, rel.from_id)
-        if mote is None:
+        if mote is None or not has_equation(mote.properties):
             continue
-        equation = mote.properties.get(EQUATION_KEY)
-        if not isinstance(equation, str) or not equation.strip():
-            continue
-        rules.append(Rule(mote=mote, species_id=rel.to_id, equation=equation))
+        rules.append(Rule(mote=mote, species_id=rel.to_id, equation=mote.properties[EQUATION_KEY]))
     return rules
 
 

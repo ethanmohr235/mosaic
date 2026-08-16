@@ -15,14 +15,15 @@ from core.db import get_connection, initialize_database
 from core import gardens as gardens_repo
 from core import garden_io
 from core import google_calendar as gcal_repo
-from core import graph as graph_repo
 from core import folders as folders_repo
+from core import graph as graph_repo
 from core import library as library_repo
 from core import links as links_repo
 from core import motes as motes_repo
 from core import portals as portals_repo
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
+from core import roles as roles_repo
 from core import simulation as simulation_repo
 from core import species as species_repo
 
@@ -49,22 +50,17 @@ def _coerce_properties(raw_properties: dict) -> dict:
 
 
 def _classify(motes: list, rels: list) -> dict:
-    """species_ids/folder_ids for a set of motes/relationships -- shared
-    by focus() (the currently-open garden) and library_snapshot() (a
-    read of _library) so the two don't drift.
+    """What each returned mote *is* -- shared by focus() (the currently-
+    open garden) and library_snapshot() (a read of _library) so the two
+    don't drift.
 
-    What makes a mote a species or a folder is core's to decide
-    (species_ids_in/folder_ids_in), not this adapter's: this used to be
-    a second, independent copy of those rules, which is how a subtlety
-    like "template_of counts as a species too" ends up true in one place
-    and false in another. All that's left here is narrowing the answer
-    to the motes actually being returned."""
-    species_target_ids = species_repo.species_ids_in(rels)
-    folder_target_ids = folders_repo.folder_ids_in(rels)
-    return {
-        "species_ids": [m.id for m in motes if m.id in species_target_ids],
-        "folder_ids": [m.id for m in motes if m.id in folder_target_ids],
-    }
+    One `roles` map rather than the species_ids/folder_ids arrays this
+    used to return: those were two of six roles core recognizes
+    (core/roles.py), and the frontend had no way to hear about the other
+    four, which is why a portal mote's detail panel said "Mote" while
+    the canvas drew it with a portal ring. Adding a role is now a change
+    to the table, not to this payload's shape."""
+    return {"roles": roles_repo.roles_in(motes, rels)}
 
 
 def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
@@ -607,7 +603,7 @@ class Api:
         if mote_id is None:
             mote_id = graph_repo.most_recent_mote_id(self._conn)
         if mote_id is None:
-            return {"focus_id": None, "motes": [], "relationships": [], "species_ids": [], "folder_ids": []}
+            return {"focus_id": None, "motes": [], "relationships": [], "roles": {}}
 
         if hops is None:
             motes, rels = graph_repo.whole_garden(self._conn)

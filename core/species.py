@@ -54,12 +54,20 @@ def list_species(conn: sqlite3.Connection) -> list[Mote]:
     return get_motes(conn, list(species_ids_in(list_relationships(conn))))
 
 
+def template_ids_in(relationships: Iterable[Relationship]) -> set[str]:
+    """Which motes a set of relationships makes into templates -- the
+    *source* of a template_of, where species_ids_in() takes the target.
+    Pure counterpart of template_mote_ids(), same split as
+    species_ids_in()/list_species()."""
+    return {r.from_id for r in relationships if r.type == TEMPLATE_OF}
+
+
 def template_mote_ids(conn: sqlite3.Connection) -> set[str]:
     """Every mote currently acting as a template -- the source of at
     least one template_of relationship. These hold starting properties
     for a species, not real data, so a caller that only wants "real"
     motes (e.g. calendar export) should exclude them."""
-    return {r.from_id for r in list_relationships(conn, type_=TEMPLATE_OF)}
+    return template_ids_in(list_relationships(conn, type_=TEMPLATE_OF))
 
 
 def set_template(conn: sqlite3.Connection, mote_id: str, species_id: str) -> str:

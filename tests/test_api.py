@@ -33,7 +33,7 @@ def test_focus_empty_garden_returns_none(api):
     result = api.focus()
     assert result["focus_id"] is None
     assert result["motes"] == []
-    assert result["folder_ids"] == []
+    assert result["roles"] == {}
 
 
 def test_focus_none_picks_most_recent(api):
@@ -82,19 +82,22 @@ def test_focus_with_no_hops_limit_returns_the_whole_garden(api):
 
 
 def test_species_with_only_a_template_is_reported_as_a_species(api):
-    # The UI drives "New instance" and the species legend off species_ids,
-    # so a species set up with a template but no instances yet has to
-    # register -- otherwise there is no way to create its first instance.
+    # The UI drives "New instance" and the species legend off the roles
+    # map, so a species set up with a template but no instances yet has
+    # to register -- otherwise there is no way to create its first
+    # instance. The template registers as one too, which is how the
+    # detail panel can say what it is.
     species = api.create_mote({"name": "Resistor"})
     template = api.create_mote({"name": "R", "resistance": "100"})
     api.set_template(template["id"], species["id"])
 
     result = api.focus(template["id"], None)
-    assert result["species_ids"] == [species["id"]]
+    assert result["roles"][species["id"]] == ["species"]
+    assert result["roles"][template["id"]] == ["template"]
 
 
 def test_list_species_reports_every_species_in_the_garden(api):
-    # Garden-wide, unlike focus()'s species_ids, which only classifies
+    # Garden-wide, unlike focus()'s roles map, which only classifies
     # the motes in the returned neighborhood.
     species = api.create_mote({"name": "Resistor"})
     instance = api.create_mote({"name": "R1"})
@@ -104,13 +107,13 @@ def test_list_species_reports_every_species_in_the_garden(api):
     assert [m["id"] for m in api.list_species()] == [species["id"]]
 
 
-def test_focus_reports_folder_ids(api):
+def test_focus_reports_the_folder_role(api):
     folder = api.create_mote({"name": "Thermodynamics"})
     member = api.create_mote({"name": "Entropy"})
     api.set_folder(member["id"], folder["id"])
 
     result = api.focus(member["id"], None)
-    assert result["folder_ids"] == [folder["id"]]
+    assert result["roles"] == {folder["id"]: ["folder"]}
 
 
 def test_set_folder_creates_an_in_folder_relationship(api):
@@ -203,11 +206,10 @@ def test_library_snapshot_returns_motes_relationships_and_classification(api):
     result = api.library_snapshot()
     assert any(m["properties"].get("name") == "Task" for m in result["motes"])
     assert result["relationships"] == []
-    assert result["species_ids"] == []
-    assert result["folder_ids"] == []
+    assert result["roles"] == {}
 
 
-def test_library_snapshot_reports_folder_ids_from_within_the_library(api):
+def test_library_snapshot_reports_roles_from_within_the_library(api):
     api.open_library()
     folder = api.create_mote({"name": "Thermodynamics"})
     member = api.create_mote({"name": "Entropy"})
@@ -215,7 +217,7 @@ def test_library_snapshot_reports_folder_ids_from_within_the_library(api):
     api.switch_garden("test")
 
     result = api.library_snapshot()
-    assert result["folder_ids"] == [folder["id"]]
+    assert result["roles"] == {folder["id"]: ["folder"]}
 
 
 def test_reuse_from_library_copies_an_entry_into_the_current_garden(api):
@@ -364,13 +366,13 @@ def test_export_garden_defaults_to_the_current_garden(api, tmp_path):
     assert names == ["CurrentMote"]
 
 
-def test_whole_garden_still_reports_species_ids(api):
+def test_whole_garden_still_reports_roles(api):
     species = api.create_mote({"name": "Node"})
     instance = api.create_mote({"name": "N1"})
     api.set_species(instance["id"], species["id"])
 
     result = api.focus(instance["id"], None)
-    assert result["species_ids"] == [species["id"]]
+    assert result["roles"][species["id"]] == ["species"]
 
 
 def test_coerce_properties_matches_repl_json_fallback_semantics():

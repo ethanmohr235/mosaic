@@ -9,6 +9,35 @@
 // Coordinates: nodes live in world space; the camera maps world -> screen
 // as `screen = center + camera.xy + world * scale`.
 
+// The roles core/roles.py recognizes. Mirrors that table's names -- the
+// frontend never decides for itself what a mote is, it only decides how
+// to draw and label what core says it already is.
+const ROLE = {
+  SPECIES: "species",
+  TEMPLATE: "template",
+  FOLDER: "folder",
+  PROPERTY_MODEL: "property_model",
+  RULE: "rule",
+  PORTAL: "portal",
+};
+
+// Human labels for the same, shown in the detail panel and search
+// results. Keyed by role name so an added role is one line here.
+const ROLE_LABEL = {
+  species: "Species",
+  template: "Template",
+  folder: "Folder",
+  property_model: "Property model",
+  rule: "Rule",
+  portal: "Portal",
+};
+
+/** The mote ids playing `role`, out of the roles map ui/api.py returns.
+ *  Lives in graph.js because it loads first and both files need it. */
+function idsWithRole(roles, role) {
+  return Object.keys(roles || {}).filter((id) => (roles[id] || []).includes(role));
+}
+
 const REPULSION = 1500;
 const SAME_SPECIES_SPRING = 0.05;
 const CROSS_SPECIES_SPRING = 0.006;
@@ -143,8 +172,12 @@ class MonossGraph {
   setData(payload, pinnedPositions = {}) {
     this.motes = payload.motes || [];
     this.relationships = payload.relationships || [];
-    this.speciesIds = new Set(payload.species_ids || []);
-    this.folderIds = new Set(payload.folder_ids || []);
+    // What a mote is comes from core's role table (core/roles.py) as one
+    // `roles` map, rather than a separate id array per role -- adding a
+    // role upstream doesn't change this payload's shape.
+    this.roles = payload.roles || {};
+    this.speciesIds = new Set(idsWithRole(this.roles, ROLE.SPECIES));
+    this.folderIds = new Set(idsWithRole(this.roles, ROLE.FOLDER));
     this._moteById = new Map(this.motes.map((m) => [m.id, m]));
     this._invalidateColors();
 

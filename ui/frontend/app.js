@@ -7,7 +7,7 @@ let api;
 let graph;
 let currentGarden = null;
 let focusId = null;
-let payload = { motes: [], relationships: [], species_ids: [], folder_ids: [] };
+let payload = { motes: [], relationships: [], roles: {} };
 let allMotes = [];
 let quickAddSpeciesId = null;
 let speciesPickerTargetId = null;
@@ -164,17 +164,32 @@ function moteById(id) {
   return payload.motes.find((m) => m.id === id) || allMotes.find((m) => m.id === id) || null;
 }
 
-/** Label for whatever a mote *is* -- its species names, or a structural
- *  role if it plays one. Shown above the title in the detail panel and in
- *  search results. */
+/** Label for whatever a mote *is*: the roles core says it plays, else
+ *  its species names, else plain "Mote". Shown above the title in the
+ *  detail panel and in search results.
+ *
+ *  Every role comes from core/roles.py's table via the payload, so this
+ *  no longer has its own partial idea of what exists -- it used to know
+ *  Species, Folder and Rule (that last one by sniffing for an `equation`
+ *  property itself) and had no idea what a portal, template or property
+ *  model was, even while graph.js drew portals with their own ring. */
 function kindLabel(mote) {
   if (!mote) return "";
-  if (payload.species_ids.includes(mote.id)) return "Species";
-  if (payload.folder_ids.includes(mote.id)) return "Folder";
+  const roles = rolesOf(mote.id);
+  if (roles.length) return roles.map((r) => ROLE_LABEL[r] || r).join(" · ");
   const species = speciesIdsOf(mote.id).map(moteById).filter(Boolean).map(nodeLabel);
   if (species.length) return species.join(", ");
-  if (mote.properties && mote.properties.equation) return "Rule";
   return "Mote";
+}
+
+/** The roles core assigned this mote, or [] for an ordinary one --
+ *  motes with no role are left out of the payload entirely. */
+function rolesOf(moteId) {
+  return (payload.roles && payload.roles[moteId]) || [];
+}
+
+function hasRole(moteId, role) {
+  return rolesOf(moteId).includes(role);
 }
 
 // ---- graph data ----
@@ -239,7 +254,7 @@ function speciesRows() {
   const counts = new Map();
   let untyped = 0;
   for (const mote of payload.motes) {
-    if (payload.species_ids.includes(mote.id)) continue;
+    if (hasRole(mote.id, ROLE.SPECIES)) continue;
     const species = speciesIdsOf(mote.id);
     if (species.length === 0) { untyped += 1; continue; }
     for (const id of species) counts.set(id, (counts.get(id) || 0) + 1);
@@ -247,7 +262,7 @@ function speciesRows() {
   // speciesColorFor, not colorFor: these rows are about species membership
   // (they're the species filter, and the chips that pick one), which is
   // still true when the canvas is colored by a property or a count.
-  const rows = payload.species_ids.map((id) => ({
+  const rows = idsWithRole(payload.roles, ROLE.SPECIES).map((id) => ({
     id,
     label: nodeLabel(moteById(id) || { id, properties: {} }),
     count: counts.get(id) || 0,
@@ -299,10 +314,10 @@ function renderLegend() {
 function folderRows() {
   const counts = new Map();
   for (const mote of payload.motes) {
-    if (payload.folder_ids.includes(mote.id)) continue;
+    if (hasRole(mote.id, ROLE.FOLDER)) continue;
     for (const id of folderIdsOf(mote.id)) counts.set(id, (counts.get(id) || 0) + 1);
   }
-  const rows = payload.folder_ids.map((id) => ({
+  const rows = idsWithRole(payload.roles, ROLE.FOLDER).map((id) => ({
     id,
     label: nodeLabel(moteById(id) || { id, properties: {} }),
     count: counts.get(id) || 0,
@@ -1406,7 +1421,7 @@ function renderSpeciesSection(mote, species, instances) {
 
   // Instantiating from a species is offered on the species itself, which
   // is where you are when you think "I want another one of these".
-  const isSpecies = instances.length > 0 || payload.species_ids.includes(mote.id);
+  const isSpecies = instances.length > 0 || hasRole(mote.id, ROLE.SPECIES);
   $("new-instance-btn").classList.toggle("hidden", !isSpecies);
   $("detail-instance-count").textContent =
     instances.length > 0 ? `${instances.length} instance${instances.length === 1 ? "" : "s"}` : "";
@@ -2659,7 +2674,7 @@ function setupPortalModal() {
 // no per-keystroke round trip, unlike the portal picker.
 
 let libraryPlaceAt = null;     // world coords from the context-menu click, for graph.placeAt
-let librarySnapshot = null;    // {motes, relationships, species_ids, folder_ids}
+let librarySnapshot = null;    // {motes, relationships, roles}
 const librarySpeciesFilter = new Set();
 const libraryFolderFilter = new Set();
 const libraryRelFilter = new Set();
@@ -2687,7 +2702,7 @@ function closeLibraryModal() {
  *  librarySnapshot instead of the live payload -- the library is a
  *  different garden from whichever one is currently open. */
 function librarySpeciesRows() {
-  return librarySnapshot.species_ids.map((id) => ({
+  return idsWithRole(librarySnapshot.roles, ROLE.SPECIES).map((id) => ({
     id,
     label: nodeLabel(librarySnapshot.motes.find((m) => m.id === id) || { id, properties: {} }),
     color: "oklch(0.68 0.16 320)",
@@ -2695,7 +2710,7 @@ function librarySpeciesRows() {
 }
 
 function libraryFolderRows() {
-  return librarySnapshot.folder_ids.map((id) => ({
+  return idsWithRole(librarySnapshot.roles, ROLE.FOLDER).map((id) => ({
     id,
     label: nodeLabel(librarySnapshot.motes.find((m) => m.id === id) || { id, properties: {} }),
     color: "oklch(0.68 0.13 250)",

@@ -34,9 +34,24 @@ Folders have no effect on simulation or storage beyond the relationship itself: 
 
 # Roles
 
-Species, template, folder and property model are all the same idea: a mote plays a role because of the relationships pointing at it, never because of anything stored on the mote itself. Each role is defined exactly once, in the module that owns it, as a pure function over a list of relationships -- `core/species.py::species_ids_in()`, `core/folders.py::folder_ids_in()`, `core/model_resolver.py::model_ids_in()` -- with that module's `list_*()` being the same question asked as a query.
+Species, template, folder, property model, rule and portal are all the same idea: an ordinary mote that plays a **role** because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
 
-The pure form is what a caller holding an already-fetched subgraph uses (`ui/api.py::focus()` classifies exactly the motes it is about to return, and does the same for the library garden). Adapters must not answer "is this a species" for themselves: that is how a subtlety like "a `template_of` target counts as a species too" ends up true in the UI and false in the CLI.
+`core/roles.py` is where it is answered, once. It is an index, not an implementation: each role's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()` -- and the `ROLES` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for roles, and `docs/style.md` rules out the global mutable state a `register_role()` would need.
+
+| role | recognized by |
+| --- | --- |
+| species | target of `instance_of` or `template_of` |
+| template | source of `template_of` |
+| folder | target of `in_folder` |
+| property model | target of `uses_model` |
+| rule | source of `applies_to` **and** carries an `equation` |
+| portal | carries `portal_garden` + `portal_mote` |
+
+Two forms, one answer: `roles_in(motes, relationships)` for a caller holding an already-fetched subgraph (each role's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Roles are not exclusive -- a species can also be a folder, and a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
+
+`ui/api.py::focus()` and `library_snapshot()` return this as one `roles` map (mote id -> role names; motes with no role are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six roles hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a role is now a change to the table, not to a payload.
+
+Adapters must not answer "is this a species" for themselves. That is how a subtlety ends up true in one surface and false in another.
 
 # Simulation
 
