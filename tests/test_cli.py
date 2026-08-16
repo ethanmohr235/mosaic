@@ -1,8 +1,18 @@
 import pytest
 
-from cli.main import _handle_garden, _handle_mote, _handle_model, _handle_simulate, build_parser
+from cli.main import (
+    _handle_folder,
+    _handle_garden,
+    _handle_library,
+    _handle_model,
+    _handle_mote,
+    _handle_portal,
+    _handle_simulate,
+    _handle_species,
+    build_parser,
+)
 from core.gardens import garden_exists
-from core.motes import create_mote
+from core.motes import create_mote, list_motes
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
 from core.species import set_species
@@ -208,3 +218,101 @@ def test_garden_delete_missing_raises():
 def test_garden_restore_without_a_prior_delete_raises():
     with pytest.raises(LookupError):
         _handle_garden(parse(["garden", "restore", "never-deleted"]))
+
+
+# ---- species / folders / portals / library / search ----
+#
+# The charter (docs/architecture.md, "What belongs on which surface")
+# gives the CLI everything scriptable. These reached only the app or only
+# MCP before.
+
+def test_species_commands_cover_set_template_and_instantiate(conn, capsys):
+    species = create_mote(conn, {"name": "Resistor"})
+    template = create_mote(conn, {"name": "R", "resistance": 100})
+
+    _handle_species(conn, parse(["species", "template", "--id", template, "--species", species]))
+    _handle_species(conn, parse(["species", "new", "--species", species, "--properties", '{"name":"R1"}']))
+    capsys.readouterr()
+
+    _handle_species(conn, parse(["species", "instances", "--id", species]))
+    out = capsys.readouterr().out
+    assert "R1" in out
+    assert "'resistance': 100" in out, "a new instance should inherit the template"
+
+
+def test_species_list_and_of(conn, capsys):
+    species = create_mote(conn, {"name": "Person"})
+    alice = create_mote(conn, {"name": "Alice"})
+    set_species(conn, alice, species)
+
+    _handle_species(conn, parse(["species", "list"]))
+    assert species in capsys.readouterr().out
+
+    _handle_species(conn, parse(["species", "of", "--id", alice]))
+    assert species in capsys.readouterr().out
+
+
+def test_folder_commands_file_and_read_back(conn, capsys):
+    folder = create_mote(conn, {"name": "Thermodynamics"})
+    note = create_mote(conn, {"name": "Entropy"})
+
+    _handle_folder(conn, parse(["folder", "set", "--id", note, "--folder", folder]))
+    assert "filed under" in capsys.readouterr().out
+
+    _handle_folder(conn, parse(["folder", "members", "--id", folder]))
+    assert note in capsys.readouterr().out
+
+    _handle_folder(conn, parse(["folder", "of", "--id", note]))
+    assert folder in capsys.readouterr().out
+
+    _handle_folder(conn, parse(["folder", "list"]))
+    assert folder in capsys.readouterr().out
+
+
+def test_mote_search_by_text_and_key_value(conn, capsys):
+    create_mote(conn, {"name": "Alice", "role": "engineer"})
+    create_mote(conn, {"name": "Bob", "role": "doctor"})
+
+    _handle_mote(conn, parse(["mote", "search", "engineer"]))
+    out = capsys.readouterr().out
+    assert "Alice" in out and "Bob" not in out
+
+    _handle_mote(conn, parse(["mote", "search", "role = doctor"]))
+    out = capsys.readouterr().out
+    assert "Bob" in out and "Alice" not in out
+
+
+def test_library_save_list_and_use(conn, capsys):
+    mote = create_mote(conn, {"name": "Standup", "duration": 15})
+
+    _handle_library(conn, parse(["library", "save", "--id", mote]))
+    entry_id = capsys.readouterr().out.split("id=")[-1].strip()
+
+    _handle_library(conn, parse(["library", "list"]))
+    assert "Standup" in capsys.readouterr().out
+
+    _handle_library(conn, parse(["library", "use", "--id", entry_id, "--properties", '{"name":"Monday"}']))
+    capsys.readouterr()
+    copies = [m for m in list_motes(conn) if m.properties.get("name") == "Monday"]
+    assert copies and copies[0].properties["duration"] == 15
+
+
+def test_portal_create_and_resolve(conn, capsys):
+    from core.db import get_connection, initialize_database
+    from core.gardens import create_garden
+
+    create_garden("elsewhere")
+    other = get_connection("elsewhere")
+    try:
+        initialize_database(other)
+        target = create_mote(other, {"name": "Reactor"})
+    finally:
+        other.close()
+
+    _handle_portal(conn, parse(["portal", "create", "--to-garden", "elsewhere", "--to-mote", target]))
+    portal_id = capsys.readouterr().out.split("id=")[-1].split()[0]
+
+    _handle_portal(conn, parse(["portal", "resolve", "--id", portal_id]))
+    out = capsys.readouterr().out
+    assert "Garden: elsewhere" in out
+    assert "Reactor" in out

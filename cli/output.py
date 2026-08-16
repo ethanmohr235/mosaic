@@ -16,6 +16,7 @@ import sqlite3
 from collections.abc import Iterable
 
 from core import model_resolver
+from core.entities import Mote
 from core.motes import get_mote, get_motes  # noqa: F401  (get_mote: print_model_detail)
 from core.providers import PropertyModelError, PropertyProvider
 from core.relationships import list_relationships
@@ -33,6 +34,14 @@ def print_models(conn: sqlite3.Connection, mote_id: str) -> None:
         return
     names = [m.properties.get("name", m.id[:8]) for m in get_motes(conn, model_ids)]
     print(f"Models: {', '.join(names)}")
+
+
+def print_motes(motes: Iterable[Mote]) -> None:
+    """The one way a list of motes is printed -- `mote list`, `mote
+    search`, `species instances`, `folder members`, `library list` are
+    all the same answer to different questions."""
+    for mote in motes:
+        print(f"[{mote.id}] {mote.properties}")
 
 
 def print_capabilities(provider: PropertyProvider) -> None:

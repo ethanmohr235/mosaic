@@ -5,7 +5,18 @@ import shlex
 
 from cli import output
 from core.db import get_connection, initialize_database
-from core.motes import create_mote, list_motes, get_mote, delete_mote, update_mote
+from core.folders import folder_members, folders_of, list_folders, set_folder
+from core.library import LIBRARY_GARDEN, reuse_from_library, save_to_library
+from core.motes import create_mote, list_motes, get_mote, delete_mote, search_motes, update_mote
+from core.portals import create_portal, resolve_portal
+from core.species import (
+    create_instance,
+    instances_of,
+    list_species,
+    set_species,
+    set_template,
+    species_of,
+)
 from core.relationships import (
     create_relationship,
     list_relationships,
@@ -38,6 +49,26 @@ HELP_TEXT = """
     mote list                                              List all motes
     mote update id=<mote_id> [key=value ...]               Update properties for a mote
     mote delete id=<mote_id>                                Delete a mote
+    mote search <text>                                     Find motes by text, or "key = value"
+
+    species list                                           List every mote acting as a species
+    species of id=<mote_id>                                Species a mote is an instance of
+    species instances id=<species_id>                      Instances of a species
+    species set id=<mote_id> species=<species_id>          Declare a mote an instance
+    species template id=<mote_id> species=<species_id>     Make a mote a species' template
+    species new species=<species_id> [key=value ...]       New instance, seeded from the template
+
+    folder list                                            List every mote acting as a folder
+    folder of id=<mote_id>                                 Folders a mote is filed under
+    folder members id=<folder_id>                          Motes filed under a folder
+    folder set id=<mote_id> folder=<folder_id>             File a mote under a folder
+
+    portal create garden=<name> mote=<mote_id> [key=v ...] Create a portal into another garden
+    portal resolve id=<portal_id>                          Show what a portal points at
+
+    library list                                           List reusable-mote entries
+    library save id=<mote_id>                              Save a mote's properties to the library
+    library use id=<entry_id> [key=value ...]              Copy an entry into this garden
 
     rel create from=<mote_id> to=<mote_id> type=<type>     Create a relationship
     rel get id=<rel_id>                                    Get a relationship by id
@@ -73,6 +104,100 @@ def parse_properties(args_list: list[str]) -> dict:
         except json.JSONDecodeError:
             props[key] = val
     return props
+
+
+def _require(action_args: dict, *keys: str) -> bool:
+    """True when every key is present; prints which one is missing
+    otherwise. The REPL's key=value style means a typo shows up as a
+    missing key rather than an argparse error."""
+    for key in keys:
+        if key not in action_args:
+            print(f"Error: {key!r} is required")
+            return False
+    return True
+
+
+def _handle_species(conn, action: str, action_args: dict) -> None:
+    if action == "list":
+        output.print_motes(list_species(conn))
+    elif action == "of":
+        if _require(action_args, "id"):
+            output.print_motes(species_of(conn, action_args["id"]))
+    elif action == "instances":
+        if _require(action_args, "id"):
+            output.print_motes(instances_of(conn, action_args["id"]))
+    elif action == "set":
+        if _require(action_args, "id", "species"):
+            set_species(conn, action_args["id"], action_args["species"])
+            print(f"Mote {action_args['id']} is now an instance of {action_args['species']}")
+    elif action == "template":
+        if _require(action_args, "id", "species"):
+            set_template(conn, action_args["id"], action_args["species"])
+            print(f"Mote {action_args['id']} is now the template for {action_args['species']}")
+    elif action == "new":
+        if _require(action_args, "species"):
+            overrides = {k: v for k, v in action_args.items() if k != "species"}
+            print(f"Instance created with id={create_instance(conn, action_args['species'], overrides)}")
+    else:
+        print(f"Unknown species action: {action}")
+
+
+def _handle_folder(conn, action: str, action_args: dict) -> None:
+    if action == "list":
+        output.print_motes(list_folders(conn))
+    elif action == "of":
+        if _require(action_args, "id"):
+            output.print_motes(folders_of(conn, action_args["id"]))
+    elif action == "members":
+        if _require(action_args, "id"):
+            output.print_motes(folder_members(conn, action_args["id"]))
+    elif action == "set":
+        if _require(action_args, "id", "folder"):
+            set_folder(conn, action_args["id"], action_args["folder"])
+            print(f"Mote {action_args['id']} filed under {action_args['folder']}")
+    else:
+        print(f"Unknown folder action: {action}")
+
+
+def _handle_portal(conn, action: str, action_args: dict) -> None:
+    if action == "create":
+        if _require(action_args, "garden", "mote"):
+            extra = {k: v for k, v in action_args.items() if k not in ("garden", "mote")}
+            mote_id = create_portal(conn, action_args["garden"], action_args["mote"], extra)
+            print(f"Portal created with id={mote_id} -> {action_args['garden']}/{action_args['mote']}")
+    elif action == "resolve":
+        if _require(action_args, "id"):
+            mote = get_mote(conn, action_args["id"])
+            if mote is None:
+                print("No mote found.")
+                return
+            garden, target = resolve_portal(mote.properties)
+            print(f"Garden: {garden}")
+            output.print_motes([target])
+    else:
+        print(f"Unknown portal action: {action}")
+
+
+def _handle_library(conn, action: str, action_args: dict) -> None:
+    """`library list` reads the reserved library garden through its own
+    short-lived connection rather than the session's -- same pattern
+    core/library.py follows for save/reuse."""
+    if action == "list":
+        library_conn = get_connection(LIBRARY_GARDEN)
+        try:
+            initialize_database(library_conn)
+            output.print_motes(list_motes(library_conn))
+        finally:
+            library_conn.close()
+    elif action == "save":
+        if _require(action_args, "id"):
+            print(f"Saved to library with id={save_to_library(conn, action_args['id'])}")
+    elif action == "use":
+        if _require(action_args, "id"):
+            overrides = {k: v for k, v in action_args.items() if k != "id"}
+            print(f"Mote created with id={reuse_from_library(conn, action_args['id'], overrides)}")
+    else:
+        print(f"Unknown library action: {action}")
 
 
 def repl(garden: str | None = None) -> None:
@@ -176,8 +301,10 @@ def repl(garden: str | None = None) -> None:
                         output.print_models(conn, mote.id)
 
                 elif action == "list":
-                    for m in list_motes(conn):
-                        print(f"[{m.id}] {m.properties}")
+                    output.print_motes(list_motes(conn))
+
+                elif action == "search":
+                    output.print_motes(search_motes(conn, " ".join(action_args)))
 
                 elif action == "update":
                     props = parse_properties(action_args)
@@ -201,6 +328,19 @@ def repl(garden: str | None = None) -> None:
 
                 else:
                     print(f"Unknown mote action: {action}")
+
+            # --------- SPECIES / FOLDER / PORTAL / LIBRARY ---------
+            elif cmd in ("species", "folder", "portal", "library"):
+                if not args:
+                    print(f"Specify a {cmd} action")
+                    continue
+                handler = {
+                    "species": _handle_species,
+                    "folder": _handle_folder,
+                    "portal": _handle_portal,
+                    "library": _handle_library,
+                }[cmd]
+                handler(conn, args[0].lower(), parse_properties(args[1:]))
 
             # --------- RELATIONSHIP COMMANDS ---------
             elif cmd == "rel":
