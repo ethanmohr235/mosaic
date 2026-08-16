@@ -27,6 +27,7 @@
     <div id="garden-menu" class="menu hidden">
       <div id="garden-menu-list"></div>
       <div class="menu-sep"></div>
+      <button id="garden-menu-open-library" class="menu-item" type="button">Open library</button>
       <button id="garden-menu-new" class="menu-item" type="button">+ New garden…</button>
       <button id="garden-menu-manage" class="menu-item" type="button" title="Manage gardens">Manage gardens…</button>
     </div>
@@ -98,6 +99,9 @@
     <section id="control-panel">
       <div class="panel-heading">Species</div>
       <div id="legend"></div>
+
+      <div class="panel-heading" id="folder-heading">Folders</div>
+      <div id="legend-folders"></div>
 
       <div class="panel-heading" id="rel-heading">Relationships</div>
       <div id="rel-filters"></div>
@@ -235,6 +239,14 @@
         </div>
         <div id="detail-instance-count"></div>
 
+        <div class="panel-heading">Folder</div>
+        <div id="detail-folders"></div>
+        <button id="set-folder-btn" type="button" class="ghost">Add to folder…</button>
+        <div id="folder-picker-wrap" class="hidden">
+          <input type="text" id="folder-picker-input" placeholder="Search for a folder…" autocomplete="off">
+          <div id="folder-picker-results"></div>
+        </div>
+
         <div class="panel-heading">Relationships</div>
         <div id="detail-relationships"></div>
         <button id="connect-btn" type="button" class="ghost wide">Connect to…</button>
@@ -275,6 +287,7 @@
   <div id="search-modal">
     <input type="text" id="search-input" placeholder="Search motes and properties, or key = value…" autocomplete="off">
     <div id="search-species-chips" class="chip-row"></div>
+    <div id="search-folder-chips" class="chip-row"></div>
     <div id="search-rel-chips" class="chip-row"></div>
     <div id="search-results"></div>
     <div id="search-footer">
@@ -301,6 +314,17 @@
     <select id="portal-garden-select"></select>
     <input type="text" id="portal-search-input" placeholder="Search motes in that garden…" autocomplete="off">
     <div id="portal-search-results"></div>
+  </div>
+</div>
+
+<div id="library-overlay" class="hidden">
+  <div id="library-modal">
+    <div class="panel-title">Reuse from library</div>
+    <input type="text" id="library-search-input" placeholder="Search the library…" autocomplete="off">
+    <div id="library-species-chips" class="chip-row"></div>
+    <div id="library-folder-chips" class="chip-row"></div>
+    <div id="library-rel-chips" class="chip-row"></div>
+    <div id="library-search-results"></div>
   </div>
 </div>
 

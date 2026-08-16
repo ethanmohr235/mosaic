@@ -7,13 +7,15 @@ let api;
 let graph;
 let currentGarden = null;
 let focusId = null;
-let payload = { motes: [], relationships: [], species_ids: [] };
+let payload = { motes: [], relationships: [], species_ids: [], folder_ids: [] };
 let allMotes = [];
 let quickAddSpeciesId = null;
 let speciesPickerTargetId = null;
+let folderPickerTargetId = null;
 let searchVisible = [];
 let searchHighlight = -1;
 const searchSpeciesFilter = new Set();
+const searchFolderFilter = new Set();
 const searchRelFilter = new Set();
 let multiSelectIds = null;             // non-null while the aggregate panel is open
 let clipboard = null;                  // array of {sourceId, properties, offset} from Copy
@@ -56,6 +58,7 @@ const $ = (id) => document.getElementById(id);
 function positionsKey(garden) { return `monoss:positions:${garden}`; }
 function lastFocusKey(garden) { return `monoss:lastFocus:${garden}`; }
 function hiddenSpeciesKey(garden) { return `monoss:hiddenSpecies:${garden}`; }
+function hiddenFoldersKey(garden) { return `monoss:hiddenFolders:${garden}`; }
 function hiddenRelKey(garden) { return `monoss:hiddenRels:${garden}`; }
 function viewSettingsKey(garden) { return `monoss:viewSettings:${garden}`; }
 
@@ -167,6 +170,7 @@ function moteById(id) {
 function kindLabel(mote) {
   if (!mote) return "";
   if (payload.species_ids.includes(mote.id)) return "Species";
+  if (payload.folder_ids.includes(mote.id)) return "Folder";
   const species = speciesIdsOf(mote.id).map(moteById).filter(Boolean).map(nodeLabel);
   if (species.length) return species.join(", ");
   if (mote.properties && mote.properties.equation) return "Rule";
@@ -187,6 +191,7 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
   graph.select(select ? focusId : null, { pan });
   $("empty-state").classList.toggle("hidden", !!focusId);
   renderLegend();
+  renderFolderLegend();
   renderRelFilters();
   // Species and relationship types are what the settings panel is a list
   // of, so it has to follow the same data everything else here does.
@@ -204,6 +209,7 @@ async function loadGarden(garden, { focusId } = {}) {
   // nothing once a different one is open.
   if (attractorMode) exitAttractorMode();
   graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
+  graph.setHiddenFolders(readJSON(hiddenFoldersKey(garden), []));
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
   viewSettings = loadViewSettings(garden);
   graph.setViewSettings(viewSettings);
@@ -290,6 +296,48 @@ function renderLegend() {
   }
 }
 
+function folderRows() {
+  const counts = new Map();
+  for (const mote of payload.motes) {
+    if (payload.folder_ids.includes(mote.id)) continue;
+    for (const id of folderIdsOf(mote.id)) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  const rows = payload.folder_ids.map((id) => ({
+    id,
+    label: nodeLabel(moteById(id) || { id, properties: {} }),
+    count: counts.get(id) || 0,
+    color: "oklch(0.68 0.13 250)",
+    square: true,
+  }));
+  rows.sort((a, b) => a.label.localeCompare(b.label));
+  return rows;
+}
+
+function renderFolderLegend() {
+  const container = $("legend-folders");
+  const rows = folderRows();
+  $("folder-heading").classList.toggle("hidden", rows.length === 0);
+  container.innerHTML = "";
+  for (const row of rows) {
+    const el = document.createElement("div");
+    const hidden = graph.hiddenFolders.has(row.id);
+    el.className = "filter-row" + (hidden ? " off" : "");
+    el.title = hidden ? `Show ${row.label}` : `Hide ${row.label}`;
+    el.innerHTML =
+      `<span class="dot square" style="background:${row.color}"></span>` +
+      `<span class="name"></span><span class="count">${row.count}</span>`;
+    el.querySelector(".name").textContent = row.label;
+    el.addEventListener("click", () => {
+      const hiddenIds = new Set(graph.hiddenFolders);
+      hiddenIds.has(row.id) ? hiddenIds.delete(row.id) : hiddenIds.add(row.id);
+      graph.setHiddenFolders(hiddenIds);
+      localStorage.setItem(hiddenFoldersKey(currentGarden), JSON.stringify([...hiddenIds]));
+      renderFolderLegend();
+    });
+    container.appendChild(el);
+  }
+}
+
 function renderRelFilters() {
   const container = $("rel-filters");
   container.innerHTML = "";
@@ -326,10 +374,13 @@ function renderRelFilters() {
  *  layout via graph.resetView(). */
 function resetViewAndUnhideAll() {
   graph.setHiddenSpecies(new Set());
+  graph.setHiddenFolders(new Set());
   graph.setHiddenRelTypes(new Set());
   localStorage.removeItem(hiddenSpeciesKey(currentGarden));
+  localStorage.removeItem(hiddenFoldersKey(currentGarden));
   localStorage.removeItem(hiddenRelKey(currentGarden));
   renderLegend();
+  renderFolderLegend();
   renderRelFilters();
   graph.resetView();
 }
@@ -684,11 +735,12 @@ function setupViewSettings() {
 // ---- detail panel ----
 
 async function openDetailPanel(moteId) {
-  const [mote, rels, species, instances, history] = await Promise.all([
+  const [mote, rels, species, instances, folders, history] = await Promise.all([
     call(api.get_mote(moteId)),
     call(api.mote_relationships(moteId)),
     call(api.species_of(moteId)),
     call(api.instances_of(moteId)),
+    call(api.group_of(moteId)),
     call(api.mote_history(moteId)),
   ]);
   if (!mote) return;
@@ -714,6 +766,7 @@ async function openDetailPanel(moteId) {
 
   renderProperties(displayMote, history, mote);
   renderSpeciesSection(mote, species, instances);
+  renderFolderSection(mote, folders);
   renderRelationships(moteId, rels);
   $("detail-panel").classList.remove("hidden");
   fitAllTextareas();
@@ -1358,10 +1411,43 @@ function renderSpeciesSection(mote, species, instances) {
     instances.length > 0 ? `${instances.length} instance${instances.length === 1 ? "" : "s"}` : "";
 }
 
+function renderFolderSection(mote, folders) {
+  const container = $("detail-folders");
+  container.innerHTML = "";
+  if (folders.length === 0) {
+    container.innerHTML = '<div class="empty-note">Not grouped into any folder</div>';
+  }
+  for (const folderMote of folders) {
+    const rel = payload.relationships.find(
+      (r) => r.type === "groups" && r.from_id === mote.id && r.to_id === folderMote.id
+    );
+    const row = document.createElement("div");
+    row.className = "rel-row";
+
+    const label = document.createElement("span");
+    label.className = "rel-other";
+    label.textContent = nodeLabel(folderMote);
+    label.addEventListener("click", () => selectMote(folderMote.id));
+
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.title = "Remove from this folder";
+    del.addEventListener("click", async () => {
+      if (editBlocked()) return;
+      if (rel) await call(api.delete_relationship(rel.id));
+      await refocus(focusId, { pan: false });
+      await openDetailPanel(mote.id);
+    });
+
+    row.append(label, del);
+    container.appendChild(row);
+  }
+}
+
 function renderRelationships(moteId, rels) {
   const container = $("detail-relationships");
   container.innerHTML = "";
-  const shown = rels.filter((r) => r.type !== "instance_of");
+  const shown = rels.filter((r) => r.type !== "instance_of" && r.type !== "groups");
   if (shown.length === 0) {
     container.innerHTML = '<div class="empty-note">None</div>';
   }
@@ -1712,6 +1798,69 @@ function setupSpeciesControls() {
   });
 }
 
+// ---- folder picker ----
+//
+// Mirrors the species picker above closely -- a folder is just a mote
+// other motes point at via `groups`, the same way a species is just a
+// mote pointed at via `instance_of`, so this needs no gate on "is this
+// mote already a folder" any more than the species picker gates on
+// "is this mote already a species."
+
+function hideFolderPicker() {
+  $("folder-picker-wrap").classList.add("hidden");
+  $("folder-picker-input").value = "";
+  folderPickerTargetId = null;
+}
+
+function renderFolderPickerResults(query) {
+  const container = $("folder-picker-results");
+  container.innerHTML = "";
+  const q = (query || "").toLowerCase();
+  const candidates = allMotes
+    .filter((m) => m.id !== folderPickerTargetId)
+    .filter((m) => !q || nodeLabel(m).toLowerCase().includes(q))
+    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
+    .slice(0, 40);
+
+  if (candidates.length === 0) {
+    container.innerHTML = '<div class="search-empty">No matches</div>';
+    return;
+  }
+  for (const mote of candidates) {
+    const row = document.createElement("div");
+    row.className = "search-result-row";
+    row.innerHTML = '<span class="label"></span>';
+    row.querySelector(".label").textContent = nodeLabel(mote);
+    row.addEventListener("mousedown", async (e) => {
+      e.preventDefault();
+      if (editBlocked()) return;
+      const targetId = folderPickerTargetId;
+      await call(api.set_group(targetId, mote.id));
+      hideFolderPicker();
+      await refocus(targetId, { pan: false });
+      await openDetailPanel(targetId);
+    });
+    container.appendChild(row);
+  }
+}
+
+function setupFolderControls() {
+  $("set-folder-btn").addEventListener("click", () => {
+    if (editBlocked()) return;
+    if (!focusId) return;
+    folderPickerTargetId = focusId;
+    $("folder-picker-wrap").classList.remove("hidden");
+    renderFolderPickerResults("");
+    $("folder-picker-input").focus();
+  });
+  $("folder-picker-input").addEventListener("input", (e) =>
+    renderFolderPickerResults(e.target.value)
+  );
+  $("folder-picker-input").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideFolderPicker();
+  });
+}
+
 // ---- search palette ----
 
 // Matches "key = value" (or "key=value"), e.g. "priority = high" --
@@ -1746,24 +1895,38 @@ function matchesQuery(mote, query) {
   return false;
 }
 
-function speciesIdsOf(moteId) {
-  return payload.relationships
-    .filter((r) => r.type === "instance_of" && r.from_id === moteId)
-    .map((r) => r.to_id);
+/** motes/relationships-parametrized so both the main search palette
+ *  (against the live payload/allMotes) and the library picker (against a
+ *  one-off library_snapshot() read) share the exact same filtering
+ *  instead of the picker reinventing a weaker version of it. */
+function relatedTargetIds(relationships, moteId, type) {
+  return relationships.filter((r) => r.type === type && r.from_id === moteId).map((r) => r.to_id);
 }
 
-function computeSearchResults(query) {
-  return allMotes
+function speciesIdsOf(moteId) {
+  return relatedTargetIds(payload.relationships, moteId, "instance_of");
+}
+
+function folderIdsOf(moteId) {
+  return relatedTargetIds(payload.relationships, moteId, "groups");
+}
+
+function computeFilteredMotes(motes, relationships, query, { speciesFilter, folderFilter, relFilter } = {}) {
+  return motes
     .filter((mote) => {
-      if (searchSpeciesFilter.size) {
-        const ids = speciesIdsOf(mote.id);
-        const matches = ids.some((id) => searchSpeciesFilter.has(id)) ||
-          (searchSpeciesFilter.has("__none__") && ids.length === 0);
+      if (speciesFilter && speciesFilter.size) {
+        const ids = relatedTargetIds(relationships, mote.id, "instance_of");
+        const matches = ids.some((id) => speciesFilter.has(id)) ||
+          (speciesFilter.has("__none__") && ids.length === 0);
         if (!matches) return false;
       }
-      if (searchRelFilter.size) {
-        const touches = payload.relationships.some(
-          (r) => (r.from_id === mote.id || r.to_id === mote.id) && searchRelFilter.has(r.type)
+      if (folderFilter && folderFilter.size) {
+        const ids = relatedTargetIds(relationships, mote.id, "groups");
+        if (!ids.some((id) => folderFilter.has(id))) return false;
+      }
+      if (relFilter && relFilter.size) {
+        const touches = relationships.some(
+          (r) => (r.from_id === mote.id || r.to_id === mote.id) && relFilter.has(r.type)
         );
         if (!touches) return false;
       }
@@ -1773,41 +1936,52 @@ function computeSearchResults(query) {
     .slice(0, 60);
 }
 
-function renderSearchChips() {
-  const speciesBox = $("search-species-chips");
-  speciesBox.innerHTML = "";
-  for (const row of speciesRows()) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip" + (searchSpeciesFilter.has(row.id) ? " on" : "");
-    chip.style.borderColor = searchSpeciesFilter.has(row.id) ? row.color : "var(--border)";
-    chip.innerHTML = `<span class="dot" style="background:${row.color}"></span><span></span>`;
-    chip.querySelector("span:last-child").textContent = row.label;
-    chip.addEventListener("click", () => {
-      searchSpeciesFilter.has(row.id)
-        ? searchSpeciesFilter.delete(row.id)
-        : searchSpeciesFilter.add(row.id);
-      renderSearchChips();
-      renderSearchResults($("search-input").value);
-    });
-    speciesBox.appendChild(chip);
-  }
+function computeSearchResults(query) {
+  return computeFilteredMotes(allMotes, payload.relationships, query, {
+    speciesFilter: searchSpeciesFilter, folderFilter: searchFolderFilter, relFilter: searchRelFilter,
+  });
+}
 
-  const relBox = $("search-rel-chips");
-  relBox.innerHTML = "";
-  for (const type of [...new Set(payload.relationships.map((r) => r.type))].sort()) {
+/** Generic chip row: rows with a `color` get a dot (square if `square`),
+ *  rows without one (plain relationship types) render as text-only. */
+function renderChipRow(container, rows, activeSet, onToggle) {
+  container.innerHTML = "";
+  for (const row of rows) {
     const chip = document.createElement("button");
     chip.type = "button";
-    chip.className = "chip" + (searchRelFilter.has(type) ? " on" : "");
-    chip.style.borderColor = searchRelFilter.has(type) ? "var(--accent)" : "var(--border)";
-    chip.textContent = type;
-    chip.addEventListener("click", () => {
-      searchRelFilter.has(type) ? searchRelFilter.delete(type) : searchRelFilter.add(type);
-      renderSearchChips();
-      renderSearchResults($("search-input").value);
-    });
-    relBox.appendChild(chip);
+    chip.className = "chip" + (activeSet.has(row.id) ? " on" : "");
+    chip.style.borderColor = activeSet.has(row.id) ? (row.color || "var(--accent)") : "var(--border)";
+    if (row.color) {
+      chip.innerHTML = `<span class="dot${row.square ? " square" : ""}" style="background:${row.color}"></span><span></span>`;
+      chip.querySelector("span:last-child").textContent = row.label;
+    } else {
+      chip.textContent = row.label;
+    }
+    chip.addEventListener("click", () => onToggle(row.id));
+    container.appendChild(chip);
   }
+}
+
+function relTypeRows(relationships) {
+  return [...new Set(relationships.map((r) => r.type))].sort().map((type) => ({ id: type, label: type }));
+}
+
+function renderSearchChips() {
+  renderChipRow($("search-species-chips"), speciesRows(), searchSpeciesFilter, (id) => {
+    searchSpeciesFilter.has(id) ? searchSpeciesFilter.delete(id) : searchSpeciesFilter.add(id);
+    renderSearchChips();
+    renderSearchResults($("search-input").value);
+  });
+  renderChipRow($("search-folder-chips"), folderRows(), searchFolderFilter, (id) => {
+    searchFolderFilter.has(id) ? searchFolderFilter.delete(id) : searchFolderFilter.add(id);
+    renderSearchChips();
+    renderSearchResults($("search-input").value);
+  });
+  renderChipRow($("search-rel-chips"), relTypeRows(payload.relationships), searchRelFilter, (type) => {
+    searchRelFilter.has(type) ? searchRelFilter.delete(type) : searchRelFilter.add(type);
+    renderSearchChips();
+    renderSearchResults($("search-input").value);
+  });
 }
 
 function renderSearchResults(query) {
@@ -1947,6 +2121,14 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
       ? (allPinned ? `Unpin ${ids.length} motes` : `Pin ${ids.length} motes`)
       : (node && node.pinned ? "Unpin" : "Pin");
     addMenuItem(menu, pinLabel, () => togglePin(ids));
+    // Single-mote only -- a library entry is one mote's properties
+    // (core/library.py), not yet a group/subgraph.
+    if (ids.length === 1) {
+      addMenuItem(menu, "Save to library…", async () => {
+        await call(api.save_to_library(targetId));
+        showToast("Saved to library.");
+      });
+    }
     const sep = document.createElement("div");
     sep.className = "menu-sep";
     menu.appendChild(sep);
@@ -1958,6 +2140,7 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     if ((await call(api.list_gardens())).length > 1) {
       addMenuItem(menu, "New portal…", () => openPortalModalAt(worldX, worldY));
     }
+    addMenuItem(menu, "Reuse from library…", () => openLibraryModalAt(worldX, worldY));
     const pasteLabel = clipboard && clipboard.length > 1 ? `Paste ${clipboard.length} motes` : "Paste";
     addMenuItem(menu, pasteLabel, () => pasteAt(worldX, worldY), { disabled: !clipboard });
   }
@@ -2207,6 +2390,11 @@ function setupTopMenus() {
     });
   }
 
+  $("garden-menu-open-library").addEventListener("click", async () => {
+    closeTopMenus();
+    const result = await call(api.open_library());
+    await loadGarden(result.garden);
+  });
   $("garden-menu-new").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
   $("garden-menu-manage").addEventListener("click", () => { closeTopMenus(); openGardensModal(); });
   $("file-new-garden").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
@@ -2421,6 +2609,132 @@ function setupPortalModal() {
     clearTimeout(portalSearchTimer);
     portalSearchTimer = setTimeout(refreshPortalResults, 150);
   });
+}
+
+// ---- library picker ----
+//
+// Reached from "Reuse from library…" on the empty-canvas context menu,
+// and "Save to library…" on a single mote's. Modeled on the portal
+// picker above for the modal shell, but filters like the main search
+// palette: librarySnapshot is a one-off whole-graph read of _library
+// (Api.library_snapshot()) fetched once per modal-open, then every
+// keystroke/chip-toggle filters it client-side via the same
+// computeFilteredMotes()/renderChipRow() the search palette uses --
+// no per-keystroke round trip, unlike the portal picker.
+
+let libraryPlaceAt = null;     // world coords from the context-menu click, for graph.placeAt
+let librarySnapshot = null;    // {motes, relationships, species_ids, folder_ids}
+const librarySpeciesFilter = new Set();
+const libraryFolderFilter = new Set();
+const libraryRelFilter = new Set();
+
+async function openLibraryModalAt(worldX, worldY) {
+  libraryPlaceAt = { x: worldX, y: worldY };
+  librarySnapshot = await call(api.library_snapshot());
+  librarySpeciesFilter.clear();
+  libraryFolderFilter.clear();
+  libraryRelFilter.clear();
+  $("library-overlay").classList.remove("hidden");
+  $("library-search-input").value = "";
+  renderLibraryChips();
+  renderLibraryResults("");
+  $("library-search-input").focus();
+}
+
+function closeLibraryModal() {
+  $("library-overlay").classList.add("hidden");
+  libraryPlaceAt = null;
+  librarySnapshot = null;
+}
+
+/** Rows shaped like speciesRows()/folderRows(), but derived from
+ *  librarySnapshot instead of the live payload -- the library is a
+ *  different garden from whichever one is currently open. */
+function librarySpeciesRows() {
+  return librarySnapshot.species_ids.map((id) => ({
+    id,
+    label: nodeLabel(librarySnapshot.motes.find((m) => m.id === id) || { id, properties: {} }),
+    color: "oklch(0.68 0.16 320)",
+  }));
+}
+
+function libraryFolderRows() {
+  return librarySnapshot.folder_ids.map((id) => ({
+    id,
+    label: nodeLabel(librarySnapshot.motes.find((m) => m.id === id) || { id, properties: {} }),
+    color: "oklch(0.68 0.13 250)",
+    square: true,
+  }));
+}
+
+function renderLibraryChips() {
+  renderChipRow($("library-species-chips"), librarySpeciesRows(), librarySpeciesFilter, (id) => {
+    librarySpeciesFilter.has(id) ? librarySpeciesFilter.delete(id) : librarySpeciesFilter.add(id);
+    renderLibraryChips();
+    renderLibraryResults($("library-search-input").value);
+  });
+  renderChipRow($("library-folder-chips"), libraryFolderRows(), libraryFolderFilter, (id) => {
+    libraryFolderFilter.has(id) ? libraryFolderFilter.delete(id) : libraryFolderFilter.add(id);
+    renderLibraryChips();
+    renderLibraryResults($("library-search-input").value);
+  });
+  renderChipRow($("library-rel-chips"), relTypeRows(librarySnapshot.relationships), libraryRelFilter, (type) => {
+    libraryRelFilter.has(type) ? libraryRelFilter.delete(type) : libraryRelFilter.add(type);
+    renderLibraryChips();
+    renderLibraryResults($("library-search-input").value);
+  });
+}
+
+function renderLibraryResults(query) {
+  const container = $("library-search-results");
+  container.innerHTML = "";
+  const results = computeFilteredMotes(librarySnapshot.motes, librarySnapshot.relationships, query, {
+    speciesFilter: librarySpeciesFilter, folderFilter: libraryFolderFilter, relFilter: libraryRelFilter,
+  });
+  if (results.length === 0) {
+    container.innerHTML = '<div class="search-empty">No matches</div>';
+    return;
+  }
+  for (const entry of results) {
+    const row = document.createElement("div");
+    row.className = "search-result-row";
+    row.innerHTML =
+      '<span class="label"></span><button type="button" class="danger delete-entry">Delete</button>';
+    row.querySelector(".label").textContent = nodeLabel(entry);
+    row.querySelector(".label").addEventListener("mousedown", async (e) => {
+      e.preventDefault();
+      const placeAt = libraryPlaceAt;
+      closeLibraryModal();
+      // Fresh independent copy every time -- reuse_from_library() never
+      // links the new mote back to the library entry, and never copies
+      // its relationships (organizational or otherwise) either --
+      // docs/architecture.md.
+      const mote = await call(api.reuse_from_library(entry.id, { name: nodeLabel(entry) }));
+      await refreshMoteCache();
+      await selectMote(mote.id, { pan: !placeAt });
+      if (placeAt) {
+        graph.placeAt(mote.id, placeAt.x, placeAt.y);
+        savePositions();
+      }
+      showToast("Added from library.");
+    });
+    row.querySelector(".delete-entry").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!window.confirm(`Remove '${nodeLabel(entry)}' from the library?`)) return;
+      await call(api.delete_library_entry(entry.id));
+      librarySnapshot = await call(api.library_snapshot());
+      renderLibraryChips();
+      renderLibraryResults($("library-search-input").value);
+    });
+    container.appendChild(row);
+  }
+}
+
+function setupLibraryModal() {
+  $("library-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("library-overlay")) closeLibraryModal();
+  });
+  $("library-search-input").addEventListener("input", (e) => renderLibraryResults(e.target.value));
 }
 
 // ---- view controls ----
@@ -2890,7 +3204,9 @@ function setupKeyboard() {
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
     if (!$("portal-overlay").classList.contains("hidden")) { closePortalModal(); return; }
+    if (!$("library-overlay").classList.contains("hidden")) { closeLibraryModal(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
+    if (!$("folder-picker-wrap").classList.contains("hidden")) { hideFolderPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
@@ -2955,10 +3271,12 @@ async function init() {
 
   setupGardensModal();
   setupPortalModal();
+  setupLibraryModal();
   setupTopMenus();
   setupDetailResize();
   setupQuickAdd();
   setupSpeciesControls();
+  setupFolderControls();
   setupSearch();
   setupViewControls();
   setupViewSettings();

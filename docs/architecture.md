@@ -16,7 +16,7 @@ Relationships should have the ability to modify the properties of motes programm
 
 # Gardens
 
-The user should be able to create multiple object graphs that are completely separate from each other. These are called gardens. The one deliberate exception is a **portal**: a mote may carry a reference into another garden so the graph can be navigated there, but nothing about the two gardens' data, simulation, or history otherwise mixes -- see Portals below.
+The user should be able to create multiple object graphs that are completely separate from each other. These are called gardens. The one deliberate exception is a **portal**: a mote may carry a reference into another garden so the graph can be navigated there, but nothing about the two gardens' data, simulation, or history otherwise mixes -- see Portals below. A second, different exception is the **library**: a reserved garden holding standalone copies of motes worth reusing elsewhere -- see Reusable motes below.
 
 # Species
 
@@ -26,13 +26,19 @@ Species are flat for now -- a species being an instance of another species is no
 
 A species may have a **template**: a mote pointing at it via a `template_of` relationship, whose properties new instances start from. `template_of` is deliberately a different relationship type from `instance_of` -- a template holds placeholder values and belongs to no simulation, so it must not appear among a species' instances.
 
+# Folders
+
+A mote can act as a **folder** -- a purely organizational container that other motes are grouped into, for annotation only. Like a species, a folder is still just a mote; nothing marks it as special structurally. Membership is a relationship: a mote is grouped into a folder by having a `groups` relationship pointing at it (`core/groups.py`), the same `member --groups--> folder` shape as `instance --instance_of--> species`. A mote may belong to more than one folder, and folders are usable in any garden, not just the library (see Reusable motes below).
+
+Folders have no effect on simulation or storage beyond the relationship itself: a folder mote is never touched by `core/simulation.py` unless it's separately declared an `instance_of` a species, and nothing about Calendar export or garden export/import treats a folder or a `groups` relationship differently from ordinary data. The one concrete distinction is visual -- the UI renders a folder mote with its own shape (a square, distinct from a species' diamond and an ordinary mote's circle) and offers a "Folders" legend section with the same hide/show behavior species get.
+
 # Simulation
 
 This is the "relationships modify mote properties programmatically" capability described above.
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of`, `applies_to` and `uses_model` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden` and `portal_mote` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model` and `groups` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden` and `portal_mote` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 # Physical property models
 
@@ -144,3 +150,34 @@ cannot read a value across a portal. There is currently no cross-garden
 mechanism anywhere in `core/simulation.py`; extending the solver to
 resolve properties across gardens would be a substantially larger,
 separate feature.
+
+# Reusable motes
+
+`core/library.py` lets a mote worth reusing (a person, a recurring
+meeting shape, a standard task) be saved once and dropped into any
+garden later. Unlike a portal, this is not a live reference: saving a
+mote copies its properties into a reserved garden, `_library`, exactly
+like any other garden underneath (same `gardens/<name>.db` file, same
+motes/relationships schema). Reusing a library entry copies its
+properties into a brand-new mote in the current garden -- a fresh,
+independent snapshot, the same way `core/species.py::create_instance()`
+seeds a new instance from a template. Nothing links the two afterward;
+editing either side never affects the other.
+
+Only a mote's properties are saved -- its relationships are never
+captured or restored. Saving a whole subgraph (a mote plus its
+relationships to other library entries) is a deferred, larger feature
+(see `docs/small-changes.md`).
+
+`_library` is filtered out of the UI's garden switcher and the portal
+picker's garden dropdown, so it never shows up as one of your everyday
+workspaces -- but it's still a real, fully editable garden underneath,
+reachable directly via the garden menu's "Open library" action. That
+makes it worth organizing like any other garden: creating folder motes
+inside it and grouping related library entries together (see Folders
+above) is the intended way to keep a large library navigable, and the
+"Reuse from library…" picker filters by that same folder/species
+grouping alongside free-text search.
+
+This first pass covers `core/` and the UI (`ui/api.py`,
+`ui/frontend/`) only; CLI and MCP exposure are deferred to a follow-up.

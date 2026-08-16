@@ -16,6 +16,8 @@ from core import gardens as gardens_repo
 from core import garden_io
 from core import google_calendar as gcal_repo
 from core import graph as graph_repo
+from core import groups as groups_repo
+from core import library as library_repo
 from core import links as links_repo
 from core import motes as motes_repo
 from core import portals as portals_repo
@@ -44,6 +46,22 @@ def _coerce(raw):
 
 def _coerce_properties(raw_properties: dict) -> dict:
     return {k: _coerce(v) for k, v in raw_properties.items()}
+
+
+def _classify(motes: list, rels: list) -> dict:
+    """species_ids/folder_ids for a set of motes/relationships -- shared
+    by focus() (the currently-open garden) and library_snapshot() (a
+    read of _library) so the two don't drift. template_of counts
+    alongside instance_of, matching species.list_species -- otherwise a
+    species set up with a template but not yet instantiated wouldn't
+    render as one."""
+    structural = (species_repo.INSTANCE_OF, species_repo.TEMPLATE_OF)
+    species_target_ids = {r.to_id for r in rels if r.type in structural}
+    folder_target_ids = {r.to_id for r in rels if r.type == groups_repo.GROUPS}
+    return {
+        "species_ids": [m.id for m in motes if m.id in species_target_ids],
+        "folder_ids": [m.id for m in motes if m.id in folder_target_ids],
+    }
 
 
 def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
@@ -147,10 +165,18 @@ class Api:
 
     @_synchronized
     def list_gardens(self) -> list[str]:
-        return gardens_repo.list_gardens()
+        # LIBRARY_GARDEN is a reserved implementation detail (reusable
+        # motes' backing store), not a normal workspace -- hidden here so
+        # every UI consumer (switcher, portal-picker's garden dropdown)
+        # never sees or targets it. delete_garden()'s "last garden left"
+        # guard below calls gardens_repo.list_gardens() directly, so it
+        # still counts it as a real garden file.
+        return [g for g in gardens_repo.list_gardens() if g != library_repo.LIBRARY_GARDEN]
 
     @_synchronized
     def create_garden(self, name: str) -> None:
+        if name == library_repo.LIBRARY_GARDEN:
+            raise ValueError(f"{name!r} is reserved for the reusable-motes library.")
         gardens_repo.create_garden(name)
 
     @_synchronized
@@ -276,6 +302,74 @@ class Api:
         self._current_garden = garden
         return {"garden": garden, "mote_id": target_mote.id}
 
+    # ---- library ----
+
+    @_synchronized
+    def open_library(self) -> dict:
+        """Switch into _library as a real, viewable/editable garden --
+        lazily creating it if nothing's been saved to it yet, same
+        reasoning as core/library.py's own lazy-creation-on-first-save
+        (get_connection + initialize_database is enough; SQLite creates
+        the file, so this deliberately bypasses self.create_garden(),
+        which rejects the literal name _library for *user-initiated*
+        creation via "+ New garden…"). Bundles create-if-needed with the
+        same close/reopen dance switch_garden()/jump_to_portal() already
+        do, so the frontend's action is one call."""
+        self._conn.close()
+        self._conn = get_connection(library_repo.LIBRARY_GARDEN)
+        initialize_database(self._conn)
+        self._current_garden = library_repo.LIBRARY_GARDEN
+        return {"garden": self._current_garden}
+
+    @_synchronized
+    def save_to_library(self, mote_id: str) -> dict:
+        """Snapshot mote_id's properties into a new library entry.
+        Returns the new entry, fetched back via a short-lived connection
+        to the library garden -- same pattern library_snapshot() uses to
+        read it without disturbing self._conn."""
+        entry_id = library_repo.save_to_library(self._conn, mote_id)
+        conn = get_connection(library_repo.LIBRARY_GARDEN)
+        try:
+            initialize_database(conn)
+            return dataclasses.asdict(motes_repo.get_mote(conn, entry_id))
+        finally:
+            conn.close()
+
+    @_synchronized
+    def library_snapshot(self) -> dict:
+        """Whole-graph read of _library (motes + relationships +
+        species/folder classification) for the "Reuse from library…"
+        picker's client-side filtering -- fetched once per modal-open
+        instead of a per-keystroke round trip. Cross-garden idiom
+        matches find_portal_target()/save_to_library()."""
+        conn = get_connection(library_repo.LIBRARY_GARDEN)
+        try:
+            initialize_database(conn)
+            motes, rels = graph_repo.whole_garden(conn)
+            return {
+                "motes": [dataclasses.asdict(m) for m in motes],
+                "relationships": [dataclasses.asdict(r) for r in rels],
+                **_classify(motes, rels),
+            }
+        finally:
+            conn.close()
+
+    @_synchronized
+    def reuse_from_library(self, library_mote_id: str, raw_overrides: dict | None = None) -> dict:
+        mote_id = library_repo.reuse_from_library(
+            self._conn, library_mote_id, _coerce_properties(raw_overrides or {})
+        )
+        return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
+
+    @_synchronized
+    def delete_library_entry(self, library_mote_id: str) -> bool:
+        conn = get_connection(library_repo.LIBRARY_GARDEN)
+        try:
+            initialize_database(conn)
+            return motes_repo.delete_mote(conn, library_mote_id)
+        finally:
+            conn.close()
+
     # ---- motes ----
 
     @_synchronized
@@ -374,6 +468,21 @@ class Api:
             self._conn, species_id, _coerce_properties(raw_overrides or {})
         )
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
+
+    # ---- groups ----
+
+    @_synchronized
+    def set_group(self, mote_id: str, folder_id: str) -> dict:
+        rel_id = groups_repo.set_group(self._conn, mote_id, folder_id)
+        return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
+
+    @_synchronized
+    def group_of(self, mote_id: str) -> list[dict]:
+        return [dataclasses.asdict(m) for m in groups_repo.group_of(self._conn, mote_id)]
+
+    @_synchronized
+    def members_of(self, folder_id: str) -> list[dict]:
+        return [dataclasses.asdict(m) for m in groups_repo.members_of(self._conn, folder_id)]
 
     # ---- simulation ----
 
@@ -538,22 +647,15 @@ class Api:
         if mote_id is None:
             mote_id = graph_repo.most_recent_mote_id(self._conn)
         if mote_id is None:
-            return {"focus_id": None, "motes": [], "relationships": [], "species_ids": []}
+            return {"focus_id": None, "motes": [], "relationships": [], "species_ids": [], "folder_ids": []}
 
         if hops is None:
             motes, rels = graph_repo.whole_garden(self._conn)
         else:
             motes, rels = graph_repo.neighborhood(self._conn, mote_id, hops)
-        # template_of counts as well as instance_of, matching
-        # species.list_species -- otherwise a species you've set up with a
-        # template but not yet instantiated wouldn't render as one, and the
-        # UI would offer no way to create its first instance.
-        structural = (species_repo.INSTANCE_OF, species_repo.TEMPLATE_OF)
-        species_target_ids = {r.to_id for r in rels if r.type in structural}
-        species_ids = [m.id for m in motes if m.id in species_target_ids]
         return {
             "focus_id": mote_id,
             "motes": [dataclasses.asdict(m) for m in motes],
             "relationships": [dataclasses.asdict(r) for r in rels],
-            "species_ids": species_ids,
+            **_classify(motes, rels),
         }

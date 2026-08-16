@@ -2007,6 +2007,233 @@ def run_checks(window):
 
     check("copy/paste a mote with a non-string property doesn't error", copy_paste_a_mote_with_a_non_string_property)
 
+    def save_to_library_menu_item_saves_a_copy():
+        result = js_async(window, """
+            async () => {
+                const src = await api.create_mote({name: 'library-src', flavor: 'chocolate'});
+                window.__librarySrcId = src.id;
+                await refreshMoteCache();
+                await refocus(src.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"save-to-library setup failed: {result}"
+
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        x, y = node_xy(window, "window.__librarySrcId")
+        right_click(window, x, y)
+        time.sleep(0.5)
+        click_menu_item(window, "Save to library…")
+        time.sleep(1.0)
+
+        toast = js(window, "document.getElementById('toast').textContent")
+        assert toast == "Saved to library.", f"expected the save toast, got {toast!r}"
+
+        snapshot = json.loads(js_async(
+            window, "async () => { window.__result = await api.library_snapshot(); }"))
+        matches = [e for e in snapshot["motes"] if e["properties"].get("flavor") == "chocolate"]
+        assert len(matches) == 1, f"expected exactly one saved library entry, got {matches}"
+        assert matches[0]["properties"]["name"] == "library-src", (
+            f"library entry should match the saved mote's properties, got {matches[0]['properties']}"
+        )
+        js(window, f"window.__library_entry_id = {json.dumps(matches[0]['id'])};")
+
+    check("context menu: Save to library… copies a mote's properties into the library",
+          save_to_library_menu_item_saves_a_copy)
+
+    def reuse_from_library_creates_an_independent_copy():
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        right_click(window, 60, 60)  # empty canvas, away from any node
+        time.sleep(0.5)
+        click_menu_item(window, "Reuse from library…")
+        time.sleep(0.5)
+
+        visible = js(window, "!document.getElementById('library-overlay').classList.contains('hidden')")
+        assert visible is True, "Reuse from library… should open the library picker"
+
+        js(window, """
+            const i = document.getElementById('library-search-input');
+            i.value = 'library-src'; i.dispatchEvent(new Event('input'));
+        """)
+        time.sleep(0.5)
+        labels = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#library-search-results .label'))
+                .map(e => e.textContent))
+        """))
+        assert labels == ["library-src"], f"library search should find the saved entry, got {labels}"
+
+        js(window, "document.querySelector('#library-search-results .label').dispatchEvent("
+                   "new MouseEvent('mousedown', {bubbles: true, cancelable: true}));")
+        time.sleep(1.5)
+
+        hidden = js(window, "document.getElementById('library-overlay').classList.contains('hidden')")
+        assert hidden is True, "picking a library entry should close the picker"
+        toast = js(window, "document.getElementById('toast').textContent")
+        assert toast == "Added from library.", f"expected the reuse toast, got {toast!r}"
+
+        motes = json.loads(js_async(window, "async () => { window.__result = await api.list_motes(); }"))
+        src_id = json.loads(js(window, "JSON.stringify(window.__librarySrcId)"))
+        reused = [m for m in motes if m["id"] != src_id and m["properties"].get("flavor") == "chocolate"]
+        assert len(reused) == 1, f"expected exactly one independent reused copy, got {reused}"
+        assert reused[0]["id"] != src_id, "the reused mote must be a new, independent mote"
+
+    check("context menu: Reuse from library… searches, picks and creates an independent copy",
+          reuse_from_library_creates_an_independent_copy)
+
+    def library_entry_can_be_deleted_from_the_picker():
+        js(window, "window.confirm = function() { return true; };")
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        right_click(window, 60, 60)
+        time.sleep(0.5)
+        click_menu_item(window, "Reuse from library…")
+        time.sleep(0.5)
+        js(window, """
+            const i = document.getElementById('library-search-input');
+            i.value = 'library-src'; i.dispatchEvent(new Event('input'));
+        """)
+        time.sleep(0.5)
+        js(window, "document.querySelector('#library-search-results .delete-entry').click();")
+        time.sleep(0.5)
+
+        empty = js(window, "document.querySelector('#library-search-results .search-empty') !== null")
+        assert empty is True, "deleting the only match should leave the results empty"
+
+        entry_id = json.loads(js(window, "JSON.stringify(window.__library_entry_id)"))
+        snapshot = json.loads(js_async(
+            window, "async () => { window.__result = await api.library_snapshot(); }"))
+        assert entry_id not in [e["id"] for e in snapshot["motes"]], "deleted entry should be gone from the library"
+
+        js(window, "$('library-overlay').classList.add('hidden');")
+
+    check("library picker: deleting an entry removes it", library_entry_can_be_deleted_from_the_picker)
+
+    def open_library_via_menu_switches_into_a_real_garden():
+        js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(0.5)
+        js(window, "document.getElementById('garden-menu-open-library').click();")
+        time.sleep(1.5)
+
+        label = js(window, "document.getElementById('garden-label').textContent")
+        assert label == "_library", f"Open library should switch into _library, got {label!r}"
+        assert js(window, "currentGarden") == "_library", "currentGarden should track the switch"
+
+        js(window, "document.getElementById('garden-btn').click();")
+        time.sleep(0.5)
+        names = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#garden-menu-list .menu-item'))
+                .map(r => r.querySelector('.name').textContent))
+        """))
+        assert "_library" not in names, f"_library should stay out of its own garden-menu list, got {names}"
+        js(window, "document.getElementById('garden-btn').click();")  # close it back
+        time.sleep(0.3)
+
+    check("garden menu: Open library switches into _library as a real, editable garden hidden from its own list",
+          open_library_via_menu_switches_into_a_real_garden)
+
+    def folder_grouping_gets_a_distinct_shape_and_legend_row():
+        # Still inside _library from the previous check -- groups/folders
+        # are usable in any garden (docs/architecture.md), and creating
+        # this folder+member here also seeds real library content the
+        # next check (chip filtering in the picker) relies on.
+        result = js_async(window, """
+            async () => {
+                const folder = await api.create_mote({name: 'Thermodynamics'});
+                const member = await api.create_mote({name: 'Entropy'});
+                await api.set_group(member.id, folder.id);
+                window.__folderIds = {folder: folder.id, member: member.id};
+                await refreshMoteCache();
+                await refocus(folder.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"folder setup failed: {result}"
+
+        is_folder = js(window, "graph.folderIds.has(window.__folderIds.folder)")
+        assert is_folder is True, "the folder mote should be tracked in graph.folderIds"
+
+        rows = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#legend-folders .filter-row'))
+                .map(e => e.querySelector('.name').textContent))
+        """))
+        assert "Thermodynamics" in rows, f"the Folders legend should list it, got {rows}"
+        heading_hidden = js(window, "document.getElementById('folder-heading').classList.contains('hidden')")
+        assert heading_hidden is False, "the Folders legend heading should show once a folder exists"
+
+        visible_before = js(window, "graph.motes.filter(m => graph.isMoteVisible(m.id)).length")
+        js(window, """
+            Array.from(document.querySelectorAll('#legend-folders .filter-row'))
+                .find(e => e.querySelector('.name').textContent === 'Thermodynamics').click();
+        """)
+        time.sleep(0.8)
+        visible_after = js(window, "graph.motes.filter(m => graph.isMoteVisible(m.id)).length")
+        assert visible_after < visible_before, (
+            f"hiding a folder should hide its members: {visible_before} -> {visible_after}"
+        )
+
+        # Restore, then switch back to the smoke test's normal garden so
+        # later checks aren't run from inside _library.
+        js(window, """
+            Array.from(document.querySelectorAll('#legend-folders .filter-row'))
+                .find(e => e.querySelector('.name').textContent === 'Thermodynamics').click();
+        """)
+        time.sleep(0.8)
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+    check("folders: grouping a mote gives it a square shape and a Folders legend row with click-to-hide",
+          folder_grouping_gets_a_distinct_shape_and_legend_row)
+
+    def library_picker_chip_filters_narrow_results():
+        result = js_async(window, """
+            async () => {
+                const other = await api.create_mote({name: 'unrelated-in-current-garden'});
+                await api.save_to_library(other.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"chip-filter setup failed: {result}"
+
+        js(window, "graph.resetView();")
+        time.sleep(1.0)
+        right_click(window, 60, 60)
+        time.sleep(0.5)
+        click_menu_item(window, "Reuse from library…")
+        time.sleep(0.5)
+
+        all_labels = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#library-search-results .label'))
+                .map(e => e.textContent))
+        """))
+        assert "Thermodynamics" in all_labels and "Entropy" in all_labels, (
+            f"the folder and its member should be visible unfiltered, got {all_labels}"
+        )
+
+        js(window, """
+            Array.from(document.querySelectorAll('#library-folder-chips .chip'))
+                .find(c => c.textContent.trim() === 'Thermodynamics').click();
+        """)
+        time.sleep(0.5)
+        filtered_labels = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#library-search-results .label'))
+                .map(e => e.textContent))
+        """))
+        assert filtered_labels == ["Entropy"], (
+            f"the Thermodynamics folder chip should narrow results to just its member, got {filtered_labels}"
+        )
+
+        js(window, "document.getElementById('library-overlay').classList.add('hidden');")
+
+    check("library picker: folder chip filters narrow results to that folder's members",
+          library_picker_chip_filters_narrow_results)
+
     def multi_copy_paste_preserves_relative_layout():
         result = js_async(window, """
             async () => {

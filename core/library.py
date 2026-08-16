@@ -1,0 +1,71 @@
+# core/library.py
+"""A reusable-motes "library" -- a reserved garden, `_library`, that
+holds standalone copies of motes worth reusing across gardens (a person,
+a recurring meeting shape, a standard task). Like core/portals.py, this
+is a deliberate, explained exception to "core functions take one
+already-open connection": saving/reusing a library entry always means
+touching a second garden's connection.
+
+Unlike a portal, a library entry is never a live reference -- saving
+copies a mote's properties into `_library`, and reusing copies them back
+out into a new, fully independent mote. Nothing ties the two together
+afterward, the same way core/species.py's create_instance() seeds a new
+instance from a template's properties without keeping them linked.
+
+Relationships are never saved or restored -- a library entry is
+properties only. Saving whole subgraphs (a mote plus its relationships
+to other library entries) is a deferred, larger feature (see
+docs/small-changes.md).
+
+`_library` is not validated to exist before use, unlike create_portal()'s
+arbitrary user-named target garden: it's a fixed reserved name that
+should come into being lazily on first save, the same way
+core/gardens.py::resolve_garden(None) lazily creates DEFAULT_GARDEN.
+"""
+import sqlite3
+
+from core.db import get_connection, initialize_database
+from core.motes import create_mote, get_mote
+
+LIBRARY_GARDEN = "_library"
+
+
+def _library_connection() -> sqlite3.Connection:
+    conn = get_connection(LIBRARY_GARDEN)
+    initialize_database(conn)
+    return conn
+
+
+def save_to_library(conn: sqlite3.Connection, mote_id: str) -> str:
+    """Snapshot mote_id's properties (from conn's garden) into a new,
+    independent entry in the library. Returns the new entry's id."""
+    mote = get_mote(conn, mote_id)
+    if mote is None:
+        raise LookupError(f"No such mote: {mote_id!r}")
+
+    library_conn = _library_connection()
+    try:
+        return create_mote(library_conn, dict(mote.properties))
+    finally:
+        library_conn.close()
+
+
+def reuse_from_library(
+    conn: sqlite3.Connection, library_mote_id: str, overrides: dict | None = None
+) -> str:
+    """Create a new mote in conn's garden, seeded from a library entry's
+    properties -- exactly like core/species.py::create_instance() seeds
+    a new instance from its species' template. Returns the new mote's
+    id; the library entry itself is untouched and nothing links back to
+    it afterward."""
+    library_conn = _library_connection()
+    try:
+        entry = get_mote(library_conn, library_mote_id)
+    finally:
+        library_conn.close()
+    if entry is None:
+        raise LookupError(f"No such library entry: {library_mote_id!r}")
+
+    properties = dict(entry.properties)
+    properties.update(overrides or {})
+    return create_mote(conn, properties)

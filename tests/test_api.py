@@ -4,7 +4,7 @@ import webbrowser
 import pytest
 
 import ui.api
-from core.gardens import create_garden
+from core.gardens import create_garden, garden_exists
 from core.simulation import SimulationError, run_simulation
 from ui.api import Api, _coerce_properties
 
@@ -33,6 +33,7 @@ def test_focus_empty_garden_returns_none(api):
     result = api.focus()
     assert result["focus_id"] is None
     assert result["motes"] == []
+    assert result["folder_ids"] == []
 
 
 def test_focus_none_picks_most_recent(api):
@@ -92,6 +93,27 @@ def test_species_with_only_a_template_is_reported_as_a_species(api):
     assert result["species_ids"] == [species["id"]]
 
 
+def test_focus_reports_folder_ids(api):
+    folder = api.create_mote({"name": "Thermodynamics"})
+    member = api.create_mote({"name": "Entropy"})
+    api.set_group(member["id"], folder["id"])
+
+    result = api.focus(member["id"], None)
+    assert result["folder_ids"] == [folder["id"]]
+
+
+def test_set_group_creates_groups_relationship(api):
+    folder = api.create_mote({"name": "Thermodynamics"})
+    member = api.create_mote({"name": "Entropy"})
+    rel = api.set_group(member["id"], folder["id"])
+    assert rel["type"] == "groups"
+    assert rel["from_id"] == member["id"]
+    assert rel["to_id"] == folder["id"]
+
+    assert [m["id"] for m in api.group_of(member["id"])] == [folder["id"]]
+    assert [m["id"] for m in api.members_of(folder["id"])] == [member["id"]]
+
+
 def test_delete_garden_blocks_the_last_garden(api):
     with pytest.raises(ValueError, match="last garden"):
         api.delete_garden("test")
@@ -126,6 +148,63 @@ def test_restore_garden_brings_a_deleted_garden_back(api):
 def test_restore_garden_missing_raises(api):
     with pytest.raises(LookupError):
         api.restore_garden("never-deleted")
+
+
+def test_list_gardens_hides_the_library_garden(api):
+    mote = api.create_mote({"name": "Task"})
+    api.save_to_library(mote["id"])
+    assert "_library" not in api.list_gardens()
+
+
+def test_create_garden_rejects_the_library_name(api):
+    with pytest.raises(ValueError, match="reserved"):
+        api.create_garden("_library")
+
+
+def test_open_library_lazily_creates_and_switches(api):
+    assert not garden_exists("_library")
+
+    result = api.open_library()
+
+    assert result == {"garden": "_library"}
+    assert api.current_garden() == "_library"
+
+
+def test_open_library_switches_into_an_existing_library(api):
+    mote = api.create_mote({"name": "Task"})
+    api.save_to_library(mote["id"])
+
+    result = api.open_library()
+
+    assert result == {"garden": "_library"}
+    assert api.current_garden() == "_library"
+    entries = api.list_motes()
+    assert any(m["properties"].get("name") == "Task" for m in entries)
+
+
+def test_library_snapshot_returns_motes_relationships_and_classification(api):
+    mote = api.create_mote({"name": "Task"})
+    api.save_to_library(mote["id"])
+
+    api.open_library()  # ensures _library exists before reading it back
+    api.switch_garden("test")
+
+    result = api.library_snapshot()
+    assert any(m["properties"].get("name") == "Task" for m in result["motes"])
+    assert result["relationships"] == []
+    assert result["species_ids"] == []
+    assert result["folder_ids"] == []
+
+
+def test_library_snapshot_reports_folder_ids_from_within_the_library(api):
+    api.open_library()
+    folder = api.create_mote({"name": "Thermodynamics"})
+    member = api.create_mote({"name": "Entropy"})
+    api.set_group(member["id"], folder["id"])
+    api.switch_garden("test")
+
+    result = api.library_snapshot()
+    assert result["folder_ids"] == [folder["id"]]
 
 
 def test_export_garden_by_name_does_not_disturb_the_current_garden(api, tmp_path):

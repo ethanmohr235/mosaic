@@ -88,8 +88,11 @@ class MonossGraph {
     this.relationships = [];
     this.speciesIds = new Set();
     this.speciesOf = new Map();   // mote id -> [species id]
+    this.folderIds = new Set();
+    this.groupOf = new Map();     // mote id -> [folder id]
     this.nodes = new Map();       // mote id -> {x, y, vx, vy, pinned}
     this.hiddenSpecies = new Set();
+    this.hiddenFolders = new Set();
     this.hiddenRelTypes = new Set();
     this.selectedIds = new Set();
     this.selectedRelIds = new Set();
@@ -141,6 +144,7 @@ class MonossGraph {
     this.motes = payload.motes || [];
     this.relationships = payload.relationships || [];
     this.speciesIds = new Set(payload.species_ids || []);
+    this.folderIds = new Set(payload.folder_ids || []);
     this._moteById = new Map(this.motes.map((m) => [m.id, m]));
     this._invalidateColors();
 
@@ -149,10 +153,15 @@ class MonossGraph {
     // species mote is always present; under a hop limit it may not be, and
     // those instances simply render uncoloured.
     this.speciesOf = new Map();
+    this.groupOf = new Map();
     for (const rel of this.relationships) {
-      if (rel.type !== "instance_of") continue;
-      if (!this.speciesOf.has(rel.from_id)) this.speciesOf.set(rel.from_id, []);
-      this.speciesOf.get(rel.from_id).push(rel.to_id);
+      if (rel.type === "instance_of") {
+        if (!this.speciesOf.has(rel.from_id)) this.speciesOf.set(rel.from_id, []);
+        this.speciesOf.get(rel.from_id).push(rel.to_id);
+      } else if (rel.type === "groups") {
+        if (!this.groupOf.has(rel.from_id)) this.groupOf.set(rel.from_id, []);
+        this.groupOf.get(rel.from_id).push(rel.to_id);
+      }
     }
 
     // Species sectors need to sit further apart as the number of species
@@ -538,6 +547,11 @@ class MonossGraph {
     this.alpha = Math.max(this.alpha, 0.4);
   }
 
+  setHiddenFolders(ids) {
+    this.hiddenFolders = new Set(ids);
+    this.alpha = Math.max(this.alpha, 0.4);
+  }
+
   setHiddenRelTypes(types) {
     this.hiddenRelTypes = new Set(types);
     this.alpha = Math.max(this.alpha, 0.4);
@@ -554,11 +568,30 @@ class MonossGraph {
   }
 
   isMoteVisible(moteId) {
-    if (this.hiddenSpecies.size === 0) return true;
-    if (this.speciesIds.has(moteId)) return !this.hiddenSpecies.has(moteId);
-    const species = this.speciesOf.get(moteId) || [];
-    if (species.length === 0) return !this.hiddenSpecies.has("__none__");
-    return species.some((s) => !this.hiddenSpecies.has(s));
+    if (this.hiddenSpecies.size > 0) {
+      if (this.speciesIds.has(moteId)) {
+        if (this.hiddenSpecies.has(moteId)) return false;
+      } else {
+        const species = this.speciesOf.get(moteId) || [];
+        if (species.length === 0) {
+          if (this.hiddenSpecies.has("__none__")) return false;
+        } else if (!species.some((s) => !this.hiddenSpecies.has(s))) {
+          return false;
+        }
+      }
+    }
+    if (this.hiddenFolders.size > 0) {
+      if (this.folderIds.has(moteId)) {
+        if (this.hiddenFolders.has(moteId)) return false;
+      } else {
+        // A mote in no folder is never hidden by folder filters -- unlike
+        // species there's no "__none__" bucket, since being ungrouped is
+        // the default/expected state, not something worth a legend row.
+        const folders = this.groupOf.get(moteId) || [];
+        if (folders.length > 0 && !folders.some((f) => !this.hiddenFolders.has(f))) return false;
+      }
+    }
+    return true;
   }
 
   isRelVisible(rel) {
@@ -960,12 +993,20 @@ class MonossGraph {
       if (this.speciesIds.has(id)) {
         // Species motes are diamonds -- a type is a different kind of
         // thing from an instance and shouldn't have to be read off a label.
+        // A mote that's somehow both a species and a folder draws as a
+        // diamond -- an arbitrary but rare tie-break, not worth its own
+        // precedence machinery.
         const r = radius * 1.35;
         ctx.moveTo(node.x, node.y - r);
         ctx.lineTo(node.x + r, node.y);
         ctx.lineTo(node.x, node.y + r);
         ctx.lineTo(node.x - r, node.y);
         ctx.closePath();
+      } else if (this.folderIds.has(id)) {
+        // Folders are squares -- a third, distinct kind of thing from
+        // both an ordinary mote and a species, purely for annotation.
+        const r = radius * 1.2;
+        ctx.rect(node.x - r, node.y - r, r * 2, r * 2);
       } else {
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       }
