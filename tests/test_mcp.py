@@ -14,10 +14,14 @@ from mcp_server.server import (
     delete_property,
     delete_relationship,
     export_garden,
+    folder_members,
+    folders_of,
     get_mote,
     get_run,
     instances_of,
+    list_folders,
     list_gardens,
+    list_library,
     list_motes,
     list_relationships,
     list_runs,
@@ -27,6 +31,9 @@ from mcp_server.server import (
     preview_simulation,
     resolve_portal,
     reserved_names,
+    reuse_from_library,
+    save_to_library,
+    set_folder,
     run_ticks,
     search_motes,
     set_species,
@@ -189,7 +196,7 @@ def test_list_relationships_filters():
     create_relationship(b["id"], a["id"], "back", GARDEN)
 
     assert len(list_relationships(from_id=a["id"], garden=GARDEN)) == 1
-    assert len(list_relationships(relationship_type="back", garden=GARDEN)) == 1
+    assert len(list_relationships(type="back", garden=GARDEN)) == 1
     assert len(list_relationships(garden=GARDEN)) == 2
 
 
@@ -360,3 +367,62 @@ def test_run_ticks_matches_preview_simulations_shape(box):
 
 def test_run_ticks_for_an_unknown_run_is_empty(box):
     assert run_ticks("nonexistent", GARDEN) == {"steps": []}
+
+
+# ---- folders ----
+#
+# Folders existed only in the app before this: the charter says MCP gets
+# reads plus graph edits, and filing a mote is both.
+
+def test_set_folder_then_read_it_back_from_either_end(box):
+    folder = create_mote({"name": "Thermodynamics"}, GARDEN)
+    note = create_mote({"name": "Entropy"}, GARDEN)
+
+    rel = set_folder(note["id"], folder["id"], GARDEN)
+    assert rel["type"] == "in_folder"
+
+    assert [m["id"] for m in list_folders(GARDEN)] == [folder["id"]]
+    assert [m["id"] for m in folders_of(note["id"], GARDEN)] == [folder["id"]]
+    assert [m["id"] for m in folder_members(folder["id"], GARDEN)] == [note["id"]]
+
+
+def test_set_folder_is_additive(box):
+    a = create_mote({"name": "A"}, GARDEN)
+    b = create_mote({"name": "B"}, GARDEN)
+    note = create_mote({"name": "Note"}, GARDEN)
+
+    set_folder(note["id"], a["id"], GARDEN)
+    set_folder(note["id"], b["id"], GARDEN)
+
+    assert {m["id"] for m in folders_of(note["id"], GARDEN)} == {a["id"], b["id"]}
+
+
+def test_list_folders_is_empty_without_any(box):
+    assert list_folders(GARDEN) == []
+
+
+# ---- the library ----
+
+def test_save_to_library_then_list_and_reuse(box):
+    mote = create_mote({"name": "Standup", "duration": 15}, GARDEN)
+
+    entry = save_to_library(mote["id"], GARDEN)
+    assert entry["properties"] == {"name": "Standup", "duration": 15}
+    assert [m["id"] for m in list_library()] == [entry["id"]]
+
+    copy = reuse_from_library(entry["id"], {"name": "Monday standup"}, GARDEN)
+    assert copy["properties"] == {"name": "Monday standup", "duration": 15}
+    assert copy["id"] not in (mote["id"], entry["id"])
+    # A copy, not a link: the entry is untouched and the new mote lives
+    # in the caller's garden.
+    assert get_mote(copy["id"], GARDEN) is not None
+    assert [m["properties"]["name"] for m in list_library()] == ["Standup"]
+
+
+def test_the_library_is_not_offered_as_an_ordinary_garden(box):
+    mote = create_mote({"name": "Task"}, GARDEN)
+    save_to_library(mote["id"], GARDEN)
+
+    # It exists and list_library() reads it, but it is not a workspace.
+    assert list_library() != []
+    assert "_library" not in list_gardens()

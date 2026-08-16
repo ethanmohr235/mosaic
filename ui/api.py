@@ -216,10 +216,15 @@ class Api:
         gardens_repo.clear_default_garden()
 
     @_synchronized
-    def export_garden(self, garden_name: str | None = None) -> dict:
+    def export_garden_to_file(self, garden_name: str | None = None) -> dict:
         """Exports the current garden by default, or any named garden --
         via a short-lived connection, so exporting one from the gardens
-        list doesn't disturb the currently open one."""
+        list doesn't disturb the currently open one.
+
+        Named for what it does that core's export_garden() doesn't: ask
+        the user for a path and write the file. The two used to share a
+        name while returning completely different things (a document vs.
+        a path or {"cancelled": True})."""
         target_name = garden_name or self._current_garden
         path = self._window.create_file_dialog(
             webview.FileDialog.SAVE, save_filename=f"{target_name}.json"

@@ -2405,7 +2405,7 @@ async function createGardenFlow() {
  *  format, so the File menu points at the real thing rather than a
  *  "soon" stub sitting next to a feature that already works. */
 async function exportGardenFlow(name) {
-  const result = await call(api.export_garden(name));
+  const result = await call(api.export_garden_to_file(name));
   if (!result.cancelled) showToast(`Exported to ${result.path}`);
 }
 

@@ -124,11 +124,40 @@ that pragma is set in the adapter only, leaving the CLI and UI
 untouched. The GUI does not observe external changes until it refetches.
 
 The surface is reads plus graph edits: motes, relationships, species,
-templates and instances, neighborhood queries, and *previews* of
-simulation runs. Applying a simulation to the graph, deleting or
-restoring gardens, calendar export, and opening links are deliberately
-left out -- they either write results the user should approve in the
-app, or need a live window. See `docs/mcp.md` for setup.
+templates and instances, folders, the reusable-motes library,
+neighborhood queries, and *previews* of simulation runs. Applying a
+simulation to the graph, deleting or restoring gardens, calendar export,
+and opening links are deliberately left out -- they either write results
+the user should approve in the app, or need a live window. See
+`docs/mcp.md` for setup.
+
+# What belongs on which surface
+
+`core/` is the whole system. `cli/`, `ui/` and `mcp_server/` are three
+adapters over it, and each one's job is a different question, so none of
+them is expected to expose everything. What is *not* acceptable is a gap
+with no reason behind it -- which is what the surfaces had accumulated:
+folders and the library existed only in the app, property models only in
+the CLI, templates only in MCP, not by decision but by whichever surface
+happened to be open when each was built.
+
+The charter:
+
+* **core** -- complete. Every capability lives here, and an adapter that
+  holds logic of its own is a bug (see Calendar export, moved out of
+  `ui/api.py` for exactly this reason).
+* **CLI** -- everything scriptable. If it can be done without a window
+  and without a human approving a result, it has a command.
+* **UI** -- everything interactive. Anything a person would reach for
+  while looking at a graph, including the things only a live window can
+  do: opening links, exporting to Calendar, approving a simulation.
+* **MCP** -- reads plus graph edits (above). Deliberately not: writing a
+  simulation to the graph, deleting or restoring gardens, Calendar
+  export, opening links.
+
+A capability missing from a surface its charter covers is a gap to
+close, not a decision. A capability missing from a surface its charter
+excludes should say so, here, in one line.
 
 # Links and external export
 

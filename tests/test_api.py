@@ -316,7 +316,7 @@ def test_import_garden_into_new_creates_and_fills_a_garden(api, tmp_path):
     api.create_mote({"name": "Original"})
     out = tmp_path / "export.json"
     api._window = _StubWindow(str(out))
-    api.export_garden()
+    api.export_garden_to_file()
 
     api._window = _StubWindow([str(out)])
     result = api.import_garden_into_new("imported")
@@ -335,7 +335,7 @@ def test_import_garden_into_new_creates_and_fills_a_garden(api, tmp_path):
     assert names == ["Original"]
 
 
-def test_export_garden_by_name_does_not_disturb_the_current_garden(api, tmp_path):
+def test_export_garden_to_file_by_name_does_not_disturb_the_current_garden(api, tmp_path):
     create_garden("other")
     other_api = Api("other")
     other_api.create_mote({"name": "OtherMote"})
@@ -345,7 +345,7 @@ def test_export_garden_by_name_does_not_disturb_the_current_garden(api, tmp_path
     out = tmp_path / "other.json"
     api._window = _StubWindow(str(out))
 
-    result = api.export_garden("other")
+    result = api.export_garden_to_file("other")
 
     assert result["path"] == str(out)
     assert api.current_garden() == "test"
@@ -354,12 +354,12 @@ def test_export_garden_by_name_does_not_disturb_the_current_garden(api, tmp_path
     assert names == ["OtherMote"]
 
 
-def test_export_garden_defaults_to_the_current_garden(api, tmp_path):
+def test_export_garden_to_file_defaults_to_the_current_garden(api, tmp_path):
     api.create_mote({"name": "CurrentMote"})
     out = tmp_path / "test.json"
     api._window = _StubWindow(str(out))
 
-    api.export_garden()
+    api.export_garden_to_file()
 
     data = json.loads(out.read_text())
     names = [m["properties"].get("name") for m in data["motes"]]

@@ -23,8 +23,10 @@ from mcp.server import MCPServer
 from mcp.server.auth.provider import OAuthAuthorizationServerProvider
 from mcp.server.auth.settings import AuthSettings
 
+from core import folders as folders_repo
 from core import garden_io
 from core import gardens as gardens_repo
+from core import library as library_repo
 from core import graph as graph_repo
 from core import motes as motes_repo
 from core import portals as portals_repo
@@ -165,13 +167,13 @@ def delete_mote(mote_id: str, garden: str | None = None) -> bool:
 
 def list_relationships(
     from_id: str | None = None,
-    relationship_type: str | None = None,
+    type: str | None = None,
     garden: str | None = None,
 ) -> list[dict[str, Any]]:
     """Relationships in the garden, optionally filtered by source mote
     and/or type. Omit both filters for all of them."""
     with _connect(garden) as conn:
-        rels = rel_repo.list_relationships(conn, from_id, relationship_type)
+        rels = rel_repo.list_relationships(conn, from_id, type)
         return [dataclasses.asdict(r) for r in rels]
 
 
@@ -185,14 +187,15 @@ def mote_relationships(mote_id: str, garden: str | None = None) -> list[dict[str
 
 
 def create_relationship(
-    from_id: str, to_id: str, relationship_type: str, garden: str | None = None
+    from_id: str, to_id: str, type: str, garden: str | None = None
 ) -> dict[str, Any]:
     """Connect two motes with a typed, directed relationship. The type is
     free-form (e.g. 'wrote', 'lives_in'), except for the reserved ones
     the engine interprets -- see reserved_names(), and prefer
-    set_species()/set_template() over creating those by hand."""
+    set_species()/set_template()/set_folder() over creating those by
+    hand."""
     with _connect(garden) as conn:
-        rel_id = rel_repo.create_relationship(conn, from_id, to_id, relationship_type)
+        rel_id = rel_repo.create_relationship(conn, from_id, to_id, type)
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
 
 
@@ -200,13 +203,13 @@ def update_relationship(
     rel_id: str,
     from_id: str | None = None,
     to_id: str | None = None,
-    relationship_type: str | None = None,
+    type: str | None = None,
     garden: str | None = None,
 ) -> dict[str, Any] | None:
     """Repoint or retype an existing relationship. Supply at least one of
-    from_id, to_id, relationship_type; omitted fields are left alone."""
+    from_id, to_id, type; omitted fields are left alone."""
     with _connect(garden) as conn:
-        rel_repo.update_relationship(conn, rel_id, from_id, to_id, relationship_type)
+        rel_repo.update_relationship(conn, rel_id, from_id, to_id, type)
         rel = rel_repo.get_relationship(conn, rel_id)
         return dataclasses.asdict(rel) if rel is not None else None
 
@@ -277,6 +280,73 @@ def create_instance(
     relationship."""
     with _connect(garden) as conn:
         mote_id = species_repo.create_instance(conn, species_id, overrides or {})
+        return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
+
+
+# ---- folders ----
+
+
+def list_folders(garden: str | None = None) -> list[dict[str, Any]]:
+    """Every mote currently acting as a folder -- the target of at least
+    one in_folder relationship. Folders are purely organizational: unlike
+    a species, a folder means nothing to the simulation engine."""
+    with _connect(garden) as conn:
+        return [dataclasses.asdict(m) for m in folders_repo.list_folders(conn)]
+
+
+def folders_of(mote_id: str, garden: str | None = None) -> list[dict[str, Any]]:
+    """The folders this mote is filed under. A mote may be in more than
+    one."""
+    with _connect(garden) as conn:
+        return [dataclasses.asdict(m) for m in folders_repo.folders_of(conn, mote_id)]
+
+
+def folder_members(folder_id: str, garden: str | None = None) -> list[dict[str, Any]]:
+    """Every mote filed under this folder."""
+    with _connect(garden) as conn:
+        return [dataclasses.asdict(m) for m in folders_repo.folder_members(conn, folder_id)]
+
+
+def set_folder(mote_id: str, folder_id: str, garden: str | None = None) -> dict[str, Any]:
+    """File a mote under a folder. Additive -- it does not remove folders
+    the mote is already in. Any mote can act as a folder; nothing marks
+    one structurally, so this is the whole of "make that a folder"."""
+    with _connect(garden) as conn:
+        rel_id = folders_repo.set_folder(conn, mote_id, folder_id)
+        return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
+
+
+# ---- reusable motes (the library) ----
+
+
+def list_library() -> list[dict[str, Any]]:
+    """Every entry in the reusable-motes library -- standalone copies of
+    motes worth dropping into any garden later. The library is a reserved
+    garden (`_library`) rather than a separate store, but it is left out
+    of list_gardens(), so this is how you find what's in it."""
+    with _connect(library_repo.LIBRARY_GARDEN) as conn:
+        return [dataclasses.asdict(m) for m in motes_repo.list_motes(conn)]
+
+
+def save_to_library(mote_id: str, garden: str | None = None) -> dict[str, Any]:
+    """Snapshot a mote's properties into a new library entry. A copy, not
+    a link: editing either side afterwards never affects the other, and
+    the mote's relationships are not captured."""
+    with _connect(garden) as conn:
+        entry_id = library_repo.save_to_library(conn, mote_id)
+    with _connect(library_repo.LIBRARY_GARDEN) as library_conn:
+        return dataclasses.asdict(motes_repo.get_mote(library_conn, entry_id))
+
+
+def reuse_from_library(
+    library_mote_id: str, overrides: dict[str, Any] | None = None, garden: str | None = None
+) -> dict[str, Any]:
+    """Create a new mote in `garden` from a library entry, with
+    `overrides` applied on top -- the same seeding create_instance() does
+    from a species' template. Nothing links the new mote back to the
+    entry."""
+    with _connect(garden) as conn:
+        mote_id = library_repo.reuse_from_library(conn, library_mote_id, overrides or {})
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
 
 
@@ -425,7 +495,7 @@ def reserved_names() -> dict[str, Any]:
 
 
 # Registered by build_server() below rather than the @mcp.tool() decorator,
-# so the same 33 tools can be mounted on either the plain instance (stdio,
+# so the same tools can be mounted on either the plain instance (stdio,
 # tests, `mcp dev`) or an OAuth-wired one (see run_mcp.py --public-url)
 # without duplicating every signature and docstring.
 _TOOLS: tuple[Callable[..., Any], ...] = (
@@ -435,6 +505,8 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     delete_relationship,
     list_species, species_of, instances_of, set_species, set_template, template_for,
     create_instance,
+    list_folders, folders_of, folder_members, set_folder,
+    list_library, save_to_library, reuse_from_library,
     create_portal, resolve_portal,
     neighborhood, whole_garden,
     preview_simulation, list_runs, get_run, run_changes, run_ticks, mote_history,
