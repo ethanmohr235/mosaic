@@ -14,13 +14,19 @@ instance from a template's properties without keeping them linked.
 
 Relationships are never saved or restored -- a library entry is
 properties only. Saving whole subgraphs (a mote plus its relationships
-to other library entries) is a deferred, larger feature (see
-docs/small-changes.md).
+to other library entries) is a deferred, larger feature -- see
+docs/architecture.md's "Reusable motes" section for what it would have
+to answer first.
 
 `_library` is not validated to exist before use, unlike create_portal()'s
 arbitrary user-named target garden: it's a fixed reserved name that
 should come into being lazily on first save, the same way
 core/gardens.py::resolve_garden(None) lazily creates DEFAULT_GARDEN.
+That lazy path (get_connection + initialize_database) is also the only
+way it can be created at all -- core/db.py::is_reserved_garden() marks
+any underscore-prefixed name as MonOSS's own, which
+core/gardens.py::create_garden() refuses to make and list_gardens()
+leaves out of the user's workspaces.
 """
 import sqlite3
 

@@ -2,10 +2,12 @@
 import sqlite3
 
 from core.db import generate_uuid
-from core.models import Relationship
+from core.entities import Relationship
 
-# Future extension point: relationships programmatically modifying mote
-# properties (simulation). Not implemented — design with the user first.
+# Relationships programmatically modifying mote properties is the
+# simulation capability, and it is built: core/rules.py discovers rules
+# from `applies_to` relationships, and core/simulation.py solves them.
+# Nothing about that lives here -- this module stays plain storage.
 
 
 def create_relationship(

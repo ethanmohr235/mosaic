@@ -4,7 +4,7 @@ import re
 import sqlite3
 
 from core.db import generate_uuid
-from core.models import Mote
+from core.entities import Mote
 
 # Matches "key = value" (or "key=value"), e.g. "priority = high" --
 # structured equality on a specific property, shared with
@@ -106,9 +106,14 @@ def search_motes(conn: sqlite3.Connection, query: str, limit: int = 60) -> list[
     "key = value" matches a specific property's value exactly; anything
     else is a substring match against the mote id or any property key or
     value. An empty/blank query matches everything, same as the UI's own
-    search palette does with nothing typed. Mirrors
-    ui/frontend/app.js::matchesQuery exactly so search results don't
-    depend on which adapter (UI, CLI, MCP) asked."""
+    search palette does with nothing typed.
+
+    ui/frontend/app.js::matchesQuery is the same function for the search
+    palette (which filters an already-cached array rather than round-
+    tripping per keystroke). The two are kept behaviourally identical --
+    same query forms, matched against the same three things -- so a query
+    returns the same motes whichever surface asked; change one and change
+    the other."""
     motes = list_motes(conn)
     query = (query or "").strip()
     if not query:

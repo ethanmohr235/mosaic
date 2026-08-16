@@ -482,6 +482,29 @@ def run_checks(window):
 
     check("search: key = value matches a specific property exactly", search_key_value_query_matches_exactly)
 
+    def search_matches_a_full_mote_id():
+        """matchesQuery() is meant to be the exact counterpart of
+        core/motes.py::search_motes. It used to match nodeLabel() instead
+        of the id, and a label only ever shows a mote's first 8
+        characters -- so pasting a whole id in found nothing here while
+        the same query found it over MCP."""
+        full_id = js(window, "JSON.stringify(allMotes[0].id)").strip('"')
+        js(window, f"""
+            const i = document.getElementById('search-input');
+            i.value = {full_id!r}; i.dispatchEvent(new Event('input'));
+        """)
+        time.sleep(0.8)
+        count = js(window, "document.querySelectorAll('#search-results .search-result-row').length")
+        assert count == 1, f"a full mote id should find exactly its own mote, got {count}"
+
+        js(window, """
+            const i = document.getElementById('search-input');
+            i.value = ''; i.dispatchEvent(new Event('input'));
+        """)
+        time.sleep(0.5)
+
+    check("search: a full mote id matches, same as core.search_motes", search_matches_a_full_mote_id)
+
     def search_keyboard_nav_selects():
         js(window, """
             const i = document.getElementById('search-input');
@@ -2134,7 +2157,7 @@ def run_checks(window):
           open_library_via_menu_switches_into_a_real_garden)
 
     def folder_grouping_gets_a_distinct_shape_and_legend_row():
-        # Still inside _library from the previous check -- groups/folders
+        # Still inside _library from the previous check -- folders
         # are usable in any garden (docs/architecture.md), and creating
         # this folder+member here also seeds real library content the
         # next check (chip filtering in the picker) relies on.
@@ -2142,7 +2165,7 @@ def run_checks(window):
             async () => {
                 const folder = await api.create_mote({name: 'Thermodynamics'});
                 const member = await api.create_mote({name: 'Entropy'});
-                await api.set_group(member.id, folder.id);
+                await api.set_folder(member.id, folder.id);
                 window.__folderIds = {folder: folder.id, member: member.id};
                 await refreshMoteCache();
                 await refocus(folder.id);
@@ -3129,11 +3152,11 @@ def run_checks(window):
     def soon_stubs_toast_instead_of_doing_nothing():
         js(window, "document.getElementById('file-btn').click();")
         time.sleep(0.3)
-        js(window, "document.querySelector('#file-menu [data-soon=\\'Import motes\\']').click();")
+        js(window, "document.querySelector('#file-menu [data-soon=\\'Export as CSV\\']').click();")
         time.sleep(0.5)
 
         toast = js(window, "document.getElementById('toast').textContent")
-        assert "Import motes" in toast, f"a 'soon' stub should toast an explanation, got {toast!r}"
+        assert "Export as CSV" in toast, f"a 'soon' stub should toast an explanation, got {toast!r}"
         closed = js(window, "document.getElementById('file-menu').classList.contains('hidden')")
         assert closed is True, "clicking a 'soon' stub should close the menu like any other action"
 

@@ -1,3 +1,4 @@
+from core.entities import Relationship
 from core.motes import create_mote, get_mote
 from core.species import (
     create_instance,
@@ -5,6 +6,7 @@ from core.species import (
     list_species,
     set_species,
     set_template,
+    species_ids_in,
     species_of,
     template_for,
     template_mote_ids,
@@ -193,3 +195,31 @@ def test_simulation_ignores_template_motes(conn):
     assert get_mote(conn, instance).properties["area"] == 12.0
     assert "area" not in get_mote(conn, template).properties
     assert len(result.values) == 1
+
+
+# ---- species_ids_in: the pure counterpart of list_species ----
+
+def test_species_ids_in_counts_instance_of_and_template_of():
+    """One definition of "is a species", shared by list_species() (which
+    queries) and ui/api.py's focus() (which classifies a subgraph it has
+    already fetched) -- the two used to answer this separately."""
+    rels = [
+        Relationship(from_id="r1", to_id="resistor", type="instance_of"),
+        Relationship(from_id="template", to_id="capacitor", type="template_of"),
+        Relationship(from_id="alice", to_id="project", type="works_on"),
+    ]
+    assert species_ids_in(rels) == {"resistor", "capacitor"}
+
+
+def test_species_ids_in_is_empty_without_structural_relationships():
+    assert species_ids_in([Relationship(from_id="a", to_id="b", type="likes")]) == set()
+
+
+def test_species_ids_in_agrees_with_list_species(conn):
+    species = create_mote(conn, {"name": "Resistor"})
+    instance = create_mote(conn, {"name": "R1"})
+    set_species(conn, instance, species)
+    create_mote(conn, {"name": "Unrelated"})
+
+    from core.relationships import list_relationships
+    assert species_ids_in(list_relationships(conn)) == {m.id for m in list_species(conn)}

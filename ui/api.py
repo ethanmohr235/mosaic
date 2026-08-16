@@ -16,7 +16,7 @@ from core import gardens as gardens_repo
 from core import garden_io
 from core import google_calendar as gcal_repo
 from core import graph as graph_repo
-from core import groups as groups_repo
+from core import folders as folders_repo
 from core import library as library_repo
 from core import links as links_repo
 from core import motes as motes_repo
@@ -51,13 +51,16 @@ def _coerce_properties(raw_properties: dict) -> dict:
 def _classify(motes: list, rels: list) -> dict:
     """species_ids/folder_ids for a set of motes/relationships -- shared
     by focus() (the currently-open garden) and library_snapshot() (a
-    read of _library) so the two don't drift. template_of counts
-    alongside instance_of, matching species.list_species -- otherwise a
-    species set up with a template but not yet instantiated wouldn't
-    render as one."""
-    structural = (species_repo.INSTANCE_OF, species_repo.TEMPLATE_OF)
-    species_target_ids = {r.to_id for r in rels if r.type in structural}
-    folder_target_ids = {r.to_id for r in rels if r.type == groups_repo.GROUPS}
+    read of _library) so the two don't drift.
+
+    What makes a mote a species or a folder is core's to decide
+    (species_ids_in/folder_ids_in), not this adapter's: this used to be
+    a second, independent copy of those rules, which is how a subtlety
+    like "template_of counts as a species too" ends up true in one place
+    and false in another. All that's left here is narrowing the answer
+    to the motes actually being returned."""
+    species_target_ids = species_repo.species_ids_in(rels)
+    folder_target_ids = folders_repo.folder_ids_in(rels)
     return {
         "species_ids": [m.id for m in motes if m.id in species_target_ids],
         "folder_ids": [m.id for m in motes if m.id in folder_target_ids],
@@ -65,22 +68,12 @@ def _classify(motes: list, rels: list) -> dict:
 
 
 def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
-    """Shapes a simulation_repo.TimeSeriesResult for the JS bridge.
-    StepResult.values/unsolved are keyed by (mote_id, key) tuples, which
-    don't survive JSON -- changes (already plain mote_id/key/old/new
-    dicts via Change) carry everything the scrub UI needs, so unsolved
-    counts stay prose-only inside each step's summary rather than being
-    serialized separately."""
+    """Shapes a simulation_repo.TimeSeriesResult for the JS bridge. The
+    steps themselves go through core's own step_payloads(), shared with
+    the MCP adapter; only the run-level fields around them are this
+    bridge's business."""
     return {
-        "steps": [
-            {
-                "step": s.step,
-                "changes": [dataclasses.asdict(c) for c in s.changes],
-                "equation_count": s.equation_count,
-                "summary": s.summary,
-            }
-            for s in result.steps
-        ],
+        "steps": simulation_repo.step_payloads(result.steps),
         "failed_at": result.failed_at,
         "error": result.error,
         "run_id": result.run_id,
@@ -141,7 +134,19 @@ def _synchronized(method):
 class Api:
     """JS-facing bridge over the core data layer. Holds the live garden
     connection as instance state -- not module-global, same pattern as
-    cli/repl.py's locals."""
+    cli/repl.py's locals.
+
+    The bridge mirrors the repository surface, the same way
+    mcp_server/server.py does, rather than being trimmed to exactly
+    today's frontend callers: a method with no caller yet (list_species,
+    set_template) is a bridge that's complete, not one that's rotting.
+
+    What earns a test in tests/test_api.py is behavior this layer adds --
+    property coercion, garden switching, cross-garden connections, export
+    orchestration. A method that only forwards to a repository and
+    asdict()s the result is already covered by that repository's own
+    tests, and testing it again here would only assert that Python can
+    call a function."""
 
     def __init__(self, garden: str | None = None):
         self._lock = threading.Lock()
@@ -165,18 +170,13 @@ class Api:
 
     @_synchronized
     def list_gardens(self) -> list[str]:
-        # LIBRARY_GARDEN is a reserved implementation detail (reusable
-        # motes' backing store), not a normal workspace -- hidden here so
-        # every UI consumer (switcher, portal-picker's garden dropdown)
-        # never sees or targets it. delete_garden()'s "last garden left"
-        # guard below calls gardens_repo.list_gardens() directly, so it
-        # still counts it as a real garden file.
-        return [g for g in gardens_repo.list_gardens() if g != library_repo.LIBRARY_GARDEN]
+        # Reserved gardens (the reusable-motes library) are filtered by
+        # core, not here, so the switcher, the portal picker, `garden
+        # list` and the MCP tool all show the same set.
+        return gardens_repo.list_gardens()
 
     @_synchronized
     def create_garden(self, name: str) -> None:
-        if name == library_repo.LIBRARY_GARDEN:
-            raise ValueError(f"{name!r} is reserved for the reusable-motes library.")
         gardens_repo.create_garden(name)
 
     @_synchronized
@@ -192,7 +192,9 @@ class Api:
     def delete_garden(self, name: str) -> dict:
         # Checked in this order deliberately: if it's the only garden left,
         # "switch away first" would be misleading advice -- there's nowhere
-        # to switch to.
+        # to switch to. "Last garden" counts workspaces, not garden files:
+        # being left with only the reusable-motes library is being left
+        # with nowhere to work.
         if len(gardens_repo.list_gardens()) <= 1:
             raise ValueError("Can't delete the last garden.")
         if name == self._current_garden:
@@ -469,20 +471,20 @@ class Api:
         )
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
 
-    # ---- groups ----
+    # ---- folders ----
 
     @_synchronized
-    def set_group(self, mote_id: str, folder_id: str) -> dict:
-        rel_id = groups_repo.set_group(self._conn, mote_id, folder_id)
+    def set_folder(self, mote_id: str, folder_id: str) -> dict:
+        rel_id = folders_repo.set_folder(self._conn, mote_id, folder_id)
         return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
 
     @_synchronized
-    def group_of(self, mote_id: str) -> list[dict]:
-        return [dataclasses.asdict(m) for m in groups_repo.group_of(self._conn, mote_id)]
+    def folders_of(self, mote_id: str) -> list[dict]:
+        return [dataclasses.asdict(m) for m in folders_repo.folders_of(self._conn, mote_id)]
 
     @_synchronized
-    def members_of(self, folder_id: str) -> list[dict]:
-        return [dataclasses.asdict(m) for m in groups_repo.members_of(self._conn, folder_id)]
+    def folder_members(self, folder_id: str) -> list[dict]:
+        return [dataclasses.asdict(m) for m in folders_repo.folder_members(self._conn, folder_id)]
 
     # ---- simulation ----
 
@@ -539,16 +541,7 @@ class Api:
         steps so the frontend's existing scrub-bar rendering needs
         nothing new to "enter" a run -- unrelated to any other run in
         the garden's history."""
-        return {
-            "steps": [
-                {
-                    "step": t.step,
-                    "changes": [dataclasses.asdict(c) for c in t.changes],
-                    "summary": t.summary,
-                }
-                for t in simulation_repo.run_ticks(self._conn, run_id)
-            ],
-        }
+        return {"steps": simulation_repo.step_payloads(simulation_repo.run_ticks(self._conn, run_id))}
 
     @_synchronized
     def mote_history(self, mote_id: str) -> dict[str, list[float]]:
@@ -566,61 +559,28 @@ class Api:
         would freeze every other Api call for as long as it takes -- the
         same mistake already made and fixed once for local-file opening
         (see _open_with_os_default). Only the brief DB-touching calls
-        (list_motes, update_mote) are synchronized, individually."""
+        (list_motes, update_mote) are synchronized, individually.
+
+        The export itself is core's (gcal_repo.export_events); what this
+        supplies is the two things only the app knows -- how to write an
+        event id back through the lock, and whether the user has switched
+        gardens out from under a network call in flight."""
         garden_at_start = self._current_garden
         all_motes = self.list_motes()
-        # Templates hold starting properties for a species, not real data
-        # (usually incomplete fields that would break other behavior) --
-        # excluded here even if dated, same as any other non-eligible mote.
         # Lock held only for this brief read, same discipline as every
         # other DB touch in this deliberately-not-@_synchronized method.
         with self._lock:
             template_ids = species_repo.template_mote_ids(self._conn)
-        motes = [m for m in gcal_repo.dated_motes(all_motes) if m["id"] not in template_ids]
-        dated_ids = {m["id"] for m in motes}
-        credentials = gcal_repo.get_credentials()
 
-        # Anything MonOSS previously exported (per Calendar's own
-        # extendedProperties tag -- see event_payload) whose mote is now
-        # gone, or no longer has a `date`, gets its event deleted. This
-        # is the only place that needs to know about motes that no
-        # longer exist, and Calendar itself is the registry -- no local
-        # tracking file to keep in sync.
-        deleted = 0
-        for mote_id, event_id in gcal_repo.list_managed_events(credentials).items():
-            if self._current_garden != garden_at_start:
-                break
-            if mote_id not in dated_ids:
-                gcal_repo.delete_event(credentials, event_id)
-                deleted += 1
-
-        created = updated = skipped = 0
-        for mote in motes:
-            try:
-                payload = gcal_repo.event_payload(mote)
-            except ValueError:
-                skipped += 1
-                continue
-
-            existing_id = mote["properties"].get("gcal_event_id")
-            event_id = gcal_repo.push_event(credentials, payload, existing_id)
-
-            if self._current_garden != garden_at_start:
-                # The garden changed underneath this loop (e.g. the user
-                # switched gardens mid-export) -- don't write this id
-                # into whatever garden is open now.
-                continue
-            if existing_id:
-                updated += 1
-            else:
-                created += 1
-            if event_id != existing_id:
-                self.update_mote(mote["id"], {"gcal_event_id": event_id})
-
-        return {
-            "created": created, "updated": updated, "skipped": skipped,
-            "deleted": deleted, "total": len(motes),
-        }
+        summary = gcal_repo.export_events(
+            gcal_repo.exportable_motes(all_motes, template_ids),
+            gcal_repo.get_credentials(),
+            record_event_id=lambda mote_id, event_id: self.update_mote(
+                mote_id, {"gcal_event_id": event_id}
+            ),
+            still_exporting=lambda: self._current_garden == garden_at_start,
+        )
+        return dataclasses.asdict(summary)
 
     # ---- reserved names ----
 

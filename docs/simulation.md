@@ -144,11 +144,15 @@ re-checked each step).
 
 ## Running and re-running
 
-A single `run_simulation()` call (used by the worked example script, and
-equivalent to committing a 1-step time series) writes solved values
-straight onto the motes and is idempotent: unknowns are re-derived from
-the species every time, so a solved value never gets mistaken for a
-fixed input.
+A single `run_simulation()` call (used by the worked example scripts) is
+*implemented as* committing a 1-step time series, not merely equivalent
+to one. It writes solved values straight onto the motes and is
+idempotent: unknowns are re-derived from the species every time, so a
+solved value never gets mistaken for a fixed input. What it keeps of its
+own is how it reports: it raises `SimulationError` instead of returning
+a result carrying an error, because a caller asking for one answer wants
+either the answer or the reason. It also logs a failed run, where a
+preview deliberately leaves no trace.
 
 A committed or *saved* run (see "Run history" below) is logged to
 `simulation_runs`/`simulation_changes` -- including a failed single-step

@@ -1,6 +1,6 @@
 import pytest
 
-from core.db import garden_db_path
+from core.db import garden_db_path, get_connection, initialize_database
 from core.gardens import (
     clear_default_garden,
     create_garden,
@@ -128,3 +128,51 @@ def test_resolve_garden_none_falls_back_when_preferred_deleted():
     delete_garden("work")
     assert resolve_garden(None) == "default"
     assert garden_exists("default")
+
+
+# ---- reserved gardens ----
+#
+# `_library` is MonOSS's own storage rather than a workspace. The rule is
+# core's, so every surface agrees: the UI used to filter its switcher
+# while `garden list` and the MCP tool both offered `_library` as an
+# ordinary garden.
+
+def test_create_garden_rejects_a_reserved_name():
+    with pytest.raises(ValueError, match="reserved"):
+        create_garden("_library")
+    assert not garden_exists("_library")
+
+
+def test_create_garden_rejects_any_underscore_prefixed_name():
+    # A rule, not a list of special cases to keep in sync.
+    with pytest.raises(ValueError, match="reserved"):
+        create_garden("_scratch")
+
+
+def test_list_gardens_hides_reserved_gardens():
+    create_garden("work")
+    library_conn = get_connection("_library")
+    initialize_database(library_conn)
+    library_conn.close()
+
+    assert list_gardens() == ["work"]
+
+
+def test_list_gardens_can_include_reserved_gardens_when_asked():
+    create_garden("work")
+    library_conn = get_connection("_library")
+    initialize_database(library_conn)
+    library_conn.close()
+
+    assert list_gardens(include_reserved=True) == ["_library", "work"]
+
+
+def test_a_reserved_garden_is_still_openable_by_name():
+    # Reserved governs discovery and creation, not access -- the library
+    # is a real, fully editable garden reachable via "Open library".
+    library_conn = get_connection("_library")
+    initialize_database(library_conn)
+    library_conn.close()
+
+    assert garden_exists("_library")
+    assert resolve_garden("_library") == "_library"

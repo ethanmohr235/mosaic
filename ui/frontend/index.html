@@ -38,11 +38,11 @@
       <button id="file-btn" class="topbar-trigger" type="button" data-menu="file" aria-haspopup="menu" aria-expanded="false">File</button>
       <div id="file-menu" class="menu hidden">
         <button id="file-new-garden" class="menu-item" type="button">New garden…</button>
-        <button class="menu-item soon" type="button" data-soon="Import motes">Import motes…<span class="menu-badge">soon</span></button>
+        <button id="file-import-garden" class="menu-item" type="button">Import garden…</button>
         <div class="menu-sep"></div>
+        <button id="file-export-garden" class="menu-item" type="button">Export garden as JSON…</button>
         <button id="export-calendar-btn" class="menu-item" type="button">Export to Calendar</button>
         <button class="menu-item soon" type="button" data-soon="Export as CSV">Export as CSV<span class="menu-badge">soon</span></button>
-        <button class="menu-item soon" type="button" data-soon="Export as JSON">Export as JSON<span class="menu-badge">soon</span></button>
         <button class="menu-item soon" type="button" data-soon="Print graph">Print graph…<span class="menu-badge">soon</span></button>
       </div>
     </div>
@@ -239,17 +239,18 @@
         </div>
         <div id="detail-instance-count"></div>
 
-        <div class="panel-heading">Folder</div>
+        <div class="panel-heading">Folders</div>
         <div id="detail-folders"></div>
         <button id="set-folder-btn" type="button" class="ghost">Add to folder…</button>
         <div id="folder-picker-wrap" class="hidden">
           <input type="text" id="folder-picker-input" placeholder="Search for a folder…" autocomplete="off">
           <div id="folder-picker-results"></div>
         </div>
+        <div id="detail-member-count"></div>
 
         <div class="panel-heading">Relationships</div>
         <div id="detail-relationships"></div>
-        <button id="connect-btn" type="button" class="ghost wide">Connect to…</button>
+        <div id="connect-hint" class="panel-hint">Ctrl+drag to another mote to connect them.</div>
 
         <button id="delete-mote-btn" type="button" class="danger wide">Delete mote</button>
       </div>

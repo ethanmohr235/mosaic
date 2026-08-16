@@ -27,6 +27,7 @@ from mcp_server.server import (
     preview_simulation,
     resolve_portal,
     reserved_names,
+    run_ticks,
     search_motes,
     set_species,
     set_template,
@@ -329,3 +330,33 @@ def test_reserved_names_includes_the_equation_and_provider_reference():
     assert any("prev(" in s for s in syntaxes)
     assert "ideal_gas" in names["propertyModelProviders"]
     assert "coolprop" in names["propertyModelProviders"]
+
+
+# ---- run_ticks: the same steps, the same shape ----
+
+def test_run_ticks_matches_preview_simulations_shape(box):
+    """A run's steps are the same steps whether freshly solved or read
+    back out of the log, so an MCP client shouldn't have to unpack them
+    two different ways -- run_ticks used to return a bare list while
+    preview_simulation returned {"steps": [...]}."""
+    from core.db import initialize_database
+    from core.simulation import run_simulation
+
+    conn = get_connection(GARDEN)
+    try:
+        initialize_database(conn)
+        result = run_simulation(conn)
+    finally:
+        conn.close()
+
+    preview = preview_simulation(1, GARDEN)
+    logged = run_ticks(result.run_id, GARDEN)
+
+    assert set(logged) == {"steps"}
+    assert len(logged["steps"]) == 1
+    assert set(logged["steps"][0]) <= set(preview["steps"][0])
+    assert {"step", "changes", "summary"} <= set(logged["steps"][0])
+
+
+def test_run_ticks_for_an_unknown_run_is_empty(box):
+    assert run_ticks("nonexistent", GARDEN) == {"steps": []}

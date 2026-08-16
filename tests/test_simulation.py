@@ -12,6 +12,7 @@ from core.simulation import (
     run_simulation,
     run_ticks,
     run_time_series,
+    step_payloads,
 )
 from core.species import set_species
 
@@ -234,6 +235,32 @@ def test_failed_run_is_logged_too(conn):
     row = cursor.fetchone()
     assert row["status"] == "error"
     assert "underdetermined" in row["detail"]
+
+
+def test_run_simulation_is_a_one_step_committed_time_series(conn, divider):
+    """The docs have always said these are the same operation; since
+    run_simulation() is now literally implemented as one, this guards
+    the equivalence rather than the wording."""
+    steady = run_simulation(conn)
+
+    # Same garden, same rules, solved again the other way round.
+    series = run_time_series(conn, step_count=1, commit=True)
+    step = series.steps[0]
+
+    assert steady.values == step.values
+    assert steady.equation_count == step.equation_count
+    assert steady.unsolved == step.unsolved
+    # Same properties, same solved values. Only old_value differs, and
+    # only because the first run already wrote them -- which is the
+    # idempotency the docs claim, not a difference between the paths.
+    assert (
+        [(c.mote_id, c.key, c.new_value) for c in steady.changes]
+        == [(c.mote_id, c.key, c.new_value) for c in step.changes]
+    )
+    # Both logged themselves as a committed run, one tick each.
+    assert [r.committed for r in list_runs(conn)] == [True, True]
+    assert len(run_ticks(conn, steady.run_id)) == 1
+    assert len(run_ticks(conn, series.run_id)) == 1
 
 
 def test_run_number_advances_across_runs(conn, divider):
@@ -519,6 +546,30 @@ def test_run_ticks_returns_the_per_tick_breakdown(conn, compounding):
     assert [t.step for t in ticks] == [0, 1, 2]
     balances = [next(c.new_value for c in t.changes if c.key == "balance") for t in ticks]
     assert balances == pytest.approx([105.0, 110.25, 115.7625])
+
+
+def test_step_payloads_shapes_a_solved_step_for_any_adapter(conn, compounding):
+    """One shared serialization, so the UI bridge and the MCP tools can't
+    hand out the same step in two different shapes."""
+    result = run_time_series(conn, step_count=2, commit=False)
+    payloads = step_payloads(result.steps)
+
+    assert [p["step"] for p in payloads] == [0, 1]
+    assert all(isinstance(p["summary"], str) for p in payloads)
+    # equation_count is present for a freshly solved step...
+    assert all(p["equation_count"] >= 1 for p in payloads)
+    change = payloads[0]["changes"][0]
+    assert set(change) == {"mote_id", "key", "old_value", "new_value"}
+
+
+def test_step_payloads_omits_equation_count_for_a_logged_tick(conn, compounding):
+    """...and absent for a tick read back out of the log, which records
+    what changed rather than how many equations produced it."""
+    result = run_time_series(conn, step_count=2, commit=True)
+    payloads = step_payloads(run_ticks(conn, result.run_id))
+
+    assert [p["step"] for p in payloads] == [0, 1]
+    assert all("equation_count" not in p for p in payloads)
 
 
 def test_run_ticks_for_a_steady_state_run_has_exactly_one_tick(conn, divider):

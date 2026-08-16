@@ -1,7 +1,8 @@
 # core/species.py
 import sqlite3
+from collections.abc import Iterable
 
-from core.models import Mote
+from core.entities import Mote, Relationship
 from core.motes import create_mote, get_mote, get_motes
 from core.relationships import create_relationship, list_relationships
 
@@ -36,16 +37,21 @@ def instances_of(conn: sqlite3.Connection, species_id: str) -> list[Mote]:
     return get_motes(conn, [r.from_id for r in rels])
 
 
+def species_ids_in(relationships: Iterable[Relationship]) -> set[str]:
+    """Which motes a set of relationships makes into species. The pure
+    counterpart of list_species(), for a caller that already holds the
+    relationships and shouldn't re-query: ui/api.py classifies the exact
+    subgraph focus() is about to return, and does it for the library
+    garden too. One definition of "is a species", whether the question
+    arrives as a query or as an already-fetched list."""
+    return {r.to_id for r in relationships if r.type in (INSTANCE_OF, TEMPLATE_OF)}
+
+
 def list_species(conn: sqlite3.Connection) -> list[Mote]:
     """Every mote currently acting as a species -- the target of at least
     one instance_of *or* template_of relationship. Templates count so that
     a species you've set up but not yet instantiated still appears."""
-    species_ids = {
-        r.to_id
-        for r in list_relationships(conn)
-        if r.type in (INSTANCE_OF, TEMPLATE_OF)
-    }
-    return get_motes(conn, list(species_ids))
+    return get_motes(conn, list(species_ids_in(list_relationships(conn))))
 
 
 def template_mote_ids(conn: sqlite3.Connection) -> set[str]:

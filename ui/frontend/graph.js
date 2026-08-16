@@ -158,7 +158,7 @@ class MonossGraph {
       if (rel.type === "instance_of") {
         if (!this.speciesOf.has(rel.from_id)) this.speciesOf.set(rel.from_id, []);
         this.speciesOf.get(rel.from_id).push(rel.to_id);
-      } else if (rel.type === "groups") {
+      } else if (rel.type === "in_folder") {
         if (!this.groupOf.has(rel.from_id)) this.groupOf.set(rel.from_id, []);
         this.groupOf.get(rel.from_id).push(rel.to_id);
       }

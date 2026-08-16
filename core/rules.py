@@ -10,7 +10,7 @@ property. Nothing else marks either as special -- same philosophy as
 import sqlite3
 from dataclasses import dataclass
 
-from core.models import Mote
+from core.entities import Mote
 from core.motes import get_mote
 from core.relationships import list_relationships
 

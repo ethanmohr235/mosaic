@@ -735,12 +735,13 @@ function setupViewSettings() {
 // ---- detail panel ----
 
 async function openDetailPanel(moteId) {
-  const [mote, rels, species, instances, folders, history] = await Promise.all([
+  const [mote, rels, species, instances, folders, members, history] = await Promise.all([
     call(api.get_mote(moteId)),
     call(api.mote_relationships(moteId)),
     call(api.species_of(moteId)),
     call(api.instances_of(moteId)),
-    call(api.group_of(moteId)),
+    call(api.folders_of(moteId)),
+    call(api.folder_members(moteId)),
     call(api.mote_history(moteId)),
   ]);
   if (!mote) return;
@@ -766,7 +767,7 @@ async function openDetailPanel(moteId) {
 
   renderProperties(displayMote, history, mote);
   renderSpeciesSection(mote, species, instances);
-  renderFolderSection(mote, folders);
+  renderFolderSection(mote, folders, members);
   renderRelationships(moteId, rels);
   $("detail-panel").classList.remove("hidden");
   fitAllTextareas();
@@ -1411,7 +1412,7 @@ function renderSpeciesSection(mote, species, instances) {
     instances.length > 0 ? `${instances.length} instance${instances.length === 1 ? "" : "s"}` : "";
 }
 
-function renderFolderSection(mote, folders) {
+function renderFolderSection(mote, folders, members) {
   const container = $("detail-folders");
   container.innerHTML = "";
   if (folders.length === 0) {
@@ -1419,7 +1420,7 @@ function renderFolderSection(mote, folders) {
   }
   for (const folderMote of folders) {
     const rel = payload.relationships.find(
-      (r) => r.type === "groups" && r.from_id === mote.id && r.to_id === folderMote.id
+      (r) => r.type === "in_folder" && r.from_id === mote.id && r.to_id === folderMote.id
     );
     const row = document.createElement("div");
     row.className = "rel-row";
@@ -1442,12 +1443,18 @@ function renderFolderSection(mote, folders) {
     row.append(label, del);
     container.appendChild(row);
   }
+
+  // The folder counterpart of the species section's instance count: a
+  // folder is a mote others point at, so what's worth stating on it is
+  // how many that is.
+  $("detail-member-count").textContent =
+    members.length > 0 ? `${members.length} member${members.length === 1 ? "" : "s"}` : "";
 }
 
 function renderRelationships(moteId, rels) {
   const container = $("detail-relationships");
   container.innerHTML = "";
-  const shown = rels.filter((r) => r.type !== "instance_of" && r.type !== "groups");
+  const shown = rels.filter((r) => r.type !== "instance_of" && r.type !== "in_folder");
   if (shown.length === 0) {
     container.innerHTML = '<div class="empty-note">None</div>';
   }
@@ -1801,7 +1808,7 @@ function setupSpeciesControls() {
 // ---- folder picker ----
 //
 // Mirrors the species picker above closely -- a folder is just a mote
-// other motes point at via `groups`, the same way a species is just a
+// other motes point at via `in_folder`, the same way a species is just a
 // mote pointed at via `instance_of`, so this needs no gate on "is this
 // mote already a folder" any more than the species picker gates on
 // "is this mote already a species."
@@ -1835,7 +1842,7 @@ function renderFolderPickerResults(query) {
       e.preventDefault();
       if (editBlocked()) return;
       const targetId = folderPickerTargetId;
-      await call(api.set_group(targetId, mote.id));
+      await call(api.set_folder(targetId, mote.id));
       hideFolderPicker();
       await refocus(targetId, { pan: false });
       await openDetailPanel(targetId);
@@ -1869,6 +1876,12 @@ function setupFolderControls() {
 // is its value out of a single blob of text.
 const KEY_VALUE_QUERY_RE = /^\s*([^=\s][^=]*?)\s*=\s*(.*)$/;
 
+/** The exact counterpart of core/motes.py::search_motes -- same two query
+ *  forms, matched against the same three things (mote id, property keys,
+ *  property values), so a query returns the same motes whichever surface
+ *  asked. The id is matched in full rather than via nodeLabel(), which
+ *  only ever shows its first 8 characters: pasting a whole mote id into
+ *  the palette used to find nothing here while finding it over MCP. */
 function matchesQuery(mote, query) {
   if (!query) return true;
 
@@ -1886,7 +1899,7 @@ function matchesQuery(mote, query) {
   }
 
   const q = query.toLowerCase();
-  if (nodeLabel(mote).toLowerCase().includes(q)) return true;
+  if (mote.id.toLowerCase().includes(q)) return true;
   for (const [k, v] of Object.entries(mote.properties || {})) {
     if (k.toLowerCase().includes(q)) return true;
     const vs = typeof v === "string" ? v : JSON.stringify(v);
@@ -1908,7 +1921,7 @@ function speciesIdsOf(moteId) {
 }
 
 function folderIdsOf(moteId) {
-  return relatedTargetIds(payload.relationships, moteId, "groups");
+  return relatedTargetIds(payload.relationships, moteId, "in_folder");
 }
 
 function computeFilteredMotes(motes, relationships, query, { speciesFilter, folderFilter, relFilter } = {}) {
@@ -1921,7 +1934,7 @@ function computeFilteredMotes(motes, relationships, query, { speciesFilter, fold
         if (!matches) return false;
       }
       if (folderFilter && folderFilter.size) {
-        const ids = relatedTargetIds(relationships, mote.id, "groups");
+        const ids = relatedTargetIds(relationships, mote.id, "in_folder");
         if (!ids.some((id) => folderFilter.has(id))) return false;
       }
       if (relFilter && relFilter.size) {
@@ -2346,10 +2359,14 @@ function toggleControlPanel() {
   }
 }
 
-/** Shared by every "soon" stub item (Import motes, Export as CSV/JSON,
- *  Print graph, Timeline view, Group by type, Automations, Webhooks, API
- *  access) -- these have no real implementation yet, so a toast explains
- *  that rather than leaving the click silently do nothing. */
+/** Shared by every "soon" stub item (Export as CSV, Print graph,
+ *  Timeline view, Group by type, Automations, Webhooks, API access) --
+ *  these have no real implementation yet, so a toast explains that
+ *  rather than leaving the click silently do nothing. A stub only ever
+ *  stands for something that genuinely doesn't exist: garden
+ *  import/export used to sit here as "soon" while already working in
+ *  the gardens modal, which read as the app not knowing its own
+ *  features. */
 function comingSoon(label) {
   showToast(`${label} isn't built yet.`);
 }
@@ -2366,6 +2383,31 @@ async function createGardenFlow() {
   await call(api.switch_garden(name));
   closeGardensModal();
   await loadGarden(name);
+}
+
+/** Shared by the gardens modal's per-row Export button and the File
+ *  menu's "Export garden as JSON…" -- the same action on the same
+ *  format, so the File menu points at the real thing rather than a
+ *  "soon" stub sitting next to a feature that already works. */
+async function exportGardenFlow(name) {
+  const result = await call(api.export_garden(name));
+  if (!result.cancelled) showToast(`Exported to ${result.path}`);
+}
+
+/** Shared by the gardens modal's Import button and the File menu's
+ *  "Import garden…". Imports always land in a new garden: garden_io
+ *  refuses to merge into one that already holds any of the incoming
+ *  mote ids (core/garden_io.py), so asking for a name up front is the
+ *  honest flow rather than discovering the conflict afterward. */
+async function importGardenFlow() {
+  const name = window.prompt("Import into a new garden named:");
+  if (!name) return;
+  const result = await call(api.import_garden_into_new(name));
+  if (result.cancelled) return;
+  await call(api.switch_garden(result.garden));
+  closeGardensModal();
+  await loadGarden(result.garden);
+  showToast(`Imported ${result.motes} motes, ${result.relationships} relationships.`);
 }
 
 function setupTopMenus() {
@@ -2398,6 +2440,11 @@ function setupTopMenus() {
   $("garden-menu-new").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
   $("garden-menu-manage").addEventListener("click", () => { closeTopMenus(); openGardensModal(); });
   $("file-new-garden").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
+  $("file-import-garden").addEventListener("click", () => { closeTopMenus(); importGardenFlow(); });
+  $("file-export-garden").addEventListener("click", () => {
+    closeTopMenus();
+    exportGardenFlow(currentGarden);
+  });
   $("view-reset-view").addEventListener("click", () => { closeTopMenus(); resetViewAndUnhideAll(); });
   $("view-toggle-panel").addEventListener("click", () => { closeTopMenus(); toggleControlPanel(); });
   $("exit-sim-btn").addEventListener("click", () => { closeTopMenus(); discardSimPreview(); });
@@ -2459,10 +2506,9 @@ async function renderGardensList() {
       await loadGarden(name);
     });
 
-    row.querySelector(".ghost").addEventListener("click", async (e) => {
+    row.querySelector(".ghost").addEventListener("click", (e) => {
       e.stopPropagation();
-      const result = await call(api.export_garden(name));
-      if (!result.cancelled) showToast(`Exported to ${result.path}`);
+      exportGardenFlow(name);
     });
 
     // Disabled client-side for the same two cases the backend itself
@@ -2508,17 +2554,7 @@ function setupGardensModal() {
   });
 
   $("new-garden-btn").addEventListener("click", createGardenFlow);
-
-  $("import-garden-btn").addEventListener("click", async () => {
-    const name = window.prompt("Import into a new garden named:");
-    if (!name) return;
-    const result = await call(api.import_garden_into_new(name));
-    if (result.cancelled) return;
-    await call(api.switch_garden(result.garden));
-    closeGardensModal();
-    await loadGarden(result.garden);
-    showToast(`Imported ${result.motes} motes, ${result.relationships} relationships.`);
-  });
+  $("import-garden-btn").addEventListener("click", importGardenFlow);
 }
 
 // ---- portal picker ----
@@ -2753,9 +2789,6 @@ function setupViewControls() {
 
   $("reset-view-btn").addEventListener("click", resetViewAndUnhideAll);
   $("close-panel").addEventListener("click", closeDetailPanel);
-  $("connect-btn").addEventListener("click", () => {
-    showToast("Ctrl+drag from one mote to another to connect them.");
-  });
 
   $("detail-add-property-btn").addEventListener("click", async () => {
     if (editBlocked()) return;
@@ -2798,8 +2831,10 @@ function setupSimulation() {
     } finally {
       // openSimBar() already disabled it (and keeps it disabled) on success;
       // this only matters for the "nothing to simulate" early return above.
+      // The ellipsis is part of the label (it opens the sim bar rather
+      // than running to completion), so restoring it has to keep it.
       button.disabled = !!simPreview;
-      button.textContent = "Simulate";
+      button.textContent = "Simulate…";
     }
   });
 

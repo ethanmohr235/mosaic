@@ -1,6 +1,8 @@
 # core/google_calendar.py
 import json
 import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import requests
@@ -146,6 +148,23 @@ def dated_motes(motes: list[dict]) -> list[dict]:
     ]
 
 
+def exportable_motes(motes: list[dict], template_ids: set[str]) -> list[dict]:
+    """The dated motes an export should actually push. Templates hold
+    starting properties for a species rather than real data -- usually
+    incomplete fields that would export as a nonsense event -- so a dated
+    template is excluded like any other non-eligible mote."""
+    return [m for m in dated_motes(motes) if m["id"] not in template_ids]
+
+
+@dataclass(frozen=True)
+class ExportSummary:
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    deleted: int = 0
+    total: int = 0
+
+
 def get_credentials() -> Credentials:
     """Loads a saved token, refreshing it if expired; otherwise runs the
     installed-app OAuth flow (opens a browser, blocks until the user
@@ -219,3 +238,66 @@ def delete_event(credentials: Credentials, event_id: str) -> None:
     response = requests.delete(f"{EVENTS_URL}/{event_id}", headers=headers, timeout=15)
     if response.status_code not in (200, 204, 404):
         response.raise_for_status()  # 404 = already gone, treated as success
+
+
+def _delete_orphaned_events(
+    credentials: Credentials, keep_ids: set[str], still_exporting: Callable[[], bool]
+) -> int:
+    """Deletes every event MonOSS previously created whose mote is now
+    gone, or no longer has a `date`. Calendar itself is the registry --
+    events are found by the extendedProperties tag event_payload() sets,
+    not a local record -- so this stays correct even if events were
+    edited or deleted by hand."""
+    deleted = 0
+    for mote_id, event_id in list_managed_events(credentials).items():
+        if not still_exporting():
+            break
+        if mote_id not in keep_ids:
+            delete_event(credentials, event_id)
+            deleted += 1
+    return deleted
+
+
+def export_events(
+    motes: list[dict],
+    credentials: Credentials,
+    *,
+    record_event_id: Callable[[str, str], None],
+    still_exporting: Callable[[], bool] = lambda: True,
+) -> ExportSummary:
+    """Push `motes` (already filtered by exportable_motes) to Calendar and
+    clean up anything stale, returning what happened.
+
+    This is the export, and it lives here rather than in ui/api.py --
+    where it used to -- so it is testable without a GUI and reachable
+    from any adapter. What the caller still owns is the two things only
+    it can know: `record_event_id`, how to persist a new event id back
+    onto a mote (the UI does that through its own connection lock), and
+    `still_exporting`, whether the world this export started in is still
+    the current one (the UI's user can switch gardens while a network
+    call is in flight, and an id written into the wrong garden would be
+    a real corruption)."""
+    keep_ids = {m["id"] for m in motes}
+    deleted = _delete_orphaned_events(credentials, keep_ids, still_exporting)
+
+    created = updated = skipped = 0
+    for mote in motes:
+        try:
+            payload = event_payload(mote)
+        except ValueError:
+            skipped += 1
+            continue
+
+        existing_id = mote["properties"].get("gcal_event_id")
+        event_id = push_event(credentials, payload, existing_id)
+
+        if not still_exporting():
+            continue
+        if existing_id:
+            updated += 1
+        else:
+            created += 1
+        if event_id != existing_id:
+            record_event_id(mote["id"], event_id)
+
+    return ExportSummary(created, updated, skipped, deleted, len(motes))

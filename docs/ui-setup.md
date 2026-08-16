@@ -74,18 +74,25 @@ ever open at a time -- opening any one closes the rest, and Esc or a
 click outside the open one closes it too.
 
 Most items are real, existing actions relocated rather than rebuilt:
-File hosts "New garden…" and "Export to Calendar"; View hosts "Reset
+File hosts "New garden…", "Import garden…", "Export garden as JSON…"
+and "Export to Calendar" -- the garden import/export items are the same
+flows the gardens modal's own Import button and per-row Export button
+run, sharing one implementation so the two entry points can't drift
+(they replaced "soon" stubs that advertised features already working
+elsewhere in the app); View hosts "Reset
 view", a "Hide/Show controls" toggle for the always-docked
 top-right panel (species legend, relationship filters, depth, reset
 view) -- the first way to reclaim that screen space, persisted across
 restarts -- and "Advanced view settings…" (below); Tools hosts the
 simulation step count and the Simulate…/Exit
 simulation trigger for the same non-blocking preview/scrub/commit bar
-described above. A handful of items (Import motes, Export as CSV/JSON,
-Print graph, Timeline view, Group by type, Automations, Webhooks, API
-access) are inert placeholders with a small "soon" badge, staged for
-future expansion -- clicking one just toasts an explanation rather than
-doing nothing silently.
+described above. A handful of items (Export as CSV, Print graph,
+Timeline view, Group by type, Automations, Webhooks, API access) are
+inert placeholders with a small "soon" badge, staged for future
+expansion -- clicking one just toasts an explanation rather than doing
+nothing silently. A stub is only allowed to describe something that
+genuinely doesn't exist yet: if the app can already do it somewhere,
+the menu item points at that instead.
 
 ### Advanced view settings
 

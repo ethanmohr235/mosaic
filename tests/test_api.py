@@ -93,25 +93,36 @@ def test_species_with_only_a_template_is_reported_as_a_species(api):
     assert result["species_ids"] == [species["id"]]
 
 
+def test_list_species_reports_every_species_in_the_garden(api):
+    # Garden-wide, unlike focus()'s species_ids, which only classifies
+    # the motes in the returned neighborhood.
+    species = api.create_mote({"name": "Resistor"})
+    instance = api.create_mote({"name": "R1"})
+    api.set_species(instance["id"], species["id"])
+    api.create_mote({"name": "Unrelated"})
+
+    assert [m["id"] for m in api.list_species()] == [species["id"]]
+
+
 def test_focus_reports_folder_ids(api):
     folder = api.create_mote({"name": "Thermodynamics"})
     member = api.create_mote({"name": "Entropy"})
-    api.set_group(member["id"], folder["id"])
+    api.set_folder(member["id"], folder["id"])
 
     result = api.focus(member["id"], None)
     assert result["folder_ids"] == [folder["id"]]
 
 
-def test_set_group_creates_groups_relationship(api):
+def test_set_folder_creates_an_in_folder_relationship(api):
     folder = api.create_mote({"name": "Thermodynamics"})
     member = api.create_mote({"name": "Entropy"})
-    rel = api.set_group(member["id"], folder["id"])
-    assert rel["type"] == "groups"
+    rel = api.set_folder(member["id"], folder["id"])
+    assert rel["type"] == "in_folder"
     assert rel["from_id"] == member["id"]
     assert rel["to_id"] == folder["id"]
 
-    assert [m["id"] for m in api.group_of(member["id"])] == [folder["id"]]
-    assert [m["id"] for m in api.members_of(folder["id"])] == [member["id"]]
+    assert [m["id"] for m in api.folders_of(member["id"])] == [folder["id"]]
+    assert [m["id"] for m in api.folder_members(folder["id"])] == [member["id"]]
 
 
 def test_delete_garden_blocks_the_last_garden(api):
@@ -200,11 +211,126 @@ def test_library_snapshot_reports_folder_ids_from_within_the_library(api):
     api.open_library()
     folder = api.create_mote({"name": "Thermodynamics"})
     member = api.create_mote({"name": "Entropy"})
-    api.set_group(member["id"], folder["id"])
+    api.set_folder(member["id"], folder["id"])
     api.switch_garden("test")
 
     result = api.library_snapshot()
     assert result["folder_ids"] == [folder["id"]]
+
+
+def test_reuse_from_library_copies_an_entry_into_the_current_garden(api):
+    mote = api.create_mote({"name": "Standup", "duration": 15})
+    entry = api.save_to_library(mote["id"])
+
+    copy = api.reuse_from_library(entry["id"], {"name": "Monday standup"})
+
+    # A fresh, independent mote in the *current* garden -- not the entry,
+    # and not linked to it.
+    assert copy["id"] not in (mote["id"], entry["id"])
+    assert copy["properties"] == {"name": "Monday standup", "duration": 15}
+    assert api.get_mote(copy["id"]) is not None
+
+
+def test_reuse_from_library_coerces_overrides_like_any_other_ui_input(api):
+    mote = api.create_mote({"name": "Task"})
+    entry = api.save_to_library(mote["id"])
+
+    copy = api.reuse_from_library(entry["id"], {"priority": "3"})
+
+    assert copy["properties"]["priority"] == 3
+
+
+def test_delete_library_entry_leaves_the_current_garden_alone(api):
+    mote = api.create_mote({"name": "Task"})
+    entry = api.save_to_library(mote["id"])
+
+    assert api.delete_library_entry(entry["id"]) is True
+    assert api.library_snapshot()["motes"] == []
+    # The mote it was snapshotted from is untouched, and so is the
+    # connection this Api still holds open on "test".
+    assert api.current_garden() == "test"
+    assert api.get_mote(mote["id"]) is not None
+
+
+def test_find_portal_target_searches_another_garden(api):
+    create_garden("other")
+    other_api = Api("other")
+    other_api.create_mote({"name": "Reactor"})
+    other_api.create_mote({"name": "Pump"})
+    other_api.shutdown()
+
+    results = api.find_portal_target("other", "react")
+
+    assert [m["properties"]["name"] for m in results] == ["Reactor"]
+    assert api.current_garden() == "test"
+
+
+def test_find_portal_target_refuses_a_garden_that_does_not_exist(api):
+    # Not silently creating it: get_connection() would happily bring an
+    # empty garden into being from a typo.
+    with pytest.raises(LookupError):
+        api.find_portal_target("no-such-garden", "anything")
+    assert not garden_exists("no-such-garden")
+
+
+def test_create_portal_then_jump_switches_gardens(api):
+    create_garden("other")
+    other_api = Api("other")
+    target = other_api.create_mote({"name": "Reactor"})
+    other_api.shutdown()
+
+    portal = api.create_portal("other", target["id"], {"name": "Reactor"})
+    assert portal["properties"]["portal_garden"] == "other"
+    assert portal["properties"]["portal_mote"] == target["id"]
+
+    result = api.jump_to_portal(portal["id"])
+
+    assert result == {"garden": "other", "mote_id": target["id"]}
+    assert api.current_garden() == "other"
+    # The connection really moved: the target garden's mote is readable
+    # and the origin garden's portal mote is not.
+    assert api.get_mote(target["id"])["properties"]["name"] == "Reactor"
+    assert api.get_mote(portal["id"]) is None
+
+
+def test_jump_to_portal_rejects_a_mote_that_is_not_a_portal(api):
+    plain = api.create_mote({"name": "Plain"})
+    with pytest.raises(ValueError):
+        api.jump_to_portal(plain["id"])
+    assert api.current_garden() == "test"
+
+
+def test_default_garden_round_trips_and_clears(api):
+    assert api.get_default_garden() is None
+
+    api.set_default_garden("test")
+    assert api.get_default_garden() == "test"
+
+    api.clear_default_garden()
+    assert api.get_default_garden() is None
+
+
+def test_import_garden_into_new_creates_and_fills_a_garden(api, tmp_path):
+    api.create_mote({"name": "Original"})
+    out = tmp_path / "export.json"
+    api._window = _StubWindow(str(out))
+    api.export_garden()
+
+    api._window = _StubWindow([str(out)])
+    result = api.import_garden_into_new("imported")
+
+    assert result["motes"] == 1
+    assert garden_exists("imported")
+    # Importing does not switch the caller into the new garden -- the
+    # frontend does that as a separate step.
+    assert api.current_garden() == "test"
+
+    imported = Api("imported")
+    try:
+        names = [m["properties"].get("name") for m in imported.list_motes()]
+    finally:
+        imported.shutdown()
+    assert names == ["Original"]
 
 
 def test_export_garden_by_name_does_not_disturb_the_current_garden(api, tmp_path):

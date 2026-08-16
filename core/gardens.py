@@ -7,6 +7,7 @@ from core.db import (
     garden_db_path,
     get_connection,
     initialize_database,
+    is_reserved_garden,
     validate_garden_name,
 )
 
@@ -15,10 +16,21 @@ def garden_exists(name: str) -> bool:
     return garden_db_path(name).exists()
 
 
-def list_gardens() -> list[str]:
+def list_gardens(include_reserved: bool = False) -> list[str]:
+    """The user's gardens. Reserved ones (core/db.py::is_reserved_garden --
+    today just the reusable-motes library) are left out unless asked for:
+    they are MonOSS's own storage, not a workspace to switch into, and a
+    surface that offered `_library` in a garden picker would be offering
+    an implementation detail.
+
+    This lives here rather than in each adapter. The UI filtered its own
+    switcher while the CLI's `garden list` and the MCP tool both listed
+    `_library` as an ordinary garden -- the same question answered
+    differently depending on where you asked it."""
     if not db.GARDENS_DIR.exists():
         return []
-    return sorted(p.stem for p in db.GARDENS_DIR.glob("*.db"))
+    names = sorted(p.stem for p in db.GARDENS_DIR.glob("*.db"))
+    return names if include_reserved else [n for n in names if not is_reserved_garden(n)]
 
 
 def _trash_path(name: str) -> Path:
@@ -48,6 +60,13 @@ def restore_garden(name: str) -> None:
 
 def create_garden(name: str) -> str:
     validate_garden_name(name)
+    # A reserved garden is MonOSS's own, brought into being lazily by
+    # whatever owns it (core/library.py) rather than created by hand --
+    # letting a user create one would mean colliding with that storage.
+    # This used to be checked in ui/api.py alone, so the CLI and MCP
+    # could both create a garden the UI then refused to show.
+    if is_reserved_garden(name):
+        raise ValueError(f"{name!r} is reserved for MonOSS's own use.")
     if garden_exists(name):
         raise FileExistsError(f"Garden already exists: {name!r}")
 

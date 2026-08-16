@@ -12,10 +12,11 @@ resolves a model imports this module first, so registration always
 happens before resolution; providers are never resolved via dynamic
 import from a database string.
 """
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from core.coolprop_provider import CoolPropProvider
 from core.ideal_gas_provider import IdealGasProvider
+from core.entities import Relationship
 from core.providers import InvalidModelConfiguration, PropertyModelError, PropertyProvider, register_provider, resolve_provider
 
 USES_MODEL = "uses_model"
@@ -24,6 +25,19 @@ CONFIGURATION_KEY = "configuration"
 
 register_provider("ideal_gas", IdealGasProvider)
 register_provider("coolprop", CoolPropProvider)
+
+
+def model_ids_in(relationships: Iterable[Relationship]) -> set[str]:
+    """Which motes a set of relationships makes into property models --
+    the target of at least one uses_model. The same shape as
+    core/species.py::species_ids_in() and core/folders.py::folder_ids_in(),
+    so "which motes play role X" has one answer per role instead of one
+    per caller (the CLI used to work this out for itself, twice).
+
+    Pure, like everything else in this module: it takes relationships
+    rather than a connection, which is also what lets the caller decide
+    whether to scan the whole garden or just a subgraph."""
+    return {r.to_id for r in relationships if r.type == USES_MODEL}
 
 
 class ModelNotFound(PropertyModelError):

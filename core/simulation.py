@@ -10,10 +10,13 @@ nonlinear part involves values that are already known (`T2 == T1 *
 never touches NumPy at all. Whatever is left must be linear, and goes to
 a single least-squares solve.
 
-Static only: there is no notion of a previous timestep yet. The run
-counter is recorded for provenance so time-dependent behaviour can build
-on it later.
+run_simulation() solves one steady state and writes it back.
+run_time_series() solves a requested number of discrete steps, each
+starting from the previous step's solved values rather than the
+database, which is what lets a rule use `t` or `prev(x)`; it is
+nondestructive unless asked to commit or save. See docs/simulation.md.
 """
+import dataclasses
 import logging
 import sqlite3
 from dataclasses import dataclass, field
@@ -34,7 +37,7 @@ from core.formula import (
     describe,
     evaluate_equation,
 )
-from core.models import Relationship
+from core.entities import Relationship
 from core.motes import list_motes, update_mote
 from core.providers import PropertyProvider
 from core.relationships import list_relationships
@@ -57,6 +60,30 @@ class Change:
     new_value: float
 
 
+def _summarize(
+    values: dict[Unknown, float],
+    changes: list[Change],
+    equation_count: int,
+    unsolved: list[Unknown],
+    scope: str,
+) -> str:
+    """The one sentence a solve reports, whether it's being described as a
+    whole run ("run #3") or as one step within one ("step 0"). Both
+    dataclasses below said this in their own copy of the same f-string,
+    which is how the same solve came to be described two slightly
+    different ways depending on which one you were holding."""
+    motes = len({c.mote_id for c in changes})
+    text = (
+        f"Solved {len(values)} value{'' if len(values) == 1 else 's'} "
+        f"across {motes} mote{'' if motes == 1 else 's'} "
+        f"from {equation_count} equation{'' if equation_count == 1 else 's'} "
+        f"({scope})."
+    )
+    if unsolved:
+        text += f" {len(unsolved)} declared unknown(s) had no equation."
+    return text
+
+
 @dataclass(frozen=True)
 class SimulationResult:
     run_id: str
@@ -68,16 +95,10 @@ class SimulationResult:
 
     @property
     def summary(self) -> str:
-        motes = len({c.mote_id for c in self.changes})
-        text = (
-            f"Solved {len(self.values)} value{'' if len(self.values) == 1 else 's'} "
-            f"across {motes} mote{'' if motes == 1 else 's'} "
-            f"from {self.equation_count} equation{'' if self.equation_count == 1 else 's'} "
-            f"(run #{self.run_number})."
+        return _summarize(
+            self.values, self.changes, self.equation_count, self.unsolved,
+            f"run #{self.run_number}",
         )
-        if self.unsolved:
-            text += f" {len(self.unsolved)} declared unknown(s) had no equation."
-        return text
 
 
 @dataclass(frozen=True)
@@ -94,16 +115,9 @@ class StepResult:
 
     @property
     def summary(self) -> str:
-        motes = len({c.mote_id for c in self.changes})
-        text = (
-            f"Solved {len(self.values)} value{'' if len(self.values) == 1 else 's'} "
-            f"across {motes} mote{'' if motes == 1 else 's'} "
-            f"from {self.equation_count} equation{'' if self.equation_count == 1 else 's'} "
-            f"(step {self.step})."
+        return _summarize(
+            self.values, self.changes, self.equation_count, self.unsolved, f"step {self.step}"
         )
-        if self.unsolved:
-            text += f" {len(self.unsolved)} declared unknown(s) had no equation."
-        return text
 
 
 @dataclass(frozen=True)
@@ -115,6 +129,36 @@ class TimeSeriesResult:
     failed_at: int | None = None   # step index that raised, if the run stopped early
     error: str | None = None
     run_id: str | None = None      # set when commit=True or save=True and at least one step succeeded
+    run_number: int | None = None  # this garden's own run counter, set alongside run_id
+
+
+def step_payloads(steps: "list[StepResult] | list[RunTick]") -> list[dict]:
+    """The canonical JSON-safe form of a run's steps, shared by every
+    adapter that has to put them on a wire (ui/api.py's JS bridge,
+    mcp_server/server.py's tools) so the same object never reaches two
+    surfaces in two shapes -- which it previously did, one of them
+    silently missing equation_count.
+
+    Lives here rather than in an adapter because the reason this
+    conversion exists is a property of the data: StepResult.values and
+    .unsolved are keyed by (mote_id, key) tuples, which JSON has no way
+    to represent. `changes` already carries everything a caller needs,
+    and unsolved counts stay prose-only inside each step's summary.
+
+    RunTick (a logged run read back) has no equation_count -- the log
+    records what changed, not how many equations produced it -- so that
+    key is present only for a freshly solved StepResult."""
+    payloads = []
+    for step in steps:
+        payload = {
+            "step": step.step,
+            "changes": [dataclasses.asdict(c) for c in step.changes],
+            "summary": step.summary,
+        }
+        if isinstance(step, StepResult):
+            payload["equation_count"] = step.equation_count
+        payloads.append(payload)
+    return payloads
 
 
 @dataclass(frozen=True)
@@ -130,43 +174,41 @@ class _GardenView:
 
 def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
     """Solve the garden and write the results back. Raises SimulationError
-    (after logging the failed run) if the rules can't be satisfied."""
-    run_number = _next_run_number(conn)
-    properties = {m.id: m.properties for m in list_motes(conn)}
-    relationships = list_relationships(conn)
-    view = _build_view(properties, relationships)
-    pairs = _rule_instances(rules_repo.list_rules(conn), view)
+    (after logging the failed run) if the rules can't be satisfied.
 
-    try:
-        solved: dict[Unknown, float] = {}
-        model_cache: dict[str, PropertyProvider] = {}
-        equations = _resolve(view, pairs, solved, model_cache=model_cache)
-        solved.update(_matrix_solve(equations, solved))
-    except SimulationError as e:
-        _log_run(conn, run_number, "error", str(e), [], committed=False)
-        logger.warning("simulation run #%s failed: %s", run_number, e)
-        raise
+    A steady-state run *is* a one-step committed time series -- the docs
+    have always said so, and now the code does too rather than keeping a
+    second solve-and-write path in parallel with run_time_series(). What
+    stays different is only how the two report themselves: this one
+    raises on failure and hands back a single result, because a caller
+    asking for one answer wants either the answer or the reason."""
+    result = run_time_series(conn, step_count=1, commit=True, log_failure=True)
+    if result.error is not None:
+        raise SimulationError(result.error)
 
-    changes = _write_back(conn, view.properties, solved)
-    run_id = _log_run(conn, run_number, "ok", None, [changes], committed=True)
-    logger.info("simulation run #%s solved %s values", run_number, len(solved))
+    step = result.steps[0]
     return SimulationResult(
-        run_id=run_id,
-        run_number=run_number,
-        values=solved,
-        changes=changes,
-        equation_count=len(equations),
-        unsolved=_unsolved(view, solved),
+        run_id=result.run_id,
+        run_number=result.run_number,
+        values=step.values,
+        changes=step.changes,
+        equation_count=step.equation_count,
+        unsolved=step.unsolved,
     )
 
 
 def run_time_series(
-    conn: sqlite3.Connection, step_count: int, commit: bool, save: bool = False
+    conn: sqlite3.Connection,
+    step_count: int,
+    commit: bool,
+    save: bool = False,
+    log_failure: bool = False,
 ) -> TimeSeriesResult:
     """Runs step_count steps entirely in memory, each step's solve
     starting from the *previous* step's solved values rather than
     re-reading the database -- this is what lets a rule use prev(x) to
-    express a recurrence.
+    express a recurrence. This is the only solve-and-write path there is:
+    run_simulation() is this, with step_count=1 and commit=True.
 
     Three mutually exclusive modes:
     - commit=False, save=False (default): a pure preview. Nothing is
@@ -180,6 +222,12 @@ def run_time_series(
       but never writes the graph -- for keeping a hypothetical run (e.g.
       one of several parameter sets being compared) around for later
       review without it becoming the garden's canonical state.
+
+    log_failure records a failed run in the audit log rather than leaving
+    no trace. Off by default because a discarded preview is meant to
+    leave none (docs/architecture.md); a run that intended to write is
+    the one worth being able to look back at, which is why
+    run_simulation() asks for it.
 
     A step that fails to solve stops the run there but keeps every step
     computed before it (see TimeSeriesResult.failed_at/error), so a
@@ -216,7 +264,7 @@ def run_time_series(
             solved.update(_matrix_solve(equations, solved))
         except SimulationError as e:
             failed_at, error = step, str(e)
-            logger.warning("simulation preview step %s failed: %s", step, e)
+            logger.warning("simulation step %s failed: %s", step, e)
             break
 
         changes = _changes_for(view.properties, solved)
@@ -227,7 +275,7 @@ def run_time_series(
         running = next_running
         steps.append(StepResult(step, solved, changes, len(equations), _unsolved(view, solved)))
 
-    run_id = None
+    run_id = run_number = None
     if (commit or save) and steps:
         run_number = _next_run_number(conn)
         if commit:
@@ -237,8 +285,14 @@ def run_time_series(
             "simulation time series %s %s steps, %s values",
             "committed" if commit else "saved", len(steps), len(cumulative),
         )
+    elif log_failure and error is not None:
+        # A run that meant to write and couldn't: logged with no changes,
+        # so it still shows up in history as the failure it was.
+        run_number = _next_run_number(conn)
+        run_id = _log_run(conn, run_number, "error", error, [], committed=False)
+        logger.warning("simulation run #%s failed: %s", run_number, error)
 
-    return TimeSeriesResult(steps, failed_at, error, run_id)
+    return TimeSeriesResult(steps, failed_at, error, run_id, run_number)
 
 
 def _build_view(

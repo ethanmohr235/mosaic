@@ -14,7 +14,7 @@ introspection here (e.g. of core/providers.py's registry) because a
 provider's capabilities() requires a constructed instance, which needs
 provider-specific configuration this module has no business knowing."""
 from core.google_calendar import RESERVED_KEYS as _GCAL_RESERVED_PROPERTIES
-from core.groups import GROUPS
+from core.folders import IN_FOLDER
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.portals import PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY
 from core.rules import APPLIES_TO, EQUATION_KEY, UNKNOWNS_KEY
@@ -24,7 +24,7 @@ RESERVED_PROPERTIES = _GCAL_RESERVED_PROPERTIES | {
     EQUATION_KEY, UNKNOWNS_KEY, PROVIDER_KEY, CONFIGURATION_KEY,
     PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY,
 }
-RESERVED_RELATIONSHIP_TYPES = {INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, GROUPS}
+RESERVED_RELATIONSHIP_TYPES = {INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, IN_FOLDER}
 
 # One line per reserved property key -- kept in the same declaration order
 # as the imports above, not sorted, so a diff adding a key is obvious.
@@ -79,10 +79,10 @@ RELATIONSHIP_TYPE_MEANINGS: dict[str, str] = {
         "'rel' from the rule's own mote first, then follows that target's "
         "uses_model to find the provider/configuration to evaluate "
         "'operation' against.",
-    GROUPS: "mote --groups--> folder. Purely organizational annotation -- "
+    IN_FOLDER: "mote --in_folder--> folder. Purely organizational annotation -- "
         "a folder is an ordinary mote with no other structural meaning, "
         "never picked up by simulation unless separately declared an "
-        "instance_of a species. Set via set_group().",
+        "instance_of a species. Set via set_folder().",
 }
 
 # Mirrors docs/simulation.md's "Expression language" table. Order matches

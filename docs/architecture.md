@@ -28,9 +28,15 @@ A species may have a **template**: a mote pointing at it via a `template_of` rel
 
 # Folders
 
-A mote can act as a **folder** -- a purely organizational container that other motes are grouped into, for annotation only. Like a species, a folder is still just a mote; nothing marks it as special structurally. Membership is a relationship: a mote is grouped into a folder by having a `groups` relationship pointing at it (`core/groups.py`), the same `member --groups--> folder` shape as `instance --instance_of--> species`. A mote may belong to more than one folder, and folders are usable in any garden, not just the library (see Reusable motes below).
+A mote can act as a **folder** -- a purely organizational container that other motes are grouped into, for annotation only. Like a species, a folder is still just a mote; nothing marks it as special structurally. Membership is a relationship: a mote is grouped into a folder by having an `in_folder` relationship pointing at it (`core/folders.py`), the same `member --in_folder--> folder` shape as `instance --instance_of--> species`. Like every other reserved type, it reads as a sentence in the direction it points; it was briefly called `groups`, which read backwards, and was renamed while no garden had used one yet. A mote may belong to more than one folder, and folders are usable in any garden, not just the library (see Reusable motes below).
 
-Folders have no effect on simulation or storage beyond the relationship itself: a folder mote is never touched by `core/simulation.py` unless it's separately declared an `instance_of` a species, and nothing about Calendar export or garden export/import treats a folder or a `groups` relationship differently from ordinary data. The one concrete distinction is visual -- the UI renders a folder mote with its own shape (a square, distinct from a species' diamond and an ordinary mote's circle) and offers a "Folders" legend section with the same hide/show behavior species get.
+Folders have no effect on simulation or storage beyond the relationship itself: a folder mote is never touched by `core/simulation.py` unless it's separately declared an `instance_of` a species, and nothing about Calendar export or garden export/import treats a folder or an `in_folder` relationship differently from ordinary data. The one concrete distinction is visual -- the UI renders a folder mote with its own shape (a square, distinct from a species' diamond and an ordinary mote's circle) and offers a "Folders" legend section with the same hide/show behavior species get. The detail panel treats folders as the parallel of species throughout: a "Folders" section listing the folders a mote belongs to, and, on a folder itself, a member count line matching the instance count a species gets.
+
+# Roles
+
+Species, template, folder and property model are all the same idea: a mote plays a role because of the relationships pointing at it, never because of anything stored on the mote itself. Each role is defined exactly once, in the module that owns it, as a pure function over a list of relationships -- `core/species.py::species_ids_in()`, `core/folders.py::folder_ids_in()`, `core/model_resolver.py::model_ids_in()` -- with that module's `list_*()` being the same question asked as a query.
+
+The pure form is what a caller holding an already-fetched subgraph uses (`ui/api.py::focus()` classifies exactly the motes it is about to return, and does the same for the library garden). Adapters must not answer "is this a species" for themselves: that is how a subtlety like "a `template_of` target counts as a species too" ends up true in the UI and false in the CLI.
 
 # Simulation
 
@@ -38,7 +44,7 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model` and `groups` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden` and `portal_mote` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model` and `in_folder` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden` and `portal_mote` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 # Physical property models
 
@@ -57,7 +63,9 @@ Equations are written in a small expression language parsed against a strict whi
 
 Solving happens in two stages. A substitution loop repeatedly resolves any equation that has come down to a single unknown and feeds the answer back, which allows nonlinear formulas as long as the nonlinear part involves values already known. Whatever remains must be linear and goes to a single least-squares solve.
 
-A run can be time-based: `core.simulation.run_time_series()` solves a requested number of discrete steps, each one starting from the *previous* step's solved values rather than the database, so a rule can use the reserved `t` (the current step index) or `prev(x)` (the value `x` had entering the step) to express time-dependent behavior or a recurrence. This is computed entirely in memory and nondestructive by default -- nothing is written, and nothing is logged -- until a specific step is explicitly committed, which re-solves up to that step (deterministic, given the same garden and rules) and writes only the cumulative result in one shot. A single steady-state `run_simulation()` call is equivalent to committing a 1-step time series.
+`core.simulation.run_time_series()` is the only solve-and-write path there is: `run_simulation()` is that function called with one step and `commit=True`, unpacked into a single result. The two used to be parallel implementations of the same thing, which is how "a steady-state run is a one-step time series" could be true in the documentation and only approximately true in the code.
+
+A run can be time-based: `run_time_series()` solves a requested number of discrete steps, each one starting from the *previous* step's solved values rather than the database, so a rule can use the reserved `t` (the current step index) or `prev(x)` (the value `x` had entering the step) to express time-dependent behavior or a recurrence. This is computed entirely in memory and nondestructive by default -- nothing is written, and nothing is logged -- until a specific step is explicitly committed, which re-solves up to that step (deterministic, given the same garden and rules) and writes only the cumulative result in one shot. A single steady-state `run_simulation()` call is equivalent to committing a 1-step time series.
 
 Every logged run (failures included) is recorded in `simulation_runs` and `simulation_changes` -- a discarded preview leaves no trace, but a *saved* run (kept for review without being written to the graph -- see `docs/simulation.md`) is logged just like a committed one. The per-garden run counter (`run_number`) is derived from that log, and is a different thing from a time-based run's own step numbering (which resets to 0 every run and is never persisted on its own -- each of a run's own steps/ticks is logged individually now, so it can be scrubbed back through later). See `docs/simulation.md` for the language reference and what is deferred.
 
@@ -131,6 +139,16 @@ MonOSS-managed (`extendedProperties.private` on each event), not a local
 record, so this stays correct even if events were edited or deleted by
 hand. See `docs/google-calendar.md` for setup and details.
 
+The export loop itself is `core/google_calendar.py::export_events()`, not
+the UI's: an adapter holding business logic is an adapter no other
+surface can reuse and no test can reach without a GUI. What `ui/api.py`
+still supplies is the two things only the app knows -- `record_event_id`
+(how to write a new event id back, through its connection lock) and
+`still_exporting` (whether the user has switched gardens while a network
+call was in flight, which must never write an id into the wrong garden).
+Exposing the export over CLI or MCP is now a question of whether it
+should be, rather than of rewriting it.
+
 # Portals
 
 `portal_garden` and `portal_mote` (`core/portals.py`) turn an ordinary
@@ -166,13 +184,22 @@ editing either side never affects the other.
 
 Only a mote's properties are saved -- its relationships are never
 captured or restored. Saving a whole subgraph (a mote plus its
-relationships to other library entries) is a deferred, larger feature
-(see `docs/small-changes.md`).
+relationships to other library entries) is a deferred, larger feature:
+it needs a way to decide where a subgraph's boundary is, and what to do
+with a relationship pointing at a mote outside it.
 
-`_library` is filtered out of the UI's garden switcher and the portal
-picker's garden dropdown, so it never shows up as one of your everyday
-workspaces -- but it's still a real, fully editable garden underneath,
-reachable directly via the garden menu's "Open library" action. That
+`_library` never shows up as one of your everyday workspaces -- it is a
+**reserved garden** (`core/db.py::is_reserved_garden`: any name starting
+with an underscore), which `core/gardens.py` refuses to create by hand
+and leaves out of `list_gardens()` unless explicitly asked with
+`include_reserved=True`. That rule lives in core rather than in one
+adapter, so the UI's garden switcher, the portal picker's dropdown, the
+CLI's `garden list` and the MCP `list_gardens` tool all show the same
+set; previously only the UI filtered it, and the other two offered the
+library as an ordinary garden you could switch into or collide with.
+Reserved governs discovery and creation, not access: it's still a real,
+fully editable garden underneath, reachable directly via the garden
+menu's "Open library" action or by naming it explicitly. That
 makes it worth organizing like any other garden: creating folder motes
 inside it and grouping related library entries together (see Folders
 above) is the intended way to keep a large library navigable, and the

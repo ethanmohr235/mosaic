@@ -70,23 +70,6 @@ def _connect(garden: str | None) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def _steps_payload(steps: list) -> list[dict[str, Any]]:
-    """Shapes StepResult/RunTick objects for the wire. Their values/
-    unsolved fields are keyed by (mote_id, key) tuples, which don't
-    survive JSON -- changes carry everything a caller needs, and unsolved
-    counts stay prose-only inside each step's summary. Mirrors
-    ui/api.py::_time_series_payload, which shapes the same objects for
-    the JS bridge."""
-    return [
-        {
-            "step": s.step,
-            "changes": [dataclasses.asdict(c) for c in s.changes],
-            "summary": s.summary,
-        }
-        for s in steps
-    ]
-
-
 # ---- gardens ----
 
 
@@ -370,7 +353,7 @@ def preview_simulation(step_count: int = 1, garden: str | None = None) -> dict[s
     with _connect(garden) as conn:
         result = simulation_repo.run_time_series(conn, step_count, commit=False)
         return {
-            "steps": _steps_payload(result.steps),
+            "steps": simulation_repo.step_payloads(result.steps),
             "failed_at": result.failed_at,
             "error": result.error,
         }
@@ -401,11 +384,14 @@ def run_changes(run_id: str, garden: str | None = None) -> list[dict[str, Any]]:
         return [dataclasses.asdict(c) for c in changes]
 
 
-def run_ticks(run_id: str, garden: str | None = None) -> list[dict[str, Any]]:
-    """A logged run's individual steps, oldest first. A steady-state run
-    has exactly one; a run committed from an N-step preview has N."""
+def run_ticks(run_id: str, garden: str | None = None) -> dict[str, Any]:
+    """A logged run's individual steps, oldest first, as {"steps": [...]}
+    -- the same shape preview_simulation() returns, since they are the
+    same steps whether freshly solved or read back out of the log. A
+    steady-state run has exactly one; a run committed from an N-step
+    preview has N."""
     with _connect(garden) as conn:
-        return _steps_payload(simulation_repo.run_ticks(conn, run_id))
+        return {"steps": simulation_repo.step_payloads(simulation_repo.run_ticks(conn, run_id))}
 
 
 def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[float]]:

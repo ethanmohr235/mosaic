@@ -1,6 +1,7 @@
 import pytest
 
-from core.model_resolver import ModelNotFound, construct, resolve
+from core.model_resolver import ModelNotFound, construct, model_ids_in, resolve
+from core.entities import Relationship
 from core.providers import InvalidModelConfiguration, ProviderNotFound
 
 # Dict-based, no DB -- core/model_resolver.py takes the same plain-callable
@@ -77,3 +78,25 @@ def test_construct_builds_the_same_provider_resolve_uses():
 def test_construct_raises_invalid_configuration_without_provider_key():
     with pytest.raises(InvalidModelConfiguration, match="provider"):
         construct("no-provider-model", properties("no-provider-model"))
+
+
+# ---- model_ids_in: which motes are property models ----
+
+def test_model_ids_in_counts_only_uses_model_targets():
+    """The CLI worked this out for itself, in two copies, before this
+    existed -- same shape as species_ids_in/folder_ids_in so every role
+    is answered the same way."""
+    rels = [
+        Relationship(from_id="air", to_id="ideal-air", type="uses_model"),
+        Relationship(from_id="steam", to_id="water-model", type="uses_model"),
+        Relationship(from_id="c1", to_id="container", type="instance_of"),
+    ]
+    assert model_ids_in(rels) == {"ideal-air", "water-model"}
+
+
+def test_model_ids_in_deduplicates_shared_models():
+    rels = [
+        Relationship(from_id="air", to_id="ideal-air", type="uses_model"),
+        Relationship(from_id="nitrogen", to_id="ideal-air", type="uses_model"),
+    ]
+    assert model_ids_in(rels) == {"ideal-air"}

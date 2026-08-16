@@ -18,7 +18,7 @@ def test_reserved_properties_match_the_documented_list():
 
 def test_reserved_relationship_types_match_the_documented_list():
     assert RESERVED_RELATIONSHIP_TYPES == {
-        "instance_of", "template_of", "applies_to", "uses_model", "groups",
+        "instance_of", "template_of", "applies_to", "uses_model", "in_folder",
     }
 
 

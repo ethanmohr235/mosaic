@@ -48,6 +48,12 @@ both.
 
 Every tool takes an optional `garden`, defaulting to `default`.
 
+`list_gardens` returns the user's workspaces only — reserved gardens
+(any underscore-prefixed name; today just `_library`, the reusable-motes
+store) are MonOSS's own storage and are left out, and `create_garden`
+refuses to make one. Naming a reserved garden explicitly still works,
+since the restriction is on discovery and creation rather than access.
+
 Property values keep whatever JSON type the client sends: `21` is stored
 as a number, `"21"` as a string. This is the one place the MCP adapter
 deliberately differs from `ui/api.py`, which interprets incoming strings
@@ -56,6 +62,13 @@ as JSON because GUI text fields deliver everything as text.
 `preview_simulation` computes a run entirely in memory and returns what
 *would* change — nothing is written or logged. Applying a run to the
 graph is not exposed; do that in the app or the CLI.
+
+A run's steps come back as `{"steps": [...]}` from both
+`preview_simulation` and `run_ticks`, with each step carrying `step`,
+`changes` and `summary` (plus `equation_count` when freshly solved
+rather than read back from the log). They are the same steps either way,
+so they have the same shape either way — `run_ticks` used to return a
+bare list.
 
 `reserved_names()` is the complete equation/simulation reference for an
 MCP client, not just a list of reserved keys: it also returns what each

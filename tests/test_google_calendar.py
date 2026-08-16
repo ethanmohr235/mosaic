@@ -292,3 +292,109 @@ def test_delete_event_calls_the_right_url(monkeypatch):
 def test_delete_event_tolerates_a_404(monkeypatch):
     monkeypatch.setattr(gcal.requests, "delete", lambda url, headers, timeout: _FakeResponse(404, {}))
     gcal.delete_event(_FakeCredentials(), "already-gone")  # must not raise
+
+
+# ---- the export itself ----
+#
+# This used to live in ui/api.py, where it could only be tested through a
+# GUI bridge; it is core's now, so these drive it directly.
+
+class _FakeCredentials:
+    token = "fake-token"
+
+
+def _exporter(monkeypatch, managed=None, push=None):
+    """Stubs the three network calls export_events() makes and records
+    what it did. Returns (pushed, deleted) lists that fill in as it runs."""
+    pushed, deleted = [], []
+    monkeypatch.setattr(gcal, "list_managed_events", lambda credentials: dict(managed or {}))
+    monkeypatch.setattr(
+        gcal, "push_event",
+        push or (lambda credentials, payload, existing: pushed.append((payload["summary"], existing))
+                 or f"event-for-{payload['summary']}"),
+    )
+    monkeypatch.setattr(gcal, "delete_event", lambda credentials, event_id: deleted.append(event_id))
+    return pushed, deleted
+
+
+def test_exportable_motes_keeps_dated_motes_and_drops_templates():
+    motes = [
+        _mote({"name": "Exam", "date": "2026-08-15"}, id="exam"),
+        _mote({"name": "No date"}, id="plain"),
+        _mote({"name": "Template", "date": "2026-08-15"}, id="template"),
+    ]
+    assert [m["id"] for m in gcal.exportable_motes(motes, {"template"})] == ["exam"]
+
+
+def test_export_events_creates_and_records_new_event_ids(monkeypatch):
+    pushed, _ = _exporter(monkeypatch)
+    recorded = []
+    motes = [_mote({"name": "Exam", "date": "2026-08-15T09:00:00"}, id="exam")]
+
+    summary = gcal.export_events(
+        motes, _FakeCredentials(), record_event_id=lambda m, e: recorded.append((m, e))
+    )
+
+    assert summary == gcal.ExportSummary(created=1, updated=0, skipped=0, deleted=0, total=1)
+    assert pushed == [("Exam", None)]
+    assert recorded == [("exam", "event-for-Exam")]
+
+
+def test_export_events_updates_a_mote_that_already_has_an_event_id(monkeypatch):
+    pushed, _ = _exporter(
+        monkeypatch, push=lambda credentials, payload, existing: pushed_id(pushed, existing)
+    )
+    recorded = []
+    motes = [_mote({"name": "Exam", "date": "2026-08-15", "gcal_event_id": "evt-1"}, id="exam")]
+
+    summary = gcal.export_events(
+        motes, _FakeCredentials(), record_event_id=lambda m, e: recorded.append((m, e))
+    )
+
+    assert summary.updated == 1 and summary.created == 0
+    # Unchanged id: nothing to write back, so the mote is left alone.
+    assert recorded == []
+
+
+def pushed_id(pushed, existing):
+    pushed.append(existing)
+    return existing
+
+
+def test_export_events_skips_an_unparseable_date(monkeypatch):
+    pushed, _ = _exporter(monkeypatch)
+    motes = [_mote({"name": "Bad", "date": "not-a-date"}, id="bad")]
+
+    summary = gcal.export_events(motes, _FakeCredentials(), record_event_id=lambda m, e: None)
+
+    assert summary == gcal.ExportSummary(created=0, updated=0, skipped=1, deleted=0, total=1)
+    assert pushed == []
+
+
+def test_export_events_deletes_an_event_whose_mote_is_gone(monkeypatch):
+    _, deleted = _exporter(monkeypatch, managed={"vanished": "evt-9", "exam": "evt-1"})
+    motes = [_mote({"name": "Exam", "date": "2026-08-15"}, id="exam")]
+
+    summary = gcal.export_events(motes, _FakeCredentials(), record_event_id=lambda m, e: None)
+
+    assert deleted == ["evt-9"]
+    assert summary.deleted == 1
+
+
+def test_export_events_stops_writing_back_once_still_exporting_goes_false(monkeypatch):
+    """The UI's mid-export garden switch, as core sees it: the push has
+    already gone out, but nothing may be written into whatever garden is
+    open now."""
+    pushed, deleted = _exporter(monkeypatch, managed={"vanished": "evt-9"})
+    recorded = []
+    motes = [_mote({"name": "Exam", "date": "2026-08-15"}, id="exam")]
+
+    summary = gcal.export_events(
+        motes, _FakeCredentials(),
+        record_event_id=lambda m, e: recorded.append((m, e)),
+        still_exporting=lambda: False,
+    )
+
+    assert recorded == []
+    assert deleted == [], "a stale event must not be deleted either once the world moved on"
+    assert summary == gcal.ExportSummary(created=0, updated=0, skipped=0, deleted=0, total=1)

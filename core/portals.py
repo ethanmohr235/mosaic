@@ -25,7 +25,7 @@ import sqlite3
 from core import gardens as gardens_repo
 from core import motes as motes_repo
 from core.db import get_connection, initialize_database
-from core.models import Mote
+from core.entities import Mote
 
 PORTAL_GARDEN_KEY = "portal_garden"
 PORTAL_MOTE_KEY = "portal_mote"

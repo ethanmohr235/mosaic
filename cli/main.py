@@ -3,7 +3,8 @@ import argparse
 import json
 import logging
 
-from core.motes import create_mote, list_motes, get_mote, get_motes, delete_mote, update_mote
+from cli import output
+from core.motes import create_mote, list_motes, get_mote, delete_mote, update_mote
 from core.relationships import (
     create_relationship,
     list_relationships,
@@ -13,9 +14,7 @@ from core.relationships import (
 )
 from core.gardens import create_garden, delete_garden, list_gardens, resolve_garden, restore_garden
 from core.db import get_connection, initialize_database
-from core import model_resolver
-from core.providers import PropertyModelError
-from core.simulation import SimulationError, get_run, list_runs, run_changes, run_simulation
+from core.simulation import SimulationError, list_runs, run_simulation
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +147,7 @@ def _handle_mote(conn, args) -> None:
             print("No mote found.")
         else:
             print(f"[{mote.id}] {mote.properties}")
-            _print_models(conn, mote.id)
+            output.print_models(conn, mote.id)
 
     elif args.action == "list":
         for m in list_motes(conn):
@@ -192,84 +191,13 @@ def _handle_rel(conn, args) -> None:
         print("Specify a rel action: create, get, list, update, delete")
 
 
-def _model_mote_ids(conn) -> list[str]:
-    """Every mote acting as a property model -- the target of at least one
-    uses_model relationship. Mirrors the target-of-a-relationship pattern
-    core/species.py's list_species() uses for instance_of/template_of."""
-    seen: list[str] = []
-    for rel in list_relationships(conn, type_=model_resolver.USES_MODEL):
-        if rel.to_id not in seen:
-            seen.append(rel.to_id)
-    return seen
-
-
-def _print_models(conn, mote_id: str) -> None:
-    """`Models: <name>, ...` for a mote's outgoing uses_model relationships,
-    printed after `mote get`/`mote show` so the property-model attached to
-    a mote is visible without a separate lookup."""
-    model_ids = [
-        r.to_id for r in list_relationships(conn, from_id=mote_id, type_=model_resolver.USES_MODEL)
-    ]
-    if not model_ids:
-        return
-    names = [m.properties.get("name", m.id[:8]) for m in get_motes(conn, model_ids)]
-    print(f"Models: {', '.join(names)}")
-
-
-def _print_capabilities(provider) -> None:
-    for cap in provider.capabilities():
-        units = f" [{cap.units}]" if cap.units else ""
-        print(f"    {cap.operation}({', '.join(cap.inputs)}) -> {cap.output}{units}")
-
-
 def _handle_model(conn, args) -> None:
     if args.action == "list":
-        for model_id in _model_mote_ids(conn):
-            mote = get_mote(conn, model_id)
-            if mote is None:
-                continue
-            name = mote.properties.get("name", mote.id[:8])
-            provider = mote.properties.get(model_resolver.PROVIDER_KEY, "?")
-            print(f"[{mote.id}] {name} (provider={provider})")
-
+        output.print_model_list(conn)
     elif args.action in ("show", "capabilities"):
-        mote = get_mote(conn, args.id)
-        if mote is None:
-            print("No mote found.")
-            return
-        try:
-            provider = model_resolver.construct(mote.id, mote.properties)
-        except PropertyModelError as e:
-            print(f"Error: {e}")
-            return
-
-        if args.action == "show":
-            name = mote.properties.get("name", mote.id[:8])
-            print(f"Model: {name} [{mote.id}]")
-            print(f"Provider: {mote.properties.get(model_resolver.PROVIDER_KEY)}")
-            configuration = mote.properties.get(model_resolver.CONFIGURATION_KEY, {})
-            print(f"Configuration: {json.dumps(configuration)}")
-            print("Capabilities:")
-        _print_capabilities(provider)
-
+        output.print_model_detail(conn, args.id, header=args.action == "show")
     else:
         print("Specify a model action: list, show, capabilities")
-
-
-def _print_changes(changes) -> None:
-    for change in changes:
-        old = "None" if change.old_value is None else f"{change.old_value:g}"
-        print(f"  [{change.mote_id[:8]}] {change.key}: {old} -> {change.new_value:g}")
-
-
-def _print_run_summary_line(run) -> None:
-    applied = "applied" if run.committed else "saved"
-    line = f"[{run.run_id}] run=#{run.run_number} {run.ran_at} {run.status} ({applied})"
-    if run.status == "ok":
-        line += f" ({run.change_count} change{'' if run.change_count == 1 else 's'})"
-    else:
-        line += f": {run.detail}"
-    print(line)
 
 
 def _handle_simulate(conn, args) -> None:
@@ -282,23 +210,14 @@ def _handle_simulate(conn, args) -> None:
             print(f"Simulation failed: {e}")
             return
         print(result.summary)
-        _print_changes(result.changes)
+        output.print_changes(result.changes)
 
     elif action == "history":
         for run in list_runs(conn, limit=getattr(args, "limit", None)):
-            _print_run_summary_line(run)
+            output.print_run_summary_line(run)
 
     elif action == "show":
-        run = get_run(conn, args.id)
-        if run is None:
-            print("No run found.")
-            return
-        applied = "applied to graph" if run.committed else "saved (not applied to graph)"
-        print(f"Run {run.run_id}")
-        print(f"run=#{run.run_number}  {run.ran_at}  status={run.status}  ({applied})")
-        if run.detail:
-            print(f"detail: {run.detail}")
-        _print_changes(run_changes(conn, run.run_id))
+        output.print_run_detail(conn, args.id)
 
     else:
         print("Specify a simulate action: run, history, show")

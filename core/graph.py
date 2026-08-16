@@ -1,7 +1,7 @@
 # core/graph.py
 import sqlite3
 
-from core.models import Mote, Relationship
+from core.entities import Mote, Relationship
 from core.motes import get_motes, list_motes
 from core.relationships import list_relationships
 

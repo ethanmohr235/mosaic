@@ -548,12 +548,18 @@ main { flex: 1; min-height: 0; display: flex; }
 
 #detail-species-actions { display: flex; gap: 6px; margin-top: 8px; }
 #detail-species-actions button { font-size: 12px; padding: 6px 10px; }
-#detail-instance-count { color: var(--faint); font-size: 11.5px; margin-top: 8px; }
+/* One shared treatment for the detail panel's small grey count lines --
+   a species' instance count and a folder's member count are the same
+   kind of statement about the same kind of role. */
+#detail-instance-count,
+#detail-member-count { color: var(--faint); font-size: 11.5px; margin-top: 8px; }
 #species-picker-wrap { margin-top: 8px; }
 #species-picker-input { width: 100%; padding: 6px 8px; font-size: 12px; }
 #species-picker-results { margin-top: 4px; max-height: 190px; overflow-y: auto; }
 
-#connect-btn { margin-top: 8px; }
+/* A hint, not a button: connecting is a canvas gesture, and an affordance
+   that only ever explains the gesture shouldn't look clickable. */
+.panel-hint { color: var(--faint); font-size: 11.5px; margin-top: 8px; }
 #delete-mote-btn { margin-top: 24px; }
 
 #detail-rel-endpoints { margin-bottom: 20px; }
