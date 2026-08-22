@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "monoss": {
-      "command": "/home/ethan/projects/monoss/.venv/bin/python",
-      "args": ["/home/ethan/projects/monoss/run_mcp.py"]
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/run_mcp.py"]
     }
   }
 }

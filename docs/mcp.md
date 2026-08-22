@@ -8,8 +8,13 @@ the MCP server section of `docs/architecture.md` for the design.
 ## Setup
 
 ```
-pip install -r requirements.txt
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -r requirements.txt
 ```
+
+`--system-site-packages` is only load-bearing for the desktop app (see
+`docs/ui-setup.md`); it's harmless for the MCP server and CLI, so one venv
+covers all three.
 
 `.mcp.json` at the project root registers the server for clients that
 read project-scoped config:
@@ -18,20 +23,26 @@ read project-scoped config:
 {
   "mcpServers": {
     "monoss": {
-      "command": "/home/ethan/projects/monoss/.venv/bin/python",
-      "args": ["/home/ethan/projects/monoss/run_mcp.py"]
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/run_mcp.py"]
     }
   }
 }
 ```
 
-The interpreter is spelled out rather than left as `python3`: the
-`python3` first on PATH here is conda's and does not have this project's
-dependencies. Restart the client after adding or editing this file.
+The interpreter is spelled out rather than left as `python3`: on a
+machine with conda or another Python on `PATH`, `python3` may not resolve
+to an interpreter with this project's dependencies. Restart the client
+after adding or editing this file.
 
-Paths are absolute because the client may launch the server from any
-working directory. If you move or clone the project elsewhere, update
-both.
+The client may launch the server from any working directory, so paths
+can't be relative to cwd — `${CLAUDE_PROJECT_DIR}` (Claude Code only;
+falls back to `.` when unset, since the variable lives in the *server's*
+spawned environment, not Claude Code's own) resolves them relative to the
+project root instead, so this file works unmodified regardless of where
+the repo is cloned. Other MCP clients (e.g. Claude Desktop) don't expand
+this variable; on those, replace both occurrences with the project's
+absolute path.
 
 ## Tools
 
