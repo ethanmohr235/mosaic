@@ -77,11 +77,16 @@ Solving runs in two stages:
                   * (pressure / sources('feeds').pressure) ** 0.286
    ```
 
-   The first equation determines `pressure`, which lets the second one evaluate.
+   The first equation determines `pressure`, which lets the second one evaluate. This stage is the same regardless of which solver is selected below -- it's free, exact, and handles the common case with no numerical error at all.
 
-2. **Linear solve.** Whatever remains goes to a single least-squares solve. Feedback loops are fine here -- a circuit's node voltages and branch currents all depend on each other and are found together.
+2. **The selected solver.** Whatever the substitution loop couldn't finish -- a still-linear system of several unknowns together, or an equation genuinely nonlinear *in the unknowns themselves* (`x * x == 4`) -- goes to the backend named by `solver` (see [Solvers](#solvers) below). Feedback loops are fine here -- a circuit's node voltages and branch currents all depend on each other and are found together.
 
-An equation that is nonlinear *in the unknowns themselves* (`x * x == 4`) can't be solved and is reported as such.
+## Solvers
+
+`run_simulation`/`run_time_series`/`preview_simulation` all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
+
+- **`linear`** (the default). Exact, non-iterative least-squares solve of whatever's left after substitution. Fails with **could not be resolved** if any equation is genuinely nonlinear in its unknowns.
+- **`newton`**. Finds a root of the combined residual by Newton-Raphson with a numeric (finite-difference) Jacobian, so it can solve the cases `linear` can't -- an equation of state, a nonlinear structural relation, a `property()` call whose input is itself unknown. Being iterative, it needs a starting guess for each unknown (the mote's existing property value if there is one, otherwise `1.0`) and can fail to converge or find a different root than expected for a badly-conditioned or multi-rooted system. Configuration: `max_iterations` (default 50), `tolerance` (default `1e-9`), `epsilon` (the finite-difference step, default `1e-6`).
 
 ## Errors
 
@@ -90,7 +95,9 @@ The engine refuses to guess. All of these stop the run with a message naming the
 - **underdetermined** -- more unknowns than independent equations. Usually a missing rule or a missing reference point (a circuit needs a ground).
 - **inconsistent** -- no values satisfy every equation at once.
 - **contradictory** -- two rules demand different values for the same thing.
-- **could not be resolved** -- an equation stayed nonlinear in its unknowns.
+- **could not be resolved** -- an equation stayed nonlinear in its unknowns and the `linear` solver was selected.
+- **did not converge** / **stalled** -- the `newton` solver ran out of iterations, or backtracking couldn't improve the residual further, without reaching `tolerance`.
+- **singular system** -- the `newton` solver's final Jacobian didn't independently constrain every unknown (the nonlinear analog of underdetermined).
 
 Being overdetermined is *not* an error, as long as the extra equations agree. This is normal: in any circuit, one of the Kirchhoff current equations is always implied by the others.
 
@@ -241,7 +248,7 @@ formula evaluation.
 
 ## Not built yet
 
-- **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration.
+- **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration. A solver backend for this shape (`dx/dt` rather than `F(x) == 0`) could join `linear`/`newton` later without changing how a rule is written.
 - **Units.** Properties are plain numbers. Use naming conventions (`resistance_ohms`) if it helps; nothing enforces or converts.
-- **Nonlinear systems.** Only nonlinearity over already-known values works. Genuinely nonlinear systems would need an iterative solver.
+- **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
 - **Species inheritance.** Species are flat.

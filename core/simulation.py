@@ -1,28 +1,28 @@
 # core/simulation.py
-"""Steady-state simulation: collect every rule's equations, solve them, and
-write the results back onto the motes.
+"""Simulation: collect every rule's equations, solve them, and write the
+results back onto the motes.
 
-The solver runs in two stages. First a substitution loop repeatedly picks
-off any equation that has come down to a single unknown and feeds the
-answer back in; this is what lets a formula be nonlinear as long as the
-nonlinear part involves values that are already known (`T2 == T1 *
-(p2/p1)**0.286`), and it means a garden of plain assignment-style rules
-never touches NumPy at all. Whatever is left must be linear, and goes to
-a single least-squares solve.
-
-Static only: there is no notion of a previous timestep yet. The run
-counter is recorded for provenance so time-dependent behaviour can build
-on it later.
+Solving happens in two stages. First a substitution loop (_reduce)
+repeatedly picks off any equation that has come down to a single unknown
+and feeds the answer back in; this is what lets a formula be nonlinear as
+long as the nonlinear part involves values that are already known (`T2 ==
+T1 * (p2/p1)**0.286`), and it means a garden of plain assignment-style
+rules never touches a solver backend at all. Whatever's left -- a
+still-linear system of several unknowns, or something genuinely nonlinear
+in its unknowns -- is handed to a pluggable solver backend (see
+core/solvers.py) chosen per run via `solver`/`solver_configuration`: the
+default `"linear"` is exact and non-iterative but fails on genuine
+nonlinearity, `"newton"` is iterative and can solve that.
 """
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-import numpy as np
-
 from core import model_resolver
 from core import rules as rules_repo
+from core import solver_registry  # noqa: F401 -- registers built-in solver backends
 from core import species as species_repo
 from core.db import generate_uuid
 from core.formula import (
@@ -31,18 +31,18 @@ from core.formula import (
     FormulaError,
     NonlinearError,
     Unknown,
-    describe,
     evaluate_equation,
 )
 from core.models import Relationship
 from core.motes import list_motes, update_mote
 from core.providers import PropertyProvider
 from core.relationships import list_relationships
+from core.solvers import DeferredEquation, Remainder, SolverError, resolve_solver
 
 logger = logging.getLogger(__name__)
 
 _TOLERANCE = 1e-9
-_RESIDUAL_TOLERANCE = 1e-6
+_DEFAULT_SOLVER = "linear"
 
 
 class SimulationError(Exception):
@@ -128,9 +128,19 @@ class _GardenView:
     in_edges: dict[tuple[str, str], list[str]]
 
 
-def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
+def run_simulation(
+    conn: sqlite3.Connection,
+    solver: str = _DEFAULT_SOLVER,
+    solver_configuration: dict | None = None,
+) -> SimulationResult:
     """Solve the garden and write the results back. Raises SimulationError
-    (after logging the failed run) if the rules can't be satisfied."""
+    (after logging the failed run) if the rules can't be satisfied.
+
+    `solver` picks the backend that finishes whatever the substitution
+    loop couldn't resolve on its own -- see core/solvers.py. The default,
+    `"linear"`, is today's exact non-iterative behavior and fails on
+    genuine nonlinearity; `"newton"` can solve that at the cost of being
+    iterative/approximate."""
     run_number = _next_run_number(conn)
     properties = {m.id: m.properties for m in list_motes(conn)}
     relationships = list_relationships(conn)
@@ -140,12 +150,16 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
     try:
         solved: dict[Unknown, float] = {}
         model_cache: dict[str, PropertyProvider] = {}
-        equations = _resolve(view, pairs, solved, model_cache=model_cache)
-        solved.update(_matrix_solve(equations, solved))
+        remainder = _reduce(view, pairs, solved, model_cache=model_cache)
+        solved.update(_finish(view, remainder, solved, solver, solver_configuration))
     except SimulationError as e:
         _log_run(conn, run_number, "error", str(e), [], committed=False)
         logger.warning("simulation run #%s failed: %s", run_number, e)
         raise
+    except SolverError as e:
+        _log_run(conn, run_number, "error", str(e), [], committed=False)
+        logger.warning("simulation run #%s failed: %s", run_number, e)
+        raise SimulationError(str(e)) from e
 
     changes = _write_back(conn, view.properties, solved)
     run_id = _log_run(conn, run_number, "ok", None, [changes], committed=True)
@@ -155,18 +169,24 @@ def run_simulation(conn: sqlite3.Connection) -> SimulationResult:
         run_number=run_number,
         values=solved,
         changes=changes,
-        equation_count=len(equations),
+        equation_count=len(remainder.open_equations) + len(remainder.deferred),
         unsolved=_unsolved(view, solved),
     )
 
 
 def run_time_series(
-    conn: sqlite3.Connection, step_count: int, commit: bool, save: bool = False
+    conn: sqlite3.Connection,
+    step_count: int,
+    commit: bool,
+    save: bool = False,
+    solver: str = _DEFAULT_SOLVER,
+    solver_configuration: dict | None = None,
 ) -> TimeSeriesResult:
     """Runs step_count steps entirely in memory, each step's solve
     starting from the *previous* step's solved values rather than
     re-reading the database -- this is what lets a rule use prev(x) to
-    express a recurrence.
+    express a recurrence. `solver`/`solver_configuration` are the same
+    per-run backend choice run_simulation() takes, applied to every step.
 
     Three mutually exclusive modes:
     - commit=False, save=False (default): a pure preview. Nothing is
@@ -210,11 +230,11 @@ def run_time_series(
         pairs = _rule_instances(rules, view)
         try:
             solved: dict[Unknown, float] = {}
-            equations = _resolve(
+            remainder = _reduce(
                 view, pairs, solved, tick=float(step), previous=running, model_cache=model_cache
             )
-            solved.update(_matrix_solve(equations, solved))
-        except SimulationError as e:
+            solved.update(_finish(view, remainder, solved, solver, solver_configuration))
+        except (SimulationError, SolverError) as e:
             failed_at, error = step, str(e)
             logger.warning("simulation preview step %s failed: %s", step, e)
             break
@@ -225,7 +245,8 @@ def run_time_series(
         for (mote_id, key), value in solved.items():
             next_running.setdefault(mote_id, {})[key] = value
         running = next_running
-        steps.append(StepResult(step, solved, changes, len(equations), _unsolved(view, solved)))
+        equation_count = len(remainder.open_equations) + len(remainder.deferred)
+        steps.append(StepResult(step, solved, changes, equation_count, _unsolved(view, solved)))
 
     run_id = None
     if (commit or save) and steps:
@@ -348,7 +369,7 @@ def _evaluate_model(
     return provider.evaluate(operation, dict(zip(capability.inputs, args)))
 
 
-def _resolve(
+def _reduce(
     view: _GardenView,
     pairs: list[tuple[rules_repo.Rule, str]],
     solved: dict[Unknown, float],
@@ -356,11 +377,16 @@ def _resolve(
     previous: dict[str, dict] | None = None,
     *,
     model_cache: dict[str, PropertyProvider],
-) -> list[Equation]:
-    """Substitution loop. Returns the equations as evaluated against the
-    final set of substituted values, ready for the matrix solve."""
+) -> Remainder:
+    """Substitution loop. Repeatedly evaluates every pair, picks off any
+    equation that comes down to a single unknown, and feeds the answer
+    back in -- exact and free of iteration error for anything expressible
+    this way, and the only stage every solver backend shares. Whatever's
+    left (still-linear multi-unknown equations, or equations genuinely
+    nonlinear in their unknowns) is packaged into a Remainder for the
+    selected backend (see core/solvers.py) to finish."""
     equations: list[Equation] = []
-    deferred: list[tuple[rules_repo.Rule, str, Exception]] = []
+    deferred: list[DeferredEquation] = []
 
     while True:
         equations, deferred = _evaluate_all(view, pairs, solved, tick, previous, model_cache=model_cache)
@@ -369,12 +395,7 @@ def _resolve(
             break
         solved.update(newly)
 
-    if deferred:
-        rule, mote_id, error = deferred[0]
-        raise SimulationError(
-            f"rule {rule.name!r} on mote {mote_id[:8]} could not be resolved: {error}"
-        )
-    return equations
+    return Remainder(equations, deferred)
 
 
 def _evaluate_all(
@@ -385,7 +406,7 @@ def _evaluate_all(
     previous: dict[str, dict] | None = None,
     *,
     model_cache: dict[str, PropertyProvider],
-) -> tuple[list[Equation], list[tuple[rules_repo.Rule, str, Exception]]]:
+) -> tuple[list[Equation], list[DeferredEquation]]:
     """Nonlinear failures are deferred rather than fatal -- the offending
     unknown may still be determined by another equation, which would make
     this one evaluable on a later pass."""
@@ -395,10 +416,75 @@ def _evaluate_all(
             ctx = _context(view, mote_id, solved, tick, previous, model_cache=model_cache)
             equations.append(evaluate_equation(rule.equation, ctx))
         except NonlinearError as e:
-            deferred.append((rule, mote_id, e))
+            deferred.append(_defer(view, rule, mote_id, solved, tick, previous, model_cache, e))
         except FormulaError as e:
             raise SimulationError(f"rule {rule.name!r} on mote {mote_id[:8]}: {e}") from e
     return equations, deferred
+
+
+class _RecordingKnown(dict):
+    """A dict that records every key actually looked up via `in`, without
+    any change to core/formula.py's _lookup() -- which checks membership
+    on Context.solved exactly that way. Used once per deferred equation
+    to discover which unknowns it actually references (see _defer), not
+    on the hot per-iteration path a solver backend runs."""
+
+    def __init__(self, base: dict):
+        super().__init__(base)
+        self.touched: set[Unknown] = set()
+
+    def __contains__(self, key) -> bool:
+        self.touched.add(key)
+        return super().__contains__(key)
+
+
+def _defer(
+    view: _GardenView,
+    rule: rules_repo.Rule,
+    mote_id: str,
+    solved: dict[Unknown, float],
+    tick: float,
+    previous: dict[str, dict] | None,
+    model_cache: dict[str, PropertyProvider],
+    error: NonlinearError,
+) -> DeferredEquation:
+    """Builds the DeferredEquation for one rule/mote pair whose equation
+    is genuinely nonlinear in its unknowns. `references` -- which
+    unknowns the equation actually touches, needed so a solver backend
+    doesn't mistake an unrelated declared-but-unsolved unknown for one it
+    must also pin down -- is discovered by one throwaway evaluation with
+    a placeholder guess (1.0) for every currently unsolved declared
+    unknown in the whole view, recorded via _RecordingKnown. If that
+    probe itself fails (e.g. a placeholder isn't a valid input to a
+    property() model), fall back to the full unsolved set rather than
+    under-counting a real dependency."""
+    all_unsolved = {
+        (mid, key)
+        for mid, keys in view.unknowns.items()
+        for key in keys
+        if (mid, key) not in solved
+    }
+    placeholder = _RecordingKnown(solved)
+    for unknown in all_unsolved:
+        dict.setdefault(placeholder, unknown, 1.0)
+    try:
+        ctx = _context(view, mote_id, placeholder, tick, previous, model_cache=model_cache)
+        evaluate_equation(rule.equation, ctx)
+        references = frozenset(placeholder.touched) & all_unsolved
+    except FormulaError:
+        references = frozenset(all_unsolved)
+
+    return DeferredEquation(
+        rule_name=rule.name,
+        mote_id=mote_id,
+        source=rule.equation,
+        detail=str(error),
+        references=references,
+        reevaluate=lambda guess, rule=rule, mote_id=mote_id: evaluate_equation(
+            rule.equation,
+            _context(view, mote_id, guess, tick, previous, model_cache=model_cache),
+        ),
+    )
 
 
 def _solve_singletons(
@@ -418,47 +504,42 @@ def _solve_singletons(
     return newly
 
 
-def _matrix_solve(
-    equations: list[Equation], solved: dict[Unknown, float]
+def _finish(
+    view: _GardenView,
+    remainder: Remainder,
+    known: dict[Unknown, float],
+    solver: str,
+    solver_configuration: dict | None,
 ) -> dict[Unknown, float]:
-    open_equations = [e for e in equations if e.terms]
-    _check_consistency([e for e in equations if not e.terms])
-    if not open_equations:
-        return {}
-
-    unknowns = sorted({u for e in open_equations for u in e.terms})
-    index = {unknown: i for i, unknown in enumerate(unknowns)}
-    matrix = np.zeros((len(open_equations), len(unknowns)))
-    constants = np.zeros(len(open_equations))
-    for row, equation in enumerate(open_equations):
-        for unknown, coefficient in equation.terms.items():
-            matrix[row, index[unknown]] = coefficient
-        constants[row] = -equation.constant
-
-    solution, _, rank, _ = np.linalg.lstsq(matrix, constants, rcond=None)
-    if rank < len(unknowns):
-        raise SimulationError(
-            f"underdetermined: {len(unknowns)} unknowns but only {rank} independent "
-            f"equations. Unknowns: {describe(unknowns)}"
-        )
-    residual = float(np.abs(matrix @ solution - constants).max())
-    if residual > _RESIDUAL_TOLERANCE:
-        raise SimulationError(
-            f"inconsistent: no values satisfy all {len(open_equations)} equations "
-            f"(worst mismatch {residual:.3g}). Unknowns: {describe(unknowns)}"
-        )
-    return {unknown: float(solution[i]) + 0.0 for unknown, i in index.items()}
+    """Resolves and runs the selected backend (see core/solvers.py) on
+    whatever _reduce() couldn't finish alone. `candidates` is deliberately
+    narrower than "every declared-but-unsolved unknown" -- it's only the
+    ones some equation actually references, so a declared unknown with no
+    equation at all keeps surfacing softly via _unsolved() under every
+    solver, exactly as it always has, rather than becoming a spurious
+    underdetermined failure."""
+    candidates = {u for e in remainder.open_equations for u in e.terms}
+    for deferred in remainder.deferred:
+        candidates |= deferred.references
+    backend = resolve_solver(solver)(solver_configuration or {})
+    return backend.solve(remainder, known, candidates, _initial_guess(view))
 
 
-def _check_consistency(closed: list[Equation]) -> None:
-    """An equation with no unknowns left is either satisfied or a flat
-    contradiction between rules."""
-    for equation in closed:
-        if abs(equation.constant) > _RESIDUAL_TOLERANCE:
-            raise SimulationError(
-                f"contradictory equation {equation.source!r}: with everything else known "
-                f"it reduces to {equation.constant:.6g} == 0"
-            )
+def _initial_guess(view: _GardenView) -> Callable[[Unknown], float]:
+    """An iterative solver backend needs a starting value for each
+    unknown it has no other information about. `view.properties` already
+    holds the right thing to start from either way: for a one-shot
+    run_simulation() it's the value freshly read from the garden, and for
+    a run_time_series() step it's the state entering that step (view is
+    rebuilt from `running` each step) -- so reading it here is a warm
+    start from the previous step for free, with no separate plumbing."""
+    def guess(unknown: Unknown) -> float:
+        mote_id, key = unknown
+        value = view.properties.get(mote_id, {}).get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return 1.0
+    return guess
 
 
 def _changes_for(properties: dict[str, dict], values: dict[Unknown, float]) -> list[Change]:

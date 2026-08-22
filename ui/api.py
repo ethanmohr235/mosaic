@@ -21,6 +21,7 @@ from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import simulation as simulation_repo
+from core import solvers as solvers_repo
 from core import species as species_repo
 
 
@@ -320,33 +321,56 @@ class Api:
     # ---- simulation ----
 
     @_synchronized
-    def preview_simulation(self, step_count: int) -> dict:
+    def list_solvers(self) -> list[str]:
+        """Every registered solver backend name (see core/solvers.py),
+        for the Tools menu's solver picker -- no DB access, but kept
+        @_synchronized like every other Api method for consistency."""
+        return solvers_repo.list_solvers()
+
+    @_synchronized
+    def preview_simulation(
+        self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None
+    ) -> dict:
         """Runs step_count steps entirely in memory -- nothing is written
         to this garden. The frontend scrubs through the returned steps
-        client-side; committing a chosen step is a separate call."""
-        result = simulation_repo.run_time_series(self._conn, step_count, commit=False)
+        client-side; committing a chosen step is a separate call. `solver`
+        picks the backend for whatever the substitution loop can't
+        resolve alone -- see core/solvers.py -- and defaults to today's
+        exact, non-iterative behavior."""
+        result = simulation_repo.run_time_series(
+            self._conn, step_count, commit=False, solver=solver, solver_configuration=solver_configuration
+        )
         return _time_series_payload(result)
 
     @_synchronized
-    def commit_simulation(self, step_count: int) -> dict:
+    def commit_simulation(
+        self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None
+    ) -> dict:
         """Re-runs step_count steps (deterministic given the same garden
         and rules) and this time writes the final cumulative result,
         logging one entry the same way a single run_simulation() always
         has. Never trusts step values echoed back from a prior preview
         call -- the only numbers that ever reach the database are ones
         this recomputes itself."""
-        result = simulation_repo.run_time_series(self._conn, step_count, commit=True)
+        result = simulation_repo.run_time_series(
+            self._conn, step_count, commit=True, solver=solver, solver_configuration=solver_configuration
+        )
         return _time_series_payload(result)
 
     @_synchronized
-    def save_simulation(self, step_count: int) -> dict:
+    def save_simulation(
+        self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None
+    ) -> dict:
         """Like commit_simulation, but never writes the graph -- logs
         every computed tick for later review (e.g. comparing a few
         hypothetical parameter sets) without any of them becoming the
         garden's canonical state. Always re-runs the full step_count
         (unlike commit, which only re-runs up to whichever tick was
         scrubbed to), since there's no "committed position" for a save."""
-        result = simulation_repo.run_time_series(self._conn, step_count, commit=False, save=True)
+        result = simulation_repo.run_time_series(
+            self._conn, step_count, commit=False, save=True,
+            solver=solver, solver_configuration=solver_configuration,
+        )
         return _time_series_payload(result)
 
     @_synchronized

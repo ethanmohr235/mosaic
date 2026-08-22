@@ -181,6 +181,7 @@ button.linkish:hover { color: var(--fg); }
   padding: 8px 14px; font-size: 13px; color: var(--muted); cursor: default;
 }
 .menu-row input { width: 64px; text-align: center; padding: 4px 6px; font-size: 12px; }
+.menu-row select { padding: 4px 6px; font-size: 12px; }
 
 #garden-menu-list { max-height: 260px; overflow-y: auto; }
 #garden-menu-list .check { color: var(--accent); width: 14px; flex-shrink: 0; text-align: center; }

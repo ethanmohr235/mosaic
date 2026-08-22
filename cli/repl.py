@@ -354,8 +354,10 @@ def repl(garden: str | None = None) -> None:
                 action = args[0].lower() if args else "run"
 
                 if action == "run":
+                    action_args = parse_properties(args[1:])
+                    solver = action_args.get("solver", "linear")
                     try:
-                        result = run_simulation(conn)
+                        result = run_simulation(conn, solver=solver)
                     except SimulationError as e:
                         print(f"Simulation failed: {e}")
                         continue

@@ -110,7 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
         "simulate", help="Run the garden's simulation rules, or inspect past runs"
     )
     simulate_sub = simulate_parser.add_subparsers(dest="action")
-    simulate_sub.add_parser("run", help="Run the simulation (default)")
+    run_parser = simulate_sub.add_parser("run", help="Run the simulation (default)")
+    run_parser.add_argument(
+        "--solver", default="linear",
+        help="Solver backend for whatever the substitution loop can't resolve alone "
+             "(default: linear; also available: newton, for equations genuinely "
+             "nonlinear in their unknowns)",
+    )
     history_parser = simulate_sub.add_parser("history", help="List past simulation runs")
     history_parser.add_argument("--limit", type=int, help="Show only the N most recent runs")
     show_parser = simulate_sub.add_parser("show", help="Show one run's changes")
@@ -277,7 +283,7 @@ def _handle_simulate(conn, args) -> None:
 
     if action == "run":
         try:
-            result = run_simulation(conn)
+            result = run_simulation(conn, solver=getattr(args, "solver", "linear"))
         except SimulationError as e:
             print(f"Simulation failed: {e}")
             return

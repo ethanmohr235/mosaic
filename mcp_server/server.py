@@ -335,15 +335,29 @@ def whole_garden(garden: str | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def preview_simulation(step_count: int = 1, garden: str | None = None) -> dict[str, Any]:
+def preview_simulation(
+    step_count: int = 1,
+    garden: str | None = None,
+    solver: str = "linear",
+    solver_configuration: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Solve the garden's rules for `step_count` steps entirely in
     memory and return what *would* change. Writes nothing and logs
     nothing. Each step starts from the previous step's solved values, so
     a rule can use `t` or `prev(x)` to express time-dependent behavior.
     Applying a run to the graph is deliberately not exposed here -- do
-    that in the app."""
+    that in the app.
+
+    `solver` picks the backend that finishes whatever the substitution
+    loop can't resolve on its own: `"linear"` (the default) is exact but
+    fails if a rule is genuinely nonlinear in its unknowns (e.g. `area ==
+    side * side`); `"newton"` solves that iteratively instead, tunable
+    via `solver_configuration` (`max_iterations`, `tolerance`,
+    `epsilon`)."""
     with _connect(garden) as conn:
-        result = simulation_repo.run_time_series(conn, step_count, commit=False)
+        result = simulation_repo.run_time_series(
+            conn, step_count, commit=False, solver=solver, solver_configuration=solver_configuration
+        )
         return {
             "steps": _steps_payload(result.steps),
             "failed_at": result.failed_at,

@@ -206,6 +206,69 @@ def test_declared_unknown_with_no_equation_is_reported_not_fatal(conn):
     assert result.unsolved == [(mote, "orphan")]
 
 
+# ---- solver selection ----
+
+def test_nonlinear_rule_solves_with_the_newton_backend(conn):
+    species = create_mote(conn, {"name": "Square", "unknowns": "side"})
+    add_rule(conn, species, "area", "area == side * side")
+    mote = create_mote(conn, {"name": "m", "area": 16.0, "side": 3.0})
+    set_species(conn, mote, species)
+
+    result = run_simulation(conn, solver="newton")
+    assert prop(conn, mote, "side") == pytest.approx(4.0)
+    assert result.equation_count == 1
+
+
+def test_orphan_declared_unknown_is_still_reported_under_newton(conn):
+    # Regression: a declared unknown no equation touches must stay a soft
+    # "unsolved" report under every solver, not get swept into the
+    # nonlinear solve as a phantom extra unknown.
+    species = create_mote(conn, {"name": "S", "unknowns": "side, orphan"})
+    add_rule(conn, species, "area", "area == side * side")
+    mote = create_mote(conn, {"name": "m", "area": 16.0, "side": 3.0})
+    set_species(conn, mote, species)
+
+    result = run_simulation(conn, solver="newton")
+    assert prop(conn, mote, "side") == pytest.approx(4.0)
+    assert result.unsolved == [(mote, "orphan")]
+
+
+def test_unknown_solver_name_is_reported(conn):
+    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    add_rule(conn, species, "r", "x == 3")
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+
+    with pytest.raises(SimulationError, match="no solver registered"):
+        run_simulation(conn, solver="bogus")
+
+
+def test_newton_solver_configuration_is_threaded_through(conn):
+    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    add_rule(conn, species, "no_root", "x * x == -4")
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+
+    with pytest.raises(SimulationError, match="converge|stalled"):
+        run_simulation(conn, solver="newton", solver_configuration={"max_iterations": 5})
+
+
+def test_time_series_accepts_a_solver_override(conn):
+    species = create_mote(conn, {"name": "Square", "unknowns": "side"})
+    add_rule(conn, species, "area", "area == side * side")
+    mote = create_mote(conn, {"name": "m", "area": 16.0, "side": 3.0})
+    set_species(conn, mote, species)
+
+    result = run_time_series(conn, step_count=1, commit=False, solver="newton")
+    assert result.failed_at is None
+    assert result.steps[0].values[(mote, "side")] == pytest.approx(4.0)
+
+    # The default backend still can't solve it -- confirms the override,
+    # not some other change, is what made the newton run succeed.
+    default_result = run_time_series(conn, step_count=1, commit=False)
+    assert default_result.failed_at == 0
+
+
 # ---- audit log ----
 
 def test_successful_run_is_logged_with_its_changes(conn, divider):

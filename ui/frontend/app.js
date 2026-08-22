@@ -37,6 +37,7 @@ const DETAIL_WIDTH_KEY = "monoss:detailWidth";
 const DETAIL_WIDTH_MIN = 280;
 const DETAIL_WIDTH_MAX = 640;
 const SIM_STEPS_KEY = "monoss:simSteps";
+const SIM_SOLVER_KEY = "monoss:simSolver";
 const SIM_ERROR_TOAST_MS = 12000;
 const CONTROL_PANEL_KEY = "monoss:controlPanel";
 
@@ -2278,6 +2279,7 @@ function setupViewControls() {
 function setupSimulation() {
   const button = $("run-sim-btn");
   const stepsInput = $("sim-steps-input");
+  const solverSelect = $("sim-solver-select");
 
   const storedSteps = localStorage.getItem(SIM_STEPS_KEY);
   if (storedSteps) stepsInput.value = storedSteps;
@@ -2285,18 +2287,32 @@ function setupSimulation() {
     localStorage.setItem(SIM_STEPS_KEY, stepsInput.value);
   });
 
+  (async () => {
+    const solvers = await call(api.list_solvers());
+    solverSelect.innerHTML = solvers.map((name) => `<option value="${name}">${name}</option>`).join("");
+    const storedSolver = localStorage.getItem(SIM_SOLVER_KEY);
+    if (storedSolver && solvers.includes(storedSolver)) solverSelect.value = storedSolver;
+  })();
+  solverSelect.addEventListener("change", () => {
+    localStorage.setItem(SIM_SOLVER_KEY, solverSelect.value);
+  });
+
   button.addEventListener("click", async () => {
     closeTopMenus();
     const steps = Math.max(1, parseInt(stepsInput.value, 10) || 1);
+    const solver = solverSelect.value || "linear";
     button.disabled = true;
     button.textContent = "Running…";
     try {
-      const result = await call(api.preview_simulation(steps));
+      const result = await call(api.preview_simulation(steps, solver));
       if (result.steps.length === 0) {
         showToast(result.error ? `Simulation failed: ${result.error}` : "Nothing to simulate.", SIM_ERROR_TOAST_MS);
         return;
       }
-      openSimBar({ ...result, mode: "preview" });
+      // The solver that produced this preview travels with it, so
+      // Commit/Save (below) re-solve with the same backend even if the
+      // dropdown is changed while the sim bar is still open.
+      openSimBar({ ...result, mode: "preview", solver });
     } finally {
       // openSimBar() already disabled it (and keeps it disabled) on success;
       // this only matters for the "nothing to simulate" early return above.
@@ -2322,7 +2338,7 @@ function setupSimulation() {
     const btn = $("sim-commit-btn");
     btn.disabled = true;
     try {
-      const result = await call(api.commit_simulation(simStep));
+      const result = await call(api.commit_simulation(simStep, simPreview.solver));
       const committed = result.steps[result.steps.length - 1];
       const committedStep = simStep;
       closeSimBar();
@@ -2343,7 +2359,7 @@ function setupSimulation() {
     const btn = $("sim-save-btn");
     btn.disabled = true;
     try {
-      const result = await call(api.save_simulation(simPreview.steps.length));
+      const result = await call(api.save_simulation(simPreview.steps.length, simPreview.solver));
       closeSimBar();
       showToast(
         result.run_id ? "Simulation saved for later review." : "Nothing to save.",
