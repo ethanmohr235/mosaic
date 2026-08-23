@@ -39,9 +39,9 @@ def divider(conn):
     total resistance 300, so I = 1/30 A, V(N1) = 10, V(N2) = 10 - 100/30
     = 20/3, V(N0) = 0.
     """
-    node = create_mote(conn, {"name": "Node", "unknowns": "voltage"})
-    resistor = create_mote(conn, {"name": "Resistor", "unknowns": "current"})
-    source = create_mote(conn, {"name": "VoltageSource", "unknowns": "current"})
+    node = create_mote(conn, {"name": "Node", "freedoms": "voltage"})
+    resistor = create_mote(conn, {"name": "Resistor", "freedoms": "current"})
+    source = create_mote(conn, {"name": "VoltageSource", "freedoms": "current"})
     ground = create_mote(conn, {"name": "Ground"})
 
     add_rule(conn, resistor, "Ohm's law", OHMS_LAW)
@@ -118,7 +118,7 @@ def test_chained_nonlinear_formulas_resolve_by_substitution(conn):
     """Each stage's pressure feeds the next stage's temperature through a
     fractional power -- nonlinear, but only in values already known by the
     time it is evaluated."""
-    stage = create_mote(conn, {"name": "Stage", "unknowns": "pressure, temperature"})
+    stage = create_mote(conn, {"name": "Stage", "freedoms": "pressure, temperature"})
     add_rule(conn, stage, "Pressure ratio", "pressure == sources('feeds').pressure * ratio")
     add_rule(
         conn, stage, "Isentropic",
@@ -137,7 +137,7 @@ def test_chained_nonlinear_formulas_resolve_by_substitution(conn):
 
 
 def test_assignment_style_rules_need_no_matrix(conn):
-    species = create_mote(conn, {"name": "Box", "unknowns": "area"})
+    species = create_mote(conn, {"name": "Box", "freedoms": "area"})
     add_rule(conn, species, "Area", "area == width * height")
     box = create_mote(conn, {"name": "b", "width": 3, "height": 4})
     set_species(conn, box, species)
@@ -149,7 +149,7 @@ def test_assignment_style_rules_need_no_matrix(conn):
 # ---- failure modes ----
 
 def test_underdetermined_system_is_reported(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x, y"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x, y"})
     add_rule(conn, species, "one equation", "x + y == 10")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -159,7 +159,7 @@ def test_underdetermined_system_is_reported(conn):
 
 
 def test_contradictory_rules_are_reported(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "one", "x == 1")
     add_rule(conn, species, "two", "x == 2")
     mote = create_mote(conn, {"name": "m"})
@@ -170,7 +170,7 @@ def test_contradictory_rules_are_reported(conn):
 
 
 def test_nonlinear_in_unknowns_is_reported(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "square", "x * x == 4")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -180,7 +180,7 @@ def test_nonlinear_in_unknowns_is_reported(conn):
 
 
 def test_formula_error_names_the_rule_and_mote(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "typo", "x == missing_property")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -196,7 +196,7 @@ def test_empty_garden_runs_without_error(conn):
 
 
 def test_declared_unknown_with_no_equation_is_reported_not_fatal(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x, orphan"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x, orphan"})
     add_rule(conn, species, "r", "x == 3")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -209,7 +209,7 @@ def test_declared_unknown_with_no_equation_is_reported_not_fatal(conn):
 # ---- solver selection ----
 
 def test_nonlinear_rule_solves_with_the_newton_backend(conn):
-    species = create_mote(conn, {"name": "Square", "unknowns": "side"})
+    species = create_mote(conn, {"name": "Square", "freedoms": "side"})
     add_rule(conn, species, "area", "area == side * side")
     mote = create_mote(conn, {"name": "m", "area": 16.0, "side": 3.0})
     set_species(conn, mote, species)
@@ -223,7 +223,7 @@ def test_orphan_declared_unknown_is_still_reported_under_newton(conn):
     # Regression: a declared unknown no equation touches must stay a soft
     # "unsolved" report under every solver, not get swept into the
     # nonlinear solve as a phantom extra unknown.
-    species = create_mote(conn, {"name": "S", "unknowns": "side, orphan"})
+    species = create_mote(conn, {"name": "S", "freedoms": "side, orphan"})
     add_rule(conn, species, "area", "area == side * side")
     mote = create_mote(conn, {"name": "m", "area": 16.0, "side": 3.0})
     set_species(conn, mote, species)
@@ -234,7 +234,7 @@ def test_orphan_declared_unknown_is_still_reported_under_newton(conn):
 
 
 def test_unknown_solver_name_is_reported(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "r", "x == 3")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -244,7 +244,7 @@ def test_unknown_solver_name_is_reported(conn):
 
 
 def test_newton_solver_configuration_is_threaded_through(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "no_root", "x * x == -4")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -254,7 +254,7 @@ def test_newton_solver_configuration_is_threaded_through(conn):
 
 
 def test_time_series_accepts_a_solver_override(conn):
-    species = create_mote(conn, {"name": "Square", "unknowns": "side"})
+    species = create_mote(conn, {"name": "Square", "freedoms": "side"})
     add_rule(conn, species, "area", "area == side * side")
     mote = create_mote(conn, {"name": "m", "area": 16.0, "side": 3.0})
     set_species(conn, mote, species)
@@ -284,7 +284,7 @@ def test_successful_run_is_logged_with_its_changes(conn, divider):
 
 
 def test_failed_run_is_logged_too(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x, y"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x, y"})
     add_rule(conn, species, "one equation", "x + y == 10")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -308,7 +308,7 @@ def test_run_number_advances_across_runs(conn, divider):
 def test_change_log_records_old_and_new_values(conn):
     from core.motes import update_mote
 
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "r", "x == width * 2")
     mote = create_mote(conn, {"name": "m", "width": 5})
     set_species(conn, mote, species)
@@ -349,7 +349,7 @@ def test_list_runs_reports_change_count_and_status(conn, divider):
 
 
 def test_list_runs_includes_failed_runs_with_zero_changes(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x, y"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x, y"})
     add_rule(conn, species, "one equation", "x + y == 10")
     set_species(conn, create_mote(conn, {"name": "m"}), species)
 
@@ -375,7 +375,7 @@ def test_get_run_matches_the_corresponding_list_runs_entry(conn, divider):
 
 
 def test_run_changes_round_trips_old_and_new_values(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "r", "x == width * 2")
     mote = create_mote(conn, {"name": "m", "width": 5})
     set_species(conn, mote, species)
@@ -392,7 +392,7 @@ def test_run_changes_round_trips_old_and_new_values(conn):
 
 
 def test_run_changes_empty_for_a_failed_run(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "x, y"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x, y"})
     add_rule(conn, species, "one equation", "x + y == 10")
     set_species(conn, create_mote(conn, {"name": "m"}), species)
 
@@ -415,7 +415,7 @@ def _rows(conn, table):
 def compounding(conn):
     """A single mote whose balance compounds by 5% each step -- the
     simplest possible recurrence, via prev()."""
-    species = create_mote(conn, {"name": "Account", "unknowns": "balance"})
+    species = create_mote(conn, {"name": "Account", "freedoms": "balance"})
     add_rule(conn, species, "Growth", "balance == prev(balance) * 1.05")
     mote = create_mote(conn, {"name": "acct1", "balance": 100.0})
     set_species(conn, mote, species)
@@ -484,7 +484,7 @@ def test_time_series_stops_at_a_failure_but_keeps_earlier_steps(conn):
     # must equal the step index". Both agree at step 0 (x starts at 0,
     # t is 0), so that step solves fine -- but from step 1 on they
     # contradict (prev(x) is still 0, t is 1), so the run fails there.
-    species = create_mote(conn, {"name": "S", "unknowns": "x"})
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
     add_rule(conn, species, "stays", "x == prev(x)")
     add_rule(conn, species, "matches_t", "x == t")
     mote = create_mote(conn, {"name": "m", "x": 0.0})
@@ -504,7 +504,7 @@ def test_time_series_stops_at_a_failure_but_keeps_earlier_steps(conn):
 
 
 def test_time_series_commit_is_a_noop_when_every_step_fails(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "a, b"})
+    species = create_mote(conn, {"name": "S", "freedoms": "a, b"})
     add_rule(conn, species, "underdetermined", "a + b == 10")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -545,7 +545,7 @@ def test_save_logs_every_tick_without_writing_the_graph(conn, compounding):
 
 
 def test_save_is_a_noop_when_every_step_fails(conn):
-    species = create_mote(conn, {"name": "S", "unknowns": "a, b"})
+    species = create_mote(conn, {"name": "S", "freedoms": "a, b"})
     add_rule(conn, species, "underdetermined", "a + b == 10")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -592,7 +592,7 @@ def test_run_ticks_for_a_steady_state_run_has_exactly_one_tick(conn, divider):
 
 
 def test_t_is_available_in_a_time_series_rule(conn):
-    species = create_mote(conn, {"name": "Ramp", "unknowns": "height"})
+    species = create_mote(conn, {"name": "Ramp", "freedoms": "height"})
     add_rule(conn, species, "Linear ramp", "height == 10 - 2 * t")
     mote = create_mote(conn, {"name": "m"})
     set_species(conn, mote, species)
@@ -618,7 +618,7 @@ def _wire_ideal_air(conn, provider="ideal_gas"):
 def test_property_builtin_solves_the_ideal_gas_law(conn):
     air = _wire_ideal_air(conn)
 
-    container = create_mote(conn, {"name": "Container", "unknowns": "pressure"})
+    container = create_mote(conn, {"name": "Container", "freedoms": "pressure"})
     add_rule(
         conn, container, "Ideal gas law",
         "pressure == property('gas', 'pressure', density, temperature)",
@@ -634,7 +634,7 @@ def test_property_builtin_solves_the_ideal_gas_law(conn):
 
 
 def test_property_builtin_reports_a_missing_model_clearly(conn):
-    container = create_mote(conn, {"name": "Container", "unknowns": "pressure"})
+    container = create_mote(conn, {"name": "Container", "freedoms": "pressure"})
     add_rule(
         conn, container, "Ideal gas law",
         "pressure == property('gas', 'pressure', density, temperature)",
@@ -649,7 +649,7 @@ def test_property_builtin_reports_a_missing_model_clearly(conn):
 
 def test_property_builtin_reports_an_unsupported_operation_clearly(conn):
     air = _wire_ideal_air(conn)
-    container = create_mote(conn, {"name": "Container", "unknowns": "enthalpy"})
+    container = create_mote(conn, {"name": "Container", "freedoms": "enthalpy"})
     add_rule(
         conn, container, "Bogus lookup",
         "enthalpy == property('gas', 'enthalpy', density, temperature)",
@@ -676,7 +676,7 @@ def test_property_model_provider_is_resolved_at_most_once_per_run(conn):
     register_provider("_counting_ideal_gas_test", _CountingIdealGas)
     air = _wire_ideal_air(conn, provider="_counting_ideal_gas_test")
 
-    container = create_mote(conn, {"name": "Container", "unknowns": "pressure"})
+    container = create_mote(conn, {"name": "Container", "freedoms": "pressure"})
     add_rule(
         conn, container, "Ideal gas law",
         "pressure == property('gas', 'pressure', density, temperature)",

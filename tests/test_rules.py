@@ -1,6 +1,6 @@
 from core.motes import create_mote
 from core.relationships import create_relationship
-from core.rules import APPLIES_TO, list_rules, parse_unknowns
+from core.rules import APPLIES_TO, list_rules, parse_freedoms
 
 
 def make_rule(conn, species_id, **properties):
@@ -9,19 +9,19 @@ def make_rule(conn, species_id, **properties):
     return rule_id
 
 
-def test_parse_unknowns_accepts_comma_separated_string():
-    assert parse_unknowns("voltage, current") == ["voltage", "current"]
+def test_parse_freedoms_accepts_comma_separated_string():
+    assert parse_freedoms("voltage, current") == ["voltage", "current"]
 
 
-def test_parse_unknowns_accepts_a_json_list():
-    assert parse_unknowns(["voltage", "current"]) == ["voltage", "current"]
+def test_parse_freedoms_accepts_a_json_list():
+    assert parse_freedoms(["voltage", "current"]) == ["voltage", "current"]
 
 
-def test_parse_unknowns_handles_missing_or_junk_values():
-    assert parse_unknowns(None) == []
-    assert parse_unknowns("") == []
-    assert parse_unknowns("  ,  ") == []
-    assert parse_unknowns(42) == []
+def test_parse_freedoms_handles_missing_or_junk_values():
+    assert parse_freedoms(None) == []
+    assert parse_freedoms("") == []
+    assert parse_freedoms("  ,  ") == []
+    assert parse_freedoms(42) == []
 
 
 def test_list_rules_finds_rules_by_applies_to(conn):
@@ -31,7 +31,7 @@ def test_list_rules_finds_rules_by_applies_to(conn):
     rules = list_rules(conn)
     assert len(rules) == 1
     assert rules[0].name == "Ohm's law"
-    assert rules[0].species_id == species
+    assert rules[0].target_id == species
     assert rules[0].equation == "voltage == current * resistance"
 
 

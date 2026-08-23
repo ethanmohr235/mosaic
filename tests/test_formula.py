@@ -238,7 +238,7 @@ def test_non_numeric_property_is_rejected():
 
 
 def test_equation_without_comparison_is_rejected():
-    with pytest.raises(FormulaError, match="not an equation"):
+    with pytest.raises(FormulaError, match="not a relation"):
         evaluate_equation("current * resistance", context())
 
 

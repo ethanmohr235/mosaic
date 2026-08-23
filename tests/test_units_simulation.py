@@ -33,7 +33,7 @@ def totals(conn):
     a factor of a thousand rather than subtly off.
     """
     part = create_mote(conn, {"name": "Part"})
-    tally = create_mote(conn, {"name": "Tally", "unknowns": "total"})
+    tally = create_mote(conn, {"name": "Tally", "freedoms": "total"})
     add_rule(conn, tally, "Total", "total == sum(targets('part').amount)")
     return {"part": part, "tally": tally}
 
@@ -89,7 +89,7 @@ def test_an_undeclared_result_is_written_in_base_units(conn, totals):
 def test_an_affine_unit_is_converted_with_its_offset(conn):
     # 25 degC is 298.15 K, which is the whole reason Unit carries an
     # offset -- a plain scale factor would make it 25 K.
-    species = create_mote(conn, {"name": "Reading", "unknowns": "kelvin"})
+    species = create_mote(conn, {"name": "Reading", "freedoms": "kelvin"})
     add_rule(conn, species, "Convert", "kelvin == celsius")
     reading = create_mote(conn, {
         "name": "R", "celsius": 25, "units": {"celsius": "degC", "kelvin": "K"},
@@ -101,7 +101,7 @@ def test_an_affine_unit_is_converted_with_its_offset(conn):
 
 
 def test_a_compound_unit_is_converted(conn):
-    species = create_mote(conn, {"name": "Trip", "unknowns": "metres_per_second"})
+    species = create_mote(conn, {"name": "Trip", "freedoms": "metres_per_second"})
     add_rule(conn, species, "Convert", "metres_per_second == speed")
     trip = create_mote(conn, {
         "name": "T", "speed": 36,
@@ -118,7 +118,7 @@ def test_a_compound_unit_is_converted(conn):
 def test_solving_does_not_rewrite_a_property_into_base_units(conn):
     """The guarantee that makes units safe to adopt: a value the user
     keeps in kohm is still in kohm after the solver touches it."""
-    species = create_mote(conn, {"name": "Element", "unknowns": "resistance"})
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
     add_rule(conn, species, "Series", "resistance == first + second")
     element = create_mote(conn, {
         "name": "E", "first": 1, "second": 2,
@@ -134,7 +134,7 @@ def test_solving_does_not_rewrite_a_property_into_base_units(conn):
 def test_a_run_is_idempotent_with_units_declared(conn):
     """Re-running must not drift. This is the test that would fail if any
     path converted a value twice."""
-    species = create_mote(conn, {"name": "Element", "unknowns": "resistance"})
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
     add_rule(conn, species, "Series", "resistance == first + second")
     element = create_mote(conn, {
         "name": "E", "first": 1, "second": 2,
@@ -152,7 +152,7 @@ def test_a_recurrence_does_not_drift_across_steps(conn):
     """prev(x) reads the running state, which is kept in the mote's own
     units -- if a step stored base-unit values there, step 2 would
     convert them again and the series would explode."""
-    species = create_mote(conn, {"name": "Account", "unknowns": "balance"})
+    species = create_mote(conn, {"name": "Account", "freedoms": "balance"})
     add_rule(conn, species, "Growth", "balance == prev(balance) * 2")
     account = create_mote(conn, {
         "name": "A", "balance": 1, "units": {"balance": "kohm"},
@@ -166,7 +166,7 @@ def test_a_recurrence_does_not_drift_across_steps(conn):
 
 
 def test_time_series_changes_are_logged_in_the_declared_unit(conn):
-    species = create_mote(conn, {"name": "Account", "unknowns": "balance"})
+    species = create_mote(conn, {"name": "Account", "freedoms": "balance"})
     add_rule(conn, species, "Growth", "balance == prev(balance) * 2")
     account = create_mote(conn, {
         "name": "A", "balance": 1, "units": {"balance": "kohm"},
@@ -183,7 +183,7 @@ def test_time_series_changes_are_logged_in_the_declared_unit(conn):
 def test_an_unrecognized_unit_fails_the_run_rather_than_being_ignored(conn):
     # Silently treating 'kilohms' as base ohms would be a factor-of-1000
     # error in the answer, which is worse than a clear failure.
-    species = create_mote(conn, {"name": "Element", "unknowns": "total"})
+    species = create_mote(conn, {"name": "Element", "freedoms": "total"})
     add_rule(conn, species, "Copy", "total == source")
     element = create_mote(conn, {
         "name": "E", "source": 5, "units": {"source": "kilohms"},
@@ -196,7 +196,7 @@ def test_an_unrecognized_unit_fails_the_run_rather_than_being_ignored(conn):
 
 def test_a_malformed_units_property_leaves_the_mote_unannotated(conn):
     # A half-typed `units` value shouldn't break a simulation.
-    species = create_mote(conn, {"name": "Element", "unknowns": "total"})
+    species = create_mote(conn, {"name": "Element", "freedoms": "total"})
     add_rule(conn, species, "Copy", "total == source")
     element = create_mote(conn, {"name": "E", "source": 5, "units": "ohm"})
     set_species(conn, element, species)
@@ -211,7 +211,7 @@ def test_a_malformed_units_property_leaves_the_mote_unannotated(conn):
 def mismatched(conn):
     """A rule that adds a resistance to a current -- dimensionally wrong,
     but perfectly solvable as bare numbers."""
-    species = create_mote(conn, {"name": "Element", "unknowns": "total"})
+    species = create_mote(conn, {"name": "Element", "freedoms": "total"})
     add_rule(conn, species, "Bad sum", "total == resistance + current")
     element = create_mote(conn, {
         "name": "E", "resistance": 1, "current": 2,
@@ -245,7 +245,7 @@ def test_strict_units_does_not_write_anything(conn, mismatched):
 
 
 def test_a_consistent_garden_passes_strict_units(conn):
-    species = create_mote(conn, {"name": "Element", "unknowns": "total"})
+    species = create_mote(conn, {"name": "Element", "freedoms": "total"})
     add_rule(conn, species, "Series", "total == first + second")
     element = create_mote(conn, {
         "name": "E", "first": 1, "second": 2,
@@ -286,7 +286,7 @@ def test_an_unannotated_garden_is_untouched(conn, totals):
 
 
 def test_removing_the_units_property_restores_raw_behaviour(conn):
-    species = create_mote(conn, {"name": "Element", "unknowns": "total"})
+    species = create_mote(conn, {"name": "Element", "freedoms": "total"})
     add_rule(conn, species, "Copy", "total == source")
     element = create_mote(conn, {
         "name": "E", "source": 2, "units": {"source": "kohm", "total": "ohm"},
@@ -305,7 +305,7 @@ def test_a_bad_unit_on_a_solved_unknown_is_caught_and_logged(conn):
     """The write-back conversion happens after a run's error handling, so
     an unrecognized unit there has to be caught before solving starts --
     otherwise the failure escapes unlogged."""
-    species = create_mote(conn, {"name": "S", "unknowns": "total"})
+    species = create_mote(conn, {"name": "S", "freedoms": "total"})
     add_rule(conn, species, "Assign", "total == 5")
     element = create_mote(conn, {"name": "E", "units": {"total": "kilohms"}})
     set_species(conn, element, species)
