@@ -201,7 +201,10 @@ class _Parser:
         self.diagnostics: list[Diagnostic] = []
         self._para: list[str] = []
         self._para_line = 0
-        self._items: list[str] | None = None
+        # [line, text] pairs, not bare strings: a bad \val on the
+        # third item should be reported at the third item, not at the
+        # \begin{itemize} the whole list opened on.
+        self._items: list[list] | None = None
         self._equation: list[str] | None = None
         self._open_line = 0
 
@@ -241,9 +244,9 @@ class _Parser:
         if line == "\\end{itemize}":
             self._close_itemize(number)
         elif line.startswith("\\item"):
-            self._items.append(line[len("\\item"):].strip())
+            self._items.append([number, line[len("\\item"):].strip()])
         elif line and self._items:
-            self._items[-1] += " " + line
+            self._items[-1][1] += " " + line
         elif line:
             self.diagnostics.append(Diagnostic(
                 number, "stray_text", "text inside itemize before the first \\item",
@@ -310,7 +313,7 @@ class _Parser:
         if self._items is None:
             return
         line = self._open_line or number
-        items = [self._inline(line, item) for item in self._items]
+        items = [self._inline(at, text) for at, text in self._items]
         if items:
             self.blocks.append(ItemList(items, line))
         self._items = None

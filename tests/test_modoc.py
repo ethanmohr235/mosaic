@@ -278,3 +278,8 @@ def test_import_without_a_target_names_the_new_mote_after_the_file(conn, tmp_pat
 def test_export_refuses_a_mote_that_does_not_exist(conn, tmp_path):
     with pytest.raises(LookupError):
         export_file(conn, "nope", tmp_path / "a.modoc")
+
+
+def test_a_diagnostic_inside_a_list_points_at_its_own_item(conn):
+    document = parse("\\begin{itemize}\n\\item fine\n\\item \\bogus\n\\end{itemize}")
+    assert [d.line for d in document.diagnostics] == [3]

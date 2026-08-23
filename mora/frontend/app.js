@@ -23,6 +23,7 @@ let focusId = null;          // panel target while browsing away from the anchor
 let renderTimer = null;
 let toastTimer = null;
 let picker = null;           // {start, query, rows, index} while the @ picker is open
+let renderSeq = 0;           // guards against two renders landing out of order
 
 const RENDER_DEBOUNCE_MS = 180;
 const MAX_STEP = 60;
@@ -134,12 +135,19 @@ function scheduleRender() {
 
 async function renderNow() {
   if (!noteId) return;
+  // The stepper and the debounce can both fire a render, and a heavier
+  // one (a simulation preview eight steps out) can land after a lighter
+  // one it started before. Only the newest answer is allowed to draw.
+  const seq = ++renderSeq;
+  let answer;
   try {
-    payload = await api.render(noteId, $("editor").value, step);
+    answer = await api.render(noteId, $("editor").value, step);
   } catch (e) {
     toast(String(e), true);
     return;
   }
+  if (seq !== renderSeq) return;
+  payload = answer;
   drawRendered();
   drawStatus();
   if (focusId === null) drawPanel(payload.anchor.id);

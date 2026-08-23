@@ -93,9 +93,9 @@ class _Timeline:
     once per question would be both slow and -- if a rule ever stopped
     being deterministic -- inconsistent between them."""
 
-    def __init__(self, conn: sqlite3.Connection, span: int) -> None:
+    def __init__(self, conn: sqlite3.Connection, motes: list[Mote], span: int) -> None:
         self.relationships: list[Relationship] = list_relationships(conn)
-        baseline = {m.id: dict(m.properties) for m in list_motes(conn)}
+        baseline = {m.id: dict(m.properties) for m in motes}
         self.states: list[dict[str, dict]] = [baseline]
         self.error: str | None = None
         if span > 0:
@@ -146,7 +146,7 @@ def resolve(
     anchor_id, diagnostics = modoc.anchor(conn, note_id)
     motes = list_motes(conn)
     span = max(step, horizon if _needs_timeline(document) else 0)
-    timeline = _Timeline(conn, span)
+    timeline = _Timeline(conn, motes, span)
     if timeline.error is not None:
         diagnostics.append(modoc.Diagnostic(0, "simulation", timeline.error))
 
