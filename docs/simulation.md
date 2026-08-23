@@ -246,9 +246,102 @@ constructed at most once per simulation run (cached across every
 substitution pass and, for a time-based run, every step), not once per
 formula evaluation.
 
+## Units
+
+A numerical property can optionally declare what it measures, through a
+mote's reserved `units` property -- a map from property key to unit
+name:
+
+```
+name:        R1
+resistance:  4.7
+current:     3
+voltage:                  <- the solver writes this
+
+units:  {"resistance": "kohm", "current": "mA", "voltage": "V"}
+```
+
+Units are **opt-in per property**. A key with no entry is simply
+unitless, and a garden that declares none behaves exactly as it did
+before this existed -- no warnings, no conversions, identical numbers.
+They're declared per mote rather than per species, so two instances of
+the same species can legitimately track the same quantity differently
+(one resistor in `ohm`, another in `kohm`). A template's `units` map is
+copied into new instances like any other starting property.
+
+### What you can write
+
+A unit name is either a registered unit or a compound expression over
+them: `m/s`, `kg/m^3`, `J/(kg*K)`, `kg/m³`, `s^-1`. `unit list` shows
+everything registered, grouped by dimension. SI prefixes work on the
+usual units (`kohm`, `mV`, `MPa`, `km`). Common non-SI units are
+included too -- `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `bar`,
+`atm`, `psi` -- along with the affine temperature units `degC` and
+`degF`, which carry an offset and so can only be used on their own,
+never inside a compound.
+
+```
+unit convert --value 36 --from km/hr --to m/s
+```
+
+### Solving
+
+The solver works internally in base (SI) units. A declared value is
+converted on the way in and the answer converted back on the way out, so
+mixed units combine correctly:
+
+```
+4.7 kohm  x  3 mA  ==  14.1 V
+```
+
+Crucially, **solving never changes the unit a property is recorded in**.
+If R1 declares its voltage in `mV`, it gets `14100`; if it declares `V`,
+it gets `14.1`. The same is true of logged changes and of every step of
+a time-based run.
+
+An unrecognized unit name fails the run rather than being ignored --
+treating `kohm` as if it were already ohms would be a silent
+factor-of-1000 error in the answer. A malformed `units` property (not a
+map, or with non-string values) leaves the mote un-annotated instead of
+breaking the run.
+
+### Checking equations
+
+Because units carry dimensions, an equation can be checked for
+consistency before its answer is trusted:
+
+```
+unit check
+```
+
+```
+1 dimensional problem(s):
+  Bad rule on R1: ohm cannot be added to A -- different dimensions
+```
+
+This walks the same expression grammar the solver evaluates, propagating
+dimensions instead of values: `+`/`-` require a match, `*`/`/` add and
+subtract dimensions, `**` scales by its (constant) exponent, and a
+`property()` call takes the unit its provider's capability declares.
+
+A mismatch is reported only when **both** sides are actually declared,
+which is what keeps a partly-annotated garden quiet. A bare number
+adapts to whatever it's compared with (`resistance == 100` is fine), and
+`t` constrains nothing, since a rule may read it as either a step count
+or elapsed time. A *computed* dimensionless value is different: if
+`a / b` cancels to a pure ratio, comparing it to a voltage is a real
+mistake and gets reported.
+
+By default this is advisory -- warnings appear on the run's result
+(`SimulationResult.dimension_warnings`) and the run proceeds. Passing
+`--strict-units` (programmatically, `strict_units=True` on
+`run_simulation`/`run_time_series`) turns a mismatch into a failure
+instead, for a garden whose units are complete enough to enforce.
+
 ## Not built yet
 
 - **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration. A solver backend for this shape (`dx/dt` rather than `F(x) == 0`) could join `linear`/`newton` later without changing how a rule is written.
-- **Units.** Properties are plain numbers. Use naming conventions (`resistance_ohms`) if it helps; nothing enforces or converts.
+- **A unit for a solved property that never declared one.** The system checks and converts *declared* units; it never infers one. Nor is there per-literal unit syntax in an equation (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with.
+- **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
 - **Species inheritance.** Species are flat.

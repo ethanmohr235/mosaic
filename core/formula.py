@@ -11,10 +11,31 @@ import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from core.units import UnitError, to_base
+
 # An unknown the solver may determine: which mote, which property key.
 Unknown = tuple[str, str]
 
 _TOLERANCE = 1e-9
+
+# The callable names a formula may use, grouped by how _call() dispatches
+# them. Hoisted into module constants rather than written inline because
+# this whitelist *is* the security boundary, and core/dimensions.py walks
+# the same grammar to check units -- two copies of the list would let a
+# builtin get added here and silently ignored there. See
+# tests/test_dimensions.py's drift test, which asserts the two agree.
+NAVIGATION_CALLS = frozenset({"targets", "sources"})
+AGGREGATE_CALLS = frozenset({"sum", "count"})
+NUMERIC_CALLS = frozenset({"abs", "min", "max"})
+PREVIOUS_CALL = "prev"
+PROPERTY_CALL = "property"
+ALLOWED_CALLS = (
+    NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | {PREVIOUS_CALL, PROPERTY_CALL}
+)
+
+# The current simulation step's index, exposed to formulas as a reserved
+# bare name rather than a per-mote property.
+TICK_NAME = "t"
 
 
 class FormulaError(ValueError):
@@ -154,7 +175,14 @@ class Context:
     Both default to values that make time-based formulas simply
     unavailable rather than silently wrong, so every non-time-based
     caller (a plain one-shot evaluation, or an existing test) is
-    unaffected."""
+    unaffected.
+
+    `units` gives each mote's declared key -> unit-name map, so a value
+    read out of a mote can be normalized to its dimension's base unit
+    before it enters the linear system. Everything downstream -- the
+    substitution loop, both solver backends -- then works in one
+    consistent set of units without knowing units exist at all. Defaults
+    to declaring nothing, which is exactly today's behavior."""
     mote_id: str
     properties: Callable[[str], dict]
     unknown_keys: Callable[[str], set[str]]
@@ -164,6 +192,7 @@ class Context:
     tick: float = 0.0
     previous: Callable[[str], dict] = lambda mote_id: {}
     evaluate_model: Callable[[str, str, str, list[float]], float] = _model_evaluation_unavailable
+    units: Callable[[str], dict] = lambda mote_id: {}
 
 
 def parse_equation(text: str) -> tuple[ast.AST, ast.AST]:
@@ -271,15 +300,15 @@ def _call(node: ast.Call, ctx: Context):
     if node.keywords:
         raise FormulaError(f"{name}() does not take keyword arguments")
 
-    if name in ("targets", "sources"):
+    if name in NAVIGATION_CALLS:
         return _navigate(name, node, ctx)
-    if name in ("sum", "count"):
+    if name in AGGREGATE_CALLS:
         return _aggregate(name, node, ctx)
-    if name in ("abs", "min", "max"):
+    if name in NUMERIC_CALLS:
         return _numeric(name, node, ctx)
-    if name == "prev":
+    if name == PREVIOUS_CALL:
         return _previous(node, ctx)
-    if name == "property":
+    if name == PROPERTY_CALL:
         return _property(node, ctx)
     raise FormulaError(f"unknown function {name!r} in formula")
 
@@ -299,7 +328,10 @@ def _previous(node: ast.Call, ctx: Context) -> LinearExpr:
     value = properties[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise FormulaError(f"previous value of {key!r} is {value!r}, which is not a number")
-    return LinearExpr.number(value)
+    # The previous step's state is kept in the same representation the
+    # database uses (declared units), so it needs the same normalization
+    # an ordinary property read gets.
+    return LinearExpr.number(_normalize(ctx, ctx.mote_id, key, value))
 
 
 def _property(node: ast.Call, ctx: Context) -> LinearExpr:
@@ -390,6 +422,30 @@ def _numeric(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
     return LinearExpr.number(min(values) if name == "min" else max(values))
 
 
+def _normalize(ctx: Context, mote_id: str, key: str, value: float) -> float:
+    """A stored property value converted into its dimension's base unit.
+
+    This is the single point where declared units enter the solver: past
+    here every number is a plain base-unit float, which is what LinearExpr
+    and both solver backends already assume. A key with no declared unit
+    is returned untouched, so an un-annotated garden takes the same path
+    it always has.
+
+    An unrecognized unit name is fatal rather than ignored: the value was
+    explicitly labelled, and treating `kohm` as if it were already ohms
+    would be a silent factor-of-1000 error in the answer.
+    """
+    unit_name = ctx.units(mote_id).get(key)
+    if not unit_name:
+        return value
+    try:
+        return to_base(value, unit_name)
+    except UnitError as e:
+        raise FormulaError(
+            f"property {key!r} of mote {mote_id[:8]} declares unit {unit_name!r}: {e}"
+        ) from e
+
+
 def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
     # A reserved word in the formula language, not a per-mote property --
     # the current simulation step's index, for time-dependent rules
@@ -397,7 +453,7 @@ def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
     # and the properties lookup, so a mote with a real property literally
     # named `t` has it shadowed inside formulas specifically (still an
     # ordinary, visible property everywhere else in the UI).
-    if key == "t":
+    if key == TICK_NAME:
         return LinearExpr.number(ctx.tick)
     if key in ctx.unknown_keys(mote_id):
         unknown = (mote_id, key)
@@ -418,7 +474,7 @@ def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
         raise FormulaError(
             f"property {key!r} of mote {mote_id[:8]} is {value!r}, which is not a number"
         )
-    return LinearExpr.number(value)
+    return LinearExpr.number(_normalize(ctx, mote_id, key, value))
 
 
 def _as_expr(value) -> LinearExpr:

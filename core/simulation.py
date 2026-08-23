@@ -33,11 +33,20 @@ from core.formula import (
     Unknown,
     evaluate_equation,
 )
+from core.dimensions import DimensionContext, check_equation
 from core.models import Relationship
 from core.motes import list_motes, update_mote
 from core.providers import PropertyProvider
 from core.relationships import list_relationships
 from core.solvers import DeferredEquation, Remainder, SolverError, resolve_solver
+from core.units import (
+    UNITS_KEY,
+    UnitError,
+    dimension_of,
+    from_base,
+    parse_units_property,
+    to_base,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +74,7 @@ class SimulationResult:
     changes: list[Change]
     equation_count: int
     unsolved: list[Unknown] = field(default_factory=list)
+    dimension_warnings: list[str] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -77,6 +87,9 @@ class SimulationResult:
         )
         if self.unsolved:
             text += f" {len(self.unsolved)} declared unknown(s) had no equation."
+        if self.dimension_warnings:
+            count = len(self.dimension_warnings)
+            text += f" {count} dimensional warning{'' if count == 1 else 's'}."
         return text
 
 
@@ -115,6 +128,9 @@ class TimeSeriesResult:
     failed_at: int | None = None   # step index that raised, if the run stopped early
     error: str | None = None
     run_id: str | None = None      # set when commit=True or save=True and at least one step succeeded
+    # Checked once against the starting garden rather than per step: the
+    # rules and declared units are the same every step, only values move.
+    dimension_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -126,12 +142,14 @@ class _GardenView:
     unknowns: dict[str, set[str]]
     out_edges: dict[tuple[str, str], list[str]]
     in_edges: dict[tuple[str, str], list[str]]
+    units: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def run_simulation(
     conn: sqlite3.Connection,
     solver: str = _DEFAULT_SOLVER,
     solver_configuration: dict | None = None,
+    strict_units: bool = False,
 ) -> SimulationResult:
     """Solve the garden and write the results back. Raises SimulationError
     (after logging the failed run) if the rules can't be satisfied.
@@ -140,7 +158,12 @@ def run_simulation(
     loop couldn't resolve on its own -- see core/solvers.py. The default,
     `"linear"`, is today's exact non-iterative behavior and fails on
     genuine nonlinearity; `"newton"` can solve that at the cost of being
-    iterative/approximate."""
+    iterative/approximate.
+
+    `strict_units` promotes a dimensional mismatch from a warning on the
+    result to a SimulationError. Off by default: units are opt-in, so a
+    garden that declares none (or only some) must still run exactly as it
+    always has."""
     run_number = _next_run_number(conn)
     properties = {m.id: m.properties for m in list_motes(conn)}
     relationships = list_relationships(conn)
@@ -150,6 +173,8 @@ def run_simulation(
     try:
         solved: dict[Unknown, float] = {}
         model_cache: dict[str, PropertyProvider] = {}
+        _validate_units(view, pairs)
+        warnings = _dimension_warnings(view, pairs, strict_units, model_cache)
         remainder = _reduce(view, pairs, solved, model_cache=model_cache)
         solved.update(_finish(view, remainder, solved, solver, solver_configuration))
     except SimulationError as e:
@@ -171,6 +196,7 @@ def run_simulation(
         changes=changes,
         equation_count=len(remainder.open_equations) + len(remainder.deferred),
         unsolved=_unsolved(view, solved),
+        dimension_warnings=warnings,
     )
 
 
@@ -181,6 +207,7 @@ def run_time_series(
     save: bool = False,
     solver: str = _DEFAULT_SOLVER,
     solver_configuration: dict | None = None,
+    strict_units: bool = False,
 ) -> TimeSeriesResult:
     """Runs step_count steps entirely in memory, each step's solve
     starting from the *previous* step's solved values rather than
@@ -204,7 +231,12 @@ def run_time_series(
     A step that fails to solve stops the run there but keeps every step
     computed before it (see TimeSeriesResult.failed_at/error), so a
     caller can still commit or save an earlier successful step rather
-    than losing the whole run."""
+    than losing the whole run.
+
+    `strict_units` is the same opt-in run_simulation() takes. It is
+    checked once up front, before any step runs, and raises rather than
+    being captured as a failed step -- nothing about it can change
+    part-way through a run."""
     if commit and save:
         raise ValueError("commit and save are mutually exclusive")
     if step_count < 1:
@@ -225,6 +257,15 @@ def run_time_series(
     failed_at: int | None = None
     error: str | None = None
 
+    # Rules and declared units don't change between steps, so this is
+    # checked once against the starting state rather than N times.
+    starting_view = _build_view(running, relationships)
+    starting_pairs = _rule_instances(rules, starting_view)
+    _validate_units(starting_view, starting_pairs)
+    warnings = _dimension_warnings(
+        starting_view, starting_pairs, strict_units, model_cache
+    )
+
     for step in range(step_count):
         view = _build_view(running, relationships)
         pairs = _rule_instances(rules, view)
@@ -241,9 +282,14 @@ def run_time_series(
 
         changes = _changes_for(view.properties, solved)
         cumulative.update(solved)
+        # The running state deliberately mirrors the database's own
+        # representation -- values in whatever unit each mote declares,
+        # not the solver's base units. Every step re-reads it through the
+        # same normalization an ordinary property read gets, so storing
+        # base-unit values here would convert them a second time.
         next_running = {mid: dict(props) for mid, props in running.items()}
-        for (mote_id, key), value in solved.items():
-            next_running.setdefault(mote_id, {})[key] = value
+        for mote_id, new_properties in _by_mote(view.properties, solved).items():
+            next_running.setdefault(mote_id, {}).update(new_properties)
         running = next_running
         equation_count = len(remainder.open_equations) + len(remainder.deferred)
         steps.append(StepResult(step, solved, changes, equation_count, _unsolved(view, solved)))
@@ -259,7 +305,7 @@ def run_time_series(
             "committed" if commit else "saved", len(steps), len(cumulative),
         )
 
-    return TimeSeriesResult(steps, failed_at, error, run_id)
+    return TimeSeriesResult(steps, failed_at, error, run_id, warnings)
 
 
 def _build_view(
@@ -283,7 +329,49 @@ def _build_view(
         if declared:
             unknowns.setdefault(rel.from_id, set()).update(declared)
 
-    return _GardenView(properties, unknowns, out_edges, in_edges)
+    return _GardenView(properties, unknowns, out_edges, in_edges, _units_for(properties))
+
+
+def _units_for(properties: dict[str, dict]) -> dict[str, dict[str, str]]:
+    """Each mote's declared key -> unit map, read once per view rather
+    than re-parsed on every property lookup. Motes declaring nothing are
+    left out entirely, so an un-annotated garden carries no extra state."""
+    declared = {}
+    for mote_id, props in properties.items():
+        parsed = parse_units_property(props.get(UNITS_KEY))
+        if parsed:
+            declared[mote_id] = parsed
+    return declared
+
+
+def _declared_units(properties: dict[str, dict], mote_id: str) -> dict[str, str]:
+    """One mote's declared units, straight from a properties dict.
+
+    Taken from the properties rather than a _GardenView so the write-back
+    and change-logging paths -- which work against a plain baseline dict,
+    not a view -- can reach the same information without threading an
+    extra argument through."""
+    return parse_units_property(properties.get(mote_id, {}).get(UNITS_KEY))
+
+
+def _in_declared_units(properties: dict[str, dict], mote_id: str, key: str, value: float) -> float:
+    """A solved (base-unit) value expressed back in whatever unit the mote
+    declares for that key.
+
+    Solving a property must never silently change the unit it is recorded
+    in: a resistance the user chose to keep in kohm stays in kohm. With no
+    declared unit the base value is written as-is, which is exactly what
+    happened before units existed.
+    """
+    unit_name = _declared_units(properties, mote_id).get(key)
+    if not unit_name:
+        return value
+    try:
+        return from_base(value, unit_name)
+    except UnitError as e:
+        raise SimulationError(
+            f"mote {mote_id[:8]} declares unit {unit_name!r} for {key!r}: {e}"
+        ) from e
 
 
 def _rule_instances(
@@ -328,6 +416,7 @@ def _context(
         evaluate_model=lambda mid, relationship_type, operation, args: _evaluate_model(
             view, model_cache, mid, relationship_type, operation, args
         ),
+        units=lambda mid: view.units.get(mid, {}),
     )
 
 
@@ -367,6 +456,138 @@ def _evaluate_model(
             f"argument(s), got {len(args)}"
         )
     return provider.evaluate(operation, dict(zip(capability.inputs, args)))
+
+
+def _capability_units(
+    view: _GardenView,
+    cache: dict[str, PropertyProvider],
+    mote_id: str,
+    relationship_type: str,
+    operation: str,
+) -> str | None:
+    """The unit a property model declares for one operation's output, for
+    the dimension checker. Every failure -- no model, no such operation,
+    no declared unit -- is simply "unknown", because a rule shouldn't be
+    unverifiable just because a provider didn't annotate itself."""
+    target_ids = view.out_edges.get((mote_id, relationship_type), [])
+    if len(target_ids) != 1:
+        return None
+    target_id = target_ids[0]
+    try:
+        if target_id not in cache:
+            cache[target_id] = model_resolver.resolve(
+                target_id,
+                lambda mid: view.properties.get(mid, {}),
+                lambda mid, type_: view.out_edges.get((mid, type_), []),
+            )
+        return cache[target_id].capability(operation).units
+    except FormulaError:
+        return None
+
+
+def check_dimensions(
+    view: _GardenView,
+    pairs: list[tuple[rules_repo.Rule, str]],
+    model_cache: dict[str, PropertyProvider] | None = None,
+) -> list[str]:
+    """Every dimensional problem in the rules about to be run, each
+    labelled with the rule and instance it was found on.
+
+    Costs one extra AST walk per (rule, instance) pair -- cheap next to
+    solving, and it runs before any value is written, so a mismatch can
+    be reported against the garden as the user left it.
+    """
+    cache = model_cache if model_cache is not None else {}
+    problems: list[str] = []
+    for rule, mote_id in pairs:
+        ctx = DimensionContext(
+            mote_id=mote_id,
+            units=lambda mid: view.units.get(mid, {}),
+            targets=lambda mid, type_: view.out_edges.get((mid, type_), []),
+            sources=lambda mid, type_: view.in_edges.get((mid, type_), []),
+            capability_units=lambda mid, rel, op: _capability_units(view, cache, mid, rel, op),
+            label=lambda mid: _mote_label(view, mid),
+        )
+        for problem in check_equation(rule.equation, ctx):
+            problems.append(f"{rule.name} on {_mote_label(view, mote_id)}: {problem}")
+    return problems
+
+
+@dataclass(frozen=True)
+class DimensionReport:
+    """The result of checking a garden's units without solving it."""
+    pairs_checked: int
+    problems: list[str]
+
+
+def check_garden(conn: sqlite3.Connection, rule_id: str | None = None) -> DimensionReport:
+    """Check a garden's rules for dimensional consistency, writing
+    nothing and solving nothing.
+
+    The same check a run performs, available on its own so units can be
+    sorted out before any value is touched. `rule_id` narrows it to a
+    single rule mote."""
+    properties = {m.id: m.properties for m in list_motes(conn)}
+    view = _build_view(properties, list_relationships(conn))
+    rules = rules_repo.list_rules(conn)
+    if rule_id is not None:
+        rules = [rule for rule in rules if rule.mote.id == rule_id]
+    pairs = _rule_instances(rules, view)
+    return DimensionReport(len(pairs), check_dimensions(view, pairs))
+
+
+def _mote_label(view: _GardenView, mote_id: str) -> str:
+    """A mote's name if it has one -- a units warning naming 'R1' is worth
+    much more than one naming a UUID prefix."""
+    name = view.properties.get(mote_id, {}).get("name")
+    return str(name) if isinstance(name, str) and name.strip() else mote_id[:8]
+
+
+def _validate_units(
+    view: _GardenView, pairs: list[tuple[rules_repo.Rule, str]]
+) -> None:
+    """Reject unrecognized unit names before solving starts.
+
+    Only the motes this run actually solves are checked. A solved value
+    is converted back into its mote's declared unit on write-back, and
+    that conversion happens after the run's error handling -- so an
+    unrecognized name has to be caught here, while a failure can still be
+    reported and logged like any other. Motes merely *read* by a formula
+    are already covered: core/formula.py raises when it can't normalize
+    one, through the ordinary error path.
+
+    Scoped rather than garden-wide on purpose: units are opt-in, and a
+    typo on some unrelated mote shouldn't fail a simulation that never
+    touches it.
+    """
+    problems = []
+    for mote_id in sorted({mote_id for _, mote_id in pairs}):
+        for key, unit_name in sorted(view.units.get(mote_id, {}).items()):
+            try:
+                dimension_of(unit_name)
+            except UnitError as e:
+                problems.append(f"{_mote_label(view, mote_id)}.{key}: {e}")
+    if problems:
+        raise SimulationError("unrecognized unit(s):\n  " + "\n  ".join(problems))
+
+
+def _dimension_warnings(
+    view: _GardenView,
+    pairs: list[tuple[rules_repo.Rule, str]],
+    strict: bool,
+    model_cache: dict[str, PropertyProvider],
+) -> list[str]:
+    """Shared pre-flight for both run shapes. Warnings are advisory by
+    default -- units are opt-in, and a half-annotated garden must still
+    run -- and only become an error when the caller explicitly asks."""
+    problems = check_dimensions(view, pairs, model_cache)
+    if problems and strict:
+        raise SimulationError(
+            "dimensional check failed:\n  " + "\n  ".join(problems)
+        )
+    for problem in problems:
+        logger.warning("dimension check: %s", problem)
+    return problems
 
 
 def _reduce(
@@ -532,12 +753,25 @@ def _initial_guess(view: _GardenView) -> Callable[[Unknown], float]:
     run_simulation() it's the value freshly read from the garden, and for
     a run_time_series() step it's the state entering that step (view is
     rebuilt from `running` each step) -- so reading it here is a warm
-    start from the previous step for free, with no separate plumbing."""
+    start from the previous step for free, with no separate plumbing.
+
+    The guess is normalized the same way a formula read is: the solver
+    works in base units, so a `resistance` stored as 4.7 kohm has to
+    start from 4700, not 4.7."""
     def guess(unknown: Unknown) -> float:
         mote_id, key = unknown
         value = view.properties.get(mote_id, {}).get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return float(value)
+            unit_name = view.units.get(mote_id, {}).get(key)
+            if not unit_name:
+                return float(value)
+            try:
+                return to_base(float(value), unit_name)
+            except UnitError:
+                # A bad unit name fails the run properly when the formula
+                # layer reads it; a starting guess isn't the place to
+                # raise, so fall back to the unconverted value.
+                return float(value)
         return 1.0
     return guess
 
@@ -545,10 +779,12 @@ def _initial_guess(view: _GardenView) -> Callable[[Unknown], float]:
 def _changes_for(properties: dict[str, dict], values: dict[Unknown, float]) -> list[Change]:
     """Old/new pairs for a set of solved values against a baseline
     properties dict -- pure, no DB write. Shared by every step of a
-    preview (which never writes) and by the final commit (which does)."""
-    by_mote: dict[str, dict[str, float]] = {}
-    for (mote_id, key), value in values.items():
-        by_mote.setdefault(mote_id, {})[key] = value
+    preview (which never writes) and by the final commit (which does).
+
+    Solved values arrive in base units; old values are whatever the mote
+    stores. Both sides are put in the mote's own declared unit so a change
+    reads as a real change rather than a unit conversion."""
+    by_mote = _by_mote(properties, values)
 
     changes = []
     for mote_id, new_properties in sorted(by_mote.items()):
@@ -561,13 +797,25 @@ def _changes_for(properties: dict[str, dict], values: dict[Unknown, float]) -> l
     return changes
 
 
+def _by_mote(
+    properties: dict[str, dict], values: dict[Unknown, float]
+) -> dict[str, dict[str, float]]:
+    """Solved values regrouped per mote and converted out of base units
+    into whatever unit each mote declares -- the one place the solver's
+    internal representation is turned back into the garden's."""
+    grouped: dict[str, dict[str, float]] = {}
+    for (mote_id, key), value in values.items():
+        grouped.setdefault(mote_id, {})[key] = _in_declared_units(
+            properties, mote_id, key, value
+        )
+    return grouped
+
+
 def _write_back(
     conn: sqlite3.Connection, properties: dict[str, dict], values: dict[Unknown, float]
 ) -> list[Change]:
     changes = _changes_for(properties, values)
-    by_mote: dict[str, dict[str, float]] = {}
-    for (mote_id, key), value in values.items():
-        by_mote.setdefault(mote_id, {})[key] = value
+    by_mote = _by_mote(properties, values)
     for mote_id, new_properties in sorted(by_mote.items()):
         update_mote(conn, mote_id, new_properties)
     return changes

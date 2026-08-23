@@ -22,7 +22,15 @@ from core.gardens import (
 )
 from core import model_resolver
 from core.providers import PropertyModelError
-from core.simulation import SimulationError, get_run, list_runs, run_changes, run_simulation
+from core.simulation import (
+    SimulationError,
+    check_garden,
+    get_run,
+    list_runs,
+    run_changes,
+    run_simulation,
+)
+from core.units import UnitError, convert, describe, dimension_of, list_units
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +58,11 @@ HELP_TEXT = """
     model show id=<model_id>                                Show a property model's details
     model capabilities id=<model_id>                       List a property model's capabilities
 
-    simulate                                                Run the garden's simulation rules
+    unit list                                              List registered units, grouped by dimension
+    unit convert value=<n> from=<unit> to=<unit>           Convert a value between units
+    unit check [id=<rule_id>]                              Check rules for dimensional consistency
+
+    simulate [strict_units=true]                            Run the garden's simulation rules
     simulate history [limit=<n>]                            List past simulation runs
     simulate show id=<run_id>                               Show one run's changes
 
@@ -349,6 +361,57 @@ def repl(garden: str | None = None) -> None:
                 else:
                     print(f"Unknown model action: {action}")
 
+            # --------- UNIT COMMANDS ---------
+            elif cmd == "unit":
+                if not args:
+                    print("Specify an action: list, convert, check")
+                    continue
+                action = args[0].lower()
+                action_args = parse_properties(args[1:])
+
+                if action == "list":
+                    by_dimension: dict[str, list[str]] = {}
+                    for unit_name in list_units():
+                        by_dimension.setdefault(
+                            describe(dimension_of(unit_name)), []
+                        ).append(unit_name)
+                    for dimension, names in sorted(by_dimension.items()):
+                        print(f"{dimension}: {', '.join(names)}")
+
+                elif action == "convert":
+                    missing = [k for k in ("value", "from", "to") if k not in action_args]
+                    if missing:
+                        print(f"Error: {', '.join(missing)} required")
+                        continue
+                    try:
+                        result = convert(
+                            float(action_args["value"]), action_args["from"], action_args["to"]
+                        )
+                    except (UnitError, ValueError) as e:
+                        print(f"Error: {e}")
+                        continue
+                    print(
+                        f"{float(action_args['value']):g} {action_args['from']} = "
+                        f"{result:g} {action_args['to']}"
+                    )
+
+                elif action == "check":
+                    report = check_garden(conn, action_args.get("id"))
+                    if report.pairs_checked == 0:
+                        print("No rules to check.")
+                    elif not report.problems:
+                        print(
+                            f"OK -- no dimensional problems in "
+                            f"{report.pairs_checked} rule/instance pair(s)."
+                        )
+                    else:
+                        print(f"{len(report.problems)} dimensional problem(s):")
+                        for problem in report.problems:
+                            print(f"  {problem}")
+
+                else:
+                    print(f"Unknown unit action: {action}")
+
             # --------- SIMULATE COMMANDS ---------
             elif cmd == "simulate":
                 action = args[0].lower() if args else "run"
@@ -357,11 +420,17 @@ def repl(garden: str | None = None) -> None:
                     action_args = parse_properties(args[1:])
                     solver = action_args.get("solver", "linear")
                     try:
-                        result = run_simulation(conn, solver=solver)
+                        result = run_simulation(
+                            conn,
+                            solver=solver,
+                            strict_units=bool(action_args.get("strict_units", False)),
+                        )
                     except SimulationError as e:
                         print(f"Simulation failed: {e}")
                         continue
                     print(result.summary)
+                    for warning in result.dimension_warnings:
+                        print(f"  warning: {warning}")
                     _print_changes(result.changes)
 
                 elif action == "history":

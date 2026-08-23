@@ -32,7 +32,34 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of`, `applies_to` and `uses_model` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider` and `configuration` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to` and `uses_model` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration` and `units` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+
+# Units
+
+A numerical property can optionally declare what it measures, via a
+mote's `units` property -- a map from property key to unit name
+(`{"resistance": "kohm"}`). `core/units.py` holds an explicitly
+registered catalog of units, each carrying an SI dimension vector, a
+scale, and (for `degC`/`degF`) an offset; compound names like `m/s` and
+`J/(kg*K)` are parsed by a small dedicated tokenizer rather than
+evaluated, the same discipline equations follow.
+
+Units are opt-in per property and declared per mote, not per species --
+two instances of one species may legitimately track the same quantity in
+different units. That is what the solver reconciles: a declared value is
+converted to base SI on the way into a formula (`core/formula.py`'s
+`_lookup`) and back to the mote's own declared unit on the way out
+(`core/simulation.py`'s write-back), so mixed units combine correctly
+and solving never silently changes the unit a property is recorded in. A
+garden that declares no units takes exactly the path it always has.
+
+`core/dimensions.py` walks the same expression grammar to check an
+equation's dimensional consistency, reusing `core/formula.py`'s
+call-name whitelist rather than duplicating it -- that whitelist is the
+security boundary, and two copies could drift. Mismatches are advisory
+by default (`SimulationResult.dimension_warnings`); `strict_units=True`
+promotes them to a failure. See `docs/simulation.md` for the reference
+and `docs/units_proposal` for the design.
 
 # Physical property models
 

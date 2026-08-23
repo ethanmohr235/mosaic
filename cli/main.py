@@ -15,7 +15,15 @@ from core.gardens import create_garden, delete_garden, list_gardens, resolve_gar
 from core.db import get_connection, initialize_database
 from core import model_resolver
 from core.providers import PropertyModelError
-from core.simulation import SimulationError, get_run, list_runs, run_changes, run_simulation
+from core.simulation import (
+    SimulationError,
+    check_garden,
+    get_run,
+    list_runs,
+    run_changes,
+    run_simulation,
+)
+from core.units import UnitError, convert, describe, dimension_of, list_units
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +113,19 @@ def build_parser() -> argparse.ArgumentParser:
     model_caps = model_sub.add_parser("capabilities", help="List a property model's capabilities")
     model_caps.add_argument("--id", required=True, help="Property-model mote id")
 
+    # ------------------ UNIT COMMANDS ------------------
+    unit_parser = subparsers.add_parser("unit", help="Inspect and convert units")
+    unit_sub = unit_parser.add_subparsers(dest="action")
+    unit_sub.add_parser("list", help="List registered units, grouped by dimension")
+    unit_convert = unit_sub.add_parser("convert", help="Convert a value between units")
+    unit_convert.add_argument("--value", type=float, required=True, help="Value to convert")
+    unit_convert.add_argument("--from", dest="from_unit", required=True, help="Unit to convert from")
+    unit_convert.add_argument("--to", dest="to_unit", required=True, help="Unit to convert to")
+    unit_check = unit_sub.add_parser(
+        "check", help="Check the garden's rules for dimensional consistency"
+    )
+    unit_check.add_argument("--id", help="Check only this rule mote id")
+
     # ------------------ SIMULATE COMMANDS ------------------
     simulate_parser = subparsers.add_parser(
         "simulate", help="Run the garden's simulation rules, or inspect past runs"
@@ -116,6 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Solver backend for whatever the substitution loop can't resolve alone "
              "(default: linear; also available: newton, for equations genuinely "
              "nonlinear in their unknowns)",
+    )
+    run_parser.add_argument(
+        "--strict-units", action="store_true",
+        help="Fail the run on a dimensional mismatch instead of only warning",
     )
     history_parser = simulate_sub.add_parser("history", help="List past simulation runs")
     history_parser.add_argument("--limit", type=int, help="Show only the N most recent runs")
@@ -262,6 +287,42 @@ def _handle_model(conn, args) -> None:
         print("Specify a model action: list, show, capabilities")
 
 
+def _handle_unit(conn, args) -> None:
+    if args.action == "list":
+        by_dimension: dict[str, list[str]] = {}
+        for name in list_units():
+            by_dimension.setdefault(describe(dimension_of(name)), []).append(name)
+        for dimension, names in sorted(by_dimension.items()):
+            print(f"{dimension}: {', '.join(names)}")
+
+    elif args.action == "convert":
+        try:
+            result = convert(args.value, args.from_unit, args.to_unit)
+        except UnitError as e:
+            print(f"Error: {e}")
+            return
+        print(f"{args.value:g} {args.from_unit} = {result:g} {args.to_unit}")
+
+    elif args.action == "check":
+        _print_dimension_check(conn, getattr(args, "id", None))
+
+    else:
+        print("Specify a unit action: list, convert, check")
+
+
+def _print_dimension_check(conn, rule_id: str | None) -> None:
+    report = check_garden(conn, rule_id)
+    if report.pairs_checked == 0:
+        print("No rules to check.")
+        return
+    if not report.problems:
+        print(f"OK -- no dimensional problems in {report.pairs_checked} rule/instance pair(s).")
+        return
+    print(f"{len(report.problems)} dimensional problem(s):")
+    for problem in report.problems:
+        print(f"  {problem}")
+
+
 def _print_changes(changes) -> None:
     for change in changes:
         old = "None" if change.old_value is None else f"{change.old_value:g}"
@@ -283,11 +344,17 @@ def _handle_simulate(conn, args) -> None:
 
     if action == "run":
         try:
-            result = run_simulation(conn, solver=getattr(args, "solver", "linear"))
+            result = run_simulation(
+                conn,
+                solver=getattr(args, "solver", "linear"),
+                strict_units=getattr(args, "strict_units", False),
+            )
         except SimulationError as e:
             print(f"Simulation failed: {e}")
             return
         print(result.summary)
+        for warning in result.dimension_warnings:
+            print(f"  warning: {warning}")
         _print_changes(result.changes)
 
     elif action == "history":
@@ -328,6 +395,8 @@ def main() -> None:
                 _handle_rel(conn, args)
             elif args.command == "model":
                 _handle_model(conn, args)
+            elif args.command == "unit":
+                _handle_unit(conn, args)
             elif args.command == "simulate":
                 _handle_simulate(conn, args)
         finally:

@@ -1,6 +1,13 @@
 import pytest
 
-from cli.main import _handle_garden, _handle_mote, _handle_model, _handle_simulate, build_parser
+from cli.main import (
+    _handle_garden,
+    _handle_mote,
+    _handle_model,
+    _handle_simulate,
+    _handle_unit,
+    build_parser,
+)
 from core.gardens import garden_exists
 from core.motes import create_mote
 from core.relationships import create_relationship
@@ -208,3 +215,83 @@ def test_garden_delete_missing_raises():
 def test_garden_restore_without_a_prior_delete_raises():
     with pytest.raises(LookupError):
         _handle_garden(parse(["garden", "restore", "never-deleted"]))
+
+
+# ---- unit list/convert/check ----
+
+def _resistor_with_units(conn, equation, units):
+    """A one-instance species carrying declared units, for exercising the
+    dimension check through the CLI."""
+    species = create_mote(conn, {"name": "Resistor", "unknowns": "voltage"})
+    rule = create_mote(conn, {"name": "Rule", "equation": equation})
+    create_relationship(conn, rule, species, APPLIES_TO)
+    instance = create_mote(conn, {
+        "name": "R1", "current": 3, "resistance": 4.7, "units": units,
+    })
+    set_species(conn, instance, species)
+    return instance
+
+
+def test_unit_list_groups_units_by_dimension(conn, capsys):
+    _handle_unit(conn, parse(["unit", "list"]))
+    out = capsys.readouterr().out
+    assert "kohm" in out
+    assert "degC" in out
+
+
+def test_unit_convert_prints_the_converted_value(conn, capsys):
+    _handle_unit(conn, parse(["unit", "convert", "--value", "1", "--from", "kohm", "--to", "ohm"]))
+    assert "1 kohm = 1000 ohm" in capsys.readouterr().out
+
+
+def test_unit_convert_reports_incompatible_dimensions(conn, capsys):
+    _handle_unit(conn, parse(["unit", "convert", "--value", "1", "--from", "ohm", "--to", "s"]))
+    assert "different dimensions" in capsys.readouterr().out
+
+
+def test_unit_convert_reports_an_unknown_unit(conn, capsys):
+    _handle_unit(conn, parse(["unit", "convert", "--value", "1", "--from", "furlong", "--to", "m"]))
+    assert "furlong" in capsys.readouterr().out
+
+
+def test_unit_check_reports_a_consistent_garden(conn, capsys):
+    _resistor_with_units(
+        conn, "voltage == current * resistance",
+        {"current": "mA", "resistance": "kohm", "voltage": "V"},
+    )
+    _handle_unit(conn, parse(["unit", "check"]))
+    assert "OK" in capsys.readouterr().out
+
+
+def test_unit_check_names_the_rule_and_instance_at_fault(conn, capsys):
+    _resistor_with_units(
+        conn, "voltage == current + resistance",
+        {"current": "mA", "resistance": "kohm", "voltage": "V"},
+    )
+    _handle_unit(conn, parse(["unit", "check"]))
+    out = capsys.readouterr().out
+    assert "Rule on R1" in out
+    assert "different dimensions" in out
+
+
+def test_unit_check_with_no_rules_says_so(conn, capsys):
+    _handle_unit(conn, parse(["unit", "check"]))
+    assert "No rules to check." in capsys.readouterr().out
+
+
+def test_simulate_run_prints_dimension_warnings(conn, capsys):
+    _resistor_with_units(
+        conn, "voltage == current + resistance",
+        {"current": "mA", "resistance": "kohm", "voltage": "V"},
+    )
+    _handle_simulate(conn, parse(["simulate", "run"]))
+    assert "warning:" in capsys.readouterr().out
+
+
+def test_simulate_run_with_strict_units_fails(conn, capsys):
+    _resistor_with_units(
+        conn, "voltage == current + resistance",
+        {"current": "mA", "resistance": "kohm", "voltage": "V"},
+    )
+    _handle_simulate(conn, parse(["simulate", "run", "--strict-units"]))
+    assert "Simulation failed" in capsys.readouterr().out
