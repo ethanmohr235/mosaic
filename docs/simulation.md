@@ -338,6 +338,26 @@ By default this is advisory -- warnings appear on the run's result
 `run_simulation`/`run_time_series`) turns a mismatch into a failure
 instead, for a garden whose units are complete enough to enforce.
 
+### Worked example
+
+`scripts/example_radiating_panel.py` builds a garden called
+`radiating-panel-example`:
+
+```
+.venv/bin/python scripts/example_radiating_panel.py
+```
+
+Two radiating panels solving `power == emissivity * stefan_boltzmann *
+area * temperature ** 4` for their surface temperature. The same rule
+demonstrates both halves of this page: it is genuinely nonlinear in its
+unknown, so `linear` refuses it and `newton` solves it; and the two
+panels are the *same* panel under the same load described in different
+units -- watts, square metres and kelvin for one, kilowatts, square
+centimetres and degrees Celsius for the other -- so they must, and do,
+come out at the same temperature, each written back in its own declared
+unit. The script closes by showing what the dimension checker says about
+a rule that doesn't add up.
+
 ## Not built yet
 
 - **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration. A solver backend for this shape (`dx/dt` rather than `F(x) == 0`) could join `linear`/`newton` later without changing how a rule is written.
