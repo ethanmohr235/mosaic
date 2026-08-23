@@ -165,6 +165,37 @@ def resolve(
     return Resolution(anchor_id, step, links, values, graphs, diagnostics)
 
 
+def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Diagnostic]:
+    """Everything wrong with a note, in one list: what wouldn't parse and
+    what wouldn't resolve.
+
+    Here rather than in each surface because it is one question with one
+    answer. It was briefly the CLI's own -- assembled inside `modoc
+    check` -- and Mora promptly reported a note with a dangling
+    `\\mote{...}` in it as having no problems at all, which is exactly
+    the drift core/roles.py exists to prevent for a different question.
+    Line numbers come off the nodes, not off the resolution, so a
+    reference that fails twice is reported at both places it failed."""
+    found = list(document.diagnostics) + list(resolution.diagnostics)
+    for node in modoc.links(document):
+        target = resolution.links.get(node.ref)
+        if target is not None and target.error:
+            found.append(modoc.Diagnostic(
+                node.line, "unresolved_link", f"\\mote{{{node.ref}}}: {target.error}"
+            ))
+    for node in modoc.values(document):
+        result = resolution.values.get(modoc.value_key(node))
+        if result is not None and result.error:
+            found.append(modoc.Diagnostic(
+                node.line, "unresolved_value", f"\\val{{{node.expression}}}: {result.error}"
+            ))
+    for node in modoc.graphs(document):
+        series = resolution.graphs.get(modoc.graph_key(node))
+        if series is not None and series.error:
+            found.append(modoc.Diagnostic(node.line, "unresolved_graph", f"\\graph: {series.error}"))
+    return sorted(found, key=lambda d: d.line)
+
+
 def _needs_timeline(document: modoc.Document) -> bool:
     return any(
         g.spec is not None and g.spec.kind == modoc.OVER_T for g in modoc.graphs(document)

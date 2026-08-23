@@ -22,9 +22,11 @@ from core.modoc import (
     Text,
     Value,
     anchor,
+    export_file,
     graph_key,
     graphs,
     has_modoc,
+    import_file,
     links,
     math_spans,
     parse,
@@ -192,6 +194,10 @@ def test_word_count_counts_a_link_by_what_it_shows():
     assert word_count(parse("\\mote{abc} and \\mote{abc}{Rina Kovac}")) == 4
 
 
+def test_word_count_ignores_punctuation_stranded_by_a_macro():
+    assert word_count(parse("See \\mote{abc} . ; ,")) == 2
+
+
 # ---- math ----
 
 @pytest.mark.parametrize("source,expected", [
@@ -249,3 +255,26 @@ def test_several_abouts_fall_back_to_the_note_and_say_so(conn):
     anchored, diagnostics = anchor(conn, note)
     assert anchored == note
     assert [d.kind for d in diagnostics] == ["ambiguous_anchor"]
+
+
+def test_export_and_import_round_trip_the_source_exactly(conn, tmp_path):
+    source = "% a note\n\\section{A}\n\nDue \\val{due}.\n"
+    mote_id = create_mote(conn, {"name": "A"})
+    write_source(conn, mote_id, source)
+
+    path = export_file(conn, mote_id, tmp_path / "a.modoc")
+    assert path.read_text() == source
+    assert read_source(conn, import_file(conn, path)) == source
+
+
+def test_import_without_a_target_names_the_new_mote_after_the_file(conn, tmp_path):
+    path = tmp_path / "field-spec.modoc"
+    path.write_text("\\section{Spec}")
+    from core.motes import get_mote as fetch
+
+    assert fetch(conn, import_file(conn, path)).properties["name"] == "field-spec"
+
+
+def test_export_refuses_a_mote_that_does_not_exist(conn, tmp_path):
+    with pytest.raises(LookupError):
+        export_file(conn, "nope", tmp_path / "a.modoc")

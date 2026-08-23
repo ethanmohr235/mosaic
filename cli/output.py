@@ -18,6 +18,7 @@ from collections.abc import Iterable
 
 from core import model_resolver
 from core import modoc
+from core import modoc_bind
 from core.entities import Mote
 from core.motes import get_mote, get_motes  # noqa: F401  (get_mote: print_model_detail)
 from core.providers import PropertyModelError, PropertyProvider
@@ -142,26 +143,15 @@ def print_modoc(document: "modoc.Document", resolution) -> None:
 
 
 def print_diagnostics(document: "modoc.Document", resolution) -> int:
-    """Everything wrong with a note, parse-time and resolve-time
-    together, and how many there were. A note is a document, not a
-    program: nothing here stops it rendering."""
-    problems = list(document.diagnostics) + list(resolution.diagnostics)
-    problems += [
-        modoc.Diagnostic(0, "unresolved_link", f"\\mote{{{ref}}}: {target.error}")
-        for ref, target in resolution.links.items() if target.error
-    ]
-    problems += [
-        modoc.Diagnostic(0, "unresolved_value", f"\\val: {result.error}")
-        for result in resolution.values.values() if result.error
-    ]
-    problems += [
-        modoc.Diagnostic(0, "unresolved_graph", f"\\graph: {series.error}")
-        for series in resolution.graphs.values() if series.error
-    ]
-    for problem in sorted(problems, key=lambda d: d.line):
+    """Everything wrong with a note, and how many there were. What counts
+    as a problem is core/modoc_bind.py::problems() -- one answer, so
+    `modoc check` and Mora's problems panel can never disagree about
+    whether a note is clean."""
+    found = modoc_bind.problems(document, resolution)
+    for problem in found:
         where = f"line {problem.line}" if problem.line else "note"
         print(f"{where}: {problem.kind}: {problem.message}")
-    return len(problems)
+    return len(found)
 
 
 def _print_block(block, resolution) -> None:

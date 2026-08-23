@@ -307,3 +307,62 @@ One check samples the canvas pixels directly. That is not paranoia: the
 graph's render loop was once entirely dead while every other check passed,
 because hit-testing works off node coordinates rather than what was drawn —
 clicking, dragging and connecting all succeeded against a blank canvas.
+
+---
+
+# Mora -- the note editor
+
+A second window, over the same gardens: `./run_mora.py`, or
+`.venv/bin/python run_mora.py`. Same stack as the main app -- pywebview
+over a local HTML/CSS/JS frontend, no browser tab, no build step -- but a
+separate process holding its own garden connection, so it opens and
+closes independently of the graph window.
+
+```
+./run_mora.py                       # the default garden
+./run_mora.py --garden reactor      # a specific garden
+./run_mora.py --note <mote id>      # straight to one mote's note
+```
+
+With neither flag it opens the first mote in the garden that already
+carries a note, and otherwise the most recent mote -- as an empty page to
+start writing on, not an error. `docs/modoc.md` is the language; this is
+the window.
+
+| Pane | |
+|---|---|
+| Source | a textarea over a syntax-highlight layer. `@` opens a mote picker that inserts `\mote{<id>}{<name>}` |
+| Rendered | the note with every macro resolved. Clicking a `\mote` link moves the data panel to it |
+| Data | the anchor mote's properties and relationships, everything linked from the text with reference counts, and any Problems |
+
+`Source` / `Split` / `Read` choose which panes are shown; `Data` toggles
+the right one.
+
+| Control | Action |
+|---|---|
+| Ctrl/Cmd+S, or **Save** | Write the source back to the mote's `modoc` property -- and nothing else |
+| `t+N` stepper | Resolve the whole note against a simulation preview N steps out. The label flips **Real** to **Projected**; nothing is written |
+| **Apply t+N…** | Commit that projection to the graph. Asks first, and is disabled at t+0 |
+| Esc | Close the note menu or the `@` picker |
+
+Save and Apply are two buttons on purpose: saving a note must never be a
+way to write simulation results.
+
+### Smoke test
+
+`scripts/mora_smoke_test.py` is Mora's equivalent of the UI smoke test
+above, and exists for the same reason -- the half of the app pytest
+cannot reach. It drives a real window against a seeded throwaway garden
+and checks that the note renders, that `\val` and `\mote` resolve (and
+visibly fail when they can't), that both `\graph` forms draw, that a link
+moves the data panel and back returns, that the stepper projects without
+writing, that Save writes only the note, and that no uncaught JS errors
+were logged.
+
+```
+.venv/bin/python scripts/mora_smoke_test.py
+```
+
+Prints PASS/FAIL per check and exits non-zero if anything failed. Never
+touches real data: `GARDENS_DIR` and the webview storage dir are both a
+fresh temp directory.

@@ -7,7 +7,7 @@ values a step produces, and that a preview never writes.
 import pytest
 
 from core import modoc
-from core.modoc_bind import DEFAULT_HORIZON, format_value, resolve
+from core.modoc_bind import DEFAULT_HORIZON, format_value, problems, resolve
 from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
 
@@ -194,3 +194,23 @@ def test_an_unreadable_graph_spec_resolves_to_an_error_not_a_crash(conn, garden)
 def test_a_repeated_macro_is_resolved_once(conn, garden):
     resolution = resolved(conn, garden, "\\val{due} and again \\val{due}")
     assert len(resolution.values) == 1
+
+
+# ---- problems ----
+
+def test_problems_gathers_parse_and_resolution_failures_together(conn, garden):
+    document = modoc.parse("\\bogus\n\n\\mote{Nowhere} \\val{nonesuch}\n\n\\graph{nonsense}")
+    found = problems(document, resolve(conn, garden, document))
+    assert [d.kind for d in found] == [
+        "unknown_command", "unresolved_link", "unresolved_value", "bad_graph", "unresolved_graph",
+    ]
+
+
+def test_problems_is_empty_for_a_note_that_fully_resolves(conn, garden):
+    document = modoc.parse("Due \\val{due} for \\mote{Atlas}.")
+    assert problems(document, resolve(conn, garden, document)) == []
+
+
+def test_a_reference_that_fails_twice_is_reported_at_both_lines(conn, garden):
+    document = modoc.parse("\\mote{Nowhere}\n\n\\mote{Nowhere}")
+    assert [d.line for d in problems(document, resolve(conn, garden, document))] == [1, 3]

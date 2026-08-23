@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mora</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div id="brand">
+    <svg width="22" height="22" viewBox="0 0 128 128" aria-hidden="true">
+      <rect width="128" height="128" rx="28" fill="var(--panel)"></rect>
+      <circle cx="64" cy="64" r="34" fill="none" stroke="var(--fg)" stroke-width="5" opacity="0.55"></circle>
+      <ellipse cx="64" cy="64" rx="34" ry="13" fill="none" stroke="var(--fg)" stroke-width="5"
+               opacity="0.55" transform="rotate(-28 64 64)"></ellipse>
+      <circle cx="64" cy="64" r="10" fill="var(--accent)"></circle>
+      <circle cx="94" cy="49" r="6" fill="var(--accent)"></circle>
+    </svg>
+    <div id="brand-text">
+      <span id="brand-name">Mora</span>
+      <span id="brand-sub">MonOSS</span>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="topbar-menu">
+    <button id="note-btn" class="topbar-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+      <span id="note-crumb">notes /</span>
+      <span id="note-title">…</span>
+      <span class="caret">⌄</span>
+    </button>
+    <div id="note-menu" class="menu hidden" role="menu"></div>
+  </div>
+
+  <span id="dirty" class="pill">synced</span>
+
+  <div class="spacer"></div>
+
+  <div id="modes" class="segmented">
+    <button type="button" data-mode="source">Source</button>
+    <button type="button" data-mode="split" class="on">Split</button>
+    <button type="button" data-mode="preview">Read</button>
+  </div>
+
+  <button id="data-toggle" class="on" type="button">Data</button>
+  <button id="save" class="primary" type="button">Save</button>
+</header>
+
+<main id="panes">
+  <section id="source-pane">
+    <div class="pane-head">
+      <span class="pane-label">Source</span>
+      <span id="line-count" class="pane-note">0 lines</span>
+    </div>
+    <div id="editor-wrap">
+      <pre id="highlight" aria-hidden="true"></pre>
+      <textarea id="editor" spellcheck="false" placeholder="\section{…}"></textarea>
+      <div id="picker" class="hidden" role="listbox"></div>
+    </div>
+  </section>
+
+  <section id="preview-pane">
+    <div class="pane-head">
+      <span class="pane-label">Rendered</span>
+      <span id="binding-count" class="pane-note">0 live bindings</span>
+    </div>
+    <div id="rendered-scroll"><article id="rendered"></article></div>
+  </section>
+
+  <aside id="data-pane">
+    <div id="panel-head">
+      <button id="panel-back" class="link-button hidden" type="button">← back to note mote</button>
+      <div id="panel-kind"><span id="panel-dot"></span><span id="panel-kind-text">Mote</span></div>
+      <div id="panel-name">…</div>
+      <div id="panel-id"></div>
+    </div>
+    <div id="panel-scroll">
+      <section class="panel-section">
+        <h2>Properties</h2>
+        <div id="panel-props"></div>
+      </section>
+      <section class="panel-section">
+        <h2>Relationships</h2>
+        <div id="panel-rels"></div>
+      </section>
+      <section class="panel-section">
+        <h2>Linked in text</h2>
+        <div id="panel-linked"></div>
+      </section>
+      <section class="panel-section hidden" id="panel-problems-section">
+        <h2>Problems</h2>
+        <div id="panel-problems"></div>
+      </section>
+    </div>
+  </aside>
+</main>
+
+<footer id="statusbar">
+  <span id="stat-words">0 words</span>
+  <span class="dot">·</span>
+  <span id="stat-links">0 mote links</span>
+  <span class="dot">·</span>
+  <span id="stat-values">0 values</span>
+  <span class="dot">·</span>
+  <button id="problems-btn" class="link-button" type="button">0 problems</button>
+  <div class="spacer"></div>
+  <span id="tick-label">real</span>
+  <div id="stepper">
+    <button id="tick-down" type="button">−</button>
+    <span id="tick-value">t+0</span>
+    <button id="tick-up" type="button">+</button>
+  </div>
+  <button id="apply" type="button" disabled>Apply t+0…</button>
+</footer>
+
+<div id="toast" class="hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -34,9 +34,9 @@ Folders have no effect on simulation or storage beyond the relationship itself: 
 
 # Roles
 
-Species, template, folder, property model, rule and portal are all the same idea: an ordinary mote that plays a **role** because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
+Species, template, folder, property model, rule, portal and note are all the same idea: an ordinary mote that plays a **role** because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
 
-`core/roles.py` is where it is answered, once. It is an index, not an implementation: each role's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()` -- and the `ROLES` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for roles, and `docs/style.md` rules out the global mutable state a `register_role()` would need.
+`core/roles.py` is where it is answered, once. It is an index, not an implementation: each role's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()`, `has_modoc()` -- and the `ROLES` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for roles, and `docs/style.md` rules out the global mutable state a `register_role()` would need.
 
 | role | recognized by |
 | --- | --- |
@@ -46,10 +46,11 @@ Species, template, folder, property model, rule and portal are all the same idea
 | property model | target of `uses_model` |
 | rule | source of `applies_to` **and** carries an `equation` |
 | portal | carries `portal_garden` + `portal_mote` |
+| note | carries `modoc` |
 
 Two forms, one answer: `roles_in(motes, relationships)` for a caller holding an already-fetched subgraph (each role's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Roles are not exclusive -- a species can also be a folder, and a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
 
-`ui/api.py::focus()` and `library_snapshot()` return this as one `roles` map (mote id -> role names; motes with no role are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six roles hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a role is now a change to the table, not to a payload.
+`ui/api.py::focus()` and `library_snapshot()` return this as one `roles` map (mote id -> role names; motes with no role are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six roles hardcoded into the payload's shape -- the frontend had no way to hear about the other five, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a role is now a change to the table, not to a payload.
 
 Adapters must not answer "is this a species" for themselves. That is how a subtlety ends up true in one surface and false in another.
 
@@ -59,7 +60,7 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model` and `in_folder` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden` and `portal_mote` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `in_folder` and `about` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden`, `portal_mote` and `modoc` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 # Physical property models
 
@@ -143,8 +144,8 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `ui/` and `mcp_server/` are three
-adapters over it, and each one's job is a different question, so none of
+`core/` is the whole system. `cli/`, `ui/`, `mora/` and `mcp_server/`
+are four adapters over it, and each one's job is a different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
 folders and the library existed only in the app, property models only in
@@ -161,6 +162,10 @@ The charter:
 * **UI** -- everything interactive. Anything a person would reach for
   while looking at a graph, including the things only a live window can
   do: opening links, exporting to Calendar, approving a simulation.
+* **Mora** -- the same charter as the UI, for one thing: writing and
+  reading .modoc notes (see Notes below). A second window rather than a
+  fourth kind of adapter -- it is the UI's charter applied to a surface
+  a graph canvas has no room for.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -270,3 +275,63 @@ grouping alongside free-text search.
 
 This first pass covers `core/` and the UI (`ui/api.py`,
 `ui/frontend/`) only; CLI and MCP exposure are deferred to a follow-up.
+
+# Notes
+
+`modoc` (`core/modoc.py`) holds a **.modoc note**: prose written *about*
+the graph, in a small LaTeX subset whose three MonOSS macros --
+`\mote{...}`, `\val{...}`, `\graph{...}` -- resolve against the garden
+every time the note is read. A due date or a task count in a note is a
+lookup, not a copy, so a note cannot go stale the way a typed-in number
+does. See `docs/modoc.md` for the language.
+
+Storage is one reserved property on an ordinary mote, and that is the
+whole design. A note is not a new object type; a mote carrying one plays
+the `note` role (Roles above) exactly as a mote carrying an `equation`
+plays `rule`. The consequence worth stating is what nobody had to build:
+notes are inside `mote_history`, garden export/import, the UI's undo, and
+MCP's `update_mote` already, because they are properties. `.modoc` files
+exist only for import and export, and a file is exactly the property's
+string -- no header naming the garden it came from, which was the first
+design and would have cost the round trip its byte-for-byte identity for
+a line meaningful to one program.
+
+A note reads from its own mote by default. `about` (a reserved
+relationship type, `note --about--> subject`) moves that anchor, so a
+note can live on its own mote while speaking about another. Exactly one
+`about` moves it; several is ambiguous and falls back to the note itself
+with a diagnostic, rather than picking one.
+
+`\val` is deliberately not a second expression language. It hands its
+argument to `core/formula.py` -- the one rules use -- so `targets()`,
+`sum()`, `prev()` and `t` are all available in a note without being
+implemented twice. The one thing in front of it is a plain-property fast
+path: `core/formula.py` is numeric by construction, so `\val{due}` has to
+be read as a property before an evaluator that can only return numbers
+sees it. `core/simulation.py::expression_context()` builds the context,
+clearing the view's declared unknowns first -- a note *reads state*, and
+a free variable with no solver behind it is useless rather than correct.
+
+Stepping a note forward in time is `run_time_series(commit=False)`, the
+preview that already existed: `t+0` is the garden as stored, `t+N`
+resolves every macro against a projection N steps out, and nothing is
+written or logged either way. Turning a projection into fact stays a
+separate, explicit act (Mora's `Apply t+N…`, which asks first). Saving a
+note and applying a run are two buttons on purpose: a save must never be
+a way to write simulation results.
+
+Nothing in the note path raises. A note with a typo still renders with
+the broken part visibly broken, and every failure -- unknown command,
+unresolved reference, unevaluable expression -- becomes a `Diagnostic`.
+What counts as a problem is answered once, in
+`core/modoc_bind.py::problems()`, for the same reason `core/roles.py`
+exists: it was briefly the CLI's own, and Mora promptly reported a note
+with a dangling `\mote{...}` in it as having no problems at all.
+
+`mora/` is the editor (`run_mora.py`) -- a second pywebview window with
+its own garden connection, source/rendered/data panes, and the `t+N`
+stepper. It parses nothing itself: the rendered pane is built from the
+tree `core/` produced and `mora/payload.py` shaped, which is why the
+window and `monoss modoc render` cannot come to disagree about what a
+note means. Only the source pane's syntax highlighting runs in
+JavaScript, colour being presentation rather than meaning.

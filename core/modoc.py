@@ -433,12 +433,19 @@ def word_count(document: Document) -> int:
     total = 0
     for node in _inlines(document):
         if isinstance(node, (Text, Styled)):
-            total += len(node.text.split())
+            total += _words(node.text)
         elif isinstance(node, Link):
-            total += len((node.label or "").split()) or 1
+            total += _words(node.label or "") or 1
         elif isinstance(node, Value):
             total += 1
     return total
+
+
+def _words(text: str) -> int:
+    """Whitespace-separated runs holding at least one letter or digit --
+    so stranded punctuation left behind by a macro ("." after
+    `\\mote{...}`) isn't counted as a word of prose."""
+    return len([w for w in text.split() if any(c.isalnum() for c in w)])
 
 
 # --- math ------------------------------------------------------------
@@ -520,7 +527,15 @@ def export_file(conn: sqlite3.Connection, note_id: str, path: Path) -> Path:
     and the wrong one: it would have made export/import stop round-
     tripping, and given the format a line that means something to exactly
     one program. A `.modoc` file is a note's source. Where a note belongs
-    is a fact about the graph, and the graph is where it stays."""
+    is a fact about the graph, and the graph is where it stays.
+
+    Unlike read_source(), this refuses a mote that does not exist. An
+    empty page is the right answer to "open this note"; an empty file is
+    not the right answer to "export it"."""
+    from core.motes import get_mote
+
+    if get_mote(conn, note_id) is None:
+        raise LookupError(f"No such mote: {note_id!r}")
     path.write_text(read_source(conn, note_id), encoding="utf-8")
     return path
 

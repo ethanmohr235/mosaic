@@ -513,7 +513,7 @@ def resolve_modoc(
             ],
             "diagnostics": [
                 dataclasses.asdict(d)
-                for d in list(document.diagnostics) + list(resolution.diagnostics)
+                for d in modoc_bind_repo.problems(document, resolution)
             ],
         }
 

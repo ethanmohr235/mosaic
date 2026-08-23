@@ -341,7 +341,9 @@ def test_resolve_modoc_reports_what_did_not_resolve():
     note = create_mote({"name": "N", "modoc": "\\mote{Nowhere} \\bogus"}, GARDEN)
     result = resolve_modoc(note["id"], garden=GARDEN)
     assert result["links"]["Nowhere"]["mote_id"] is None
-    assert [d["kind"] for d in result["diagnostics"]] == ["unknown_command"]
+    assert sorted(d["kind"] for d in result["diagnostics"]) == [
+        "unknown_command", "unresolved_link",
+    ]
 
 
 def test_resolve_modoc_at_a_step_projects_without_writing(box):
