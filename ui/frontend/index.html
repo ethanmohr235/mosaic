@@ -69,9 +69,14 @@
           <span>Solver</span>
           <select id="sim-solver-select" title="Solver backend for equations the substitution loop can't resolve alone"></select>
         </div>
+        <div class="menu-row">
+          <span>Scenario</span>
+          <select id="sim-scenario-select" title="Solve as a scenario would have the garden. A scenario run is never written to the graph"></select>
+        </div>
         <button id="run-sim-btn" class="menu-item accent" type="button">Simulate…</button>
         <button id="exit-sim-btn" class="menu-item hidden" type="button">Exit simulation</button>
         <button id="toggle-runs-panel-btn" class="menu-item" type="button">Run history…</button>
+        <button id="check-roles-btn" class="menu-item" type="button">Check roles…</button>
         <div class="menu-sep"></div>
         <button class="menu-item soon" type="button" data-soon="Automations">Automations<span class="menu-badge">soon</span></button>
         <button class="menu-item soon" type="button" data-soon="Webhooks">Webhooks<span class="menu-badge">soon</span></button>
@@ -193,6 +198,7 @@
         <div id="sim-caption"></div>
       </div>
       <div id="sim-bar-error" class="hidden"></div>
+      <div id="sim-bar-advisory" class="hidden"></div>
       <div id="sim-bar-controls">
         <button id="sim-prev-btn" type="button">‹ prev</button>
         <button id="sim-play-btn" type="button">Play</button>

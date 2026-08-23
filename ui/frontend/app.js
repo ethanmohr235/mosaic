@@ -1261,6 +1261,18 @@ function renderProperties(mote, history, baseMote) {
       const color = simPreview && simPreview.mode === "history" ? "oklch(0.62 0.19 300)" : undefined;
       trailing.push(renderSparkline(values, simPreview ? "ticks" : "runs", color));
     }
+    // Any numeric property may be something the solver determined, or
+    // something other values depend on. Which of the two it is is
+    // exactly what the panel answers, so the button is offered for both
+    // rather than guessing from whether a value looks solved.
+    if (typeof value === "number") {
+      const explain = document.createElement("button");
+      explain.className = "explain";
+      explain.textContent = "?";
+      explain.title = `Why ${key}, and what depends on it`;
+      explain.addEventListener("click", () => toggleExplain(row, explain, mote.id, key));
+      trailing.push(explain);
+    }
     if (key === "url" && typeof value === "string" && value.trim()) {
       const open = document.createElement("button");
       open.className = "open-link";
@@ -1272,6 +1284,192 @@ function renderProperties(mote, history, baseMote) {
     row.append(keyEl, field, ...trailing, del);
     container.appendChild(row);
   }
+}
+
+/* The scenario picker lists every mote that varies something, plus the
+ * garden itself. Refreshed whenever the graph changes rather than only
+ * at startup, because a scenario is built out of ordinary motes and
+ * relationships -- the user can create one without leaving the app. */
+async function refreshScenarioPicker() {
+  const select = $("sim-scenario-select");
+  if (!select) return;
+  const previous = select.value;
+  // Nothing awaits this -- it is fired from the menu-open handler -- so a
+  // failure has to end here rather than surface as an unhandled rejection.
+  let scenarios;
+  try {
+    scenarios = await api.list_scenarios();
+  } catch {
+    return;
+  }
+
+  // Built as DOM rather than interpolated into innerHTML: a scenario's
+  // name is an ordinary mote property, so it is user data, and
+  // textContent cannot be made to mean markup.
+  select.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Garden as it stands";
+  select.appendChild(none);
+  for (const scenario of scenarios) {
+    const option = document.createElement("option");
+    option.value = scenario.id;
+    const motes = `${scenario.target_count} mote${scenario.target_count === 1 ? "" : "s"}`;
+    option.textContent = `${scenario.name} (${motes})`;
+    select.appendChild(option);
+  }
+  if (scenarios.some((s) => s.id === previous)) select.value = previous;
+}
+
+/* Explanation and dependencies for one property, opened inline under its
+ * row. Two questions with two different sources: `why` reads the run log
+ * (so it needs a run to have happened), while `dependencies` reads the
+ * rules themselves and answers before anything is solved. Showing them
+ * together is the point -- "this is how it was found" next to "this is
+ * what it rests on and what rests on it". */
+async function toggleExplain(row, button, moteId, key) {
+  const existing = row.nextElementSibling;
+  if (existing && existing.classList.contains("explain-block")) {
+    existing.remove();
+    button.classList.remove("open");
+    return;
+  }
+  button.classList.add("open");
+
+  const block = document.createElement("div");
+  block.className = "explain-block";
+  block.textContent = "Loading…";
+  row.after(block);
+
+  try {
+    const [explanation, deps] = await Promise.all([
+      call(api.why(moteId, key)),
+      call(api.dependencies(moteId, key)),
+    ]);
+    block.replaceChildren(...explanationNodes(explanation), ...dependencyNodes(deps));
+  } catch {
+    // call() has already toasted the reason; leaving "Loading…" sitting
+    // there forever would be the only thing worse than saying so.
+    block.replaceChildren(explainLine("Could not load.", "explain-note"));
+  }
+}
+
+function explainHeading(text) {
+  const el = document.createElement("div");
+  el.className = "explain-heading";
+  el.textContent = text;
+  return el;
+}
+
+function explainLine(text, className) {
+  const el = document.createElement("div");
+  if (className) el.className = className;
+  el.textContent = text;
+  return el;
+}
+
+function moteLabel(moteId) {
+  const mote = moteById(moteId);
+  return mote ? nodeLabel(mote) : moteId.slice(0, 8);
+}
+
+function variableLabel(moteId, key) {
+  return `${moteLabel(moteId)}.${key}`;
+}
+
+/* One derivation and, recursively, the derived values it read. Stops
+ * wherever the run didn't determine something -- a stored property, a
+ * property-model call -- which is exactly the set of things needing no
+ * explanation. */
+function explanationNodes(explanation, depth = 0) {
+  const nodes = [];
+  if (depth === 0) nodes.push(explainHeading("How it was found"));
+
+  if (!explanation || !explanation.method) {
+    nodes.push(explainLine(
+      (explanation && explanation.note) || "Not determined by any run.", "explain-note"
+    ));
+    return nodes;
+  }
+
+  for (const equation of explanation.equations) {
+    nodes.push(explainLine(`${equation.rule_name} on ${moteLabel(equation.anchor_mote_id)}`));
+    nodes.push(explainLine(equation.equation, "explain-equation"));
+  }
+  if (explanation.also_determined.length > 0) {
+    nodes.push(explainLine(
+      "Found together with " +
+      explanation.also_determined.map((v) => variableLabel(v.mote_id, v.key)).join(", "),
+      "explain-note"
+    ));
+  }
+  for (const input of explanation.inputs) {
+    const line = explainLine(
+      `${input.kind} · ${variableLabel(input.mote_id, input.key)} = ${formatNumber(input.value)}`
+    );
+    nodes.push(line);
+    if (input.derivation) {
+      const nested = document.createElement("div");
+      nested.className = "explain-nested";
+      nested.append(...explanationNodes(input.derivation, depth + 1));
+      nodes.push(nested);
+    }
+  }
+  if (depth === 0) {
+    nodes.push(explainLine("Values in base SI units — what the solver worked in.", "explain-note"));
+  }
+  return nodes;
+}
+
+function dependencyNodes(deps) {
+  const nodes = [];
+
+  nodes.push(explainHeading("What it needs"));
+  if (!deps.free) {
+    nodes.push(explainLine(
+      "Not among this mote's freedoms, so nothing can determine it.", "explain-note"
+    ));
+  } else if (!deps.determinable) {
+    nodes.push(explainLine("Free, but no equation constrains it.", "explain-note"));
+  } else {
+    nodes.push(explainLine(`Determined by ${deps.producers.join(", ")}`));
+    const chips = document.createElement("div");
+    for (const need of deps.needs) {
+      const chip = document.createElement("span");
+      chip.className = `explain-chip${need.status === "missing" ? " missing" : ""}`;
+      chip.textContent = `${need.status} ${variableLabel(need.mote_id, need.key)}`;
+      chips.appendChild(chip);
+    }
+    if (deps.needs.length === 0) chips.appendChild(explainLine("Nothing.", "explain-note"));
+    nodes.push(chips);
+  }
+
+  nodes.push(explainHeading("What it could move"));
+  if (deps.impact.length === 0) {
+    nodes.push(explainLine("Nothing depends on it.", "explain-note"));
+  } else {
+    const chips = document.createElement("div");
+    for (const effect of deps.impact) {
+      const chip = document.createElement("span");
+      chip.className = "explain-chip explain-link";
+      chip.textContent = variableLabel(effect.mote_id, effect.key);
+      chip.title = `${effect.distance} step(s) away, via ${effect.through.join(", ")}`;
+      chip.addEventListener("click", () => selectMote(effect.mote_id));
+      chips.appendChild(chip);
+    }
+    nodes.push(chips);
+  }
+  return nodes;
+}
+
+/* Six significant figures, with the padding zeros toPrecision leaves
+ * behind trimmed off -- and the bare decimal point that trimming can
+ * expose (2.0000001 -> "2.00000" -> "2.") trimmed with them. */
+function formatNumber(value) {
+  if (typeof value !== "number") return String(value);
+  if (Number.isInteger(value)) return String(value);
+  const text = value.toPrecision(6);
+  return text.includes("e") ? text : text.replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function renderSpeciesSection(mote, species, instances) {
@@ -2076,6 +2274,11 @@ function refreshViewMenu() {
 function refreshToolsMenu() {
   $("run-sim-btn").classList.toggle("hidden", !!simPreview);
   $("exit-sim-btn").classList.toggle("hidden", !simPreview);
+  // A scenario is built from ordinary motes and relationships, so one
+  // can appear without leaving the app. Reloading the list when the menu
+  // opens is exactly when it matters and costs nothing the rest of the
+  // time.
+  refreshScenarioPicker();
 }
 
 /** #control-panel (species legend, relationship filters, depth, reset
@@ -2297,14 +2500,36 @@ function setupSimulation() {
     localStorage.setItem(SIM_SOLVER_KEY, solverSelect.value);
   });
 
+  refreshScenarioPicker();
+
+  $("check-roles-btn").addEventListener("click", async () => {
+    closeTopMenus();
+    const report = await call(api.check_roles());
+    const lines = [...report.problems, ...report.once_scoped];
+    if (report.motes_checked === 0 && lines.length === 0) {
+      showToast("No motes declare roles.");
+    } else if (report.problems.length === 0) {
+      showToast(
+        `Roles OK — ${report.motes_checked} assembly(s) wired correctly.` +
+        (report.once_scoped.length ? ` ${report.once_scoped.length} rule(s) asserted about one mote.` : "")
+      );
+    } else {
+      showToast(`${report.problems.length} role problem(s): ${report.problems[0]}`, SIM_ERROR_TOAST_MS);
+    }
+  });
+
   button.addEventListener("click", async () => {
     closeTopMenus();
     const steps = Math.max(1, parseInt(stepsInput.value, 10) || 1);
     const solver = solverSelect.value || "linear";
+    // "" means the garden as it stands. A scenario is never committed,
+    // so it travels with the preview the same way the solver does and
+    // decides whether Commit is offered at all.
+    const scenario = $("sim-scenario-select").value || null;
     button.disabled = true;
     button.textContent = "Running…";
     try {
-      const result = await call(api.preview_simulation(steps, solver));
+      const result = await call(api.preview_simulation(steps, solver, null, scenario));
       if (result.steps.length === 0) {
         showToast(result.error ? `Simulation failed: ${result.error}` : "Nothing to simulate.", SIM_ERROR_TOAST_MS);
         return;
@@ -2312,7 +2537,7 @@ function setupSimulation() {
       // The solver that produced this preview travels with it, so
       // Commit/Save (below) re-solve with the same backend even if the
       // dropdown is changed while the sim bar is still open.
-      openSimBar({ ...result, mode: "preview", solver });
+      openSimBar({ ...result, mode: "preview", solver, scenario });
     } finally {
       // openSimBar() already disabled it (and keeps it disabled) on success;
       // this only matters for the "nothing to simulate" early return above.
@@ -2359,7 +2584,8 @@ function setupSimulation() {
     const btn = $("sim-save-btn");
     btn.disabled = true;
     try {
-      const result = await call(api.save_simulation(simPreview.steps.length, simPreview.solver));
+      const result = await call(api.save_simulation(
+        simPreview.steps.length, simPreview.solver, null, simPreview.scenario || null));
       closeSimBar();
       showToast(
         result.run_id ? "Simulation saved for later review." : "Nothing to save.",
@@ -2467,6 +2693,35 @@ function cumulativeSimChanges() {
     a.mote_id.localeCompare(b.mote_id) || a.key.localeCompare(b.key));
 }
 
+/* Dimensional warnings and unsatisfied constraints, shown together but
+ * labelled apart: one is a statement about the model, the other about the
+ * answer. Neither stops a run, so neither belongs in the error area. */
+function renderSimAdvisories() {
+  const el = $("sim-bar-advisory");
+  el.replaceChildren();
+
+  const lines = [];
+  if (simPreview.scenario) {
+    const mote = moteById(simPreview.scenario);
+    const name = mote ? nodeLabel(mote) : "a scenario";
+    lines.push(`Scenario · ${name} — nothing here will be written to the graph.`);
+  }
+  for (const warning of simPreview.dimension_warnings || []) {
+    lines.push(`Units · ${warning}`);
+  }
+  for (const violation of simPreview.constraint_violations || []) {
+    lines.push(`Constraint · ${violation}`);
+  }
+
+  el.classList.toggle("hidden", lines.length === 0);
+  for (const line of lines) {
+    const row = document.createElement("div");
+    row.className = "advisory-line";
+    row.textContent = line;
+    el.appendChild(row);
+  }
+}
+
 function renderSimBar() {
   const isHistory = simPreview.mode === "history";
   const projected = simStep > 0;
@@ -2498,10 +2753,16 @@ function renderSimBar() {
     errorEl.classList.add("hidden");
   }
 
+  renderSimAdvisories();
+
   $("sim-step-count").textContent = `${simStep}/${simPreview.steps.length}`;
   $("sim-prev-btn").disabled = simStep <= 0;
   $("sim-next-btn").disabled = simStep >= simPreview.steps.length;
-  $("sim-commit-btn").classList.toggle("hidden", isHistory);
+  // A scenario run answers what *would* happen, so there is nothing to
+  // commit: the engine refuses it outright. Save still applies -- that
+  // is how a hypothetical is kept for comparison.
+  const scenarioRun = !!simPreview.scenario;
+  $("sim-commit-btn").classList.toggle("hidden", isHistory || scenarioRun);
   $("sim-commit-btn").disabled = simStep === 0;
   $("sim-save-btn").classList.toggle("hidden", isHistory);
   $("sim-discard-btn").textContent = isHistory ? "Exit" : "Discard";

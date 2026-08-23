@@ -466,7 +466,7 @@ def test_reserved_names_returns_properties_and_relationship_types(api):
 def _seed_compounding_rule(api):
     """Mirrors tests/test_simulation.py's `compounding` fixture, but
     through the JS-facing Api rather than core.simulation directly."""
-    species = api.create_mote({"name": "Account", "unknowns": "balance"})
+    species = api.create_mote({"name": "Account", "freedoms": "balance"})
     rule = api.create_mote({"name": "Growth", "equation": "balance == prev(balance) * 1.05"})
     api.create_relationship(rule["id"], species["id"], "applies_to")
     mote = api.create_mote({"name": "acct1", "balance": 100.0})
@@ -499,7 +499,7 @@ def test_commit_simulation_writes_the_final_step_and_returns_a_run_id(api):
 
 
 def test_preview_simulation_reports_a_failure_without_raising(api):
-    species = api.create_mote({"name": "S", "unknowns": "a, b"})
+    species = api.create_mote({"name": "S", "freedoms": "a, b"})
     rule = api.create_mote({"name": "underdetermined", "equation": "a + b == 10"})
     api.create_relationship(rule["id"], species["id"], "applies_to")
     mote = api.create_mote({"name": "m"})
@@ -540,7 +540,7 @@ def test_get_run_returns_none_for_an_unknown_id(api):
 
 
 def test_list_runs_includes_a_failed_run_with_no_changes(api):
-    species = api.create_mote({"name": "S", "unknowns": "a, b"})
+    species = api.create_mote({"name": "S", "freedoms": "a, b"})
     rule = api.create_mote({"name": "underdetermined", "equation": "a + b == 10"})
     api.create_relationship(rule["id"], species["id"], "applies_to")
     mote = api.create_mote({"name": "m"})
@@ -621,3 +621,121 @@ def test_mote_history_excludes_saved_runs(api):
     mote_id = _seed_compounding_rule(api)
     api.save_simulation(2)
     assert api.mote_history(mote_id) == {}
+
+
+# ---- explanation, dependencies, roles, scenarios ----
+
+
+def _seed_ohm(api):
+    """A resistor whose voltage is solved from current and resistance."""
+    species = api.create_mote({"name": "Resistor", "freedoms": "voltage"})
+    rule = api.create_mote({"name": "Ohm", "equation": "voltage == current * resistance"})
+    api.create_relationship(rule["id"], species["id"], "applies_to")
+    mote = api.create_mote({"name": "R1", "current": "2", "resistance": "3"})
+    api.set_species(mote["id"], species["id"])
+    return {"mote": mote["id"], "species": species["id"]}
+
+
+def test_why_explains_a_solved_value(api):
+    garden = _seed_ohm(api)
+    api.commit_simulation(1)
+
+    explanation = api.why(garden["mote"], "voltage")
+    assert explanation["value"] == 6
+    assert explanation["method"] == "substitution"
+    assert [e["rule_name"] for e in explanation["equations"]] == ["Ohm"]
+    assert {i["key"] for i in explanation["inputs"]} == {"current", "resistance"}
+    # A stored input has nothing behind it, which is where the panel stops.
+    assert all(i["derivation"] is None for i in explanation["inputs"])
+
+
+def test_why_before_any_run_returns_a_note_rather_than_failing(api):
+    garden = _seed_ohm(api)
+    explanation = api.why(garden["mote"], "voltage")
+    assert explanation["note"]
+    assert explanation["equations"] == []
+
+
+def test_dependencies_answers_without_a_run(api):
+    garden = _seed_ohm(api)
+    deps = api.dependencies(garden["mote"], "voltage")
+
+    assert deps["free"] is True
+    assert deps["determinable"] is True
+    assert deps["producers"] == ["Ohm"]
+    assert {n["key"]: n["status"] for n in deps["needs"]} == {
+        "current": "stored", "resistance": "stored"
+    }
+
+
+def test_dependencies_reports_a_value_that_is_not_free(api):
+    garden = _seed_ohm(api)
+    deps = api.dependencies(garden["mote"], "current")
+
+    assert deps["free"] is False
+    assert deps["producers"] == []
+    assert deps["consumers"] == ["Ohm"]
+    assert [e["key"] for e in deps["impact"]] == ["voltage"]
+
+
+def test_check_roles_reports_wiring_and_scope(api):
+    whole = api.create_mote({"name": "W1", "roles": '["left"]'})
+    report = api.check_roles()
+
+    assert report["motes_checked"] == 1
+    assert "'left'" in report["problems"][0]
+
+    part = api.create_mote({"name": "Left"})
+    api.create_relationship(whole["id"], part["id"], "left")
+    assert api.check_roles()["problems"] == []
+
+
+def test_list_scenarios_describes_each_one(api):
+    garden = _seed_ohm(api)
+    override = api.create_mote({"current": "10"})
+    api.create_relationship(override["id"], garden["mote"], "overrides")
+    scenario = api.create_mote({"name": "High Load"})
+    api.create_relationship(scenario["id"], override["id"], "varies")
+
+    assert api.list_scenarios() == [
+        {"id": scenario["id"], "name": "High Load",
+         "override_count": 1, "target_count": 1}
+    ]
+
+
+def test_preview_simulation_under_a_scenario_writes_nothing(api):
+    garden = _seed_ohm(api)
+    override = api.create_mote({"current": "10"})
+    api.create_relationship(override["id"], garden["mote"], "overrides")
+    scenario = api.create_mote({"name": "High Load"})
+    api.create_relationship(scenario["id"], override["id"], "varies")
+
+    plain = api.preview_simulation(1)
+    assert plain["steps"][0]["changes"][0]["new_value"] == 6
+
+    varied = api.preview_simulation(1, scenario=scenario["id"])
+    assert varied["steps"][0]["changes"][0]["new_value"] == 30
+    assert "voltage" not in api.get_mote(garden["mote"])["properties"]
+
+
+def test_save_simulation_can_keep_a_scenario_run(api):
+    garden = _seed_ohm(api)
+    override = api.create_mote({"current": "10"})
+    api.create_relationship(override["id"], garden["mote"], "overrides")
+    scenario = api.create_mote({"name": "High Load"})
+    api.create_relationship(scenario["id"], override["id"], "varies")
+
+    result = api.save_simulation(1, scenario=scenario["id"])
+    assert result["run_id"] is not None
+    assert "voltage" not in api.get_mote(garden["mote"])["properties"]
+
+
+def test_preview_reports_constraint_violations(api):
+    garden = _seed_ohm(api)
+    limit = api.create_mote({"name": "Too big", "equation": "voltage <= 1"})
+    api.create_relationship(limit["id"], garden["species"], "applies_to")
+
+    result = api.preview_simulation(1)
+    assert len(result["constraint_violations"]) == 1
+    assert "Too big" in result["constraint_violations"][0]
+    assert result["steps"][0]["changes"][0]["new_value"] == 6   # advisory only
