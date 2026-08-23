@@ -266,7 +266,7 @@ def run_checks(window):
     def species_and_templating():
         result = js_async(window, """
             async () => {
-                const species = await api.create_mote({name: 'Resistor', unknowns: 'current'});
+                const species = await api.create_mote({name: 'Resistor', freedoms: 'current'});
                 const template = await api.create_mote({name: 'R', resistance: '100'});
                 await api.set_template(template.id, species.id);
                 window.__seed.speciesId = species.id;
@@ -1202,7 +1202,7 @@ def run_checks(window):
     def simulation_previews_then_commits_from_the_sim_bar():
         result = js_async(window, """
             async () => {
-                const species = await api.create_mote({name: 'Box', unknowns: 'area'});
+                const species = await api.create_mote({name: 'Box', freedoms: 'area'});
                 const rule = await api.create_mote({name: 'Area', equation: 'area == width * height'});
                 await api.create_relationship(rule.id, species.id, 'applies_to');
                 const box = await api.create_mote({name: 'b1', width: '3', height: '4'});
@@ -1313,7 +1313,7 @@ def run_checks(window):
     def unsolvable_garden_reports_instead_of_crashing():
         js_async(window, """
             async () => {
-                const species = await api.create_mote({name: 'Loose', unknowns: 'x, y'});
+                const species = await api.create_mote({name: 'Loose', freedoms: 'x, y'});
                 const rule = await api.create_mote({name: 'one eq', equation: 'x + y == 10'});
                 await api.create_relationship(rule.id, species.id, 'applies_to');
                 const m = await api.create_mote({name: 'loose1'});
@@ -1342,7 +1342,7 @@ def run_checks(window):
             async () => {
                 await api.create_garden('smoke-sim');
                 await api.switch_garden('smoke-sim');
-                const species = await api.create_mote({name: 'Account', unknowns: 'balance'});
+                const species = await api.create_mote({name: 'Account', freedoms: 'balance'});
                 const rule = await api.create_mote({name: 'Growth', equation: 'balance == prev(balance) * 1.05'});
                 await api.create_relationship(rule.id, species.id, 'applies_to');
                 const mote = await api.create_mote({name: 'acct1', balance: 100.0});
@@ -1444,7 +1444,7 @@ def run_checks(window):
             async () => {
                 await api.create_garden('smoke-history');
                 await api.switch_garden('smoke-history');
-                const species = await api.create_mote({name: 'Account', unknowns: 'balance'});
+                const species = await api.create_mote({name: 'Account', freedoms: 'balance'});
                 const rule = await api.create_mote({name: 'Growth', equation: 'balance == prev(balance) * 1.05'});
                 await api.create_relationship(rule.id, species.id, 'applies_to');
                 const mote = await api.create_mote({name: 'acct1', balance: 100.0});
@@ -2626,7 +2626,7 @@ def run_checks(window):
             async () => {
                 await api.create_garden('smoke-toolsmenu');
                 await api.switch_garden('smoke-toolsmenu');
-                const species = await api.create_mote({name: 'Widget', unknowns: 'count'});
+                const species = await api.create_mote({name: 'Widget', freedoms: 'count'});
                 const rule = await api.create_mote({name: 'Grow', equation: 'count == prev(count) + 1'});
                 await api.create_relationship(rule.id, species.id, 'applies_to');
                 const mote = await api.create_mote({name: 'w1', count: 0});

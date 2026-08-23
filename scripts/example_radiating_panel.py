@@ -93,7 +93,7 @@ PANELS = [
 
 
 def build(conn) -> tuple[str, dict[str, str]]:
-    panel = create_mote(conn, {"name": "Panel", "unknowns": "temperature"})
+    panel = create_mote(conn, {"name": "Panel", "freedoms": "temperature"})
     create_relationship(
         conn,
         create_mote(conn, {"name": "Stefan-Boltzmann law", "equation": RULE}),

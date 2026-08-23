@@ -20,7 +20,13 @@ then scale the ideal enthalpy drop by the turbine's efficiency to get
 actual work. Boiler/Condenser are included only so the mote graph looks
 like the real system (see docs/physical_property_proposal Sec 15) -- they
 carry no rules of their own; this example proves the property-model
-architecture, not a full Rankine-cycle solver.
+architecture, and deliberately stays two independent turbines rather than
+a cycle, because two instances of one species is the shape it is
+demonstrating.
+
+For a complete cycle -- every component solving its own state, wired
+together by an assembly mote through declared roles -- see
+`scripts/example_rankine_cycle.py`.
 
 `coolprop` (core/coolprop_provider.py) is MonOSS's first provider backed by
 a real external library -- see docs/physical_property_proposal for why
@@ -35,7 +41,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.db import get_connection, initialize_database  # noqa: E402
-from core.gardens import create_garden  # noqa: E402
+from core.gardens import create_garden, garden_exists  # noqa: E402
 from core.motes import create_mote, get_mote  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
 from core.rules import APPLIES_TO  # noqa: E402
@@ -74,7 +80,7 @@ def build(conn) -> dict[str, str]:
     condenser = create_mote(conn, {"name": "Condenser"})
 
     turbine_species = create_mote(
-        conn, {"name": "Turbine", "unknowns": "h_in,s_in,h_out,work"}
+        conn, {"name": "Turbine", "freedoms": "h_in,s_in,h_out,work"}
     )
     for name, equation in TURBINE_EQUATIONS:
         rule = create_mote(conn, {"name": name, "equation": equation})
@@ -102,7 +108,11 @@ def build(conn) -> dict[str, str]:
 
 
 def main() -> int:
-    create_garden(GARDEN)
+    # The docstring promises a re-run rebuilds from scratch (the
+    # DELETE below does that); create_garden raises if the file is
+    # already there, so only create it the first time.
+    if not garden_exists(GARDEN):
+        create_garden(GARDEN)
     conn = get_connection(GARDEN)
     try:
         initialize_database(conn)

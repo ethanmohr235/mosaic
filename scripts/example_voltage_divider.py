@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.db import get_connection, initialize_database  # noqa: E402
-from core.gardens import create_garden  # noqa: E402
+from core.gardens import create_garden, garden_exists  # noqa: E402
 from core.motes import create_mote, get_mote  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
 from core.rules import APPLIES_TO  # noqa: E402
@@ -58,10 +58,10 @@ SPECIES = [
 
 def build(conn) -> dict[str, str]:
     species = {}
-    for name, unknowns in SPECIES:
+    for name, freedoms in SPECIES:
         properties = {"name": name}
-        if unknowns:
-            properties["unknowns"] = unknowns
+        if freedoms:
+            properties["freedoms"] = freedoms
         species[name] = create_mote(conn, properties)
 
     for name, species_name, equation in RULES:
@@ -89,7 +89,11 @@ def build(conn) -> dict[str, str]:
 
 
 def main() -> int:
-    create_garden(GARDEN)
+    # The docstring promises a re-run rebuilds from scratch (the
+    # DELETE below does that); create_garden raises if the file is
+    # already there, so only create it the first time.
+    if not garden_exists(GARDEN):
+        create_garden(GARDEN)
     conn = get_connection(GARDEN)
     try:
         initialize_database(conn)
