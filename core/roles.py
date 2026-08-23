@@ -1,8 +1,8 @@
 # core/roles.py
 """What a mote *is*, derived rather than stored.
 
-Species, template, folder, property model, rule and portal are the same
-idea six times over: an ordinary mote that plays a role because of what
+Species, template, folder, property model, rule, portal and note are
+the same idea seven times over: an ordinary mote that plays a role because of what
 points at it (or, for a portal, because of the reserved properties it
 carries). Nothing is written on a mote to say so, which is the whole
 point of "everything is a mote" -- but it does mean the question "what
@@ -13,8 +13,8 @@ Folder, Rule, Mote; the CLI knew property models; MCP knew species.
 This module is the index, not the implementation. Each role's detection
 still lives in the module that owns the concept -- species_ids_in(),
 folder_ids_in(), model_ids_in(), template_ids_in(), rule_ids_in() +
-has_equation(), portal_target() -- and ROLES below just says which is
-which. A declarative table rather than a registry providers-style: there
+has_equation(), portal_target(), has_modoc() -- and ROLES below just
+says which is which. A declarative table rather than a registry providers-style: there
 is no plugin story here, and docs/style.md rules out the global mutable
 state a register_role() would need.
 
@@ -25,7 +25,7 @@ of one species can be an instance of another.
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from core import folders, model_resolver, portals, rules, species
+from core import folders, model_resolver, modoc, portals, rules, species
 from core.entities import Mote, Relationship
 
 SPECIES = "species"
@@ -34,6 +34,7 @@ FOLDER = "folder"
 PROPERTY_MODEL = "property_model"
 RULE = "rule"
 PORTAL = "portal"
+NOTE = "note"
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ ROLES: tuple[Role, ...] = (
     Role(PROPERTY_MODEL, "Property model", ids_in=model_resolver.model_ids_in),
     Role(RULE, "Rule", ids_in=rules.rule_ids_in, matches=rules.has_equation),
     Role(PORTAL, "Portal", matches=lambda props: portals.portal_target(props) is not None),
+    Role(NOTE, "Note", matches=modoc.has_modoc),
 )
 
 ROLE_NAMES: tuple[str, ...] = tuple(role.name for role in ROLES)

@@ -364,6 +364,32 @@ def _context(
     )
 
 
+def expression_context(
+    properties: dict[str, dict],
+    relationships: list[Relationship],
+    mote_id: str,
+    *,
+    tick: float = 0.0,
+    previous: dict[str, dict] | None = None,
+) -> Context:
+    """A Context for evaluating one expression against a garden that has
+    already been read, for a caller that wants to *read* a value rather
+    than pose a system to solve -- core/modoc.py's `\\val`. Built on
+    _build_view/_context so a note sees exactly the edge maps, reserved
+    `t` and prev() semantics a rule sees, rather than a second copy of
+    them that could drift.
+
+    The view's unknowns are deliberately cleared. A property a species
+    declares unknown evaluates to a free variable, which is correct when
+    there is a solver waiting for it and useless when there is not: a
+    note has no equations to contribute and nowhere to send one. Cleared,
+    every property resolves to the value it actually holds -- which, at
+    step N of a time series, is the value that step solved for it.
+    """
+    view = dataclasses.replace(_build_view(properties, relationships), unknowns={})
+    return _context(view, mote_id, {}, tick, previous, model_cache={})
+
+
 def _evaluate_model(
     view: _GardenView,
     cache: dict[str, PropertyProvider],

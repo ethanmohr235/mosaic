@@ -28,6 +28,8 @@ from core import garden_io
 from core import gardens as gardens_repo
 from core import library as library_repo
 from core import graph as graph_repo
+from core import modoc as modoc_repo
+from core import modoc_bind as modoc_bind_repo
 from core import motes as motes_repo
 from core import portals as portals_repo
 from core import relationships as rel_repo
@@ -472,6 +474,50 @@ def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[floa
         return simulation_repo.mote_history(conn, mote_id)
 
 
+# ---- notes ----
+
+
+def resolve_modoc(
+    mote: str, step: int = 0, garden: str | None = None
+) -> dict[str, Any]:
+    """Read a mote's `modoc` note and everything its macros currently
+    resolve to: which mote each `\\mote{...}` points at, what each
+    `\\val{...}` comes to, and each `\\graph{...}`'s series.
+
+    `step` 0 reads the garden as stored; a higher step resolves the note
+    against a simulation preview that far ahead, exactly like
+    preview_simulation() and just as nondestructive -- nothing is written
+    or logged either way. Writing a note is ordinary update_mote() on the
+    `modoc` property; there is no separate write tool.
+
+    `diagnostics` is what is wrong with the note (unknown commands,
+    unresolvable references); a note always resolves, however broken."""
+    with _connect(garden) as conn:
+        source = modoc_repo.read_source(conn, mote)
+        document = modoc_repo.parse(source)
+        resolution = modoc_bind_repo.resolve(conn, mote, document, step=step)
+        return {
+            "source": source,
+            "anchorId": resolution.anchor_id,
+            "step": resolution.step,
+            "projected": resolution.projected,
+            "links": {ref: dataclasses.asdict(t) for ref, t in resolution.links.items()},
+            "values": {
+                node.expression if node.ref is None else f"[{node.ref}]{node.expression}":
+                    dataclasses.asdict(resolution.values[modoc_repo.value_key(node)])
+                for node in modoc_repo.values(document)
+            },
+            "graphs": [
+                dataclasses.asdict(resolution.graphs[modoc_repo.graph_key(node)])
+                for node in modoc_repo.graphs(document)
+            ],
+            "diagnostics": [
+                dataclasses.asdict(d)
+                for d in list(document.diagnostics) + list(resolution.diagnostics)
+            ],
+        }
+
+
 # ---- conventions ----
 
 
@@ -510,6 +556,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     create_portal, resolve_portal,
     neighborhood, whole_garden,
     preview_simulation, list_runs, get_run, run_changes, run_ticks, mote_history,
+    resolve_modoc,
     reserved_names,
 )
 

@@ -31,6 +31,7 @@ from mcp_server.server import (
     preview_simulation,
     resolve_portal,
     reserved_names,
+    resolve_modoc,
     reuse_from_library,
     save_to_library,
     set_folder,
@@ -314,6 +315,51 @@ def test_preview_simulation_rejects_a_zero_step_count(box):
         preview_simulation(0, GARDEN)
 
 
+# ---- notes ----
+
+
+def test_resolve_modoc_returns_the_source_and_what_it_resolves_to():
+    project = create_mote({"name": "Atlas", "due": "2026-09-30"}, GARDEN)
+    task = create_mote({"name": "T0"}, GARDEN)
+    create_relationship(project["id"], task["id"], "contains", GARDEN)
+    update_mote(
+        project["id"],
+        {"modoc": "Due \\val{due} for \\mote{T0}, \\val{count(targets('contains'))} task."},
+        GARDEN,
+    )
+
+    result = resolve_modoc(project["id"], garden=GARDEN)
+    assert result["anchorId"] == project["id"]
+    assert result["projected"] is False
+    assert result["values"]["due"]["text"] == "2026-09-30"
+    assert result["values"]["count(targets('contains'))"]["text"] == "1"
+    assert result["links"]["T0"]["mote_id"] == task["id"]
+    assert result["diagnostics"] == []
+
+
+def test_resolve_modoc_reports_what_did_not_resolve():
+    note = create_mote({"name": "N", "modoc": "\\mote{Nowhere} \\bogus"}, GARDEN)
+    result = resolve_modoc(note["id"], garden=GARDEN)
+    assert result["links"]["Nowhere"]["mote_id"] is None
+    assert [d["kind"] for d in result["diagnostics"]] == ["unknown_command"]
+
+
+def test_resolve_modoc_at_a_step_projects_without_writing(box):
+    update_mote(box["id"], {"modoc": "Area is \\val{area}."}, GARDEN)
+
+    result = resolve_modoc(box["id"], step=1, garden=GARDEN)
+    assert result["projected"] is True
+    assert result["values"]["area"]["text"] == "12"
+    assert "area" not in get_mote(box["id"], GARDEN)["properties"]
+    assert list_runs(garden=GARDEN) == []
+
+
+def test_resolve_modoc_on_a_mote_with_no_note_is_empty_not_an_error():
+    mote = create_mote({"name": "Plain"}, GARDEN)
+    result = resolve_modoc(mote["id"], garden=GARDEN)
+    assert result["source"] == "" and result["values"] == {}
+
+
 # ---- conventions ----
 
 
@@ -322,7 +368,9 @@ def test_reserved_names_lists_the_interpreted_keys():
     assert "equation" in names["properties"]
     assert "portal_garden" in names["properties"]
     assert "portal_mote" in names["properties"]
+    assert "modoc" in names["properties"]
     assert INSTANCE_OF in names["relationshipTypes"]
+    assert "about" in names["relationshipTypes"]
 
 
 def test_reserved_names_includes_the_equation_and_provider_reference():

@@ -7,6 +7,7 @@ answer serve a whole-garden query and an already-fetched subgraph.
 from core.entities import Mote, Relationship
 from core.roles import (
     FOLDER,
+    NOTE,
     PORTAL,
     PROPERTY_MODEL,
     ROLE_LABELS,
@@ -86,6 +87,14 @@ def test_a_portal_is_recognized_from_its_properties_alone():
 def test_an_incomplete_portal_is_not_a_portal():
     assert roles_of(mote("p", portal_garden="other"), []) == []
     assert roles_of(mote("p", portal_garden="  ", portal_mote="abc"), []) == []
+
+
+def test_a_note_is_recognized_from_its_modoc_property_alone():
+    assert roles_of(mote("n", modoc="\\section{A}"), []) == [NOTE]
+
+
+def test_a_note_property_that_is_not_text_is_not_a_note():
+    assert roles_of(mote("n", modoc=3), []) == []
 
 
 # ---- combinations ----

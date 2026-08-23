@@ -21,6 +21,7 @@ written down."""
 from core.google_calendar import RESERVED_KEYS as _GCAL_RESERVED_PROPERTIES
 from core.folders import IN_FOLDER
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
+from core.modoc import ABOUT, MODOC_KEY
 from core.portals import PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY
 from core.providers import describe_providers
 from core.rules import APPLIES_TO, EQUATION_KEY, UNKNOWNS_KEY
@@ -28,9 +29,9 @@ from core.species import INSTANCE_OF, TEMPLATE_OF
 
 RESERVED_PROPERTIES = _GCAL_RESERVED_PROPERTIES | {
     EQUATION_KEY, UNKNOWNS_KEY, PROVIDER_KEY, CONFIGURATION_KEY,
-    PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY,
+    PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY, MODOC_KEY,
 }
-RESERVED_RELATIONSHIP_TYPES = {INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, IN_FOLDER}
+RESERVED_RELATIONSHIP_TYPES = {INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, IN_FOLDER, ABOUT}
 
 # One line per reserved property key -- kept in the same declaration order
 # as the imports above, not sorted, so a diff adding a key is obvious.
@@ -54,6 +55,10 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "the target garden.",
     PORTAL_MOTE_KEY: "Together with portal_garden, marks a mote as a portal. "
         "Names the target mote's id within that garden.",
+    MODOC_KEY: "A .modoc note about this mote -- a small LaTeX subset whose "
+        "\\mote/\\val/\\graph macros resolve live against the garden. The "
+        "property is the canonical copy; .modoc files are import/export only. "
+        "Written and read in Mora (run_mora.py); see docs/modoc.md.",
     "date": "An ISO date ('2026-08-15') or datetime ('2026-08-15T14:00:00') "
         "marking a mote as exportable to Google Calendar (paired with "
         "duration/recurrence). Export itself is a UI-only action, not an "
@@ -89,6 +94,12 @@ RELATIONSHIP_TYPE_MEANINGS: dict[str, str] = {
         "a folder is an ordinary mote with no other structural meaning, "
         "never picked up by simulation unless separately declared an "
         "instance_of a species. Set via set_folder().",
+    ABOUT: "note mote --about--> subject. Optional, and only meaningful on a "
+        "mote carrying a `modoc` note: it moves the mote that note's "
+        "\\val{key} and \\graph read from, so a note can live on its own "
+        "mote while still speaking about another. A note with no `about` "
+        "reads from itself; one with several is ambiguous and falls back "
+        "to itself.",
 }
 
 # Mirrors docs/simulation.md's "Expression language" table. Order matches
