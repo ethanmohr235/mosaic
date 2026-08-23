@@ -101,7 +101,8 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         ran_at TEXT NOT NULL,
         status TEXT NOT NULL,
         detail TEXT,
-        committed INTEGER NOT NULL DEFAULT 1
+        committed INTEGER NOT NULL DEFAULT 1,
+        scenario_id TEXT
     );
     """)
 
@@ -119,6 +120,69 @@ def initialize_database(conn: sqlite3.Connection) -> None:
 
     cursor.execute("""
     CREATE INDEX IF NOT EXISTS idx_simulation_changes_run ON simulation_changes(run_id);
+    """)
+
+    # Provenance: which equations, with which known inputs, determined
+    # which values. A `block` is one group solved together -- exactly one
+    # equation and one value for a substitution step, N of each for a
+    # solver block, which is why both fit one shape. Block numbers are
+    # unique within a (run, step) only. See core/provenance.py.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS simulation_derivations (
+        run_id TEXT NOT NULL,
+        step INTEGER NOT NULL DEFAULT 0,
+        block INTEGER NOT NULL,
+        mote_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        method TEXT NOT NULL,
+        detail TEXT,
+        FOREIGN KEY (run_id) REFERENCES simulation_runs(id) ON DELETE CASCADE
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS simulation_derivation_equations (
+        run_id TEXT NOT NULL,
+        step INTEGER NOT NULL DEFAULT 0,
+        block INTEGER NOT NULL,
+        rule_mote_id TEXT NOT NULL,
+        rule_name TEXT NOT NULL,
+        anchor_mote_id TEXT NOT NULL,
+        equation TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES simulation_runs(id) ON DELETE CASCADE
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS simulation_derivation_inputs (
+        run_id TEXT NOT NULL,
+        step INTEGER NOT NULL DEFAULT 0,
+        block INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        mote_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES simulation_runs(id) ON DELETE CASCADE
+    );
+    """)
+
+    # Explaining a value looks it up by (run, mote, key); expanding an
+    # input then looks up that input's own block the same way. Both are
+    # covered by this one index.
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_simulation_derivations_lookup
+        ON simulation_derivations(run_id, mote_id, key);
+    """)
+
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_simulation_derivation_inputs_block
+        ON simulation_derivation_inputs(run_id, step, block);
+    """)
+
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_simulation_derivation_equations_block
+        ON simulation_derivation_equations(run_id, step, block);
     """)
 
     # Migrate a garden created before run_number/committed/step existed.
@@ -141,5 +205,26 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         # Old rows only ever represented one net step, so DEFAULT 0 is
         # correct, not just a placeholder.
         cursor.execute("ALTER TABLE simulation_changes ADD COLUMN step INTEGER NOT NULL DEFAULT 0")
+
+    # A run made against a scenario records which one, so runs over
+    # different scenarios can be told apart and compared afterwards.
+    # NULL means the garden as it actually stands.
+    if "scenario_id" not in run_columns:
+        cursor.execute("ALTER TABLE simulation_runs ADD COLUMN scenario_id TEXT")
+
+    # `unknowns` was renamed `freedoms` when the declaration moved from
+    # the species to the mote: these are the properties a thing is free
+    # to have determined, not a solver's list of variables. Scoped to
+    # motes acting as a species, which is everywhere the old key ever
+    # meant anything -- an ordinary mote with a property a user happened
+    # to name `unknowns` is left alone. Idempotent, like the migrations
+    # above: a no-op on a fresh garden and on one already migrated.
+    cursor.execute("""
+    UPDATE mote_properties SET key = 'freedoms'
+     WHERE key = 'unknowns'
+       AND mote_id IN (SELECT to_id FROM relationships
+                        WHERE type IN ('instance_of', 'template_of'))
+       AND mote_id NOT IN (SELECT mote_id FROM mote_properties WHERE key = 'freedoms')
+    """)
 
     conn.commit()

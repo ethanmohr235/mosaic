@@ -452,7 +452,7 @@ _CANONICAL = {
 def parse_units_property(value) -> dict[str, str]:
     """Read a mote's `units` property into a clean key -> unit-name map.
 
-    Tolerant by design, like core/rules.py: parse_unknowns(): a malformed
+    Tolerant by design, like core/rules.py: parse_freedoms(): a malformed
     or half-typed `units` value should leave a mote un-annotated, not
     break every simulation that touches it. Unknown unit *names* are not
     filtered here -- that's a real mistake worth reporting where it's

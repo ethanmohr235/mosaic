@@ -28,6 +28,7 @@ import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from core import roles as roles_repo
 from core.formula import (
     AGGREGATE_CALLS,
     NAVIGATION_CALLS,
@@ -104,6 +105,7 @@ class DimensionContext:
     sources: Callable[[str, str], list[str]]
     capability_units: Callable[[str, str, str], str | None] = _no_capability_units
     label: Callable[[str], str] = lambda mote_id: mote_id[:8]
+    roles: Callable[[str], dict] = lambda mote_id: {}
 
 
 def check_equation(text: str, ctx: DimensionContext) -> list[str]:
@@ -118,7 +120,8 @@ def check_equation(text: str, ctx: DimensionContext) -> list[str]:
     it. This checker's job is units, not syntax.
     """
     try:
-        left, right = parse_equation(text)
+        relation = parse_equation(text)
+        left, right = relation.left, relation.right
     except FormulaError:
         return []
 
@@ -255,14 +258,35 @@ class _Checker:
         return base * exponent
 
     def _attribute(self, node: ast.Attribute):
-        value = self._walk(node.value)
+        """`targets('a').voltage`, or `turbine.work` for a declared role.
+
+        Roles are resolved here exactly as core/formula.py resolves them,
+        through the shared rules in core/roles.py. The two walks must
+        agree about what a name means -- a role this checker did not
+        recognize would make every equation using one unverifiable."""
+        role, value = self._role_or_value(node)
         if not isinstance(value, _Motes):
-            raise FormulaError("can only read a property off targets(...) or sources(...)")
+            raise FormulaError(
+                "can only read a property off targets(...), sources(...) or a declared role"
+            )
         dimensions = [self._name(mid, node.attr) for mid in value.mote_ids]
         label = f"{value.label}.{node.attr}"
-        if len(dimensions) == 1:
+        if len(dimensions) == 1 and (role is None or role.collapses):
             return dimensions[0]
         return _Values(dimensions, label)
+
+    def _role_or_value(self, node: ast.Attribute):
+        if not isinstance(node.value, ast.Name):
+            return None, self._walk(node.value)
+        role = self.ctx.roles(self.ctx.mote_id).get(node.value.id)
+        if role is None:
+            return None, self._walk(node.value)
+
+        mote_ids = self.ctx.targets(self.ctx.mote_id, role.name)
+        problem = roles_repo.arity_problem(role, len(mote_ids))
+        if problem is not None:
+            raise FormulaError(f"mote {self.ctx.mote_id[:8]}: {problem}")
+        return role, _Motes(mote_ids, role.name)
 
     def _call(self, node: ast.Call):
         if not isinstance(node.func, ast.Name):
