@@ -18,14 +18,31 @@ history" below for its `save` option).
 
 ## The three pieces
 
-**A species** declares what the solver is allowed to determine, via an `unknowns` property:
+**Freedoms** are what the solver is allowed to determine, declared via a `freedoms` property:
 
 ```
 name:      Node
-unknowns:  voltage
+freedoms:  voltage
 ```
 
-`unknowns` accepts a comma-separated string (`voltage, current`) or a JSON list (`["voltage"]`). Every mote with an `instance_of` relationship to this species now has a solvable `voltage`.
+`freedoms` accepts a comma-separated string (`voltage, current`) or a JSON list (`["voltage"]`).
+
+Where you put it decides who it is about, by the same rule `roles` follows:
+
+- On a mote **acting as a species** (something other motes point at with `instance_of` or `template_of`), it declares what every *instance* is free to have determined. Every mote with an `instance_of` relationship to the Node above now has a solvable `voltage`.
+- On any **other mote**, it declares what that mote itself is free to have determined -- which is how a mote that is an instance of nothing can be solved at all.
+
+A mote's own declaration **replaces** what its species declare rather than adding to them, so a mote can narrow its freedoms as well as widen them:
+
+```
+name:      R1
+freedoms:  current      # ask this one resistor the inverse question
+voltage:   12
+```
+
+That is the point of moving the declaration off the species. The same equation, `voltage == current * resistance`, sizes one resistor and rates another in the same garden, without editing what a Resistor *is*. Freedoms declared only on species behave exactly as they always have; several species a mote belongs to merge, since nothing orders them.
+
+> `freedoms` was called `unknowns` until the declaration moved off the species. Gardens are migrated on open (`core/db.py`), scoped to motes acting as a species -- an ordinary property a user happened to name `unknowns` is left alone. The solver's own vocabulary is unchanged: `core/formula.py` and both backends still say *unknown*, because at that layer it is the right word.
 
 **A rule** is a mote with an `equation` property and an `applies_to` relationship pointing at a species:
 
@@ -48,14 +65,19 @@ current:                  <- the solver writes this
 
 ## Expression language
 
-Every equation is `left == right`, exactly one `==`.
+Every relation is `left <op> right`, with exactly one comparison. `==`
+makes it an **equation** the solver satisfies; `<=`, `>=`, `<` and `>`
+make it a **constraint** the solver only checks (see
+[Comparison relations](#comparison-relations)). Everything below applies
+to both.
 
 | Syntax | Meaning |
 |---|---|
-| `resistance` | A property of the mote the rule is running against. If the species declares it as an unknown, it becomes something to solve for; otherwise it must already hold a number. |
+| `resistance` | A property of the mote the rule is running against. If it is among the mote's [freedoms](#the-three-pieces), it becomes something to solve for; otherwise it must already hold a number. |
+| `turbine.work` | A property of the mote filling the declared role `turbine` (see [Roles](#roles)). A bare name is always a property; a name in this position is always a role. |
 | `targets('a')` | The motes this one points at via a relationship of type `a`. |
 | `sources('a')` | The motes pointing *at* this one via a relationship of type `a`. |
-| `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached. |
+| `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached -- unlike an `arity: many` role, which never collapses. |
 | `sum(...)`, `count(...)` | Combine several motes into one value. Required when more than one mote is reached. |
 | `+ - * / **` | Arithmetic. Parentheses work as usual. |
 | `abs`, `min`, `max` | Only on values that are already known. |
@@ -116,7 +138,7 @@ A 10 V source across 100 Ω and 200 Ω in series, modelled with four rules -- Oh
 A run solves `t = 0, 1, 2, ...` in sequence, each step's equations
 starting from the *previous* step's solved values rather than the live
 database -- that's what lets `prev(x)` express a recurrence, and it's
-also why nothing is unknowns-idempotent mid-run the way a single solve
+also why nothing is freedom-idempotent mid-run the way a single solve
 is: each step deliberately builds on the last.
 
 **Preview** computes the whole requested number of steps entirely in
@@ -153,8 +175,8 @@ re-checked each step).
 
 A single `run_simulation()` call (used by the worked example script, and
 equivalent to committing a 1-step time series) writes solved values
-straight onto the motes and is idempotent: unknowns are re-derived from
-the species every time, so a solved value never gets mistaken for a
+straight onto the motes and is idempotent: freedoms are re-derived from
+the graph every time, so a solved value never gets mistaken for a
 fixed input.
 
 A committed or *saved* run (see "Run history" below) is logged to
@@ -188,7 +210,464 @@ the graph's current state:
 A run's `committed` flag (`core.simulation.RunRecord.committed`)
 distinguishes the two in the runs panel and CLI history: `True` for a
 normal commit (or any plain `run_simulation()` call, which always
-writes), `False` for a saved-only run.
+writes), `False` for a saved-only run or any [scenario](#scenarios) run.
+
+`RunRecord.scenario_id` names the scenario a run was solved under, or is
+null for the garden as it stands. `simulate history` and `simulate show`
+print it, because two runs over the same rules that reached different
+answers differ only by which question they answered.
+
+## Why a value is what it is
+
+Every logged run records not only *that* a property changed but which
+equations, reading which known values, determined it. `why` walks that
+record backwards:
+
+```
+monoss why <mote-id> <property>          # argparse CLI
+why id=<mote_id> key=<property>          # REPL
+```
+
+```text
+N2.voltage = 6.66667  [solver]
+  solved together by the 'linear' solver
+  found together with: V1.current, R2.current, R1.current
+  <- KCL on N2: sum(sources('b').current) - sum(sources('a').current) == 0
+  <- Ohm's law on R1: targets('a').voltage - targets('b').voltage == current * resistance
+  derived N1.voltage = 10
+    N1.voltage = 10  [substitution]
+      <- Source on V1: targets('a').voltage - targets('b').voltage == voltage
+      property V1.voltage = 10
+```
+
+The two `method`s are the two stages of the solve, and they explain
+differently:
+
+- **`substitution`** -- one equation determined this value alone. It has a
+  single cause, and each of its derived inputs expands the same way, so
+  the explanation is a chain.
+- **`solver`** -- several equations determined several values *together*
+  (see [What the solver can handle](#what-the-solver-can-handle)). There
+  is no smaller attribution to make, so the record names every equation
+  that constrained the block and every other value found with it, under
+  `found together with`. An explanation that expanded this into a tree
+  would be inventing a causality the solve never had.
+
+An equation the substitution loop already used up is not blamed for a
+later block. Once `voltage == 0` has determined a ground node it
+re-evaluates to the trivially true `0 == 0`, which stays in the open set
+but constrains nothing.
+
+Recursion stops on anything the run did not derive -- a stored property,
+a `property()` model evaluation, or the state entering the first step --
+which is exactly the set of things that need no explanation. A value the
+run never determined reports that plainly rather than failing.
+
+`prev(x)` is followed into the step before, because that is literally
+where it came from: the value `x` had entering this step is the one the
+last step determined. At step 0 there is no earlier step, and the answer
+is that it came from the garden.
+
+**Values shown are in each dimension's base SI unit** -- what the solver
+worked in -- not the unit a mote declares. A resistance recorded as
+`4.7 kohm` explains as `4700`, so that the equation printed beside it
+multiplies out. The change log (`simulate show`) converts back into each
+mote's own unit instead; the two are deliberately different views.
+
+`why` defaults to the garden's most recent successful run, which is the
+one whose values are on the motes now. `--run` explains an earlier one,
+`--step` a particular step within a time-series run (the default is the
+last step that determined the value), and `--depth` bounds how far back
+the recursion goes.
+
+A **discarded preview records nothing** -- committing re-solves from the
+database anyway, and that solve is what gets recorded. A **saved** run
+records its derivations without touching the graph. A **failed** run
+records neither derivations nor changes: the partial work of a solve that
+did not finish describes a state the garden never reached.
+
+## Comparison relations
+
+A rule's comparison need not be `==`. `<=`, `>=`, `<` and `>` are all
+accepted, and they turn a rule into a **constraint**: something the
+solver checks against the answer rather than something it satisfies.
+
+```text
+name:      Efficiency is physical
+equation:  efficiency <= 1
+```
+
+```text
+name:      Turbine outruns pump
+equation:  turbine.work >= pump.work
+```
+
+This is one parser change and no second expression language. Every
+relation evaluates to `lhs - rhs <op> 0` from the same walk of the same
+grammar; the operator decides only what is done with the result -- solved
+for zero, or read for a sign. Constraints are dimension-checked,
+unit-converted, and may use roles, `property()` and everything else a
+rule can.
+
+### A constraint can never determine a value
+
+Constraints are separated from equations *before* anything is solved, so
+no solver backend ever receives one. That is the structural form of "an
+inequality cannot determine a value": there is no code path by which one
+could. Consequences worth knowing:
+
+- A garden whose only rule for `x` is `x <= 1` leaves `x` unsolved, and
+  says so, rather than picking a number that satisfies it.
+- `producers x` never offers a constraint. `consumers x` does.
+
+### Reported, not enforced
+
+Violations arrive on the result as `constraint_violations`, separately
+from `dimension_warnings` -- a violated constraint is a statement about
+the **answer**, a dimensional mismatch one about the **model**, and
+folding them together would make neither readable.
+
+```text
+Solved 2 values across 1 mote from 2 equations (run #1). 1 constraint problem.
+  constraint: Efficiency limit on T1: efficiency <= 1 is not satisfied (off by 0.2)
+```
+
+The run still solved and still wrote. That is deliberate: an answer that
+breaks a limit is very often exactly what you ran to find.
+`--strict-constraints` (`strict_constraints=True`) promotes a violation
+to a failure instead, mirroring `--strict-units`.
+
+In a time-based run each step checks its own constraints, since a
+constraint is about the values that step found. `TimeSeriesResult`
+labels each violation with its step.
+
+### Unchecked is not passing
+
+A constraint that still depends on something the run could not determine
+is reported as **not checked** rather than treated as satisfied. Silence
+would be indistinguishable from passing, and a limit nobody could
+evaluate is exactly the one worth mentioning. Under
+`--strict-constraints` an unchecked constraint fails the run too.
+
+### Boundaries
+
+`<=` and `>=` get the solver's tolerance, so `x <= 0.3` with `x` landing
+on `0.1 + 0.2` passes. `<` and `>` do not, because excluding the boundary
+is the whole of what makes them strict.
+
+Chained comparisons (`0 <= x <= 1`) are rejected with advice to write
+them as two relations -- which is what they are.
+
+## Roles
+
+A rule can always reach other motes by navigating relationships
+(`targets('a').voltage`). A **role** is that same navigation, declared and
+named, so an assembly's parts can be addressed directly:
+
+```text
+Rankine Cycle #1 --boiler----> Boiler A
+                 --turbine---> Turbine A
+                 --condenser-> Condenser A
+                 --pump------> Pump A
+```
+
+```text
+turbine.h_in == boiler.h_out
+```
+
+A role is **not a new kind of object**: it is an ordinary relationship
+whose *type* is the role's name. There is no binding table, because a
+relationship already is one, and a role may point at another assembly, so
+nesting comes free.
+
+### Declaring roles
+
+The reserved `roles` property, in any of the shapes the freedom list also
+accepts:
+
+```text
+["boiler", "turbine"]                       every role, arity one
+"boiler, turbine"                           the same, comma-separated
+{"turbine": "one", "heaters": "many"}       arity per role
+{"turbine": {"arity": "one", "species": "<mote-id>"}}
+```
+
+`roles` on a mote that is **acting as a species** declares what its
+*instances* have; on any other mote it declares what that mote itself
+has. That second reading is what lets a one-off assembly name its parts
+without inventing a species with one instance. An instance may add roles
+of its own on top of its species'.
+
+### Arity
+
+- **`one`** must reach exactly one mote, and collapses to a single value
+  in a formula. Zero or several is a wiring mistake, and guessing which
+  was meant is exactly the silent choice that hides it.
+- **`many`** accepts any number, zero included, and **always yields a
+  list** -- even when only one mote is wired. So a formula that will need
+  `sum(...)` the day a second part is added needs it from the start,
+  rather than changing meaning that day.
+
+Untyped `targets(...)`/`sources(...)` navigation is unchanged, single
+motes still collapsing, because every existing garden relies on that.
+
+### Roles never shadow properties
+
+A **bare name** is a property of the anchor mote. A name in the
+**attribute position** is a role. Nothing that used to mean a property
+can start meaning a role, because reading an attribute off anything other
+than `targets()`/`sources()` was already an error. An undeclared name in
+the attribute position is rejected, naming what is declared.
+
+`core/dimensions.py` resolves roles exactly as the evaluator does, so an
+equation written with roles is dimension-checked like any other.
+
+### Checking
+
+```
+monoss roles check       # argparse CLI
+roles check              # REPL
+```
+
+Reports roles wired to the wrong number of motes or to a mote of the
+wrong species. This is a **lint, not part of a run**, unlike the
+dimensional check -- the difference being what happens when each goes
+wrong. A dimensional mismatch is silent and yields a plausible wrong
+number, so a run has to warn about it; a mis-wired role that any rule
+actually uses fails that run outright, naming the role.
+
+### Rule scope
+
+What `applies_to` points at decides how widely a rule is asserted, and
+that is **inferred from the target**:
+
+```text
+a species  ->  once per instance   (everything before roles existed)
+any mote   ->  once, about it
+```
+
+"Acting as a species" is the same test `list_species` uses: being the
+target of an `instance_of` or `template_of` relationship. One
+relationship type covers both cases.
+
+The cost of inferring is that making the first instance of a mote flips
+every rule asserted about it from "once" to "each". `roles check` lists
+every rule currently resolved to "once" for exactly that reason -- so the
+change is visible before it produces a different answer.
+
+A `once`-scoped rule can only determine values its mote is free to
+change -- which is why `freedoms` may be declared on the mote itself and
+not only on a species. A one-off assembly declares both its parts and its
+freedoms directly, and needs no species at all.
+
+### Worked example
+
+`scripts/example_rankine_cycle.py` builds a complete Rankine cycle in a
+garden called `rankine-cycle-example`:
+
+```
+.venv/bin/python scripts/example_rankine_cycle.py
+```
+
+Boiler, turbine, condenser and pump each solve their own state from
+CoolProp; a `Rankine Cycle` assembly declares them as four roles and
+closes the loop with rules like `turbine.h_in == boiler.h_out`. Those
+linking rules are anchored on the *cycle* and solve unknowns belonging to
+the *parts* -- which has always been possible, but reads as a model
+rather than as graph navigation once the parts have names.
+
+## Scenarios
+
+A garden holds one state, but every question worth asking about a model
+is comparative: design against off-design, best against worst case, what
+breaks if the feedwater drops 20 K. A **scenario** is a named
+perturbation, so those can be asked without editing the garden and
+editing it back.
+
+The shape mirrors templates, one arrow over:
+
+```text
+template_of : species  ::  overrides : mote
+```
+
+A template holds placeholder properties for a species and is excluded
+from its instances. An **override** holds replacement properties for one
+specific mote and is excluded from every run unless a scenario selects
+it. A **scenario** gathers overrides:
+
+```text
+Winter Case --varies--> Winter Turbine --overrides--> HP Turbine
+```
+
+Two reserved relationship types, no new properties, no new tables. An
+override's replacement values are **ordinary properties**, so the
+property editor, units, and the whole MCP surface work on them unchanged.
+
+### Running one
+
+```
+monoss simulate run --scenario <scenario-mote-id>
+monoss scenario list
+monoss scenario show --id <scenario-mote-id>
+```
+
+```text
+High Load varies 1 mote(s):
+  R1
+    current: 2 -> 10
+```
+
+**A scenario run never writes to the graph.** `run_simulation` with a
+scenario solves, logs the run as uncommitted with its `scenario_id`, and
+reports what *would* change; `run_time_series` refuses `commit=True`
+outright, since committing is an explicit request to make something the
+garden's state. `save=True` keeps the run for later comparison, which is
+usually what a scenario is for.
+
+This is not a limitation to lift later. The answer to a hypothetical is
+not the garden's state, and "where would a scenario run's results be
+written" has no good answer.
+
+### Changing the question, not just the inputs
+
+An override may carry **`freedoms`**, which is what makes scenarios more
+than a parameter sweep:
+
+```text
+override:  freedoms: resistance
+           voltage:  24
+```
+
+The same equation that sized a resistor now rates it. That is why
+[freedoms](#the-three-pieces) had to move off the species first: a
+scenario perturbs *motes*, so anything it changes has to be declarable on
+a mote.
+
+`incidence_index(conn, scenario=...)` answers the same structural
+question about a hypothetical -- what a scenario would make determinable,
+and what it would leave missing -- before anything is solved.
+
+### Details worth knowing
+
+- An override **replaces every property it carries**, `name` included.
+  There is no special case, exactly as a template supplies every property
+  it carries to a new instance. Name an override for what its target
+  becomes under that scenario, or leave `name` off it.
+- Overrides merge **per property**: an override naming one pressure
+  changes that pressure and nothing else about its target.
+- Override motes are left out of **every** run, scenario or not. They
+  hold replacement values rather than state, and one declaring `freedoms`
+  would otherwise become solvable in its own right.
+- A scenario id naming no scenario is an **error**, not a quiet fallback
+  to the unperturbed garden -- it is nearly always a mistyped id, and
+  silently answering a different question is the worst possible response.
+- An override pointing at no target yet is skipped rather than fatal, the
+  same reading a rule with no equation gets.
+- Scenarios compose with time series: each step reads the perturbed
+  state.
+
+## Dependency queries
+
+`why` reads the run log. These four read the *rules*, so they answer
+before anything has been solved, and they answer about the model rather
+than about one run:
+
+```
+monoss impact    <mote-id> <property> [--distance N]
+monoss requires  <mote-id> <property>
+monoss producers <mote-id> <property>
+monoss consumers <mote-id> <property>
+```
+
+The index behind them is **derived on every call, never stored**. The
+equations are the single source of truth about what depends on what, and
+a persisted copy would be a second one. It costs one probe evaluation per
+rule/instance pair -- the same order of work the dimensional check
+already does, and far less than solving, since nothing here iterates.
+
+### The shape is bipartite, not a DAG
+
+An equation does not have inputs and outputs. `V == I * R` determines V
+in one garden and I in another, from the same text -- what decides is
+which values are **free** (declared via `freedoms`). So the
+index relates *equations* to *values*, and every query reads that
+relation rather than following arrows.
+
+Two consequences worth knowing before reading the output:
+
+- **`producers` returns every equation that touches a free value.** If
+  both `b` and `c` are free, `c == b + 1` is a producer of `b` as much as
+  of `c`, because either is what it determines depending on what else is
+  known when the solve runs. Reporting one of them would be inventing a
+  direction the system does not have.
+- **`producers` and `consumers` never overlap**, and which one an
+  equation lands in is decided by the value's freedom, not by the
+  equation. A free value is produced and never consumed; a stored value
+  is consumed and never produced. `producers` coming back empty means
+  *nothing can determine this*, which is the most common modelling
+  mistake -- and `requires` tells you which of its two causes it is.
+
+### `impact`
+
+```text
+Changing R1.resistance could move 6 values:
+  1 step away
+    N1.voltage  via Ohm's law on R1
+    R1.current  via Ohm's law on R1
+  2 steps away
+    V1.current  via KCL on N1
+```
+
+A breadth-first walk: a change perturbs every equation touching the
+value, each perturbed equation can move anything it is free to
+determine, and those perturb further equations. **Distance is hops
+through the equation graph, not a causal ordering** -- everything in a
+coupled block is found at once. It is shown because the near values are
+usually the ones a reader meant, not because the change arrives in that
+sequence.
+
+A value nothing is free to determine can be a cause but never an effect,
+so it never appears in the results.
+
+### `requires`
+
+```text
+To determine N2.voltage:
+
+  determined by:
+    Ohm's law on R1
+    Ohm's law on R2
+
+  needs (1 missing):
+    missing  R2.resistance
+    derived  N1.voltage
+    stored   V1.voltage
+```
+
+Each prerequisite is **stored** (the mote holds a value), **derived**
+(free, and some equation determines it), or **missing** (neither -- this
+is what to go fix). Missing ones are listed first, since they are the
+only part anyone has to act on.
+
+The closure is flat rather than a tree, for the same reason `why` stops
+at a solver block: a coupled block has no tree inside it.
+
+Two failures get their own headline, because both are otherwise silent:
+
+```text
+Nothing can determine V1.voltage.
+  It is not among its mote's declared freedoms, so the solver may not change it.
+```
+
+```text
+Nothing can determine L1.x.
+  It is declared free, but no equation constrains it.
+```
+
+A free property is reported as **derived** even when the mote already
+holds a number for it -- that number is a previous run's answer and is
+about to be replaced, so calling it a stored input would describe the
+garden rather than the model.
 
 ## Physical property models
 
@@ -365,3 +844,9 @@ a rule that doesn't add up.
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
 - **Species inheritance.** Species are flat.
+- **Multi-mote models as roles.** A rule reaches other motes by
+  navigating relationships (`targets('a').voltage`), which works but ties
+  the model to graph topology rather than to named roles. See
+  `docs/modeling_proposal`.
+- **Scenarios.** A garden holds one state, so asking a second question
+  means editing it. See `docs/modeling_proposal`.

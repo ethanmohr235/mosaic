@@ -46,7 +46,7 @@ absolute path.
 
 ## Tools
 
-30 tools, grouped: gardens (`list_gardens`, `create_garden`,
+37 tools, grouped: gardens (`list_gardens`, `create_garden`,
 `export_garden`), motes (`list_motes`, `get_mote`, `create_mote`,
 `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
@@ -54,8 +54,9 @@ absolute path.
 `species_of`, `instances_of`, `set_species`, `set_template`,
 `template_for`, `create_instance`), graph (`neighborhood`,
 `whole_garden`), simulation (`preview_simulation`, `list_runs`,
-`get_run`, `run_changes`, `run_ticks`, `mote_history`), and
-`reserved_names`.
+`get_run`, `run_changes`, `run_ticks`, `mote_history`, `why`),
+dependencies (`impact`, `requires`, `producers`, `consumers`),
+`check_roles`, `list_scenarios`, and `reserved_names`.
 
 Every tool takes an optional `garden`, defaulting to `default`.
 
@@ -67,6 +68,31 @@ as JSON because GUI text fields deliver everything as text.
 `preview_simulation` computes a run entirely in memory and returns what
 *would* change — nothing is written or logged. Applying a run to the
 graph is not exposed; do that in the app or the CLI.
+
+`why` explains how a solved value was determined, recursively. It reads
+the run log only, so it needs a run to have happened; a preview leaves
+nothing for it to read.
+
+The four dependency tools read the *rules* instead, so they answer
+before anything has been solved. Note that MonOSS solves constraint
+systems: `producers` returns every equation that could determine a
+value, which for a coupled system is several, and an empty result means
+nothing can determine it at all.
+
+`preview_simulation` also returns `constraint_violations`: comparison
+relations (`efficiency <= 1`) the answer does not satisfy. These are
+reported, never enforced, and one depending on a value the run could not
+determine is reported as *not checked* rather than passing.
+
+`list_scenarios` lists named perturbations of the garden, and
+`preview_simulation` takes a `scenario` to solve under one. A preview
+never writes either way; a scenario changes which question is being
+previewed, not whether the answer is applied.
+
+`check_roles` reports assemblies wired to the wrong parts, and separately
+which rules are asserted about one mote rather than a whole species --
+which is inferred from what `applies_to` points at, and changes the first
+time someone makes an instance of that mote. See `docs/simulation.md`.
 
 ## Reaching it from other machines
 
