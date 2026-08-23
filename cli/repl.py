@@ -20,12 +20,28 @@ from core.gardens import (
     resolve_garden,
     restore_garden,
 )
+from cli.render import (
+    BASE_UNIT_NOTE,
+    change_lines,
+    equation_lines,
+    explanation_lines,
+    impact_lines,
+    label,
+    requirement_lines,
+    run_summary_line,
+    scenario_lines,
+    variable,
+)
+from core import derivations
 from core import model_resolver
 from core.providers import PropertyModelError
+from core.scenarios import get_scenario, list_scenarios
 from core.simulation import (
     SimulationError,
     check_garden,
+    check_roles,
     get_run,
+    incidence_index,
     list_runs,
     run_changes,
     run_simulation,
@@ -62,9 +78,22 @@ HELP_TEXT = """
     unit convert value=<n> from=<unit> to=<unit>           Convert a value between units
     unit check [id=<rule_id>]                              Check rules for dimensional consistency
 
-    simulate [strict_units=true]                            Run the garden's simulation rules
+    scenario list                                          List scenarios and what they vary
+    scenario show id=<scenario_id>                         Show one scenario's overrides
+
+    simulate [strict_units=true] [strict_constraints=true]  Run the garden's simulation rules
+        [scenario=<id>]
     simulate history [limit=<n>]                            List past simulation runs
     simulate show id=<run_id>                               Show one run's changes
+
+    roles check                                            Check how assemblies are wired to their parts
+
+    why id=<mote_id> key=<property> [run=<run_id>]         Explain how a solved value was determined
+        [step=<n>] [depth=<n>]
+    impact id=<mote_id> key=<property> [distance=<n>]      What could move if this value changed
+    requires id=<mote_id> key=<property>                   What must be known to determine this value
+    producers id=<mote_id> key=<property>                  Which equations could determine it
+    consumers id=<mote_id> key=<property>                  Which equations read it
 
     exit / quit                                            Exit REPL
 
@@ -116,22 +145,6 @@ def _print_capabilities(provider) -> None:
     for cap in provider.capabilities():
         units = f" [{cap.units}]" if cap.units else ""
         print(f"    {cap.operation}({', '.join(cap.inputs)}) -> {cap.output}{units}")
-
-
-def _print_changes(changes) -> None:
-    for change in changes:
-        old = "None" if change.old_value is None else f"{change.old_value:g}"
-        print(f"  [{change.mote_id[:8]}] {change.key}: {old} -> {change.new_value:g}")
-
-
-def _print_run_summary_line(run) -> None:
-    applied = "applied" if run.committed else "saved"
-    line = f"[{run.run_id}] run=#{run.run_number} {run.ran_at} {run.status} ({applied})"
-    if run.status == "ok":
-        line += f" ({run.change_count} change{'' if run.change_count == 1 else 's'})"
-    else:
-        line += f": {run.detail}"
-    print(line)
 
 
 def repl(garden: str | None = None) -> None:
@@ -424,6 +437,10 @@ def repl(garden: str | None = None) -> None:
                             conn,
                             solver=solver,
                             strict_units=bool(action_args.get("strict_units", False)),
+                            strict_constraints=bool(
+                                action_args.get("strict_constraints", False)
+                            ),
+                            scenario=action_args.get("scenario"),
                         )
                     except SimulationError as e:
                         print(f"Simulation failed: {e}")
@@ -431,13 +448,16 @@ def repl(garden: str | None = None) -> None:
                     print(result.summary)
                     for warning in result.dimension_warnings:
                         print(f"  warning: {warning}")
-                    _print_changes(result.changes)
+                    for violation in result.constraint_violations:
+                        print(f"  constraint: {violation}")
+                    for line in change_lines(result.changes):
+                        print(line)
 
                 elif action == "history":
                     action_args = parse_properties(args[1:])
                     limit = action_args.get("limit")
                     for run in list_runs(conn, limit=limit):
-                        _print_run_summary_line(run)
+                        print(run_summary_line(conn, run))
 
                 elif action == "show":
                     action_args = parse_properties(args[1:])
@@ -451,12 +471,109 @@ def repl(garden: str | None = None) -> None:
                     applied = "applied to graph" if run.committed else "saved (not applied to graph)"
                     print(f"Run {run.run_id}")
                     print(f"run=#{run.run_number}  {run.ran_at}  status={run.status}  ({applied})")
+                    if run.scenario_id:
+                        print(f"scenario: {label(conn, run.scenario_id)}")
                     if run.detail:
                         print(f"detail: {run.detail}")
-                    _print_changes(run_changes(conn, run.run_id))
+                    for line in change_lines(run_changes(conn, run.run_id)):
+                        print(line)
 
                 else:
                     print(f"Unknown simulate action: {action}")
+
+            elif cmd == "why":
+                action_args = parse_properties(args)
+                if "id" not in action_args or "key" not in action_args:
+                    print("Error: 'id' and 'key' are required")
+                    continue
+                explanation = derivations.explain(
+                    conn,
+                    str(action_args["id"]),
+                    str(action_args["key"]),
+                    run_id=action_args.get("run"),
+                    step=action_args.get("step"),
+                    depth=int(action_args.get("depth", derivations.DEFAULT_DEPTH)),
+                )
+                if explanation.derived:
+                    print(BASE_UNIT_NOTE)
+                for line in explanation_lines(conn, explanation):
+                    print(line)
+
+            elif cmd == "scenario":
+                action = args[0].lower() if args else "list"
+                if action == "show":
+                    action_args = parse_properties(args[1:])
+                    if "id" not in action_args:
+                        print("Error: 'id' is required")
+                        continue
+                    scenario = get_scenario(conn, str(action_args["id"]))
+                    if scenario is None:
+                        print("No scenario found. A scenario is a mote with a 'varies' relationship.")
+                        continue
+                    for line in scenario_lines(conn, scenario):
+                        print(line)
+                elif action == "list":
+                    scenarios = list_scenarios(conn)
+                    if not scenarios:
+                        print("No scenarios in this garden.")
+                    for scenario in scenarios:
+                        print(
+                            f"[{scenario.mote_id}] {scenario.name} "
+                            f"({len(scenario.overrides)} override(s) over "
+                            f"{len(scenario.target_ids)} mote(s))"
+                        )
+                else:
+                    print(f"Unknown scenario action: {action}")
+
+            elif cmd == "roles":
+                if args and args[0].lower() != "check":
+                    print(f"Unknown roles action: {args[0]}")
+                    continue
+                report = check_roles(conn)
+                if report.motes_checked == 0:
+                    print("No motes declare roles.")
+                elif not report.problems:
+                    print(
+                        f"OK -- {report.motes_checked} mote(s) with declared roles "
+                        "are wired correctly."
+                    )
+                else:
+                    print(f"{len(report.problems)} role problem(s):")
+                    for problem in report.problems:
+                        print(f"  {problem}")
+                if report.once_scoped:
+                    print(f"{len(report.once_scoped)} rule(s) asserted about a single mote:")
+                    for line in report.once_scoped:
+                        print(f"  {line}")
+
+            elif cmd in ("impact", "requires", "producers", "consumers"):
+                action_args = parse_properties(args)
+                if "id" not in action_args or "key" not in action_args:
+                    print("Error: 'id' and 'key' are required")
+                    continue
+                target = (str(action_args["id"]), str(action_args["key"]))
+                index = incidence_index(conn)
+
+                if cmd == "impact":
+                    lines = impact_lines(
+                        conn, target,
+                        index.impact(target, max_distance=action_args.get("distance")),
+                    )
+                elif cmd == "requires":
+                    lines = requirement_lines(conn, index.requires(target))
+                elif cmd == "producers":
+                    lines = [f"Equations that could determine {variable(conn, target)}:"]
+                    lines += equation_lines(
+                        conn, index.producers(target),
+                        "none -- it is not free to move" if not index.is_free(target)
+                        else "none -- it is free, but no equation constrains it",
+                    )
+                else:
+                    lines = [f"Equations that read {variable(conn, target)}:"]
+                    lines += equation_lines(conn, index.consumers(target), "none")
+
+                for line in lines:
+                    print(line)
 
             else:
                 print(f"Unknown command: {cmd}. Type 'help' for available commands.")

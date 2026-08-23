@@ -21,7 +21,9 @@ from typing import Any
 
 from mcp.server import MCPServer
 
+from core import derivations as derivations_repo
 from core import garden_io
+from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo
 from core import motes as motes_repo
@@ -340,6 +342,7 @@ def preview_simulation(
     garden: str | None = None,
     solver: str = "linear",
     solver_configuration: dict[str, Any] | None = None,
+    scenario: str | None = None,
 ) -> dict[str, Any]:
     """Solve the garden's rules for `step_count` steps entirely in
     memory and return what *would* change. Writes nothing and logs
@@ -353,15 +356,29 @@ def preview_simulation(
     fails if a rule is genuinely nonlinear in its unknowns (e.g. `area ==
     side * side`); `"newton"` solves that iteratively instead, tunable
     via `solver_configuration` (`max_iterations`, `tolerance`,
-    `epsilon`)."""
+    `epsilon`).
+
+    `scenario` names a mote gathering overrides (see list_scenarios) --
+    the garden is solved as that scenario would have it. A preview never
+    writes either way; a scenario changes which question is being
+    previewed, not whether the answer is applied.
+
+    `constraint_violations` lists comparison relations (`efficiency <= 1`)
+    the answer does not satisfy, each labelled with its step. These are
+    reported, never enforced: a constraint says something about the
+    answer, and an answer that breaks a limit is often exactly what you
+    ran to find. A constraint depending on something the run could not
+    determine is reported as *not checked* rather than passing."""
     with _connect(garden) as conn:
         result = simulation_repo.run_time_series(
-            conn, step_count, commit=False, solver=solver, solver_configuration=solver_configuration
+            conn, step_count, commit=False, solver=solver,
+            solver_configuration=solver_configuration, scenario=scenario,
         )
         return {
             "steps": _steps_payload(result.steps),
             "failed_at": result.failed_at,
             "error": result.error,
+            "constraint_violations": result.constraint_violations,
         }
 
 
@@ -369,7 +386,9 @@ def preview_simulation(
 def list_runs(limit: int | None = None, garden: str | None = None) -> list[dict[str, Any]]:
     """Past simulation runs, most recent first. Includes failed runs and
     runs that were saved for review without being applied to the graph
-    (`committed` tells them apart)."""
+    (`committed` tells them apart). `scenario_id` names the scenario a
+    run was solved under, or is null for the garden as it stands -- which
+    is what makes two runs over the same rules comparable."""
     with _connect(garden) as conn:
         runs = simulation_repo.list_runs(conn, limit=limit)
         return [dataclasses.asdict(r) for r in runs]
@@ -408,6 +427,173 @@ def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[floa
     runs, which were never the mote's real state."""
     with _connect(garden) as conn:
         return simulation_repo.mote_history(conn, mote_id)
+
+
+@mcp.tool()
+def why(
+    mote_id: str,
+    key: str,
+    run_id: str | None = None,
+    step: int | None = None,
+    depth: int = derivations_repo.DEFAULT_DEPTH,
+    garden: str | None = None,
+) -> dict[str, Any]:
+    """How a solved property value was determined: the equations that
+    produced it, the known values they read, and -- recursively -- how
+    each of those was itself determined.
+
+    Defaults to the garden's most recent successful run, which is the one
+    whose values are on the motes now. `method` is "substitution" when
+    one equation determined the value alone, or "solver" when several
+    equations determined several values *together*; in that case
+    `also_determined` names the others and no finer attribution exists.
+    An empty `equations` with a `note` means the run did not derive this
+    value at all -- it was set directly, or is unchanged.
+
+    Values are in each dimension's base SI unit, which is what the solver
+    worked in, not the unit a mote declares."""
+    with _connect(garden) as conn:
+        explanation = derivations_repo.explain(
+            conn, mote_id, key, run_id=run_id, step=step, depth=depth
+        )
+        return dataclasses.asdict(explanation)
+
+
+def _equations_payload(touches) -> list[dict[str, Any]]:
+    """Equations as a client sees them. `determines`/`reads` are dropped:
+    they are frozensets of tuples, the whole index rather than the answer
+    to the question asked, and every caller here already knows which
+    value it asked about."""
+    return [
+        {
+            "rule_mote_id": t.rule_mote_id,
+            "rule_name": t.rule_name,
+            "anchor_mote_id": t.anchor_mote_id,
+            "equation": t.equation,
+        }
+        for t in touches
+    ]
+
+
+@mcp.tool()
+def impact(
+    mote_id: str, key: str, max_distance: int | None = None, garden: str | None = None
+) -> dict[str, Any]:
+    """What could move if this value changed, nearest first.
+
+    A breadth-first walk of the equation graph, not a forward walk of a
+    dependency tree: MonOSS solves constraint systems, so everything in a
+    coupled block moves together and `distance` is hops through that
+    graph rather than a causal ordering. A value nothing is free to
+    determine can be a cause but never an effect, so it never appears.
+
+    Read from the rules on every call -- no index is stored, so this is
+    always current."""
+    with _connect(garden) as conn:
+        effects = simulation_repo.incidence_index(conn).impact(
+            (mote_id, key), max_distance=max_distance
+        )
+        return {
+            "variable": {"mote_id": mote_id, "key": key},
+            "effects": [
+                {
+                    "mote_id": e.variable[0],
+                    "key": e.variable[1],
+                    "distance": e.distance,
+                    "through": _equations_payload(e.through),
+                }
+                for e in effects
+            ],
+        }
+
+
+@mcp.tool()
+def requires(mote_id: str, key: str, garden: str | None = None) -> dict[str, Any]:
+    """What must be known before this value can be determined.
+
+    `free` is whether the value is among its mote's declared freedoms --
+    if it is not, nothing can determine it, which is the most common
+    modelling mistake. Each entry in `needs` is "stored" (a value exists
+    on the mote), "derived" (free, and some equation determines it), or
+    "missing" (neither -- this is what to fix)."""
+    with _connect(garden) as conn:
+        requirement = simulation_repo.incidence_index(conn).requires((mote_id, key))
+        return {
+            "variable": {"mote_id": mote_id, "key": key},
+            "free": requirement.free,
+            "determinable": requirement.determinable,
+            "producers": _equations_payload(requirement.producers),
+            "needs": [
+                {"mote_id": n.variable[0], "key": n.variable[1], "status": n.status}
+                for n in requirement.needs
+            ],
+        }
+
+
+@mcp.tool()
+def producers(mote_id: str, key: str, garden: str | None = None) -> list[dict[str, Any]]:
+    """Equations that could determine this value. Empty when the value is
+    not free to move -- use requires() to tell that case apart from a
+    value nothing happens to constrain."""
+    with _connect(garden) as conn:
+        index = simulation_repo.incidence_index(conn)
+        return _equations_payload(index.producers((mote_id, key)))
+
+
+@mcp.tool()
+def consumers(mote_id: str, key: str, garden: str | None = None) -> list[dict[str, Any]]:
+    """Equations that read this value as a known quantity."""
+    with _connect(garden) as conn:
+        index = simulation_repo.incidence_index(conn)
+        return _equations_payload(index.consumers((mote_id, key)))
+
+
+@mcp.tool()
+def list_scenarios(garden: str | None = None) -> list[dict[str, Any]]:
+    """Named perturbations of the garden -- motes with a `varies`
+    relationship to override motes, each of which shadows one mote's
+    properties via `overrides`.
+
+    Solving under a scenario answers what *would* happen and never writes
+    to the graph, so a garden can be asked several questions without
+    being edited between them. An override may carry `freedoms`, which
+    changes the question rather than the inputs (sizing vs. rating)."""
+    with _connect(garden) as conn:
+        return [
+            {
+                "id": scenario.mote_id,
+                "name": scenario.name,
+                "overrides": [
+                    {
+                        "id": o.mote_id,
+                        "target_mote_id": o.target_id,
+                        "properties": o.properties,
+                    }
+                    for o in scenario.overrides
+                ],
+            }
+            for scenario in scenarios_repo.list_scenarios(conn)
+        ]
+
+
+@mcp.tool()
+def check_roles(garden: str | None = None) -> dict[str, Any]:
+    """Check how every assembly is wired to its declared parts.
+
+    A species' `roles` property names the parts its instances should
+    have; each part is an ordinary relationship whose type is the role's
+    name. This reports roles wired to the wrong number of motes or to a
+    mote of the wrong species -- and, separately, which rules are
+    asserted about one mote rather than about a whole species, since that
+    is inferred from what `applies_to` points at and changes the first
+    time someone makes an instance of that mote."""
+    with _connect(garden) as conn:
+        report = simulation_repo.check_roles(conn)
+        return {
+            "motes_checked": report.motes_checked,
+            "problems": report.problems,
+            "once_scoped": report.once_scoped,
+        }
 
 
 # ---- conventions ----

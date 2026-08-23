@@ -3,8 +3,11 @@ import pytest
 from core.db import get_connection
 from core.rules import APPLIES_TO
 from core.simulation import list_runs as core_list_runs
+from core.simulation import run_simulation as core_run_simulation
 from core.species import INSTANCE_OF, TEMPLATE_OF
 from mcp_server.server import (
+    check_roles,
+    consumers,
     create_garden,
     create_instance,
     create_mote,
@@ -15,15 +18,19 @@ from mcp_server.server import (
     export_garden,
     get_mote,
     get_run,
+    impact,
     instances_of,
     list_gardens,
     list_motes,
     list_relationships,
     list_runs,
+    list_scenarios,
     list_species,
     mote_relationships,
     neighborhood,
     preview_simulation,
+    producers,
+    requires,
     reserved_names,
     set_species,
     set_template,
@@ -32,6 +39,7 @@ from mcp_server.server import (
     update_mote,
     update_relationship,
     whole_garden,
+    why,
 )
 
 # Every tool takes `garden` last and opens its own connection, so tests
@@ -226,13 +234,13 @@ def test_whole_garden_reaches_unconnected_motes():
 @pytest.fixture
 def box():
     """A species whose instances solve area == width * height."""
-    species = create_mote({"name": "Box", "unknowns": "area"}, GARDEN)
+    species = create_mote({"name": "Box", "freedoms": "area"}, GARDEN)
     rule = create_mote({"name": "Area", "equation": "area == width * height"}, GARDEN)
     create_relationship(rule["id"], species["id"], APPLIES_TO, GARDEN)
 
     instance = create_mote({"name": "B1", "width": 3, "height": 4}, GARDEN)
     set_species(instance["id"], species["id"], GARDEN)
-    return instance
+    return {**instance, "species_id": species["id"]}
 
 
 def test_preview_simulation_reports_changes(box):
@@ -269,3 +277,167 @@ def test_reserved_names_lists_the_interpreted_keys():
     names = reserved_names()
     assert "equation" in names["properties"]
     assert INSTANCE_OF in names["relationshipTypes"]
+
+
+# ---- provenance ----
+
+
+def test_why_explains_a_solved_value(box):
+    conn = get_connection(GARDEN)
+    try:
+        core_run_simulation(conn)
+    finally:
+        conn.close()
+
+    explanation = why(box["id"], "area", garden=GARDEN)
+    assert explanation["value"] == 12.0
+    assert explanation["method"] == "substitution"
+    assert [e["rule_name"] for e in explanation["equations"]] == ["Area"]
+    assert {i["key"] for i in explanation["inputs"]} == {"width", "height"}
+
+
+def test_why_on_an_underived_value_returns_a_note_not_an_error(box):
+    conn = get_connection(GARDEN)
+    try:
+        core_run_simulation(conn)
+    finally:
+        conn.close()
+
+    explanation = why(box["id"], "width", garden=GARDEN)
+    # asdict() preserves the dataclass's tuples; they reach a client as
+    # JSON arrays either way, so what matters is that it is empty.
+    assert not explanation["equations"]
+    assert explanation["note"]
+
+
+def test_why_before_any_run_says_the_garden_has_no_runs(box):
+    assert why(box["id"], "area", garden=GARDEN)["note"] == "this garden has no logged runs"
+
+
+# ---- dependency queries ----
+
+
+def test_impact_reports_what_could_move(box):
+    result = impact(box["id"], "width", garden=GARDEN)
+    assert [(e["key"], e["distance"]) for e in result["effects"]] == [("area", 1)]
+    assert result["effects"][0]["through"][0]["rule_name"] == "Area"
+
+
+def test_requires_reports_prerequisites_and_their_status(box):
+    result = requires(box["id"], "area", garden=GARDEN)
+    assert result["free"] is True
+    assert result["determinable"] is True
+    assert {n["key"]: n["status"] for n in result["needs"]} == {
+        "width": "stored", "height": "stored"
+    }
+
+
+def test_requires_flags_a_value_that_is_not_free(box):
+    result = requires(box["id"], "width", garden=GARDEN)
+    assert result["free"] is False
+    assert result["determinable"] is False
+
+
+def test_producers_and_consumers_read_the_same_index(box):
+    assert [t["rule_name"] for t in producers(box["id"], "area", garden=GARDEN)] == ["Area"]
+    assert [t["rule_name"] for t in consumers(box["id"], "width", garden=GARDEN)] == ["Area"]
+
+
+def test_the_queries_answer_before_any_run(box):
+    """No simulation has been run in this garden -- the index comes from
+    the rules, not the run log."""
+    assert list_runs(garden=GARDEN) == []
+    assert producers(box["id"], "area", garden=GARDEN)
+
+
+# ---- roles ----
+
+
+def test_check_roles_reports_wiring_problems(box):
+    whole = create_mote({"name": "W1", "roles": ["left"]}, GARDEN)
+    report = check_roles(garden=GARDEN)
+
+    assert report["motes_checked"] == 1
+    assert len(report["problems"]) == 1
+    assert "'left'" in report["problems"][0]
+
+    part = create_mote({"name": "Left"}, GARDEN)
+    create_relationship(whole["id"], part["id"], "left", GARDEN)
+    assert check_roles(garden=GARDEN)["problems"] == []
+
+
+def test_check_roles_reports_once_scoped_rules(box):
+    mote = create_mote({"name": "Solo", "freedoms": "x"}, GARDEN)
+    rule = create_mote({"name": "One-off", "equation": "x == 1"}, GARDEN)
+    create_relationship(rule["id"], mote["id"], APPLIES_TO, GARDEN)
+
+    assert check_roles(garden=GARDEN)["once_scoped"] == [
+        "'One-off' is asserted once, about Solo"
+    ]
+
+
+def test_roles_is_a_reserved_property():
+    assert "roles" in reserved_names()["properties"]
+
+
+# ---- scenarios ----
+
+
+def _scenario_over(box):
+    override = create_mote({"width": 10}, GARDEN)
+    create_relationship(override["id"], box["id"], "overrides", GARDEN)
+    scenario = create_mote({"name": "Wide"}, GARDEN)
+    create_relationship(scenario["id"], override["id"], "varies", GARDEN)
+    return scenario["id"]
+
+
+def test_list_scenarios_reports_what_each_varies(box):
+    scenario_id = _scenario_over(box)
+    scenarios = list_scenarios(garden=GARDEN)
+
+    assert [s["name"] for s in scenarios] == ["Wide"]
+    assert scenarios[0]["id"] == scenario_id
+    assert scenarios[0]["overrides"][0]["target_mote_id"] == box["id"]
+    assert scenarios[0]["overrides"][0]["properties"] == {"width": 10}
+
+
+def test_list_scenarios_is_empty_when_nothing_varies(box):
+    assert list_scenarios(garden=GARDEN) == []
+
+
+def test_preview_simulation_can_be_run_under_a_scenario(box):
+    scenario_id = _scenario_over(box)
+
+    plain = preview_simulation(1, GARDEN)
+    assert plain["steps"][0]["changes"][0]["new_value"] == 12.0
+
+    varied = preview_simulation(1, GARDEN, scenario=scenario_id)
+    assert varied["steps"][0]["changes"][0]["new_value"] == 40.0
+    assert "area" not in get_mote(box["id"], GARDEN)["properties"]
+
+
+def test_the_scenario_relationship_types_are_reserved():
+    types = reserved_names()["relationshipTypes"]
+    assert {"overrides", "varies"} <= set(types)
+
+
+# ---- constraints ----
+
+
+def test_preview_simulation_reports_constraint_violations(box):
+    limit = create_mote({"name": "Too big", "equation": "area <= 5"}, GARDEN)
+    create_relationship(limit["id"], box["species_id"], APPLIES_TO, GARDEN)
+
+    result = preview_simulation(1, GARDEN)
+    assert result["error"] is None
+    assert len(result["constraint_violations"]) == 1
+    assert "Too big" in result["constraint_violations"][0]
+    # Advisory: the preview still produced its answer.
+    assert result["steps"][0]["changes"][0]["new_value"] == 12.0
+
+
+def test_preview_simulation_is_quiet_when_constraints_hold(box):
+    limit = create_mote({"name": "Fine", "equation": "area <= 100"}, GARDEN)
+    create_relationship(limit["id"], box["species_id"], APPLIES_TO, GARDEN)
+
+    assert preview_simulation(1, GARDEN)["constraint_violations"] == []
