@@ -501,6 +501,9 @@ main { flex: 1; min-height: 0; display: flex; }
   background: transparent; color: var(--accent); border-color: var(--accent);
 }
 .detail-row .portal-jump { color: var(--portal-ring); border-color: var(--portal-ring); }
+/* A note's row is a summary, not an editor (app.js::noteField) -- it
+   reads as inert so nobody types into it expecting the note to change. */
+.detail-row .note-summary { color: var(--muted); font-style: italic; cursor: default; }
 .detail-row .sparkline { flex-shrink: 0; align-self: center; opacity: 0.85; }
 
 /* ---- date/recurrence pickers (app.js::dateField/recurrenceField) ---- */

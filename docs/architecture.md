@@ -34,9 +34,9 @@ Folders have no effect on simulation or storage beyond the relationship itself: 
 
 # Roles
 
-Species, template, folder, property model, rule, portal and note are all the same idea: an ordinary mote that plays a **role** because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
+Species, template, folder, property model, rule and portal are all the same idea: an ordinary mote that plays a **role** because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
 
-`core/roles.py` is where it is answered, once. It is an index, not an implementation: each role's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()`, `has_modoc()` -- and the `ROLES` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for roles, and `docs/style.md` rules out the global mutable state a `register_role()` would need.
+`core/roles.py` is where it is answered, once. It is an index, not an implementation: each role's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()` -- and the `ROLES` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for roles, and `docs/style.md` rules out the global mutable state a `register_role()` would need.
 
 | role | recognized by |
 | --- | --- |
@@ -46,11 +46,10 @@ Species, template, folder, property model, rule, portal and note are all the sam
 | property model | target of `uses_model` |
 | rule | source of `applies_to` **and** carries an `equation` |
 | portal | carries `portal_garden` + `portal_mote` |
-| note | carries `modoc` |
 
 Two forms, one answer: `roles_in(motes, relationships)` for a caller holding an already-fetched subgraph (each role's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Roles are not exclusive -- a species can also be a folder, and a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
 
-`ui/api.py::focus()` and `library_snapshot()` return this as one `roles` map (mote id -> role names; motes with no role are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six roles hardcoded into the payload's shape -- the frontend had no way to hear about the other five, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a role is now a change to the table, not to a payload.
+`ui/api.py::focus()` and `library_snapshot()` return this as one `roles` map (mote id -> role names; motes with no role are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six roles hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a role is now a change to the table, not to a payload.
 
 Adapters must not answer "is this a species" for themselves. That is how a subtlety ends up true in one surface and false in another.
 
@@ -286,9 +285,15 @@ lookup, not a copy, so a note cannot go stale the way a typed-in number
 does. See `docs/modoc.md` for the language.
 
 Storage is one reserved property on an ordinary mote, and that is the
-whole design. A note is not a new object type; a mote carrying one plays
-the `note` role (Roles above) exactly as a mote carrying an `equation`
-plays `rule`. The consequence worth stating is what nobody had to build:
+whole design. A note is not a new object type, and carrying one is
+deliberately **not** a role (Roles above): every entry in that table is a
+job a mote does in the graph's machinery -- a rule solves, a portal
+navigates -- and `modoc` changes nothing about how a mote is treated. It
+is data, exactly like `url` and `date`, neither of which is a role
+either. This was briefly got wrong, and the cost was immediate and
+visible: because a role displaces the species in the detail panel's type
+label, a project that gained a note stopped reading as a project. The
+consequence worth stating is what nobody had to build:
 notes are inside `mote_history`, garden export/import, the UI's undo, and
 MCP's `update_mote` already, because they are properties. `.modoc` files
 exist only for import and export, and a file is exactly the property's
@@ -335,3 +340,12 @@ tree `core/` produced and `mora/payload.py` shaped, which is why the
 window and `monoss modoc render` cannot come to disagree about what a
 note means. Only the source pane's syntax highlighting runs in
 JavaScript, colour being presentation rather than meaning.
+
+The graph window reaches it through `ui/api.py::open_mora`, which spawns
+`run_mora.py` detached under `sys.executable` -- a sibling process, not a
+child window, so neither app's lifetime is tied to the other's. That
+makes two processes on one garden file the normal case rather than the
+exception, which is why `mora/api.py` sets `busy_timeout` on its
+connection for the same reason `mcp_server/server.py` does. `core/db.py`
+is deliberately left alone, so the CLI and the graph window keep the
+behavior they have.

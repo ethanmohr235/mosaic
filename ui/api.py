@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import threading
 import webbrowser
 from pathlib import Path
@@ -74,6 +75,12 @@ def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
         "error": result.error,
         "run_id": result.run_id,
     }
+
+
+# Mora, the .modoc note editor (docs/modoc.md), launched as its own
+# process rather than a second window on this one: it holds its own
+# garden connection and outlives or predeceases this window freely.
+MORA_SCRIPT = Path(__file__).resolve().parent.parent / "run_mora.py"
 
 
 def _popen_detached(args: list[str]) -> None:
@@ -412,6 +419,28 @@ class Api:
         else:
             _open_with_os_default(value)
         return {"opened": target}
+
+    @_synchronized
+    def open_mora(self, mote_id: str | None = None) -> dict:
+        """Open Mora on this garden, optionally straight to one mote's
+        note. Fire-and-forget, through the same detached launcher the
+        Open-link action uses, so nothing here blocks on a window that
+        may outlive this one.
+
+        `sys.executable` rather than a bare `python`: the app is running
+        in a specific virtualenv (docs/ui-setup.md), and the editor has
+        to come up in that same one.
+
+        The two processes then hold separate connections to the same
+        garden file. Neither observes the other's writes until it
+        refetches -- the same rule the MCP server already lives under
+        (docs/architecture.md) -- but nothing is lost either way, since
+        both write one property at a time."""
+        command = [sys.executable, str(MORA_SCRIPT), "--garden", self._current_garden]
+        if mote_id:
+            command += ["--note", mote_id]
+        _popen_detached(command)
+        return {"garden": self._current_garden, "note": mote_id}
 
     # ---- relationships ----
 

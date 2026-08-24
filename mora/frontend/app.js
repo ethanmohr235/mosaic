@@ -62,9 +62,14 @@ function colorOf(entry) {
   return `oklch(0.72 0.11 ${hueFor(entry.speciesId)})`;
 }
 
+/** What a mote *is*: the roles core says it plays, else its species,
+ *  else plain "mote". The same order ui/frontend/app.js::kindLabel uses,
+ *  so the two windows describe a mote the same way. */
 function kindOf(entry) {
-  const roles = (entry && entry.roles) || [];
-  return roles.length ? roles[0].replace(/_/g, " ") : "mote";
+  if (!entry) return "mote";
+  const roles = entry.roles || [];
+  if (roles.length) return roles.map((r) => r.replace(/_/g, " ")).join(" · ");
+  return entry.speciesName || "mote";
 }
 
 // ---- small DOM helpers --------------------------------------------

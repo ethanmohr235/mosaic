@@ -143,6 +143,15 @@ def test_focus_returns_relationships_with_their_direction(api, project):
     assert all(r["outgoing"] for r in panel["relationships"])
 
 
+def test_focus_names_the_species_so_the_panel_can_say_what_a_mote_is(api, project):
+    """Carrying a note is not a role (core/roles.py), so a note mote has
+    no role to label it -- its species is what "what is this?" wants."""
+    task = next(r["other"]["id"] for r in api.focus(project)["relationships"])
+    panel = api.focus(task)
+    assert panel["roles"] == []
+    assert panel["speciesName"] == "Task"
+
+
 def test_focus_on_a_missing_mote_returns_nothing(api):
     assert api.focus("nope") is None
 

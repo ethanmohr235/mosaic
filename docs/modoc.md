@@ -16,9 +16,9 @@ cannot go stale the way a number typed into a paragraph does.
 ## Where a note lives
 
 In the reserved `modoc` property of an ordinary mote. That is the whole
-storage design: a note is not a new object type, and a mote carrying one
-plays the `note` role (`core/roles.py`) the same way a mote carrying an
-`equation` plays `rule`. It follows that a note is inside mote history,
+storage design: a note is not a new object type, and carrying one is not
+a role either -- it is data, like `url` or `date`. A project with a note
+on it is still a project. It follows that a note is inside mote history,
 garden export, undo and MCP's `update_mote` without any of them being
 taught about notes.
 

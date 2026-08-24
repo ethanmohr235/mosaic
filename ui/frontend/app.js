@@ -784,11 +784,36 @@ async function openDetailPanel(moteId) {
   $("detail-id").textContent = mote.id;
 
   renderProperties(displayMote, history, mote);
+  renderNoteSection(mote);
   renderSpeciesSection(mote, species, instances);
   renderFolderSection(mote, folders, members);
   renderRelationships(moteId, rels);
   $("detail-panel").classList.remove("hidden");
   fitAllTextareas();
+}
+
+/** A mote's note is edited in Mora, not here -- .modoc is a document
+ *  format with live bindings in it (docs/modoc.md), and a one-line text
+ *  box in a side panel is the wrong instrument for one. So the panel
+ *  offers the door rather than the room, and says which side of it the
+ *  mote is on. */
+function renderNoteSection(mote) {
+  const button = $("open-note-btn");
+  const has = typeof mote.properties.modoc === "string";
+  button.textContent = has ? "Open note…" : "Write a note…";
+  button.title = has
+    ? "Open this mote's note in Mora"
+    : "Open Mora on this mote and start a note";
+  button.onclick = () => openMora(mote.id);
+}
+
+function openMora(moteId) {
+  call(api.open_mora(moteId || null));
+  showToast(
+    moteId
+      ? "Opening Mora… notes saved there appear here after a refocus."
+      : "Opening Mora…",
+  );
 }
 
 function withSimOverlay(mote) {
@@ -1062,9 +1087,25 @@ function valueField(key, rawValue, onCommit) {
     const parsed = parseDateValue(text);
     if (parsed) return dateField(parsed, onCommit);
   }
+  if (key === "modoc") return noteField(text);
   if (key === "recurrence") return recurrenceField(text, onCommit);
   if (key === "provider") return providerField(text, onCommit);
   return plainField(text, onCommit);
+}
+
+/** A note's source, summarized and read-only. Every other property is
+ *  editable in place; this one is a whole document, and rendering it
+ *  into an inline field would both bury the rest of the panel and put a
+ *  note one stray keystroke from being overwritten. The row still
+ *  deletes like any other -- removing a note is an ordinary property
+ *  delete, because that is all it is. */
+function noteField(text) {
+  const lines = text.split("\n").length;
+  const field = plainField(`${lines} line${lines === 1 ? "" : "s"} — edit in Mora`, () => {});
+  field.readOnly = true;
+  field.classList.add("note-summary");
+  field.title = text.slice(0, 400);
+  return field;
 }
 
 /** A plain text box with the registered providers as completions. Text,
@@ -1388,6 +1429,17 @@ function renderProperties(mote, history, baseMote) {
     if (values && values.length > 1) {
       const color = simPreview && simPreview.mode === "history" ? "oklch(0.62 0.19 300)" : undefined;
       trailing.push(renderSparkline(values, simPreview ? "ticks" : "runs", color));
+    }
+    // "modoc" is a note (docs/modoc.md) -- same one-click-to-follow
+    // treatment url and portal_mote get below, since the row itself is
+    // deliberately only a summary.
+    if (key === "modoc" && typeof value === "string") {
+      const open = document.createElement("button");
+      open.className = "open-link";
+      open.textContent = "↗";
+      open.title = "Open in Mora";
+      open.addEventListener("click", () => openMora(mote.id));
+      trailing.push(open);
     }
     if (key === "url" && typeof value === "string" && value.trim()) {
       const open = document.createElement("button");
@@ -3169,6 +3221,14 @@ async function enterRunScrub(runId) {
   renderRunsPanel();
 }
 
+function setupMora() {
+  $("open-mora-btn").addEventListener("click", () => {
+    closeTopMenus();
+    openMora(null);
+  });
+}
+
+
 function setupRunsPanel() {
   $("toggle-runs-panel-btn").addEventListener("click", () => {
     closeTopMenus();
@@ -3424,6 +3484,7 @@ async function init() {
   setupViewSettings();
   setupSimulation();
   setupRunsPanel();
+  setupMora();
   setupCalendarExport();
   setupContextMenu();
   setupKeyboard();

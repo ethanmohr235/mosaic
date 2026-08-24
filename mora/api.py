@@ -30,13 +30,19 @@ from core import modoc_bind
 from core import motes as motes_repo
 from core import simulation as simulation_repo
 from core.db import get_connection, initialize_database
-from core.roles import NOTE, ids_with_role
 from mora import payload as payload_repo
 
 logger = logging.getLogger(__name__)
 
 MAX_STEP = 60
 _SEARCH_LIMIT = 12
+# How long a write waits out a lock held by another process before
+# giving up. Mora is opened *from* the graph window (ui/api.py::
+# open_mora), so two processes holding the same garden file open at
+# once is the normal case here, not the exception -- the same reason
+# mcp_server/server.py sets this. core/db.py stays untouched, so the
+# CLI and the main UI keep their current behavior exactly.
+_BUSY_TIMEOUT_MS = 5000
 
 
 def _synchronized(method):
@@ -64,9 +70,14 @@ class Api:
         # `run_mora.py --note <id>`: the frontend opens whatever it was
         # last on, so the command line has to be able to say otherwise.
         self._initial_note = note
-        self._conn = get_connection(self._garden)
-        initialize_database(self._conn)
+        self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
+
+    def _open(self, garden: str):
+        conn = get_connection(garden)
+        conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+        initialize_database(conn)
+        return conn
 
     @_synchronized
     def shutdown(self) -> None:
@@ -86,8 +97,7 @@ class Api:
     def switch_garden(self, name: str) -> dict:
         resolved = gardens_repo.resolve_garden(name)
         self._conn.close()
-        self._conn = get_connection(resolved)
-        initialize_database(self._conn)
+        self._conn = self._open(resolved)
         self._garden = resolved
         return {"garden": resolved}
 
@@ -95,13 +105,18 @@ class Api:
 
     @_synchronized
     def list_notes(self) -> list[dict]:
-        """Every mote carrying a note. `note` is a role like any other
-        (core/roles.py), so this is the same question the main app's
-        detail panel asks, not a second definition of what a note is."""
+        """Every mote carrying a note.
+
+        Asked of the property, not of core/roles.py, because carrying a
+        note is deliberately not a role: every role in that table is a
+        job a mote does in the graph's machinery, and `modoc` changes
+        nothing about how a mote is treated -- it is data, like `url` or
+        `date`, neither of which is a role either. Making it one meant a
+        project that gained a note stopped reading as a project, since a
+        role displaces the species in the main app's type label."""
         motes, relationships = graph_repo.whole_garden(self._conn)
         directory = payload_repo.Directory.of(motes, relationships)
-        note_ids = set(ids_with_role(NOTE, motes, relationships))
-        notes = [directory.describe(m.id) for m in motes if m.id in note_ids]
+        notes = [directory.describe(m.id) for m in motes if modoc.has_modoc(m.properties)]
         return sorted(notes, key=lambda n: n["name"].casefold())
 
     @_synchronized
@@ -124,8 +139,8 @@ class Api:
         }
 
     def _default_note(self) -> str | None:
-        motes, relationships = graph_repo.whole_garden(self._conn)
-        existing = ids_with_role(NOTE, motes, relationships)
+        motes, _ = graph_repo.whole_garden(self._conn)
+        existing = [m.id for m in motes if modoc.has_modoc(m.properties)]
         return existing[0] if existing else graph_repo.most_recent_mote_id(self._conn)
 
     @_synchronized

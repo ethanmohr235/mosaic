@@ -46,11 +46,18 @@ class Directory:
     def describe(self, mote_id: str | None) -> dict:
         mote = self.motes.get(mote_id) if mote_id else None
         if mote is None:
-            return {"id": mote_id, "name": mote_id or "", "speciesId": None, "roles": []}
+            return {"id": mote_id, "name": mote_id or "", "speciesId": None,
+                    "speciesName": None, "roles": []}
+        species_id = self._species_id(mote.id)
+        species = self.motes.get(species_id) if species_id else None
         return {
             "id": mote.id,
             "name": name_of(mote),
-            "speciesId": self._species_id(mote.id),
+            "speciesId": species_id,
+            # The name as well as the id: the id colours the mote, the
+            # name is what "what is this?" actually wants -- "Project",
+            # not a UUID, and not the bare word "mote".
+            "speciesName": name_of(species) if species else None,
             "roles": self.roles.get(mote.id, []),
         }
 

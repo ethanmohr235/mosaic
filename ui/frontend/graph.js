@@ -19,7 +19,6 @@ const ROLE = {
   PROPERTY_MODEL: "property_model",
   RULE: "rule",
   PORTAL: "portal",
-  NOTE: "note",
 };
 
 // Human labels for the same, shown in the detail panel and search
@@ -31,7 +30,6 @@ const ROLE_LABEL = {
   property_model: "Property model",
   rule: "Rule",
   portal: "Portal",
-  note: "Note",
 };
 
 /** The mote ids playing `role`, out of the roles map ui/api.py returns.

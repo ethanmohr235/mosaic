@@ -86,7 +86,8 @@ view) -- the first way to reclaim that screen space, persisted across
 restarts -- and "Advanced view settings…" (below); Tools hosts the
 simulation step count and the Simulate…/Exit
 simulation trigger for the same non-blocking preview/scrub/commit bar
-described above. A handful of items (Export as CSV, Print graph,
+described above, plus "Notes (Mora)…", which opens the note editor on
+the current garden (see Mora, below). A handful of items (Export as CSV, Print graph,
 Timeline view, Group by type, Automations, Webhooks, API access) are
 inert placeholders with a small "soon" badge, staged for future
 expansion -- clicking one just toasts an explanation rather than doing
@@ -324,6 +325,32 @@ closes independently of the graph window.
 ./run_mora.py --note <mote id>      # straight to one mote's note
 ```
 
+### Opening it from the graph
+
+Three ways, all of them the same launch with different arguments:
+
+| Where | Opens |
+|---|---|
+| Tools → **Notes (Mora)…** | Mora on the current garden |
+| Detail panel → **Write a note… / Open note…** | Mora on the selected mote |
+| Detail panel → the `modoc` row's ↗ | the same, from the property itself |
+
+`ui/api.py::open_mora` spawns it detached with `sys.executable` -- the
+virtualenv the app is already running in -- so it is a sibling process,
+not a child window, and closing the graph does not close it.
+
+Two consequences worth knowing. The two processes hold separate
+connections to the same garden file, so neither sees the other's writes
+until it refetches -- refocus the graph after saving in Mora. Nothing is
+lost either way: both write one property at a time, so editing a mote in
+the panel never clobbers a note saved next door.
+
+A note is a property like any other, so it also appears in the detail
+panel's Properties list -- as a `N lines — edit in Mora` summary rather
+than an editable field, because a document is not a thing to edit through
+a one-line box in a side panel. Deleting it is an ordinary property
+delete, because that is all it is.
+
 With neither flag it opens the first mote in the garden that already
 carries a note, and otherwise the most recent mote -- as an empty page to
 start writing on, not an error. `docs/modoc.md` is the language; this is
@@ -357,7 +384,12 @@ and checks that the note renders, that `\val` and `\mote` resolve (and
 visibly fail when they can't), that both `\graph` forms draw, that a link
 moves the data panel and back returns, that the stepper projects without
 writing, that Save writes only the note, and that no uncaught JS errors
-were logged.
+were logged. The entry points *into* Mora belong to the main window, so
+they are checked by `scripts/ui_smoke_test.py` instead, with `open_mora`
+stubbed -- an automated suite has no business spawning a second app.
+
+Run the two one at a time. Both drive real windows with synthetic
+gestures, and the timing-sensitive checks flake when they compete.
 
 ```
 .venv/bin/python scripts/mora_smoke_test.py
