@@ -212,6 +212,12 @@ class Api:
         step = int(step)
         if step < 1:
             raise ValueError("Nothing to apply at t+0 -- that is the garden as it stands.")
+        if step > MAX_STEP:
+            # Same bound render() clamps a preview to. The frontend never
+            # asks past MAX_STEP either (see mora/frontend/app.js), but
+            # this method commits to the graph, so it checks for itself
+            # rather than trusting the caller stayed in range.
+            raise ValueError(f"Can't apply past t+{MAX_STEP} -- that's the simulation preview's own limit.")
         result = simulation_repo.run_time_series(self._conn, step, commit=True)
         return {
             "steps": simulation_repo.step_payloads(result.steps),

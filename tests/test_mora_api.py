@@ -177,6 +177,13 @@ def test_apply_step_refuses_t_zero(api, project):
         api.apply_step(0)
 
 
+def test_apply_step_refuses_past_max_step(api, project):
+    # render() clamps a preview to MAX_STEP; apply_step commits to the
+    # graph, so it must not silently truncate or run past that bound.
+    with pytest.raises(ValueError):
+        api.apply_step(MAX_STEP + 1)
+
+
 # ---- gardens ----
 
 def test_switch_garden_moves_the_connection(api, project):
