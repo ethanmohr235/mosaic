@@ -30,7 +30,7 @@ def project(api):
     """A project of two tasks, one of which a rule advances, so both a
     plain and a projected render have something to say."""
     conn = api._conn
-    species = create_mote(conn, {"name": "Task", "unknowns": "progress"})
+    species = create_mote(conn, {"name": "Task", "freedoms": "progress"})
     rule = create_mote(conn, {"name": "Grow", "equation": "progress == prev(progress) + 10"})
     create_relationship(conn, rule, species, "applies_to")
 

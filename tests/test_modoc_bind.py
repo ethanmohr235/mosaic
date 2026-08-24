@@ -16,7 +16,7 @@ from core.relationships import create_relationship
 def garden(conn):
     """A project of three tasks whose `progress` a rule advances by 10 a
     step, so every value in these tests has a knowable t+N."""
-    species = create_mote(conn, {"name": "Task", "unknowns": "progress"})
+    species = create_mote(conn, {"name": "Task", "freedoms": "progress"})
     rule = create_mote(conn, {"name": "Grow", "equation": "progress == prev(progress) + 10"})
     create_relationship(conn, rule, species, "applies_to")
 

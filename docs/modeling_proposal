@@ -1,0 +1,976 @@
+# MonOSS Relations, Roles, Freedoms, and Scenarios
+
+> **Decisions taken.** Reviewed and settled before implementation:
+>
+> 1. Names confirmed: `roles`, `varies`, `overrides`.
+> 2. **`unknowns` is renamed to `freedoms`** -- key and all -- rather than
+>    keeping a solver's word for a modeling concept (§3c). Existing
+>    gardens are migrated on open (§3d).
+> 3. Rule scope is **inferred from the `applies_to` target**, not
+>    expressed with a second relationship type (§2e).
+> 4. Comparison relations (§6) are in scope for v1, advisory.
+> 5. Each phase ships in `core/`, `cli/` and `mcp_server/`; the
+>    Observatory is a single pass at the end (§10), so no frontend is
+>    built twice against a shape still moving.
+
+> **Revision note: Phase 1 (provenance) is implemented.** `core/provenance.py`,
+> `core/derivations.py`, three tables in `core/db.py`, `why` in both CLI
+> surfaces and the MCP server, `tests/test_provenance.py`. Five things
+> changed on contact with the code.
+>
+> 1. **A solver block's equations have to be filtered.** §5 assumed the
+>    remainder handed to a backend *is* the block. It isn't: the
+>    substitution loop leaves behind equations it already used up. Once
+>    `voltage == 0` has determined a ground node, re-evaluating it yields
+>    the trivially true `0 == 0`, which stays in the open set and
+>    constrains nothing -- but listing it as a reason for the answer would
+>    be false. `_contributors()` keeps only equations whose terms
+>    intersect the values the backend actually returned.
+> 2. **A derivation stores its values, not just their addresses.** §5b's
+>    table had a `value` column but §5's prose treated a block as
+>    equations plus outputs. Reading the number back from
+>    `simulation_changes` instead would mean reconciling two records that
+>    are in different units, so a derivation is self-contained.
+> 3. **A discarded preview records nothing.** Recording costs a wrapper
+>    per equation per pass, and a preview that is never committed or saved
+>    can never be read back -- committing re-solves from the database, and
+>    *that* solve is the one recorded. This is why the "records nothing
+>    without a journal" path exists rather than being hypothetical.
+> 4. **A deferred equation's inputs are partial, deliberately.** An
+>    equation that stays nonlinear in its unknowns raises part-way through
+>    evaluation, so what was recorded is the reads that happened before it
+>    gave up. Those reads are real; they are simply not the whole story,
+>    which is why a solver block's record leads with its equations rather
+>    than claiming to account for every input.
+> 5. **`cli/render.py` is new.** `cli/main.py` and `cli/repl.py` had each
+>    grown their own copy of the small printers. An explanation tree is
+>    recursive and too big to copy -- two copies would drift into two
+>    different accounts of one run -- so the renderer is shared and
+>    returns lines rather than printing them.
+>
+> One thing §5 got right that was worth the trouble: the substitution loop
+> really is a derivation generator that was throwing its work away, and
+> capturing it needed no change to `core/formula.py` at all.
+
+> **Revision note: Phase 2 (the derived index) is implemented.**
+> `core/incidence.py`, `incidence_index()` in `core/simulation.py`, four
+> commands in both CLI surfaces and four MCP tools,
+> `tests/test_incidence.py`. Four things changed on contact with the code.
+>
+> 1. **A missing property is invisible to a probe that reads it.** §5d
+>    assumed the probe technique gives a complete picture. It does not:
+>    `core/formula.py` raises on a property no mote holds, *before* the
+>    read is recorded, so the single most useful thing `requires` can
+>    report was the one thing it could not see. Reads during analysis are
+>    now permissive -- a properties dict that answers for keys it does not
+>    have -- which lets the walk finish and records the absence. Safe only
+>    because nothing there is solving; while solving, a missing property
+>    must stay an error.
+> 2. **`producers` and `consumers` are decided by freedom, not by the
+>    equation.** §25 of the original proposal, and my own summary of it,
+>    implicitly assumed each equation has one producer role. In a
+>    constraint system `c == b + 1` produces `b` exactly as much as `c`,
+>    and which it determines depends on what else is known when the solve
+>    runs. A test written the DAG way failed, and the code was right:
+>    every equation touching a free value is a producer of it, `consumers`
+>    covers only values that are not free, and the two never overlap. An
+>    empty `producers` therefore means *nothing can determine this*, which
+>    turned out to be the most valuable diagnostic in the phase.
+> 3. **`_RecordingKnown` and provenance's recording dict were the same
+>    class.** `_defer`'s probe and Phase 1's read recorder intercept
+>    `Context.solved` at the same point for different questions
+>    (membership vs. value). Keeping two would have meant they could not
+>    be used together, which the index needs. They are now one
+>    `RecordingSolved` in `core/provenance.py`, and `_defer`'s
+>    hand-rolled probe became the shared `_probe()`.
+> 4. **`impact` distance is hops, not causality.** Worth stating in the
+>    output rather than leaving implied: everything in a coupled block is
+>    found at once, so distance orders the display, not the solve.
+>
+> The no-drift goal came out stronger than planned. Rather than testing
+> that the index agrees with the solver, `core/incidence.py` holds no
+> parser at all -- it is graph math over touch sets produced by the real
+> evaluator -- so there is no second interpretation that *could* drift.
+> The drift test asserts that structure (no `ast` import, no evaluator
+> calls) as well as the fact that `_touch` goes through `_probe`.
+
+> **Revision note: Phase 3 (roles) is implemented.** `core/roles.py`,
+> role resolution in both `core/formula.py` and `core/dimensions.py`,
+> scope inference in `core/rules.py`, `check_roles()`, `roles check` in
+> both CLI surfaces, an MCP tool, `scripts/example_rankine_cycle.py`,
+> `tests/test_roles.py`. §2a held up exactly as written -- multi-mote
+> relations already worked, and this phase added only the declaration.
+> Five things changed on contact with the code.
+>
+> 1. **`once` scope is half-useful until Phase 4, and the plan did not
+>    see the dependency.** §2e treats widening `applies_to` as
+>    self-contained, but a rule can only determine values its mote is
+>    *free* to change, and freedoms are still declared on a species. So a
+>    mote with no species has no freedoms, and a one-off rule can read
+>    anything but write only to a mote that is an instance of something.
+>    Phase 4 removes the limit; until then it is documented rather than
+>    worked around.
+> 2. **Roles needed a second declaration site.** §2c put `roles` on the
+>    species only. That leaves a one-off assembly -- exactly what §2e's
+>    single-mote scope is for -- unable to name its parts without
+>    inventing a species with one instance, which is the workaround the
+>    phase exists to remove. `roles` on a mote acting as a species now
+>    declares what its instances have; on any other mote it declares what
+>    that mote itself has. One reading, decided by the test
+>    `core/species.py` already uses.
+> 3. **The example was added, not rewritten.** §10 said to rewrite
+>    `scripts/example_steam_turbine.py`. On contact that is the wrong
+>    move: it demonstrates property models over *two instances of one
+>    species*, and `docs/physical_property_proposal` and
+>    `docs/simulation.md` both point at it for that. The cycle is a new
+>    `scripts/example_rankine_cycle.py`, and the old one now says which
+>    is which.
+> 4. **`impact` is a sound over-approximation, which the cycle made
+>    obvious.** Running it on the finished example lists the pump's
+>    specific volume among the values a change in boiler temperature
+>    could move -- true structurally (they share an equation), false
+>    numerically (the volume is pinned by its own inlet state). The
+>    analysis knows an equation relates several values, not which of them
+>    a given solve will pin. "Could move" is meant literally; tightening
+>    it would mean predicting the solve. Now stated in §5's docs rather
+>    than left for someone to discover.
+> 5. **`Rule.species_id` became `Rule.target_id`.** It holds a species
+>    only in the `each` case now, and had exactly one consumer.
+>
+> Unrelated pre-existing bug, found and not fixed: the older example
+> scripts say "re-run it and it rebuilds from scratch", but
+> `create_garden` raises `FileExistsError` on the second run. The new
+> example checks `garden_exists` first; the other three still need it.
+
+> **Revision note: Phase 4 (freedoms) is implemented.** The
+> `unknowns` -> `freedoms` rename across `core/`, `cli/`, `mcp_server/`,
+> every example script and every doc; the migration in `core/db.py`; the
+> mote-then-species resolution order in `_freedoms_for()`;
+> `tests/test_freedoms.py` and four migration tests. §3 held up almost
+> exactly. Three things worth recording.
+>
+> 1. **The declaration-reading rule had to be unified with roles, and
+>    that made both simpler.** §3b's resolution order says nothing about
+>    a *species mote's own* freedoms. Read naively, a species declaring
+>    `freedoms: "voltage"` would become solvable for its own voltage --
+>    every species in every garden suddenly carrying an unsolved freedom.
+>    Phase 3 had already answered this for `roles`, so freedoms now use
+>    the same test: a declaration property on a mote acting as a species
+>    describes its *instances*; on any other mote it describes that mote
+>    itself. `_acting_as_species()` is computed once in `_build_view()`
+>    and shared. One rule for both, and a mote never has to work out
+>    which of its properties are about it.
+> 2. **Freedoms replace, roles merge.** §3b specified replacement, and it
+>    is right -- narrowing is the whole point, and it is what lets one
+>    resistor be rated while its sibling is sized. But the same choice
+>    would be wrong for roles: a part an assembly has *in addition* is
+>    far more common than one it must be denied. The two properties are
+>    read the same way and combined differently, and both docstrings now
+>    say why.
+> 3. **The Phase 3 limitation is gone.** A rule asserted `once` about a
+>    mote with no species could previously read anything and write
+>    nothing. That mote can now declare its own freedoms, so a one-off
+>    assembly needs no species at all --
+>    `test_a_once_scoped_rule_can_now_write_to_a_species_less_mote`
+>    covers exactly the case Phase 3 had to document as a gap.
+>
+> The migration is scoped to motes acting as a species, skips any mote
+> that already has a `freedoms` key, and is idempotent -- so a garden
+> where someone set the new key by hand keeps it, and an ordinary
+> property a user happened to name `unknowns` is never touched.
+
+> **Revision note: Phase 5 (scenarios) is implemented.**
+> `core/scenarios.py`, a `scenario_id` column on `simulation_runs`, an
+> optional `scenario` on both run shapes and on `incidence_index()`,
+> `scenario list`/`show` and `simulate run --scenario` in both CLI
+> surfaces, `list_scenarios` and `preview_simulation(scenario=...)` in
+> MCP, `tests/test_scenarios.py`. §4c's central claim held exactly --
+> `_build_view` being pure since the units work meant a scenario is one
+> pure function inserted ahead of another, and no solver, unit,
+> dimension or provenance code changed at all. Four things §4 did not
+> say.
+>
+> 1. **Override motes must be excluded from every run, not just scenario
+>    runs.** §4b says an override is "excluded from runs unless a
+>    scenario selects it", which reads as a scenario-time concern. It is
+>    not: an override sitting in the graph declaring `freedoms` becomes
+>    solvable in its own right, and its replacement values get read as
+>    some mote's real state. They are now dropped in `_build_view`
+>    itself, which is the same exclusion `template_mote_ids()` already
+>    exists for -- and the parallel is exact, since both hold values that
+>    belong to something else.
+> 2. **"Never commits" needed splitting between the two run shapes.**
+>    `run_simulation` always wrote, so with a scenario it now solves,
+>    logs uncommitted, and reports what *would* change.
+>    `run_time_series(commit=True)` instead **refuses**, because there
+>    `commit` is an explicit request rather than the default -- silently
+>    downgrading it would be worse than an error.
+> 3. **An unknown scenario id is an error, not a fallback.** Quietly
+>    running the unperturbed garden when asked for a scenario that does
+>    not exist means answering a different question than the one asked.
+>    A mote with no `varies` relationship is not an empty scenario; it is
+>    not a scenario.
+> 4. **No `name` special case.** The temptation was to exempt `name` so
+>    an override would not rename its target. Rejected: a template
+>    supplies every property it carries to a new instance, and an
+>    override should be read the same way. "Name it for what the target
+>    becomes" is one rule instead of one rule plus an exception.
+>
+> Two additions beyond the plan, both nearly free. `simulation_runs`
+> gained a `scenario_id` column, without which §4d's comparison of runs
+> across scenarios could not be done at all. And `incidence_index()`
+> takes a scenario, so "what would this make determinable, and what would
+> it leave missing" can be asked structurally before anything is
+> solved -- which matters most for exactly the scenarios that change
+> `freedoms` rather than values.
+
+> **Revision note: Phase 6 (comparison relations) is implemented.** The
+> parser change in `core/formula.py`, splitting and checking in
+> `core/simulation.py`, `constraint_violations` on both result shapes,
+> `--strict-constraints`, two constraints added to
+> `scripts/example_rankine_cycle.py`, `tests/test_constraints.py`. §6's
+> claim that this costs a parser change and no second expression language
+> held exactly -- constraints get dimension checking, unit conversion,
+> roles and `property()` for free, because they were never a different
+> kind of thing. Three notes.
+>
+> 1. **The "may not declare freedoms" guard became structural instead.**
+>    §6 proposed a rule forbidding a comparison from declaring freedoms.
+>    That is the wrong shape: freedoms are declared on motes, not on
+>    rules, so there was nothing to forbid. What was actually needed is
+>    that a constraint never *reaches* a solver, which `_split_relations`
+>    now guarantees before anything is solved. The guard is the absence
+>    of a code path rather than a check -- and it also settles
+>    `core/incidence.py`, where a constraint must not appear among a
+>    value's producers.
+> 2. **"Unchecked" had to be a reported outcome, not silence.** §6 said a
+>    constraint with unsolved unknowns is "reported as unchecked", which
+>    turned out to be the more important half of the feature: silence is
+>    indistinguishable from passing, so a limit nobody could evaluate is
+>    exactly the one worth naming. It counts as a problem under
+>    `strict_constraints` too.
+> 3. **Non-strict comparisons need the tolerance; strict ones must not
+>    have it.** `x <= 0.3` with `x` landing on `0.1 + 0.2` has to pass,
+>    but giving `<` the same slack would make it mean `<=`, which is the
+>    whole of the difference between them.
+>
+> `parse_equation` keeps its name while now returning a `Relation` --
+> "equation" is still what every case the solver acts on is, and the one
+> other caller (`core/dimensions.py`) cares about the two sides rather
+> than the operator, so inequalities became dimension-checked without
+> touching that walk at all.
+
+> **Revision note: Phase 7 (the Observatory) is implemented.** Seven new
+> `ui/api.py` methods, a `?` panel on every numeric property, a scenario
+> picker beside the solver picker, an advisory area on the sim bar, and
+> "Check roles…" in Tools. Deliberately a *pass*, not a redesign: no
+> existing panel was rearranged, and everything added hangs off surfaces
+> that were already there. Four notes.
+>
+> 1. **`why` and the dependency queries answer different questions from
+>    different places, and the panel has to say so.** `why` reads the run
+>    log and needs a run to have happened; `requires`/`impact` read the
+>    rules and answer before anything is solved. Showing them in one
+>    block is right -- "how it was found" beside "what it rests on" -- but
+>    a user who sees one populated and the other empty needs to know that
+>    is normal, so the headings name the difference rather than reading as
+>    one feature that half-failed.
+> 2. **The base-unit caveat had to reach the GUI.** The inspector shows
+>    each mote's declared unit; a derivation shows base SI. Side by side
+>    in one panel that is genuinely confusing, so the block says which it
+>    is showing. This is the first place the two representations have ever
+>    been visible at once.
+> 3. **The three dependency queries became one API call.** The index is
+>    rebuilt per call by design, so three round trips would rebuild it
+>    three times to fill one panel. `dependencies()` returns what the
+>    panel shows, which is also the only shape any caller wanted.
+> 4. **A scenario name is user data.** The solver picker interpolates
+>    names into `innerHTML` safely because they come from a registry;
+>    scenario names are ordinary mote properties. The picker is built with
+>    `createElement`/`textContent` instead, which needs no escaper and
+>    cannot be made to mean markup.
+>
+> `commit_simulation` deliberately did *not* gain a `scenario` argument.
+> The engine refuses to commit a scenario run, so offering the parameter
+> would only create a call that always fails; the Commit button is hidden
+> instead, and Save carries the scenario through.
+
+## Objective
+
+Split the rule mote into its actual parts, and take the abstractions
+that fall out of that split.
+
+A rule mote today carries five distinct responsibilities smeared across
+two motes and one expression syntax. This proposal gives each one an
+ordinary, visible home in the graph, so that the rule mote keeps exactly
+one thing -- **the mathematics** -- and everything it was implicitly
+carrying becomes something the user can see, edit, and query.
+
+The decomposition is not the goal on its own. Three of the four homes it
+creates are abstractions MonOSS does not have and would clearly benefit
+from: **roles** (a relation over several motes, not one), **freedoms**
+(what a specific mote is free to have determined, not what its type is),
+and **scenarios** (a named perturbation of the garden, so one graph can
+hold more than one answer). The fifth home, **provenance**, is the thing
+that makes any of it explicable.
+
+This proposal deliberately does **not** adopt the directed-computation
+architecture of `docs/modeling_architecture_proposal.md`. MonOSS solves
+undirected constraint systems; a directed computation is the degenerate
+case, not the foundation. See §9 for what is being declined and why.
+
+---
+
+## 0. Diagnosis: what a rule mote actually carries
+
+A rule today is a mote with an `equation` property and an `applies_to`
+relationship pointing at a species (`core/rules.py`). The species
+separately carries an `unknowns` property. Between them, five different
+things are being expressed:
+
+| # | Responsibility | Where it lives now | Problem |
+|---|---|---|---|
+| 1 | **The statement.** `voltage == current * resistance` | `equation` on the rule mote | None. This part is right. |
+| 2 | **Scope.** For which motes is it asserted? | `applies_to` edge to a species | Only ever "every instance of one species". A relation can't be asserted about one specific mote, or about a group. |
+| 3 | **Binding.** How do names resolve to motes? | Baked into the *syntax*: bare names anchor on the current mote, `targets('a').v` navigates | Undeclared and unchecked. A mis-wired graph fails at solve time with "found 0 motes", not at check time. |
+| 4 | **Freedom.** Which properties may the solver determine? | `unknowns` on the *species* | Named for the solver, not the model, and in the wrong mote entirely -- and at the wrong granularity: solvability is asserted about a *type*, when it is a fact about a particular *problem*. |
+| 5 | **Provenance.** Why is the answer what it is? | Nowhere | `simulation_changes` records that a value changed, never which equation and which inputs produced it. |
+
+Responsibility 4 is the sharpest smell: the rule states the relation but
+a *different mote* decides what the relation is allowed to determine.
+Reading a rule tells you nothing about whether it will solve.
+
+### The principle
+
+> **The rule keeps the mathematics. Scope lives on the edge, binding
+> lives in the graph, freedom lives on the mote that has it, and
+> provenance lives in the log.**
+
+Note what this does *not* require: no new object types, no `Computation`,
+no tables for structure. Scope is already an edge. Binding is already a
+relationship. Freedom is already a property. The work is moving three
+things to where they belong and writing down the fourth.
+
+---
+
+## 1. The target decomposition
+
+| Concern | Today | Proposed |
+|---|---|---|
+| Statement | `equation` on rule mote | unchanged |
+| Scope | `applies_to` → species | `applies_to` → species **or a single mote**, inferred from the target |
+| Binding | implicit anchor + inline `targets()` | **roles**: a relationship type, declared on the species, addressed as `role.property` |
+| Freedom | `unknowns` on species | **`freedoms`** on the **mote**, defaulting to its species, overridable by a **scenario** |
+| Provenance | -- | derived **derivation log** (§5) |
+
+Every row either narrows the rule mote's job or gives an existing
+implicit thing an explicit home. Nothing is added that isn't already
+being expressed somewhere less visibly.
+
+---
+
+## 2. Roles: a relation over several motes
+
+### 2a. This already works
+
+The most important finding in writing this proposal: **multi-mote
+relations are already solvable today.** `core/formula.py`'s `_attribute`
+calls `_lookup(ctx, mid, node.attr)` against the *navigated* mote's id,
+and `_lookup` checks that mote's own declared unknowns. So a navigated
+property can be an unknown, and the solver writes back to whichever mote
+owns it. The voltage-divider example depends on exactly this:
+
+```text
+OHMS_LAW = "targets('a').voltage - targets('b').voltage == current * resistance"
+```
+
+`voltage` there is an unknown on two *remote* node motes, determined by a
+rule anchored on the resistor. The engine has been solving multi-mote
+systems since it was written.
+
+What is missing is not capability. It is **declaration** -- there is no
+way to say what a relation expects to be wired to, so nothing can be
+checked, inspected, or suggested. And the syntax makes the wiring look
+like an incidental detail of the formula rather than part of the model.
+
+### 2b. A role is a relationship type
+
+No new concept. Given
+
+```text
+Rankine Cycle #1 --turbine--> HP Turbine
+Rankine Cycle #1 --boiler---> Boiler A
+Rankine Cycle #1 --condenser-> Condenser A
+```
+
+the role names *are* the relationship types. A rule anchored on the
+cycle mote reaches its participants by navigating them. This is what
+`docs/modeling_architecture_proposal.md` wanted `model_participants` and
+`participant_bindings` tables for; in a monist graph it is four ordinary
+edges and zero new storage. A role may point at another assembly, so
+composition and hierarchy come free.
+
+### 2c. Declare roles on the species
+
+A new reserved property, `roles`, on a species mote -- a dict mapping
+role name to what may fill it:
+
+```json
+{
+  "turbine":   {"species": "Turbine", "arity": "one"},
+  "boiler":    {"species": "Boiler",  "arity": "one"},
+  "feedwater": {"species": "Heater",  "arity": "many"}
+}
+```
+
+`species` is optional (a role may be untyped). `arity` defaults to
+`"one"`. This mirrors `units` exactly: a dict-valued reserved property,
+opt-in, recognized by convention and enforced nowhere in the schema.
+
+The declaration buys three things the graph cannot currently give:
+
+- **Checking before solving.** A cycle missing its `condenser` edge, or
+  wired to a mote of the wrong species, is reported by a pre-flight check
+  alongside the dimensional check that already runs
+  (`core/simulation.py`'s `check_dimensions`), naming the mote -- not
+  discovered as "property() needs exactly one mote via ... found 0"
+  halfway through a solve.
+- **Arity as a stated intent.** `"one"` must resolve to exactly one mote.
+  `"many"` yields the existing `TermList`, which already forces the user
+  to write `sum(...)` rather than silently collapsing. Today the same
+  distinction exists but only as an accident of how many edges happen to
+  be present.
+- **Inspection.** "What does a Rankine Cycle need?" becomes answerable.
+
+### 2d. `role.property` as the address
+
+Sugar, resolved at parse time against the declared roles:
+
+```text
+turbine.work == boiler.heat_in - condenser.heat_out
+```
+
+meaning `targets('turbine').work`, etc.
+
+There is no ambiguity to arbitrate, because the two forms occupy
+different syntactic positions. A **bare name** is a property of the
+anchor mote, exactly as today. A **name in the attribute position** is a
+role. `_attribute` today accepts only a `MoteSet` and errors on anything
+else, so `something.property` is already an error for every non-navigated
+value -- nothing existing changes meaning. `targets()`/`sources()` remain,
+unchanged, for navigation that is genuinely topological rather than a
+declared role (`sources('feeds')` in a pipeline is a real use, not a
+role).
+
+An undeclared role name in the attribute position is an error naming the
+species and its declared roles. This keeps the guarantee that made the
+current design defensible: **no namespace roulette.** Every name in a
+formula resolves through something written down.
+
+### 2e. Scope widens to a single mote
+
+`applies_to` gains one permitted target shape: an ordinary mote, meaning
+"assert this once, about this mote." Today a one-off relation must be
+faked by inventing a species with a single instance -- a workaround the
+philosophy explicitly rejects ("avoid special cases... the user should
+have the freedom to create their own organizational schema").
+
+Scope is **inferred from the target**, not declared. One relationship
+type stays:
+
+```text
+if the target is acting as a species  ->  once per instance   (today)
+otherwise                             ->  once, about the target itself
+```
+
+"Acting as a species" is already defined in `core/species.py`: the target
+of at least one `instance_of` or `template_of` edge -- the same test
+`list_species` uses. No second reserved name, and the common case reads
+identically to how it reads now.
+
+The cost of inference is that a rule's meaning changes the first time
+someone makes an instance of the mote it was asserted about. That is not
+acceptable silently, so it is **reported rather than prevented**:
+
+- `Rule` carries the resolved `scope` (`"each"` | `"once"`), so every
+  surface that lists rules says which one it got.
+- The pre-flight check that already runs before solving reports a rule
+  resolved to `"each"` over exactly one instance, and any rule resolved
+  to `"once"`, naming the mote. A flip therefore shows up in the run
+  output the first time it happens, not as a silently different answer.
+
+`core/rules.py`'s `list_rules` already reads `applies_to` edges without
+caring what they point at; `_rule_instances` is the only place that
+assumes species semantics, and it is nine lines.
+
+---
+
+## 3. Freedoms: what a mote may have determined
+
+The reserved property `unknowns` is **renamed to `freedoms`**, and moves
+from the species to the mote.
+
+### 3a. The problem
+
+`unknowns` on a species asserts that *every instance of a type* has the
+same things determined for it, forever. That is false of essentially all
+real modeling. The same turbine, with the same equations, is sized in one
+problem (given power, find mass flow) and rated in another (given mass
+flow, find power). Today that requires editing the species -- changing
+what a *turbine is* in order to ask a different question about one.
+
+It is also structurally odd: it is the only case in MonOSS where a fact
+about a mote is stored on its species and cannot be overridden on the
+mote. Templates already established the opposite pattern -- a species
+supplies *starting* values, and the instance owns them thereafter.
+
+### 3b. Resolution order
+
+The parsed shape is unchanged -- `core/rules.py`'s `parse_unknowns`
+(renamed `parse_freedoms`) already accepts both a JSON list and a
+comma-separated string, and both stay. Only where it is *read* changes,
+in `_build_view`:
+
+```text
+1. scenario override for this mote   (§4)
+2. the mote's own `freedoms`
+3. its species' `freedoms`           (today's behavior, one level up)
+```
+
+First hit wins; it replaces rather than merges, so a mote can *narrow*
+its freedoms as well as widen them. A garden that declares `freedoms`
+only on species behaves exactly as it does today -- the same opt-in
+discipline units took.
+
+This is the whole of "per-run unknowns" as a feature, arrived at by
+moving one lookup rather than by adding a mechanism.
+
+### 3c. Why rename
+
+`unknowns` is a solver's word for a modeling concept. These are the
+properties a thing is *free* to have determined -- its degrees of
+freedom -- and a user asking "what is this turbine free to determine?"
+is asking a modeling question, not a linear-algebra one. The word also
+stops making sense at the point it is most needed: under a scenario, a
+"declared unknown" may be exactly the value you just fixed by hand.
+
+The rename is worth its cost only because it is cheap now and gets
+steadily more expensive: `freedoms` is the property a user must set to
+make anything solve at all, so it appears in every example, every doc,
+and every garden built from here on.
+
+`Unknown = tuple[str, str]` in `core/formula.py` **keeps its name**. It
+is the solver's internal address type, and there the solver's vocabulary
+is correct. The rename applies to the user-facing reserved property and
+the functions that read it.
+
+### 3d. Migration
+
+`core/db.py`'s `initialize_database` already carries idempotent
+migrations that run on every garden open (the `tick` -> `run_number`
+rename, the `committed` and `step` backfills). This one joins them:
+
+```sql
+UPDATE mote_properties SET key = 'freedoms'
+ WHERE key = 'unknowns'
+   AND mote_id IN (SELECT to_id FROM relationships
+                    WHERE type IN ('instance_of', 'template_of'))
+```
+
+Scoped to motes acting as a species, so an ordinary mote with a property
+a user happened to name `unknowns` is left alone. It is a no-op on a
+fresh garden and on one already migrated, and re-running it is safe --
+the same properties the existing migrations have.
+
+Motes that are *not* species and carry `unknowns` are not migrated,
+because before this proposal that property meant nothing there. Once
+§3b lands they would suddenly mean something, and inventing freedoms a
+user never declared is worse than ignoring a stale key.
+
+---
+
+## 4. Scenarios: one garden, several answers
+
+### 4a. The gap
+
+A garden holds exactly one state. Every question a user actually wants to
+ask about a model is comparative: design vs. off-design, best vs. worst
+case, this parameter swept across a range, what breaks if the feedwater
+temperature drops 20 K. Today each of those means editing the garden,
+running, writing down the answer, and editing it back.
+
+The machinery to avoid that is already built and is simply not reachable.
+`run_time_series` computes N complete states in memory without writing
+anything, and `_build_view` is **pure** -- it takes a properties dict, not
+a connection, precisely so a run can be driven from state that isn't the
+database. A scenario is that same door, opened sideways instead of
+forward in time.
+
+### 4b. An override mote shadows a mote
+
+The shape mirrors templates, one arrow over:
+
+```text
+template_of : species  ::  overrides : mote
+```
+
+A **template** mote holds placeholder properties for a species and is
+excluded from that species' instances. An **override** mote holds
+replacement properties for one specific mote and is excluded from runs
+unless a scenario selects it.
+
+```text
+Winter HP Turbine --overrides--> HP Turbine        {"pressure_in": 6e6}
+Winter Boiler     --overrides--> Boiler A          {"heat_in": 4.2e7}
+
+Winter Case --varies--> Winter HP Turbine
+Winter Case --varies--> Winter Boiler
+```
+
+Two reserved relationship types (`overrides`, `varies`), zero new
+properties, zero new tables. The override's replacement values are
+*ordinary properties*, so the existing property editor, the units
+mechanism, and the MCP surface all work on them with no change. An
+override may also carry `freedoms`, which is how §3b's first resolution
+rule earns its place: a scenario can change the *question*, not only the
+inputs.
+
+### 4c. Applying one
+
+```text
+properties = apply_overrides(base_properties, scenario)
+view       = _build_view(properties, relationships)
+```
+
+One pure function inserted ahead of an already-pure function. Both run
+shapes take an optional `scenario` argument; both solver backends,
+`_reduce`, units, dimensions and provenance are untouched.
+
+**A scenario run never commits.** It is nondestructive by construction --
+logged like a `save=True` run (which `run_time_series` already supports)
+so it can be reviewed and compared, but never written back to the graph.
+This is not a limitation to lift later; it is the point. A scenario asks
+what *would* happen, and the answer to a hypothetical does not belong in
+the canonical state. It also dodges the question of where a scenario
+run's results would be written, which has no good answer.
+
+Scenarios compose with time series (each step reads the overridden
+state), with roles (an override can replace a role's filler by shadowing
+the mote it points at), and with strict units.
+
+### 4d. What this unlocks
+
+- Sizing vs. rating, by overriding `freedoms` (§3b).
+- Parameter sweeps: N scenarios differing in one property, run and
+  compared. The comparison is a query over saved runs, which the run log
+  already supports.
+- Sensitivity: pair a sweep with §5's derivation log to see which values
+  actually moved.
+- Preserving a baseline. A committed run overwrites the garden; today
+  there is no way to keep "as designed" alongside "as measured" except in
+  two gardens, which severs the relationships between them.
+
+---
+
+## 5. Provenance: the substitution loop already knows
+
+### 5a. The insight
+
+`_reduce` is a provenance generator that currently throws its work away.
+Every pass of the substitution loop does exactly one explicable thing:
+*this equation, on this mote, with these known inputs, determined this
+one value.* That is a derivation record, produced already, discarded
+because nothing asks for it.
+
+What the loop cannot explain is the remainder handed to a solver backend.
+When five equations jointly determine five unknowns, there is no tree --
+the honest record is "these equations, together, determined these values,
+by `newton`, in 7 iterations." A `why` that pretends otherwise is lying,
+and `docs/modeling_architecture_proposal.md`'s §10 draws exactly that
+lie, because it assumes a DAG.
+
+So the structure is: **substitution steps are the branches, solver blocks
+are the leaves.** Both are recorded in the same shape; a substitution
+step is simply a block of size one.
+
+### 5b. Three log tables
+
+History earns tables; structure does not (§9). Alongside
+`simulation_runs` / `simulation_changes`:
+
+```sql
+simulation_derivations
+----------------------
+run_id, step, block_id, mote_id, key, method, detail
+    -- one row per solved value. method is 'substitution' | 'solver'.
+    -- detail carries the backend name and iteration count for a solver
+    -- block, NULL for substitution.
+
+simulation_derivation_equations
+-------------------------------
+run_id, step, block_id, rule_mote_id, anchor_mote_id, equation
+    -- one row per equation in the block. Exactly one for substitution.
+
+simulation_derivation_inputs
+----------------------------
+run_id, step, block_id, source_mote_id, source_key, value
+    -- the already-known values that entered the block, in base units.
+```
+
+Uniform across both methods, and `block_id` groups jointly-determined
+values without needing a second shape for them.
+
+### 5c. Capturing the inputs
+
+The one piece not already in hand is *which* known values an equation
+read. It is captured by recording lookups through `Context`, which this
+codebase has already done once, for a different purpose:
+`core/simulation.py`'s `_RecordingKnown` is a dict that records every
+membership test `_lookup` performs, specifically so `_defer` can discover
+which unknowns an equation touches without changing `core/formula.py`.
+The same technique, applied to `Context.properties`, yields the inputs.
+
+This matters as a constraint: **provenance must not require changes to
+the formula evaluator.** The evaluator's whitelist is the security
+boundary and it is deliberately a flat dispatch. Recording belongs in the
+context the simulation layer constructs, not in the walker.
+
+### 5d. `why`, and the queries that come with it
+
+```text
+why HP Turbine.work
+```
+
+resolves the mote and key, finds the derivation row for the most recent
+run (or `--run N`), prints the equation and its inputs, and recurses into
+each input's own derivation. Values with no derivation row terminate the
+recursion honestly as *manually specified* or *carried from a previous
+step*. A solver block terminates with its equations and method.
+
+The forward-facing queries do **not** need a stored graph. Because
+formulas are already parsed into an AST, the incidence relation
+(variables <-> equations) is computable on demand by the probe technique
+`_defer` already uses -- evaluate each (rule, mote) pair with placeholder
+values and record what it touched:
+
+```text
+impact    HP Turbine.pressure_in     -- what could move if this changes
+requires  HP Turbine.work            -- what must be known first, and what is missing
+producers HP Turbine.work            -- which rules can determine it
+consumers HP Turbine.mass_flow       -- which rules read it
+```
+
+**The incidence graph is derived, never stored.** This is the same call
+`core/dimensions.py` already made in reusing `core/formula.py`'s call
+whitelist rather than duplicating it -- with a drift test asserting the
+two agree. A persisted copy of the dependency structure is a second
+source of truth about the same equations, and it will diverge from them.
+
+The CLI and the Observatory must query this one index. Two
+interpretations of the model is the failure mode to design against.
+
+---
+
+## 6. Comparison relations
+
+`parse_equation` currently requires exactly one `==`. Permitting `<=`,
+`>=`, `<`, `>` costs a few lines and yields constraints without a second
+expression system:
+
+```text
+efficiency <= 1
+temperature <= maximum_temperature
+```
+
+Evaluation is unchanged -- a comparison still reduces to a `LinearExpr`
+difference, and its sign is checked instead of its zero. In v1 these are
+**advisory**, reported like `dimension_warnings` already are, and never
+consulted by a solver. The data structure is then already right for
+feeding an optimizer or a feasibility check later.
+
+Violations are reported on the result as `constraint_violations`, a
+separate field from `dimension_warnings` -- a violated constraint is a
+statement about the *answer*, while a dimensional mismatch is a statement
+about the *model*, and collapsing the two would make neither readable. A
+`strict_constraints` flag promotes violations to a `SimulationError`,
+mirroring `strict_units` exactly.
+
+Two guards worth stating: a comparison relation may not declare freedoms
+(an inequality cannot determine a value), and one containing unsolved
+unknowns is reported as unchecked rather than assumed satisfied.
+
+---
+
+## 7. Directional relations (later)
+
+`core/capability.py` already is the "computation" abstraction that
+`docs/modeling_architecture_proposal.md` proposes building:
+`Capability(operation, inputs: tuple[str, ...], output: str, units)`,
+scoped to exactly the cases that genuinely are directional -- opaque
+providers like CoolProp, which can be evaluated but not inverted.
+
+The eventual unification is to let an ordinary rule declare the same
+thing optionally: *this relation only runs forward.* That gives the
+substitution loop an ordering hint and lets `producers`/`why` describe
+provider calls in the same vocabulary as equations. It is not urgent and
+should not be built until roles and provenance are in, because until then
+there is nothing for it to unify with.
+
+---
+
+## 8. Reserved names delta
+
+| Name | Kind | Change |
+|---|---|---|
+| `freedoms` | property | **replaces `unknowns`**; read from the mote, then its species (§3) |
+| `roles` | property | new; on a species, declares what an assembly is wired to (§2c) |
+| `overrides` | relationship | new; override mote -> the mote it shadows (§4b) |
+| `varies` | relationship | new; scenario -> an override it includes (§4b) |
+| `applies_to` | relationship | unchanged name; target may now be a species *or* a plain mote (§2e) |
+
+`unknowns` is removed from the reserved list rather than kept as an
+alias. A garden opened after the migration has no such key on any
+species, and leaving a dead name recognized would mean two ways to say
+one thing -- exactly the drift this codebase already refuses elsewhere.
+
+All of it must land in `core/reserved.py` and in
+`docs/architecture.md`'s reserved-name list, which that module is kept
+in sync with by convention.
+
+---
+
+## 9. Non-goals
+
+Declined from `docs/modeling_architecture_proposal.md`, with reasons:
+
+- **A directed computation graph with topological execution.** MonOSS
+  solves undirected constraint systems today; a DAG with "cycles are
+  errors, solver groups later" would make the working case the deferred
+  case. `V == I * R` has no inputs and outputs.
+- **`Computation`, `InputBinding`, `OutputBinding`, `Reference` as new
+  types.** `Capability` is the first, `Unknown = tuple[str, str]` is the
+  last, and the middle two are what a role declaration expresses.
+- **Tables for models, participants, instances, and bindings.**
+  Structure stays in motes. History gets tables.
+- **"One active producer per property."** In a constraint system two
+  equations determining one value is an overdetermined system, which
+  `docs/simulation.md` already documents as normal and correct -- one
+  Kirchhoff equation is always implied by the others.
+- **Staleness marking and lazy recomputation.** It makes the graph mutate
+  as a side effect of editing. Preview/scrub/commit is a better and more
+  honest model, and `impact` answers the question staleness was for.
+- **IF/THEN reactive rules.** MonOSS has one rule kind on purpose:
+  "an assignment and a coupled equation are the same thing to the solver."
+  Adding an imperative subsystem is a larger philosophical change than
+  anything else here and should be argued separately, if ever.
+- **Ports.** A role already carries the semantics a port was wanted for,
+  without asserting that everything is a pipe.
+
+Also out of scope: a property-value type with status/revision/source
+columns (it would restructure the "properties are flexible JSON, not
+stored directly" decision in `docs/architecture.md` for benefits §5
+delivers from the log instead), and species inheritance.
+
+---
+
+## 10. Implementation order
+
+Each phase ships something usable and none of them require the next.
+Every phase lands in `core/`, `cli/` and `mcp_server/` together, so the
+MCP surface never drifts behind the engine. The Observatory is a single
+pass at the end -- the frontend is the most expensive thing to build
+twice, and these shapes are still moving.
+
+**Phase 1 -- Provenance.** *Done.* Record derivations from `_reduce` and
+`_finish` via a recording context. Three tables. `why`, with `--run`.
+No modeling change at all; pure gain on the system as it stands.
+
+**Phase 2 -- The derived index.** *Done.* Incidence computed on demand
+from the ASTs. `impact`, `requires`, `producers`, `consumers`, in CLI and
+MCP over one implementation (Observatory in Phase 7).
+
+**Phase 3 -- Roles.** *Done.* `roles` on a species *or on a mote that is
+not one*; `role.property` resolution in both walks; arity and species
+checking as a standalone lint (`check_roles`) rather than folded into the
+run, since a mis-wired role that any rule uses already fails that run;
+`applies_to` scope inference plus the reporting that keeps it honest
+(§2e). `scripts/example_rankine_cycle.py` is the proof: a complete cycle
+whose components each solve their own state, wired by an assembly that
+closes the loop through named parts.
+
+**Phase 4 -- Freedoms.** *Done.* The `unknowns` -> `freedoms` rename, its
+garden migration, and the resolution order in `_build_view` -- read by
+the same rule roles are, so a declaration property means one thing
+wherever it appears.
+
+**Phase 5 -- Scenarios.** *Done.* `overrides` / `varies`, a pure
+`apply()`, optional `scenario` on both run shapes and on the incidence
+index, always nondestructive.
+
+**Phase 6 -- Comparison relations.** *Done.* Advisory, with
+`strict_constraints`; constraints separated from equations before solving
+so one can never determine a value.
+
+**Phase 7 -- The Observatory.** *Done.* One pass: `why` and the
+dependency queries as a per-property panel on the existing detail view,
+scenario selection alongside the solver picker, constraint and unit
+advisories on the sim bar, roles checkable from Tools. Roles and freedoms
+needed no special editor -- they are ordinary properties and relationships,
+and the reserved-name badge already marks them.
+
+**Phase 8 -- Directional relations.** Only once §7 has something to
+unify. Not part of this proposal's definition of done.
+
+---
+
+## 11. Testing strategy
+
+- **Nothing regresses.** The existing simulation, formula, units, and
+  dimension suites must pass untouched at every phase. Each new mechanism
+  is opt-in exactly as units are, and a garden using none of them takes
+  the path it takes today.
+- **Provenance.** A three-deep substitution chain explains in the right
+  order; a solver block reports all its unknowns and equations together
+  rather than inventing a tree; a manually-set value terminates the
+  recursion; a time-series step's `prev(x)` input is attributed to the
+  previous step, not the current one.
+- **Scope inference.** A rule pointed at a species with instances
+  resolves to `"each"`; the same rule pointed at a plain mote resolves to
+  `"once"`; making an instance of that mote flips it and the pre-flight
+  check says so.
+- **Roles.** A remote unknown solved through a role writes back to the
+  role's mote; a missing role and a wrong-species role are both caught by
+  the pre-flight check, not by the solver; an `arity: many` role with one
+  filler still requires `sum()`; an undeclared role name in the attribute
+  position is rejected naming the declared roles.
+- **Freedoms.** Mote overrides species; a narrowing override makes a
+  previously-solved system underdetermined and says so; a garden with
+  species-level declarations only is bit-identical to today. The
+  migration is idempotent, leaves a non-species mote's `unknowns`
+  untouched, and is covered the way
+  `test_initialize_database_migrates_a_pre_run_number_garden` covers
+  its predecessors.
+- **Scenarios.** A scenario run leaves the garden byte-identical; two
+  scenarios over one garden give different answers from the same rules;
+  a scenario overriding `freedoms` flips a sizing problem into a rating
+  problem; a scenario composes with a time series without drift (the
+  same failure `test_a_recurrence_does_not_drift_across_steps` guards).
+- **Drift.** As `tests/test_dimensions.py` asserts the whitelist has not
+  been duplicated, a test must assert the incidence index is derived from
+  the same AST walk the solver uses and not from a parallel parser.
+
+## 12. Definition of done
+
+- A rule mote carries an `equation` and nothing else. Its scope is on its
+  edge, its bindings are in the graph, its freedoms are on the motes that
+  have them, and its history is in the log.
+- `why` on any solved value explains it truthfully, including saying
+  "these five were found together" when that is what happened.
+- `impact`, `requires`, `producers` and `consumers` answer from one index
+  shared by CLI, MCP, and Observatory.
+- A Rankine cycle is expressible as a mote with four roles, and its rules
+  read `turbine.work`, not `targets('turbine').work`.
+- A garden can be asked more than one question without being edited.
+- `docs/architecture.md`, `docs/simulation.md`, and `core/reserved.py`
+  are updated together, and no garden that predates this proposal behaves
+  differently.

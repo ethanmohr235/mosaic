@@ -84,16 +84,61 @@ view", a "Hide/Show controls" toggle for the always-docked
 top-right panel (species legend, relationship filters, depth, reset
 view) -- the first way to reclaim that screen space, persisted across
 restarts -- and "Advanced view settings…" (below); Tools hosts the
-simulation step count and the Simulate…/Exit
-simulation trigger for the same non-blocking preview/scrub/commit bar
-described above, plus "Notes (Mora)…", which opens the note editor on
-the current garden (see Mora, below). A handful of items (Export as CSV, Print graph,
-Timeline view, Group by type, Automations, Webhooks, API access) are
-inert placeholders with a small "soon" badge, staged for future
-expansion -- clicking one just toasts an explanation rather than doing
-nothing silently. A stub is only allowed to describe something that
-genuinely doesn't exist yet: if the app can already do it somewhere,
-the menu item points at that instead.
+simulation step count, the **solver** and **scenario** pickers, the
+Simulate…/Exit simulation trigger for the same non-blocking
+preview/scrub/commit bar described above, "Check roles…", and
+"Notes (Mora)…", which opens the note editor on the current garden (see
+Mora, below). A handful of items (Import motes, Export as CSV/JSON,
+Print graph, Timeline view, Group by type, Automations, Webhooks, API
+access) are inert placeholders with a small "soon" badge, staged for
+future expansion -- clicking one just toasts an explanation rather than
+doing nothing silently. A stub is only allowed to describe something
+that genuinely doesn't exist yet: if the app can already do it
+somewhere, the menu item points at that instead.
+
+### Explaining a value
+
+Every **numeric** property in the detail panel carries a `?` button that
+opens a block underneath it answering two different questions from two
+different sources:
+
+- **How it was found** comes from the run log (`why`), so it needs a run
+  to have happened -- a discarded preview leaves nothing to read. It
+  names the equations that produced the value, the known values they
+  read, and expands recursively into any of those this run also derived.
+  A value found together with others in a coupled solve says so rather
+  than pretending to a single cause. Numbers here are in **base SI
+  units**, which is what the solver worked in, so the numbers beside an
+  equation multiply out -- unlike the property rows above, which show
+  each mote's own declared unit.
+- **What it needs** and **what it could move** come from the rules
+  themselves, so they answer before anything has ever been solved.
+  Missing prerequisites are marked in red; anything the value could move
+  is clickable and selects that mote.
+
+The `?` is offered on every numeric property rather than only on solved
+ones, because which of the two a property is happens to be exactly what
+the panel answers.
+
+### Scenarios
+
+The Tools menu's **scenario** picker lists every mote that varies
+something (see `docs/simulation.md`), defaulting to "Garden as it
+stands". Running under a scenario previews the garden as that scenario
+would have it, and the sim bar says so.
+
+A scenario run is never written to the graph, so **Commit is hidden**
+while one is open -- the engine refuses it outright. "Save simulation"
+still applies, and is how a hypothetical is kept for comparison against
+the real run.
+
+### Warnings and constraints
+
+Below the sim bar's error line (which only appears when a run actually
+stopped) is an advisory area for things that did not stop it: dimensional
+warnings about the *model*, and unsatisfied comparison relations about
+the *answer*. They are labelled apart because they are different kinds
+of problem, and neither prevents committing.
 
 ### Advanced view settings
 
@@ -180,7 +225,7 @@ and what happens on first export.
 
 `docs/architecture.md` lists every property key and relationship type
 MonOSS recognizes by convention (`url`, `date`, `duration`, `equation`,
-`instance_of`, ...). Any property or relationship using one of these
+`freedoms`, `roles`, `instance_of`, `overrides`, `varies`, ...). Any property or relationship using one of these
 gets a small dot badge next to its name in the detail panel, so it
 doesn't look like ordinary data -- hover it for a tooltip. This is
 purely a visual cue; the name still works exactly like any other

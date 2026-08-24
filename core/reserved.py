@@ -24,14 +24,20 @@ from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
 from core.portals import PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY
 from core.providers import describe_providers
-from core.rules import APPLIES_TO, EQUATION_KEY, UNKNOWNS_KEY
+from core.roles import ROLES_KEY
+from core.rules import APPLIES_TO, EQUATION_KEY, FREEDOMS_KEY
+from core.scenarios import OVERRIDES, VARIES
 from core.species import INSTANCE_OF, TEMPLATE_OF
+from core.units import UNITS_KEY
 
 RESERVED_PROPERTIES = _GCAL_RESERVED_PROPERTIES | {
-    EQUATION_KEY, UNKNOWNS_KEY, PROVIDER_KEY, CONFIGURATION_KEY,
-    PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY, MODOC_KEY,
+    EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
+    ROLES_KEY, PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY, MODOC_KEY,
 }
-RESERVED_RELATIONSHIP_TYPES = {INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, IN_FOLDER, ABOUT}
+RESERVED_RELATIONSHIP_TYPES = {
+    INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, IN_FOLDER, ABOUT,
+    OVERRIDES, VARIES,
+}
 
 # One line per reserved property key -- kept in the same declaration order
 # as the imports above, not sorted, so a diff adding a key is obvious.
@@ -40,9 +46,22 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "language returned alongside this as `equationLanguage`. Paired with an "
         "`applies_to` relationship pointing at the species the rule runs "
         "against, once per instance.",
-    UNKNOWNS_KEY: "On a species mote: which of its instances' properties "
-        "the solver may determine. A comma-separated string "
-        "('voltage, current') or a JSON list (['voltage']).",
+    FREEDOMS_KEY: "Which of a mote's properties the solver may determine. "
+        "A comma-separated string ('voltage, current') or a JSON list "
+        "(['voltage']). On a mote acting as a species it declares what its "
+        "instances may solve for; on any other mote it declares that mote's "
+        "own, and *replaces* rather than adds to what its species declare -- "
+        "which is how two instances of one species can pose opposite "
+        "questions (sizing vs rating).",
+    ROLES_KEY: "On a mote acting as a species: the named parts its instances "
+        "are wired to, as {'turbine': {'arity': 'one'}}. A role is an "
+        "ordinary relationship whose *type* is the role's name, so a rule can "
+        "address a part by name (`turbine.work`). On any other mote it "
+        "declares that mote's own parts. Checked by `roles check`, not by "
+        "every run. Distinct from core/kinds.py, which is what a mote *is*.",
+    UNITS_KEY: "A mote's per-property unit map, {'resistance': 'kohm'}. "
+        "Opt-in per property -- a key with no entry is unitless. Units are "
+        "registered at import time, never parsed from the database.",
     PROVIDER_KEY: "On a property-model mote: the registered PropertyProvider "
         "name it's constructed from -- see `propertyModelProviders` "
         "returned alongside this.",
@@ -94,6 +113,14 @@ RELATIONSHIP_TYPE_MEANINGS: dict[str, str] = {
         "a folder is an ordinary mote with no other structural meaning, "
         "never picked up by simulation unless separately declared an "
         "instance_of a species. Set via set_folder().",
+    OVERRIDES: "override mote --overrides--> target. The override holds "
+        "replacement properties for that one mote, and is excluded from every "
+        "run unless a scenario selects it -- the same exclusion a template "
+        "gets. Mirrors template_of one arrow over.",
+    VARIES: "scenario mote --varies--> override. Gathers the overrides one "
+        "scenario applies. A scenario run never writes to the graph: it "
+        "answers what would happen, so run_time_series(commit=True, "
+        "scenario=...) refuses outright.",
     ABOUT: "note mote --about--> subject. Optional, and only meaningful on a "
         "mote carrying a `modoc` note: it moves the mote that note's "
         "\\val{key} and \\graph read from, so a note can live on its own "

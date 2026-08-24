@@ -4,7 +4,7 @@ import logging
 import shlex
 from pathlib import Path
 
-from cli import output
+from cli import render
 from core.db import get_connection, initialize_database
 from core.folders import folder_members, folders_of, list_folders, set_folder
 from core.library import LIBRARY_GARDEN, reuse_from_library, save_to_library
@@ -35,7 +35,33 @@ from core.gardens import (
     resolve_garden,
     restore_garden,
 )
-from core.simulation import SimulationError, list_runs, run_simulation
+from cli.render import (
+    BASE_UNIT_NOTE,
+    change_lines,
+    equation_lines,
+    explanation_lines,
+    impact_lines,
+    label,
+    requirement_lines,
+    run_summary_line,
+    scenario_lines,
+    variable,
+)
+from core import derivations
+from core import model_resolver
+from core.providers import PropertyModelError
+from core.scenarios import get_scenario, list_scenarios
+from core.simulation import (
+    SimulationError,
+    check_garden,
+    check_roles,
+    get_run,
+    incidence_index,
+    list_runs,
+    run_changes,
+    run_simulation,
+)
+from core.units import UnitError, convert, describe, dimension_of, list_units
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +115,26 @@ HELP_TEXT = """
     model show id=<model_id>                                Show a property model's details
     model capabilities id=<model_id>                       List a property model's capabilities
 
-    simulate                                                Run the garden's simulation rules
+    unit list                                              List registered units, grouped by dimension
+    unit convert value=<n> from=<unit> to=<unit>           Convert a value between units
+    unit check [id=<rule_id>]                              Check rules for dimensional consistency
+
+    scenario list                                          List scenarios and what they vary
+    scenario show id=<scenario_id>                         Show one scenario's overrides
+
+    simulate [strict_units=true] [strict_constraints=true]  Run the garden's simulation rules
+        [scenario=<id>]
     simulate history [limit=<n>]                            List past simulation runs
     simulate show id=<run_id>                               Show one run's changes
+
+    roles check                                            Check how assemblies are wired to their parts
+
+    why id=<mote_id> key=<property> [run=<run_id>]         Explain how a solved value was determined
+        [step=<n>] [depth=<n>]
+    impact id=<mote_id> key=<property> [distance=<n>]      What could move if this value changed
+    requires id=<mote_id> key=<property>                   What must be known to determine this value
+    producers id=<mote_id> key=<property>                  Which equations could determine it
+    consumers id=<mote_id> key=<property>                  Which equations read it
 
     exit / quit                                            Exit REPL
 
@@ -128,13 +171,13 @@ def _require(action_args: dict, *keys: str) -> bool:
 
 def _handle_species(conn, action: str, action_args: dict) -> None:
     if action == "list":
-        output.print_motes(list_species(conn))
+        render.print_motes(list_species(conn))
     elif action == "of":
         if _require(action_args, "id"):
-            output.print_motes(species_of(conn, action_args["id"]))
+            render.print_motes(species_of(conn, action_args["id"]))
     elif action == "instances":
         if _require(action_args, "id"):
-            output.print_motes(instances_of(conn, action_args["id"]))
+            render.print_motes(instances_of(conn, action_args["id"]))
     elif action == "set":
         if _require(action_args, "id", "species"):
             set_species(conn, action_args["id"], action_args["species"])
@@ -153,13 +196,13 @@ def _handle_species(conn, action: str, action_args: dict) -> None:
 
 def _handle_folder(conn, action: str, action_args: dict) -> None:
     if action == "list":
-        output.print_motes(list_folders(conn))
+        render.print_motes(list_folders(conn))
     elif action == "of":
         if _require(action_args, "id"):
-            output.print_motes(folders_of(conn, action_args["id"]))
+            render.print_motes(folders_of(conn, action_args["id"]))
     elif action == "members":
         if _require(action_args, "id"):
-            output.print_motes(folder_members(conn, action_args["id"]))
+            render.print_motes(folder_members(conn, action_args["id"]))
     elif action == "set":
         if _require(action_args, "id", "folder"):
             set_folder(conn, action_args["id"], action_args["folder"])
@@ -182,7 +225,7 @@ def _handle_portal(conn, action: str, action_args: dict) -> None:
                 return
             garden, target = resolve_portal(mote.properties)
             print(f"Garden: {garden}")
-            output.print_motes([target])
+            render.print_motes([target])
     else:
         print(f"Unknown portal action: {action}")
 
@@ -195,7 +238,7 @@ def _handle_library(conn, action: str, action_args: dict) -> None:
         library_conn = get_connection(LIBRARY_GARDEN)
         try:
             initialize_database(library_conn)
-            output.print_motes(list_motes(library_conn))
+            render.print_motes(list_motes(library_conn))
         finally:
             library_conn.close()
     elif action == "save":
@@ -232,14 +275,14 @@ def _handle_modoc(conn, action: str, action_args: dict) -> None:
     document = modoc.parse(modoc.read_source(conn, note_id))
     resolution = resolve_modoc(conn, note_id, document, step=int(action_args.get("step", 0)))
     if action == "check":
-        if output.print_diagnostics(document, resolution) == 0:
+        if render.print_diagnostics(document, resolution) == 0:
             print("No problems.")
     elif action == "values":
         for node in modoc.values(document):
             result = resolution.values[modoc.value_key(node)]
             print(f"{f'[{node.ref}]' if node.ref else ''}{node.expression} = {result.text}")
     else:
-        output.print_modoc(document, resolution)
+        render.print_modoc(document, resolution)
 
 
 def repl(garden: str | None = None) -> None:
@@ -340,13 +383,13 @@ def repl(garden: str | None = None) -> None:
                         print("No mote found.")
                     else:
                         print(f"[{mote.id}] {mote.properties}")
-                        output.print_models(conn, mote.id)
+                        render.print_models(conn, mote.id)
 
                 elif action == "list":
-                    output.print_motes(list_motes(conn))
+                    render.print_motes(list_motes(conn))
 
                 elif action == "search":
-                    output.print_motes(search_motes(conn, " ".join(action_args)))
+                    render.print_motes(search_motes(conn, " ".join(action_args)))
 
                 elif action == "update":
                     props = parse_properties(action_args)
@@ -451,45 +494,217 @@ def repl(garden: str | None = None) -> None:
                 action_args = parse_properties(args[1:])
 
                 if action == "list":
-                    output.print_model_list(conn)
+                    render.print_model_list(conn)
 
                 elif action in ("show", "capabilities"):
                     if "id" not in action_args:
                         print("Error: 'id' is required")
                         continue
-                    output.print_model_detail(conn, action_args["id"], header=action == "show")
+                    render.print_model_detail(conn, action_args["id"], header=action == "show")
 
                 else:
                     print(f"Unknown model action: {action}")
+
+            # --------- UNIT COMMANDS ---------
+            elif cmd == "unit":
+                if not args:
+                    print("Specify an action: list, convert, check")
+                    continue
+                action = args[0].lower()
+                action_args = parse_properties(args[1:])
+
+                if action == "list":
+                    by_dimension: dict[str, list[str]] = {}
+                    for unit_name in list_units():
+                        by_dimension.setdefault(
+                            describe(dimension_of(unit_name)), []
+                        ).append(unit_name)
+                    for dimension, names in sorted(by_dimension.items()):
+                        print(f"{dimension}: {', '.join(names)}")
+
+                elif action == "convert":
+                    missing = [k for k in ("value", "from", "to") if k not in action_args]
+                    if missing:
+                        print(f"Error: {', '.join(missing)} required")
+                        continue
+                    try:
+                        result = convert(
+                            float(action_args["value"]), action_args["from"], action_args["to"]
+                        )
+                    except (UnitError, ValueError) as e:
+                        print(f"Error: {e}")
+                        continue
+                    print(
+                        f"{float(action_args['value']):g} {action_args['from']} = "
+                        f"{result:g} {action_args['to']}"
+                    )
+
+                elif action == "check":
+                    report = check_garden(conn, action_args.get("id"))
+                    if report.pairs_checked == 0:
+                        print("No rules to check.")
+                    elif not report.problems:
+                        print(
+                            f"OK -- no dimensional problems in "
+                            f"{report.pairs_checked} rule/instance pair(s)."
+                        )
+                    else:
+                        print(f"{len(report.problems)} dimensional problem(s):")
+                        for problem in report.problems:
+                            print(f"  {problem}")
+
+                else:
+                    print(f"Unknown unit action: {action}")
 
             # --------- SIMULATE COMMANDS ---------
             elif cmd == "simulate":
                 action = args[0].lower() if args else "run"
 
                 if action == "run":
+                    action_args = parse_properties(args[1:])
+                    solver = action_args.get("solver", "linear")
                     try:
-                        result = run_simulation(conn)
+                        result = run_simulation(
+                            conn,
+                            solver=solver,
+                            strict_units=bool(action_args.get("strict_units", False)),
+                            strict_constraints=bool(
+                                action_args.get("strict_constraints", False)
+                            ),
+                            scenario=action_args.get("scenario"),
+                        )
                     except SimulationError as e:
                         print(f"Simulation failed: {e}")
                         continue
                     print(result.summary)
-                    output.print_changes(result.changes)
+                    for warning in result.dimension_warnings:
+                        print(f"  warning: {warning}")
+                    for violation in result.constraint_violations:
+                        print(f"  constraint: {violation}")
+                    for line in change_lines(result.changes):
+                        print(line)
 
                 elif action == "history":
                     action_args = parse_properties(args[1:])
                     limit = action_args.get("limit")
                     for run in list_runs(conn, limit=limit):
-                        output.print_run_summary_line(run)
+                        print(run_summary_line(conn, run))
 
                 elif action == "show":
                     action_args = parse_properties(args[1:])
                     if "id" not in action_args:
                         print("Error: 'id' is required")
                         continue
-                    output.print_run_detail(conn, action_args["id"])
+                    run = get_run(conn, action_args["id"])
+                    if run is None:
+                        print("No run found.")
+                        continue
+                    applied = "applied to graph" if run.committed else "saved (not applied to graph)"
+                    print(f"Run {run.run_id}")
+                    print(f"run=#{run.run_number}  {run.ran_at}  status={run.status}  ({applied})")
+                    if run.scenario_id:
+                        print(f"scenario: {label(conn, run.scenario_id)}")
+                    if run.detail:
+                        print(f"detail: {run.detail}")
+                    for line in change_lines(run_changes(conn, run.run_id)):
+                        print(line)
 
                 else:
                     print(f"Unknown simulate action: {action}")
+
+            elif cmd == "why":
+                action_args = parse_properties(args)
+                if "id" not in action_args or "key" not in action_args:
+                    print("Error: 'id' and 'key' are required")
+                    continue
+                explanation = derivations.explain(
+                    conn,
+                    str(action_args["id"]),
+                    str(action_args["key"]),
+                    run_id=action_args.get("run"),
+                    step=action_args.get("step"),
+                    depth=int(action_args.get("depth", derivations.DEFAULT_DEPTH)),
+                )
+                if explanation.derived:
+                    print(BASE_UNIT_NOTE)
+                for line in explanation_lines(conn, explanation):
+                    print(line)
+
+            elif cmd == "scenario":
+                action = args[0].lower() if args else "list"
+                if action == "show":
+                    action_args = parse_properties(args[1:])
+                    if "id" not in action_args:
+                        print("Error: 'id' is required")
+                        continue
+                    scenario = get_scenario(conn, str(action_args["id"]))
+                    if scenario is None:
+                        print("No scenario found. A scenario is a mote with a 'varies' relationship.")
+                        continue
+                    for line in scenario_lines(conn, scenario):
+                        print(line)
+                elif action == "list":
+                    scenarios = list_scenarios(conn)
+                    if not scenarios:
+                        print("No scenarios in this garden.")
+                    for scenario in scenarios:
+                        print(
+                            f"[{scenario.mote_id}] {scenario.name} "
+                            f"({len(scenario.overrides)} override(s) over "
+                            f"{len(scenario.target_ids)} mote(s))"
+                        )
+                else:
+                    print(f"Unknown scenario action: {action}")
+
+            elif cmd == "roles":
+                if args and args[0].lower() != "check":
+                    print(f"Unknown roles action: {args[0]}")
+                    continue
+                report = check_roles(conn)
+                if report.motes_checked == 0:
+                    print("No motes declare roles.")
+                elif not report.problems:
+                    print(
+                        f"OK -- {report.motes_checked} mote(s) with declared roles "
+                        "are wired correctly."
+                    )
+                else:
+                    print(f"{len(report.problems)} role problem(s):")
+                    for problem in report.problems:
+                        print(f"  {problem}")
+                if report.once_scoped:
+                    print(f"{len(report.once_scoped)} rule(s) asserted about a single mote:")
+                    for line in report.once_scoped:
+                        print(f"  {line}")
+
+            elif cmd in ("impact", "requires", "producers", "consumers"):
+                action_args = parse_properties(args)
+                if "id" not in action_args or "key" not in action_args:
+                    print("Error: 'id' and 'key' are required")
+                    continue
+                target = (str(action_args["id"]), str(action_args["key"]))
+                index = incidence_index(conn)
+
+                if cmd == "impact":
+                    lines = impact_lines(
+                        conn, target,
+                        index.impact(target, max_distance=action_args.get("distance")),
+                    )
+                elif cmd == "requires":
+                    lines = requirement_lines(conn, index.requires(target))
+                elif cmd == "producers":
+                    lines = [f"Equations that could determine {variable(conn, target)}:"]
+                    lines += equation_lines(
+                        conn, index.producers(target),
+                        "none -- it is not free to move" if not index.is_free(target)
+                        else "none -- it is free, but no equation constrains it",
+                    )
+                else:
+                    lines = [f"Equations that read {variable(conn, target)}:"]
+                    lines += equation_lines(conn, index.consumers(target), "none")
+
+                for line in lines:
+                    print(line)
 
             else:
                 print(f"Unknown command: {cmd}. Type 'help' for available commands.")

@@ -158,7 +158,7 @@ def _wire_solvable_container(conn):
     from core.relationships import create_relationship
     create_relationship(conn, air, model, "uses_model")
 
-    container = create_mote(conn, {"name": "Container", "unknowns": "pressure"})
+    container = create_mote(conn, {"name": "Container", "freedoms": "pressure"})
     rule = create_mote(
         conn,
         {"name": "Ideal gas law", "equation": "pressure == property('gas', 'pressure', density, temperature)"},

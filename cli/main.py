@@ -4,7 +4,6 @@ import json
 import logging
 from pathlib import Path
 
-from cli import output
 from core.folders import folder_members, folders_of, list_folders, set_folder
 from core.library import LIBRARY_GARDEN, reuse_from_library, save_to_library
 from core import modoc
@@ -28,7 +27,34 @@ from core.relationships import (
 )
 from core.gardens import create_garden, delete_garden, list_gardens, resolve_garden, restore_garden
 from core.db import get_connection, initialize_database
-from core.simulation import SimulationError, list_runs, run_simulation
+from cli.render import (
+    BASE_UNIT_NOTE,
+    change_lines,
+    equation_lines,
+    explanation_lines,
+    impact_lines,
+    requirement_lines,
+    run_summary_line,
+    scenario_lines,
+    variable,
+)
+from cli.render import label as _label_or_id
+from core import derivations
+from core import model_resolver
+from core.scenarios import get_scenario, list_scenarios
+from core.providers import PropertyModelError
+from core.simulation import (
+    SimulationError,
+    check_garden,
+    check_roles,
+    get_run,
+    incidence_index,
+    list_runs,
+    run_changes,
+    run_simulation,
+)
+from core.units import UnitError, convert, describe, dimension_of, list_units
+from cli import render
 
 logger = logging.getLogger(__name__)
 
@@ -189,16 +215,101 @@ def build_parser() -> argparse.ArgumentParser:
     model_caps = model_sub.add_parser("capabilities", help="List a property model's capabilities")
     model_caps.add_argument("--id", required=True, help="Property-model mote id")
 
+    # ------------------ UNIT COMMANDS ------------------
+    unit_parser = subparsers.add_parser("unit", help="Inspect and convert units")
+    unit_sub = unit_parser.add_subparsers(dest="action")
+    unit_sub.add_parser("list", help="List registered units, grouped by dimension")
+    unit_convert = unit_sub.add_parser("convert", help="Convert a value between units")
+    unit_convert.add_argument("--value", type=float, required=True, help="Value to convert")
+    unit_convert.add_argument("--from", dest="from_unit", required=True, help="Unit to convert from")
+    unit_convert.add_argument("--to", dest="to_unit", required=True, help="Unit to convert to")
+    unit_check = unit_sub.add_parser(
+        "check", help="Check the garden's rules for dimensional consistency"
+    )
+    unit_check.add_argument("--id", help="Check only this rule mote id")
+
     # ------------------ SIMULATE COMMANDS ------------------
     simulate_parser = subparsers.add_parser(
         "simulate", help="Run the garden's simulation rules, or inspect past runs"
     )
     simulate_sub = simulate_parser.add_subparsers(dest="action")
-    simulate_sub.add_parser("run", help="Run the simulation (default)")
+    run_parser = simulate_sub.add_parser("run", help="Run the simulation (default)")
+    run_parser.add_argument(
+        "--solver", default="linear",
+        help="Solver backend for whatever the substitution loop can't resolve alone "
+             "(default: linear; also available: newton, for equations genuinely "
+             "nonlinear in their unknowns)",
+    )
+    run_parser.add_argument(
+        "--strict-units", action="store_true",
+        help="Fail the run on a dimensional mismatch instead of only warning",
+    )
+    run_parser.add_argument(
+        "--strict-constraints", action="store_true",
+        help="Fail the run on an unsatisfied constraint instead of only reporting it",
+    )
+    run_parser.add_argument(
+        "--scenario",
+        help="Solve under this scenario mote's overrides. Never writes to the graph -- "
+             "the run is logged for comparison and reports what would change",
+    )
     history_parser = simulate_sub.add_parser("history", help="List past simulation runs")
     history_parser.add_argument("--limit", type=int, help="Show only the N most recent runs")
     show_parser = simulate_sub.add_parser("show", help="Show one run's changes")
     show_parser.add_argument("--id", required=True, help="Run id")
+
+    ### Scenarios
+    scenario_parser = subparsers.add_parser(
+        "scenario", help="Inspect named perturbations of the garden"
+    )
+    scenario_sub = scenario_parser.add_subparsers(dest="action")
+    scenario_sub.add_parser("list", help="List scenarios and what they vary")
+    scenario_show = scenario_sub.add_parser("show", help="Show one scenario's overrides")
+    scenario_show.add_argument("--id", required=True, help="Scenario mote id")
+
+    ### Roles
+    roles_parser = subparsers.add_parser(
+        "roles", help="Inspect how assemblies are wired to their parts"
+    )
+    roles_sub = roles_parser.add_subparsers(dest="action")
+    roles_sub.add_parser("check", help="Check every declared role's wiring")
+
+    ### Why
+    why_parser = subparsers.add_parser(
+        "why", help="Explain how a solved property value was determined"
+    )
+    why_parser.add_argument("mote_id", help="Mote whose property to explain")
+    why_parser.add_argument("key", help="Property key to explain")
+    why_parser.add_argument(
+        "--run", help="Explain as of this run id (default: the most recent successful run)"
+    )
+    why_parser.add_argument(
+        "--step", type=int,
+        help="Explain as of this step within the run (default: the last step that determined it)",
+    )
+    why_parser.add_argument(
+        "--depth", type=int, default=derivations.DEFAULT_DEPTH,
+        help=f"How far back to follow derived inputs (default: {derivations.DEFAULT_DEPTH})",
+    )
+
+    ### Dependency queries
+    # All four read the same derived index (core/incidence.py) and take
+    # the same target, so they are built from one loop rather than four
+    # near-identical blocks.
+    for name, help_text in (
+        ("impact", "What could move if a value changed"),
+        ("requires", "What must be known before a value can be determined"),
+        ("producers", "Which equations could determine a value"),
+        ("consumers", "Which equations read a value"),
+    ):
+        query = subparsers.add_parser(name, help=help_text)
+        query.add_argument("mote_id", help="Mote the property belongs to")
+        query.add_argument("key", help="Property key")
+        if name == "impact":
+            query.add_argument(
+                "--distance", type=int,
+                help="Stop after this many hops through the equation graph",
+            )
 
     return parser
 
@@ -232,13 +343,13 @@ def _handle_mote(conn, args) -> None:
             print("No mote found.")
         else:
             print(f"[{mote.id}] {mote.properties}")
-            output.print_models(conn, mote.id)
+            render.print_models(conn, mote.id)
 
     elif args.action == "list":
-        output.print_motes(list_motes(conn))
+        render.print_motes(list_motes(conn))
 
     elif args.action == "search":
-        output.print_motes(search_motes(conn, args.query, args.limit))
+        render.print_motes(search_motes(conn, args.query, args.limit))
 
     elif args.action == "update":
         props = _parse_properties_json(args.properties)
@@ -255,13 +366,13 @@ def _handle_mote(conn, args) -> None:
 
 def _handle_species(conn, args) -> None:
     if args.action == "list":
-        output.print_motes(list_species(conn))
+        render.print_motes(list_species(conn))
 
     elif args.action == "of":
-        output.print_motes(species_of(conn, args.id))
+        render.print_motes(species_of(conn, args.id))
 
     elif args.action == "instances":
-        output.print_motes(instances_of(conn, args.id))
+        render.print_motes(instances_of(conn, args.id))
 
     elif args.action == "set":
         set_species(conn, args.id, args.species)
@@ -282,13 +393,13 @@ def _handle_species(conn, args) -> None:
 
 def _handle_folder(conn, args) -> None:
     if args.action == "list":
-        output.print_motes(list_folders(conn))
+        render.print_motes(list_folders(conn))
 
     elif args.action == "of":
-        output.print_motes(folders_of(conn, args.id))
+        render.print_motes(folders_of(conn, args.id))
 
     elif args.action == "members":
-        output.print_motes(folder_members(conn, args.id))
+        render.print_motes(folder_members(conn, args.id))
 
     elif args.action == "set":
         set_folder(conn, args.id, args.folder)
@@ -326,7 +437,7 @@ def _handle_library(conn, args) -> None:
         library_conn = get_connection(LIBRARY_GARDEN)
         try:
             initialize_database(library_conn)
-            output.print_motes(list_motes(library_conn))
+            render.print_motes(list_motes(library_conn))
         finally:
             library_conn.close()
 
@@ -361,12 +472,12 @@ def _handle_modoc(conn, args) -> None:
     document = modoc.parse(modoc.read_source(conn, args.id))
     resolution = resolve_modoc(conn, args.id, document, step=getattr(args, "step", 0))
     if args.action == "check":
-        if output.print_diagnostics(document, resolution) == 0:
+        if render.print_diagnostics(document, resolution) == 0:
             print("No problems.")
     elif args.action == "values":
         _print_modoc_values(document, resolution)
     else:
-        output.print_modoc(document, resolution)
+        render.print_modoc(document, resolution)
 
 
 def _print_modoc_values(document, resolution) -> None:
@@ -406,11 +517,47 @@ def _handle_rel(conn, args) -> None:
 
 def _handle_model(conn, args) -> None:
     if args.action == "list":
-        output.print_model_list(conn)
+        render.print_model_list(conn)
     elif args.action in ("show", "capabilities"):
-        output.print_model_detail(conn, args.id, header=args.action == "show")
+        render.print_model_detail(conn, args.id, header=args.action == "show")
     else:
         print("Specify a model action: list, show, capabilities")
+
+
+def _handle_unit(conn, args) -> None:
+    if args.action == "list":
+        by_dimension: dict[str, list[str]] = {}
+        for name in list_units():
+            by_dimension.setdefault(describe(dimension_of(name)), []).append(name)
+        for dimension, names in sorted(by_dimension.items()):
+            print(f"{dimension}: {', '.join(names)}")
+
+    elif args.action == "convert":
+        try:
+            result = convert(args.value, args.from_unit, args.to_unit)
+        except UnitError as e:
+            print(f"Error: {e}")
+            return
+        print(f"{args.value:g} {args.from_unit} = {result:g} {args.to_unit}")
+
+    elif args.action == "check":
+        _print_dimension_check(conn, getattr(args, "id", None))
+
+    else:
+        print("Specify a unit action: list, convert, check")
+
+
+def _print_dimension_check(conn, rule_id: str | None) -> None:
+    report = check_garden(conn, rule_id)
+    if report.pairs_checked == 0:
+        print("No rules to check.")
+        return
+    if not report.problems:
+        print(f"OK -- no dimensional problems in {report.pairs_checked} rule/instance pair(s).")
+        return
+    print(f"{len(report.problems)} dimensional problem(s):")
+    for problem in report.problems:
+        print(f"  {problem}")
 
 
 def _handle_simulate(conn, args) -> None:
@@ -418,22 +565,132 @@ def _handle_simulate(conn, args) -> None:
 
     if action == "run":
         try:
-            result = run_simulation(conn)
+            result = run_simulation(
+                conn,
+                solver=getattr(args, "solver", "linear"),
+                strict_units=getattr(args, "strict_units", False),
+                strict_constraints=getattr(args, "strict_constraints", False),
+                scenario=getattr(args, "scenario", None),
+            )
         except SimulationError as e:
             print(f"Simulation failed: {e}")
             return
         print(result.summary)
-        output.print_changes(result.changes)
+        for warning in result.dimension_warnings:
+            print(f"  warning: {warning}")
+        for violation in result.constraint_violations:
+            print(f"  constraint: {violation}")
+        for line in change_lines(result.changes):
+            print(line)
 
     elif action == "history":
         for run in list_runs(conn, limit=getattr(args, "limit", None)):
-            output.print_run_summary_line(run)
+            print(run_summary_line(conn, run))
 
     elif action == "show":
-        output.print_run_detail(conn, args.id)
+        run = get_run(conn, args.id)
+        if run is None:
+            print("No run found.")
+            return
+        applied = "applied to graph" if run.committed else "saved (not applied to graph)"
+        print(f"Run {run.run_id}")
+        print(f"run=#{run.run_number}  {run.ran_at}  status={run.status}  ({applied})")
+        if run.scenario_id:
+            print(f"scenario: {_label_or_id(conn, run.scenario_id)}")
+        if run.detail:
+            print(f"detail: {run.detail}")
+        for line in change_lines(run_changes(conn, run.run_id)):
+            print(line)
 
     else:
         print("Specify a simulate action: run, history, show")
+
+
+def _handle_why(conn, args) -> None:
+    explanation = derivations.explain(
+        conn, args.mote_id, args.key,
+        run_id=args.run, step=args.step, depth=args.depth,
+    )
+    if explanation.derived:
+        print(BASE_UNIT_NOTE)
+    for line in explanation_lines(conn, explanation):
+        print(line)
+
+
+def _handle_scenario(conn, args) -> None:
+    if args.action == "show":
+        scenario = get_scenario(conn, args.id)
+        if scenario is None:
+            print("No scenario found. A scenario is a mote with a 'varies' relationship.")
+            return
+        for line in scenario_lines(conn, scenario):
+            print(line)
+        return
+
+    if args.action not in (None, "list"):
+        print("Specify a scenario action: list, show")
+        return
+
+    scenarios = list_scenarios(conn)
+    if not scenarios:
+        print("No scenarios in this garden.")
+        return
+    for scenario in scenarios:
+        motes = len(scenario.target_ids)
+        print(
+            f"[{scenario.mote_id}] {scenario.name} "
+            f"({len(scenario.overrides)} override(s) over {motes} mote(s))"
+        )
+
+
+def _handle_roles(conn, args) -> None:
+    if args.action not in (None, "check"):
+        print("Specify a roles action: check")
+        return
+
+    report = check_roles(conn)
+    if report.motes_checked == 0:
+        print("No motes declare roles.")
+    elif not report.problems:
+        print(f"OK -- {report.motes_checked} mote(s) with declared roles are wired correctly.")
+    else:
+        print(f"{len(report.problems)} role problem(s):")
+        for problem in report.problems:
+            print(f"  {problem}")
+
+    if report.once_scoped:
+        print(f"{len(report.once_scoped)} rule(s) asserted about a single mote:")
+        for line in report.once_scoped:
+            print(f"  {line}")
+
+
+def _handle_incidence(conn, args) -> None:
+    """impact / requires / producers / consumers -- one index, four reads
+    of it. The index is rebuilt per invocation on purpose: it is derived
+    from the rules, and a stored copy would be a second account of
+    them."""
+    index = incidence_index(conn)
+    target = (args.mote_id, args.key)
+
+    if args.command == "impact":
+        lines = impact_lines(
+            conn, target, index.impact(target, max_distance=getattr(args, "distance", None))
+        )
+    elif args.command == "requires":
+        lines = requirement_lines(conn, index.requires(target))
+    elif args.command == "producers":
+        lines = [f"Equations that could determine {variable(conn, target)}:"]
+        lines += equation_lines(
+            conn, index.producers(target),
+            "none -- it is not free to move" if not index.is_free(target)
+            else "none -- it is free, but no equation constrains it",
+        )
+    else:
+        lines = [f"Equations that read {variable(conn, target)}:"]
+        lines += equation_lines(conn, index.consumers(target), "none")
+
+    for line in lines:
+        print(line)
 
 
 def main() -> None:
@@ -464,8 +721,18 @@ def main() -> None:
                 _handle_modoc(conn, args)
             elif args.command == "model":
                 _handle_model(conn, args)
+            elif args.command == "unit":
+                _handle_unit(conn, args)
             elif args.command == "simulate":
                 _handle_simulate(conn, args)
+            elif args.command == "scenario":
+                _handle_scenario(conn, args)
+            elif args.command == "roles":
+                _handle_roles(conn, args)
+            elif args.command == "why":
+                _handle_why(conn, args)
+            elif args.command in ("impact", "requires", "producers", "consumers"):
+                _handle_incidence(conn, args)
         finally:
             conn.close()
     except Exception as e:

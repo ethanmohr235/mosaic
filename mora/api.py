@@ -194,7 +194,7 @@ class Api:
         step = int(step)
         if step < 1:
             raise ValueError("Nothing to apply at t+0 -- that is the garden as it stands.")
-        result = simulation_repo.run_time_series(self._conn, step, commit=True, log_failure=True)
+        result = simulation_repo.run_time_series(self._conn, step, commit=True)
         return {
             "steps": simulation_repo.step_payloads(result.steps),
             "failed_at": result.failed_at,

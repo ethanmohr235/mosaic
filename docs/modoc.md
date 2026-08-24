@@ -105,9 +105,11 @@ date. Anything else goes to the same expression language rules use
     \val{sum(targets('contains').cost)}  4820
     \val{budget * 1.2}                   48000
     \val{t}                              the current step
+    \val{turbine.work}                   a role's part (see core/roles.py)
 
-A `\val` never has unknowns. It reads the state the garden is in; there
-is no solver behind a note to hand a free variable to.
+A `\val` never has freedoms. It reads the state the garden is in; there
+is no solver behind a note to hand a free variable to -- `core/simulation.py::
+expression_context()` clears them for exactly that reason.
 
 ### `\graph` -- a figure
 

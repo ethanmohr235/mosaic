@@ -11,10 +11,32 @@ import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from core import roles as roles_repo
+from core.units import UnitError, to_base
+
 # An unknown the solver may determine: which mote, which property key.
 Unknown = tuple[str, str]
 
 _TOLERANCE = 1e-9
+
+# The callable names a formula may use, grouped by how _call() dispatches
+# them. Hoisted into module constants rather than written inline because
+# this whitelist *is* the security boundary, and core/dimensions.py walks
+# the same grammar to check units -- two copies of the list would let a
+# builtin get added here and silently ignored there. See
+# tests/test_dimensions.py's drift test, which asserts the two agree.
+NAVIGATION_CALLS = frozenset({"targets", "sources"})
+AGGREGATE_CALLS = frozenset({"sum", "count"})
+NUMERIC_CALLS = frozenset({"abs", "min", "max"})
+PREVIOUS_CALL = "prev"
+PROPERTY_CALL = "property"
+ALLOWED_CALLS = (
+    NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | {PREVIOUS_CALL, PROPERTY_CALL}
+)
+
+# The current simulation step's index, exposed to formulas as a reserved
+# bare name rather than a per-mote property.
+TICK_NAME = "t"
 
 
 class FormulaError(ValueError):
@@ -108,16 +130,55 @@ def _prune(terms: dict[Unknown, float]) -> dict[Unknown, float]:
     return {k: v for k, v in terms.items() if abs(v) > _TOLERANCE}
 
 
+# The comparisons a relation may use. `==` is an equation, which the
+# solver may satisfy by choosing values; the rest are constraints, which
+# it may only check. Both are `lhs - rhs <op> 0` after evaluation, so one
+# evaluator serves both and there is no second expression language.
+EQUALS = "=="
+_COMPARISONS = {
+    ast.Eq: EQUALS,
+    ast.LtE: "<=",
+    ast.GtE: ">=",
+    ast.Lt: "<",
+    ast.Gt: ">",
+}
+
+
+@dataclass(frozen=True)
+class Relation:
+    """One parsed `lhs <op> rhs`, before either side is evaluated."""
+    left: ast.AST
+    right: ast.AST
+    operator: str = EQUALS
+
+    @property
+    def is_equation(self) -> bool:
+        return self.operator == EQUALS
+
+
 @dataclass(frozen=True)
 class Equation:
-    """`sum(coefficient * unknown) + constant == 0`."""
+    """`sum(coefficient * unknown) + constant <op> 0`.
+
+    Still called an Equation because that is what it is for every
+    operator the solver ever sees: only `==` reaches a solver backend. A
+    constraint carries the same shape so that checking one is reading the
+    sign of a number the existing evaluator already produced, rather than
+    a second kind of thing."""
     terms: dict[Unknown, float]
     constant: float
     source: str = ""
+    operator: str = EQUALS
+
+    @property
+    def is_equation(self) -> bool:
+        return self.operator == EQUALS
 
     @staticmethod
-    def from_difference(expr: LinearExpr, source: str = "") -> "Equation":
-        return Equation(expr.terms, expr.constant, source)
+    def from_difference(
+        expr: LinearExpr, source: str = "", operator: str = EQUALS
+    ) -> "Equation":
+        return Equation(expr.terms, expr.constant, source, operator)
 
 
 @dataclass(frozen=True)
@@ -154,7 +215,14 @@ class Context:
     Both default to values that make time-based formulas simply
     unavailable rather than silently wrong, so every non-time-based
     caller (a plain one-shot evaluation, or an existing test) is
-    unaffected."""
+    unaffected.
+
+    `units` gives each mote's declared key -> unit-name map, so a value
+    read out of a mote can be normalized to its dimension's base unit
+    before it enters the linear system. Everything downstream -- the
+    substitution loop, both solver backends -- then works in one
+    consistent set of units without knowing units exist at all. Defaults
+    to declaring nothing, which is exactly today's behavior."""
     mote_id: str
     properties: Callable[[str], dict]
     unknown_keys: Callable[[str], set[str]]
@@ -164,10 +232,25 @@ class Context:
     tick: float = 0.0
     previous: Callable[[str], dict] = lambda mote_id: {}
     evaluate_model: Callable[[str, str, str, list[float]], float] = _model_evaluation_unavailable
+    units: Callable[[str], dict] = lambda mote_id: {}
+    roles: Callable[[str], dict] = lambda mote_id: {}
 
 
-def parse_equation(text: str) -> tuple[ast.AST, ast.AST]:
-    """Split `lhs == rhs` into its two sides, rejecting anything else."""
+def relation_operator(text: str) -> str:
+    """Which comparison a relation uses, without evaluating either side.
+
+    Lets core/simulation.py sort rules into equations and constraints
+    once per rule, before any solving, rather than discovering it
+    mid-solve."""
+    return parse_equation(text).operator
+
+
+def parse_equation(text: str) -> Relation:
+    """Split `lhs <op> rhs` into its parts, rejecting anything else.
+
+    Named for the case that existed first and is still the only one the
+    solver acts on. `==` asks for values that satisfy it; `<=`, `>=`, `<`
+    and `>` only ever assert something about values found elsewhere."""
     try:
         tree = ast.parse(text.strip(), mode="eval")
     except SyntaxError as e:
@@ -175,17 +258,36 @@ def parse_equation(text: str) -> tuple[ast.AST, ast.AST]:
 
     body = tree.body
     if not isinstance(body, ast.Compare):
-        raise FormulaError(f"formula {text!r} is not an equation (expected `lhs == rhs`)")
-    if len(body.ops) != 1 or not isinstance(body.ops[0], ast.Eq):
-        raise FormulaError(f"formula {text!r} must use exactly one `==` comparison")
-    return body.left, body.comparators[0]
+        raise FormulaError(
+            f"formula {text!r} is not a relation (expected `lhs == rhs`, or a "
+            f"comparison such as `lhs <= rhs`)"
+        )
+    if len(body.ops) != 1:
+        raise FormulaError(
+            f"formula {text!r} must use exactly one comparison -- chained "
+            f"comparisons (`0 <= x <= 1`) are two relations, so write them as two"
+        )
+    operator = _COMPARISONS.get(type(body.ops[0]))
+    if operator is None:
+        raise FormulaError(
+            f"formula {text!r} uses a comparison that is not allowed; use one of "
+            f"{', '.join(sorted(_COMPARISONS.values()))}"
+        )
+    return Relation(body.left, body.comparators[0], operator)
 
 
 def evaluate_equation(text: str, ctx: Context) -> Equation:
-    """Evaluate `lhs == rhs` into the equation `lhs - rhs == 0`."""
-    left, right = parse_equation(text)
-    difference = _as_expr(_evaluate(left, ctx)) - _as_expr(_evaluate(right, ctx))
-    return Equation.from_difference(difference, source=text)
+    """Evaluate `lhs <op> rhs` into `lhs - rhs <op> 0`.
+
+    The subtraction is the same whichever comparison was written, which
+    is why one evaluator serves equations and constraints alike: the
+    operator only decides what is done with the result -- solved for
+    zero, or checked for a sign."""
+    relation = parse_equation(text)
+    difference = (
+        _as_expr(_evaluate(relation.left, ctx)) - _as_expr(_evaluate(relation.right, ctx))
+    )
+    return Equation.from_difference(difference, source=text, operator=relation.operator)
 
 
 def evaluate_expression(text: str, ctx: Context) -> LinearExpr:
@@ -272,19 +374,46 @@ def _unary(node: ast.UnaryOp, ctx: Context) -> LinearExpr:
 
 
 def _attribute(node: ast.Attribute, ctx: Context):
-    """`targets('a').voltage`. Handled explicitly rather than through
-    __getattr__ on MoteSet, so there is no attribute-escape surface."""
-    value = _evaluate(node.value, ctx)
+    """`targets('a').voltage`, or `turbine.work` for a declared role.
+    Handled explicitly rather than through __getattr__ on MoteSet, so
+    there is no attribute-escape surface.
+
+    A role and a property never compete: a bare name is always a property
+    of the anchor mote, and a name in *this* position is always a role.
+    Nothing changes meaning, because reading an attribute off anything
+    other than targets()/sources() was already an error."""
+    role, value = _role_or_value(node, ctx)
     if not isinstance(value, MoteSet):
         raise FormulaError(
-            f"can only read a property off targets(...) or sources(...), not {node.attr!r} "
-            f"off a {type(value).__name__}"
+            f"can only read a property off targets(...), sources(...) or a declared "
+            f"role, not {node.attr!r} off a {type(value).__name__}"
         )
     values = [_lookup(ctx, mid, node.attr) for mid in value.mote_ids]
     label = f"{value.label}.{node.attr}"
-    if len(values) == 1:
+    # A `many` role keeps its list even when it reaches exactly one mote,
+    # so a formula that will need sum() the day a second one is wired
+    # needs it from the start. Untyped navigation keeps collapsing, which
+    # is what every existing garden relies on.
+    if len(values) == 1 and (role is None or role.collapses):
         return values[0]
     return TermList(values, label)
+
+
+def _role_or_value(node: ast.Attribute, ctx: Context):
+    """Resolve the left-hand side of an attribute access, preferring a
+    declared role. Returns the Role it matched (or None) alongside the
+    value, because arity decides whether one mote collapses to a scalar."""
+    if not isinstance(node.value, ast.Name):
+        return None, _evaluate(node.value, ctx)
+    role = ctx.roles(ctx.mote_id).get(node.value.id)
+    if role is None:
+        return None, _evaluate(node.value, ctx)
+
+    mote_ids = ctx.targets(ctx.mote_id, role.name)
+    problem = roles_repo.arity_problem(role, len(mote_ids))
+    if problem is not None:
+        raise FormulaError(f"mote {ctx.mote_id[:8]}: {problem}")
+    return role, MoteSet(mote_ids, role.name)
 
 
 def _call(node: ast.Call, ctx: Context):
@@ -294,15 +423,15 @@ def _call(node: ast.Call, ctx: Context):
     if node.keywords:
         raise FormulaError(f"{name}() does not take keyword arguments")
 
-    if name in ("targets", "sources"):
+    if name in NAVIGATION_CALLS:
         return _navigate(name, node, ctx)
-    if name in ("sum", "count"):
+    if name in AGGREGATE_CALLS:
         return _aggregate(name, node, ctx)
-    if name in ("abs", "min", "max"):
+    if name in NUMERIC_CALLS:
         return _numeric(name, node, ctx)
-    if name == "prev":
+    if name == PREVIOUS_CALL:
         return _previous(node, ctx)
-    if name == "property":
+    if name == PROPERTY_CALL:
         return _property(node, ctx)
     raise FormulaError(f"unknown function {name!r} in formula")
 
@@ -322,7 +451,10 @@ def _previous(node: ast.Call, ctx: Context) -> LinearExpr:
     value = properties[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise FormulaError(f"previous value of {key!r} is {value!r}, which is not a number")
-    return LinearExpr.number(value)
+    # The previous step's state is kept in the same representation the
+    # database uses (declared units), so it needs the same normalization
+    # an ordinary property read gets.
+    return LinearExpr.number(_normalize(ctx, ctx.mote_id, key, value))
 
 
 def _property(node: ast.Call, ctx: Context) -> LinearExpr:
@@ -413,6 +545,30 @@ def _numeric(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
     return LinearExpr.number(min(values) if name == "min" else max(values))
 
 
+def _normalize(ctx: Context, mote_id: str, key: str, value: float) -> float:
+    """A stored property value converted into its dimension's base unit.
+
+    This is the single point where declared units enter the solver: past
+    here every number is a plain base-unit float, which is what LinearExpr
+    and both solver backends already assume. A key with no declared unit
+    is returned untouched, so an un-annotated garden takes the same path
+    it always has.
+
+    An unrecognized unit name is fatal rather than ignored: the value was
+    explicitly labelled, and treating `kohm` as if it were already ohms
+    would be a silent factor-of-1000 error in the answer.
+    """
+    unit_name = ctx.units(mote_id).get(key)
+    if not unit_name:
+        return value
+    try:
+        return to_base(value, unit_name)
+    except UnitError as e:
+        raise FormulaError(
+            f"property {key!r} of mote {mote_id[:8]} declares unit {unit_name!r}: {e}"
+        ) from e
+
+
 def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
     # A reserved word in the formula language, not a per-mote property --
     # the current simulation step's index, for time-dependent rules
@@ -420,7 +576,7 @@ def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
     # and the properties lookup, so a mote with a real property literally
     # named `t` has it shadowed inside formulas specifically (still an
     # ordinary, visible property everywhere else in the UI).
-    if key == "t":
+    if key == TICK_NAME:
         return LinearExpr.number(ctx.tick)
     if key in ctx.unknown_keys(mote_id):
         unknown = (mote_id, key)
@@ -441,7 +597,7 @@ def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
         raise FormulaError(
             f"property {key!r} of mote {mote_id[:8]} is {value!r}, which is not a number"
         )
-    return LinearExpr.number(value)
+    return LinearExpr.number(_normalize(ctx, mote_id, key, value))
 
 
 def _as_expr(value) -> LinearExpr:
@@ -453,9 +609,10 @@ def _as_expr(value) -> LinearExpr:
             f"(e.g. {value.label}.voltage)"
         )
     if isinstance(value, TermList):
+        count = len(value.values)
         raise FormulaError(
-            f"{value.label} refers to {len(value.values)} motes -- wrap it in sum() "
-            f"to combine them into one value"
+            f"{value.label} refers to {count} mote{'' if count == 1 else 's'} -- wrap "
+            f"it in sum() to combine them into one value"
         )
     raise FormulaError(f"unexpected value {value!r} in formula")
 

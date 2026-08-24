@@ -8,8 +8,13 @@ the MCP server section of `docs/architecture.md` for the design.
 ## Setup
 
 ```
-pip install -r requirements.txt
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -r requirements.txt
 ```
+
+`--system-site-packages` is only load-bearing for the desktop app (see
+`docs/ui-setup.md`); it's harmless for the MCP server and CLI, so one venv
+covers all three.
 
 `.mcp.json` at the project root registers the server for clients that
 read project-scoped config:
@@ -18,24 +23,30 @@ read project-scoped config:
 {
   "mcpServers": {
     "monoss": {
-      "command": "/home/ethan/projects/monoss/.venv/bin/python",
-      "args": ["/home/ethan/projects/monoss/run_mcp.py"]
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/run_mcp.py"]
     }
   }
 }
 ```
 
-The interpreter is spelled out rather than left as `python3`: the
-`python3` first on PATH here is conda's and does not have this project's
-dependencies. Restart the client after adding or editing this file.
+The interpreter is spelled out rather than left as `python3`: on a
+machine with conda or another Python on `PATH`, `python3` may not resolve
+to an interpreter with this project's dependencies. Restart the client
+after adding or editing this file.
 
-Paths are absolute because the client may launch the server from any
-working directory. If you move or clone the project elsewhere, update
-both.
+The client may launch the server from any working directory, so paths
+can't be relative to cwd — `${CLAUDE_PROJECT_DIR}` (Claude Code only;
+falls back to `.` when unset, since the variable lives in the *server's*
+spawned environment, not Claude Code's own) resolves them relative to the
+project root instead, so this file works unmodified regardless of where
+the repo is cloned. Other MCP clients (e.g. Claude Desktop) don't expand
+this variable; on those, replace both occurrences with the project's
+absolute path.
 
 ## Tools
 
-40 tools, grouped: gardens (`list_gardens`, `create_garden`,
+48 tools, grouped: gardens (`list_gardens`, `create_garden`,
 `export_garden`), motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
@@ -46,8 +57,10 @@ both.
 library (`list_library`, `save_to_library`, `reuse_from_library`),
 portals (`create_portal`, `resolve_portal`), graph (`neighborhood`,
 `whole_garden`), simulation (`preview_simulation`, `list_runs`,
-`get_run`, `run_changes`, `run_ticks`, `mote_history`), notes
-(`resolve_modoc`), and `reserved_names`.
+`get_run`, `run_changes`, `run_ticks`, `mote_history`, `why`),
+dependencies (`impact`, `requires`, `producers`, `consumers`),
+`check_roles`, `list_scenarios`, notes (`resolve_modoc`), and
+`reserved_names`.
 
 Folders and the library used to exist only in the desktop app. They are
 graph edits like any other, which is what this surface is for — see "What
@@ -99,6 +112,31 @@ every built-in physical-property provider's operations, inputs, and
 units. Call it before hand-writing an `equation` or a property-model
 mote — `docs/simulation.md` has the same content with more prose, but
 isn't itself reachable over MCP.
+
+`why` explains how a solved value was determined, recursively. It reads
+the run log only, so it needs a run to have happened; a preview leaves
+nothing for it to read.
+
+The four dependency tools read the *rules* instead, so they answer
+before anything has been solved. Note that MonOSS solves constraint
+systems: `producers` returns every equation that could determine a
+value, which for a coupled system is several, and an empty result means
+nothing can determine it at all.
+
+`preview_simulation` also returns `constraint_violations`: comparison
+relations (`efficiency <= 1`) the answer does not satisfy. These are
+reported, never enforced, and one depending on a value the run could not
+determine is reported as *not checked* rather than passing.
+
+`list_scenarios` lists named perturbations of the garden, and
+`preview_simulation` takes a `scenario` to solve under one. A preview
+never writes either way; a scenario changes which question is being
+previewed, not whether the answer is applied.
+
+`check_roles` reports assemblies wired to the wrong parts, and separately
+which rules are asserted about one mote rather than a whole species --
+which is inferred from what `applies_to` points at, and changes the first
+time someone makes an instance of that mote. See `docs/simulation.md`.
 
 ## Reaching it from other machines
 

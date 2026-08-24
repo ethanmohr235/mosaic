@@ -119,7 +119,7 @@ def seed():
     conn = get_connection(GARDEN)
     try:
         initialize_database(conn)
-        species = create_mote(conn, {"name": "Task", "unknowns": "progress"})
+        species = create_mote(conn, {"name": "Task", "freedoms": "progress"})
         rule = create_mote(conn, {"name": "Grow", "equation": "progress == prev(progress) + 10"})
         create_relationship(conn, rule, species, "applies_to")
         create_mote(conn, {"name": "Rina Kovac", "role": "Staff engineer"})

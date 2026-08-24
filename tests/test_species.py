@@ -95,7 +95,7 @@ def test_species_of_and_instances_of_issue_a_constant_number_of_queries(conn):
 # ---- templating ----
 
 def test_create_instance_copies_template_properties(conn):
-    resistor = create_mote(conn, {"name": "Resistor", "unknowns": "current"})
+    resistor = create_mote(conn, {"name": "Resistor", "freedoms": "current"})
     template = create_mote(conn, {"name": "R", "resistance": 100})
     set_template(conn, template, resistor)
 
@@ -180,7 +180,7 @@ def test_simulation_ignores_template_motes(conn):
     from core.rules import APPLIES_TO
     from core.simulation import run_simulation
 
-    species = create_mote(conn, {"name": "Box", "unknowns": "area"})
+    species = create_mote(conn, {"name": "Box", "freedoms": "area"})
     rule = create_mote(conn, {"name": "Area", "equation": "area == width * height"})
     create_relationship(conn, rule, species, APPLIES_TO)
 

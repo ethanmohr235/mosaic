@@ -1,0 +1,212 @@
+# MonOSS Units System
+
+> **Revision note (implemented).** This design has been built; two things
+> changed on contact with the code.
+>
+> 1. **Compound unit expressions were necessary, not optional.** §2
+>    assumed atomic registered names. But the property-model capabilities
+>    already in this codebase declare units like `J/(kg*K)` and `kg/m^3`,
+>    so §4a's "parse the capability's declared units into a Dimension"
+>    was unimplementable without them -- and users would want `m/s`
+>    anyway, which no registry can enumerate. `core/units.py` therefore
+>    includes a small hand-written tokenizer for `m/s`, `kg/m^3`,
+>    `J/(kg K)`, `s^-1`, `kg/m³`. It is a dedicated parser, not `eval`,
+>    keeping the same "never interpret a database string as code"
+>    guarantee the provider registry has. Affine units (`degC`) are
+>    rejected inside a compound, since dropping their offset would give
+>    plausible-looking wrong numbers.
+> 2. **Time-series state is kept in declared units, not base units.**
+>    §4b proposed keeping the in-memory `running` state in base units.
+>    That is wrong: each step rebuilds the garden view from `running` and
+>    re-reads it through the same normalization an ordinary property read
+>    gets, so base-unit values stored there would be converted a *second*
+>    time and the series would drift. The running state instead mirrors
+>    the database's own representation exactly, which is also a simpler
+>    invariant -- conversion happens only at the formula read boundary
+>    and the write boundary, nowhere else. `test_a_recurrence_does_not_
+>    drift_across_steps` covers this.
+>
+> One addition not in the original plan: unit names are validated up
+> front for the motes a run actually solves (`_validate_units`). Write-
+> back conversion happens *after* a run's error handling, so an
+> unrecognized unit discovered there would escape unlogged; checking
+> first lets it fail and be logged like any other simulation error. It is
+> scoped to the motes being solved rather than the whole garden, so a
+> typo on an unrelated mote can't break a simulation that never touches
+> it.
+
+## Objective
+
+Let a numerical property optionally carry a **unit**, so MonOSS can:
+
+1. **Display** a value in whatever unit is convenient (`1000` stored, shown as `1 kΩ`).
+2. **Verify** that a rule's equation is dimensionally consistent (`voltage == current * resistance` checks out as `V = A·Ω`; a broken rule gets flagged before it produces a silently wrong answer).
+3. **Convert automatically** during solving, so two motes that happen to track the same quantity in different units (one Resistor in `ohm`, another in `kohm`) still combine correctly instead of requiring the user to keep every instance in the same unit by convention.
+
+This is explicitly called out as not built in `docs/simulation.md`'s "Not built yet" section today: *"Properties are plain numbers. Use naming conventions (`resistance_ohms`) if it helps; nothing enforces or converts."* This proposal replaces that gap.
+
+Per current direction: **backend only for now.** The UI keeps editing `units` as raw JSON, the same way `configuration` is edited today on a property-model mote -- no new per-row unit widget in this phase. All scope below (display + verification + automatic solver conversion) is in for v1, phased for implementation order.
+
+---
+
+## 1. Where a unit lives: one `units` property, per mote
+
+A new reserved property, `units`, holds a **dict** mapping property key → unit name:
+
+```text
+name:          R1
+resistance:    1
+power_rating:  0.25
+tolerance:     0.05
+
+units: {"resistance": "kohm", "power_rating": "W"}
+```
+
+`tolerance` has no entry and stays dimensionless -- units are opt-in per property, not a schema requirement. This is per-*mote*, not per-species: two instances of the same species may track the same key in different units (one Resistor in `ohm`, another in `kohm`), which is exactly the case automatic conversion (§4) exists to handle. It also falls out of the existing template mechanism for free -- `template_of` already copies a template's starting property *values* into new instances (`core/species.py: create_instance()`), so a template's `units` dict rides along the same way any other starting property does, with no special-casing needed.
+
+`units` is reserved by convention only, like `equation`/`unknowns`/`provider`/`configuration` -- an ordinary, editable, deletable JSON property that the engine happens to look for by exact key. `UNITS_KEY = "units"` is added to `core/reserved.py`'s `RESERVED_PROPERTIES`, and to the reserved-name list in `docs/architecture.md`.
+
+---
+
+## 2. `core/units.py` -- the unit registry
+
+Explicit registration, no dynamic parsing of arbitrary strings -- same discipline `core/providers.py` uses for providers ("registered explicitly... never resolved via dynamic import from a database string").
+
+**Dimension vector.** A `Dimension` is an immutable vector of exponents over five SI base dimensions -- length, mass, time, current, temperature. (Amount/luminosity are left out of v1; nothing here prevents adding them later, it's just two more fields on the vector and two more base units.) Supports `+`/`-` (vector add/sub, used when multiplying/dividing quantities) and scalar multiplication (used for `**`), plus a canonical string form for error messages (`"m·s⁻¹"`).
+
+**Unit entry.** Each registered unit maps to `(dimension, scale, offset=0.0)`: `value_in_base = value * scale + offset`. Offset exists for affine units -- Celsius and Fahrenheit are *not* simple multiples of Kelvin, and need to be called out explicitly rather than silently mishandled as if they were.
+
+**Built-in catalog**, deliberately small and extensible rather than exhaustive: base SI units (`m`, `kg`, `s`, `A`, `K`) plus a modest set of named derived/common units (`ohm`, `V`, `W`, `Hz`, `N`, `Pa`, `J`; common non-SI: `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `degC`, `degF`; pressure: `bar`, `atm`, `psi`). SI prefixes (`k`, `m`, `μ`/`u`, `M`, ...) are generated programmatically at import time for the subset of base/derived units where a prefix makes sense (so `kohm`, `mV`, `MPa` exist without hand-enumerating every prefix × unit combination) -- still fully explicit registration, just done in a loop instead of one line per unit.
+
+**API:**
+
+```python
+to_base(value: float, unit: str) -> float
+from_base(value: float, unit: str) -> float
+convert(value: float, from_unit: str, to_unit: str) -> float   # raises IncompatibleUnits if dimensions differ
+dimension_of(unit: str) -> Dimension
+list_units() -> list[str]
+```
+
+**Errors:** `UnitError(ValueError)` base; `UnknownUnit(UnitError)` (unregistered name); `IncompatibleUnits(UnitError)` (dimension mismatch on `convert()`).
+
+This module is pure and has zero dependency on `core/formula.py`, `core/simulation.py`, or the database -- it's usable standalone for display formatting even if nothing else in this proposal is built.
+
+---
+
+## 3. Display formatting (lowest risk, no solver changes)
+
+Given a value, its declared unit (from the mote's `units` dict), and a *target* display unit, `units.convert()` does the work. The target unit is a **viewer preference, not stored data** -- never conflate "what unit is this mote's `resistance` actually recorded in" with "what unit does whoever's looking at it right now want to see." Since UI/UX is explicitly deferred, this phase is really just: make sure `core/units.py` is capable of this (it is, by construction) and expose it to the CLI as a `--unit` style flag or a `mote show` variant, for spot-checking values without needing UI work. No changes to `core/formula.py`, `core/simulation.py`, or storage.
+
+---
+
+## 4. Formula integration
+
+### 4a. Dimensional verification
+
+A parallel walk of the same equation AST `core/formula.py: parse_equation()` already produces, propagating **dimensions** instead of `LinearExpr` values:
+
+| Construct | Dimension rule |
+|---|---|
+| bare property/unknown name | looked up in that mote's `units` dict; `None` ("unspecified") if absent |
+| `+` / `-` | operand dimensions must match (both concrete, or handled per §4a note below); result keeps that dimension |
+| `*` / `/` | dimensions add/subtract as vectors |
+| `**` | exponent must be a constant (already structurally required by `LinearExpr.__pow__`); result is base dimension × exponent |
+| `targets(...).prop` / `sources(...).prop` | looked up against *that* target mote's own `units` -- a different unit string is fine as long as the *dimension* matches (that's the reason to compare dimension vectors, not literal unit strings) |
+| numeric literal (e.g. `100`) | dimensionless/unspecified -- see the literal-units note below |
+| `t` | dimensionless |
+| `property('rel', 'op', ...)` | dimension comes from that capability's declared units (`core/capability.py: Capability.units`), once that field is parsed into a `Dimension` via the same registry rather than compared as a free string |
+
+**`None` (unspecified) never causes a mismatch on its own** -- a property with no declared unit is compatible with anything, the same way an untyped variable doesn't break inference elsewhere in this codebase. This is what keeps units strictly opt-in: a garden that never sets `units` anywhere gets zero warnings, ever. A mismatch is only reported when **both** sides of a `+`/`-`/`==` resolve to a *concrete, different* dimension.
+
+**Literal-units convention (must be stated explicitly, it's the one real ambiguity here):** a bare numeric literal in an equation (`resistance == 100`) is treated as already being in the *base* (SI) unit of whatever dimension it ends up combined with -- there is no per-literal unit syntax in v1 (no `100[ohm]`). This mirrors the existing "SI internally" convention physical property models already use, and keeps the grammar unchanged.
+
+**Output:** a list of human-readable warnings per rule (`"Ohm's law: left side resolves to V, right side resolves to A·Ω — mismatch"`), not a hard failure by default -- consistent with how this project has kept schema enforcement opt-in everywhere else (species-required-properties is explicitly deferred for the same reason in `docs/architecture.md`). `run_simulation`/`run_time_series`/`preview_simulation` gain an optional `strict_units: bool = False` argument, the same per-call-opt-in shape `solver` already uses -- `False` (default) surfaces mismatches as a `dimension_warnings: list[str]` field on the result; `True` promotes a mismatch to a `SimulationError`, for a garden whose units are fully annotated and wants real enforcement.
+
+**Implementation risk worth calling out up front:** the security boundary in `core/formula.py` is a *closed whitelist* of AST node types and callable names (`_evaluate`, `_call`) -- "never `eval`" is a hard constraint, not style. A dimension-checking walker needs to accept exactly the same grammar, or the two walkers can drift (someone adds a builtin to `_call()` and forgets the checker, which then either crashes on valid rules or -- worse -- silently no-ops past something it doesn't recognize). Two ways to handle this, in order of preference:
+
+- **Preferred:** factor the *structural* part of `core/formula.py`'s walk (which node types are allowed, which call names dispatch where) into something both the numeric evaluator and the dimension checker drive, so the whitelist is defined once. Doesn't need to be a fully generic algebra abstraction -- even hoisting the allowed-call-names set and the `isinstance` dispatch table into shared constants that both walkers `if name not in ALLOWED_CALLS: raise` against closes most of the drift risk cheaply.
+- **Fallback if that's more invasive than it's worth:** accept two separate walks, but add a test that fails loudly if they disagree -- e.g. assert the dimension checker's recognized call names are exactly `core/formula.py`'s `_call()` whitelist, so an addition to one without the other breaks CI immediately rather than silently.
+
+Land on which of these during implementation, not in this proposal -- it depends on how the code actually looks once the dimension walker is drafted.
+
+### 4b. Automatic conversion during solving
+
+The bigger piece: when an equation combines properties from motes that declared *different* (but dimensionally compatible) units for the same kind of quantity, the raw numbers must be normalized before they enter the linear system, or the arithmetic is just wrong (`1` from a `kohm`-tagged mote plus `1` from an `ohm`-tagged mote is not `2` of anything).
+
+**Design: normalize at the boundary, solve in base units throughout, denormalize on write-back.**
+
+- `core.simulation._GardenView` gains a `units: dict[str, dict]` field (mote_id → its `units` dict, defaulting to `{}`), built in `_build_view()` from each mote's `UNITS_KEY` property -- same shape as the existing `unknowns`/`out_edges`/`in_edges` fields, read once per run/step rather than re-read per equation.
+- `core/formula.py: Context` gains one more plain callable, `units: Callable[[str], dict] = lambda mote_id: {}`, mirroring how `evaluate_model` and `previous` were added for the physical-property-model and time-series features respectively -- `formula.py` stays DB-free and testable with plain dicts.
+- `_lookup()` (the function every bare property/unknown name and every `targets(...).prop` attribute access goes through) converts a known property's raw value to its dimension's base unit via `units.to_base()` *before* wrapping it in `LinearExpr.number(...)`, whenever that mote has a declared unit for that key. No declared unit → no change → byte-identical behavior to today. This is the single change that makes the rest of the linear-algebra machinery (`LinearExpr`, the substitution loop, both solver backends) unit-correct without touching any of it -- by the time a value reaches `LinearExpr`, it's already a plain base-unit number, exactly what that code already assumes.
+- `_previous()` (the `prev(x)` builtin) needs the identical conversion on read, since it pulls a raw value out of `ctx.previous(mote_id)` the same way `_lookup` pulls one out of `ctx.properties(mote_id)`.
+- `property()` calls need **no extra conversion** -- physical property models already promise SI output (`docs/physical_property_proposal` §12, "For the first implementation, use SI internally"), which *is* the base representation this system uses. That's a real synergy, not a coincidence to paper over: both systems converge on "SI is the canonical wire format," so a `property()` result composes with the rest of a unit-normalized equation for free.
+- Internal step-to-step state in `run_time_series()` (`running`/`next_running`) stays in base units throughout a run, for the same reason the read/write boundary matters: converting on every read and write *inside* the loop would be wasted work and a chance to introduce drift. Only the two true boundaries convert: reading a mote's own stored property (`_lookup`/`_previous`, base ← stored) and the final write to the database.
+- **Write-back** (`_write_back()`, used by both `run_simulation()` and a committed `run_time_series()`): a solved value in `solved[(mote_id, key)]` is in base units (everything upstream of it was). Before calling `update_mote()`, check that mote's `units` dict for an existing declared unit on `key`; if present, convert base → that unit (`units.from_base()`) so a solve **never silently changes which unit a property is expressed in** -- a `resistance` the user chose to track in `kohm` stays in `kohm` after being solved for, it doesn't get rewritten to a bare `ohm` number just because the solver's internals are unit-normalized. If absent, write the base value as-is -- today's behavior, unchanged.
+- `_changes_for()` (used for both the logged `Change` records and preview diffing) should log old/new values in the mote's own declared unit too, for the same reason -- a change log showing `resistance: 1 → 1` because one side was silently base-converted and the other wasn't would be confusing and wrong.
+
+**What this deliberately does not do:** invent a unit for a property nobody declared one for, or try to guess which of several possible units a bare number "should" be. Every conversion in this section only fires when a mote's own `units` dict already names one.
+
+---
+
+## 5. Reserved names
+
+- `UNITS_KEY = "units"` defined in `core/units.py`, added to `core/reserved.py: RESERVED_PROPERTIES`.
+- `docs/architecture.md`'s reserved-property list gets `units` added alongside `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`.
+- `docs/simulation.md`'s "Not built yet → Units" bullet gets removed/rewritten, with a new section documenting the dimension model, the `strict_units` flag, and the write-back-preserves-declared-unit guarantee (the "Physical property models" section is the closest existing template for tone/depth).
+
+---
+
+## 6. CLI
+
+Mirroring the model-inspection commands the physical-property-model proposal added (`model list`/`model show`/`model capabilities`):
+
+```text
+unit list                    # every registered unit, grouped by dimension
+unit convert <value> <from> <to>
+equation check <rule-id>     # runs the §4a dimension walk on one rule, prints warnings or "OK"
+```
+
+No MCP tool is strictly required for this backend-only phase -- an MCP client already sees `units` as an ordinary JSON property through the existing mote read/write tools. A `check_equation`/`convert_value` MCP tool could be added later if useful, once there's a concrete client need for it.
+
+---
+
+## 7. Testing strategy
+
+- **`core/units.py` unit tests:** conversion correctness (`convert(1, "kohm", "ohm") == 1000`), affine round-trips (`convert(0, "degC", "degF") == 32`), `IncompatibleUnits` on mismatched dimensions, `UnknownUnit` on a bad name, SI-prefix generation.
+- **Dimension-checker tests:** Ohm's law (`docs/simulation.md`'s worked example) checks out clean once `units` is set on its motes; a deliberately broken equation (e.g. `voltage == current + resistance`) is flagged; an equation with no `units` declared anywhere produces zero warnings (opt-in guarantee).
+- **Whitelist-drift test** (per §4a): whatever form the fix takes, a test that fails if the dimension checker's recognized constructs diverge from `core/formula.py: _call()`'s whitelist.
+- **Solver integration tests:** two instances of the same species, one with `resistance` in `ohm` and one in `kohm`, combined by a rule (e.g. `sum(...)` across both) -- confirm the solved result is numerically correct, and that write-back preserves each mote's own original unit rather than collapsing both to the same one.
+- **Backward-compatibility test:** an existing test garden with no `units` property anywhere (e.g. `scripts/example_voltage_divider.py`'s circuit) produces byte-identical solved values before and after this feature lands.
+
+---
+
+## 8. Implementation order
+
+1. **`core/units.py`** -- dimension vector, registry, built-in catalog, `convert`/`to_base`/`from_base`, errors. Fully standalone, no other module touched yet.
+2. **Reserved-name wiring** -- `UNITS_KEY` into `core/reserved.py` and `docs/architecture.md`.
+3. **Display/CLI** (§3, §6's `unit list`/`unit convert`) -- exercises the registry end-to-end with no risk to simulation.
+4. **Dimension verification** (§4a) -- new checker module, `equation check` CLI command, `strict_units` plumbed as an inert (warning-only) flag first.
+5. **Automatic solver conversion** (§4b) -- `Context.units`, `_lookup`/`_previous` conversion, `_GardenView.units`, write-back denormalization. Land behind the backward-compatibility test from §7 passing first, since this is the change with real blast radius on existing simulations.
+6. **`strict_units=True` enforcement** -- promote a §4a mismatch to a hard `SimulationError` when requested.
+7. **`docs/simulation.md` update**, removing the "Units" not-built-yet bullet.
+
+---
+
+## 9. Non-goals
+
+- No unit *inference* for a newly-solved property that never had one declared -- the system checks/converts declared units, it never invents one.
+- No per-literal unit syntax in equations (`100[ohm]`) -- literals are assumed base-unit, per §4a.
+- No currency or other non-physical "units" (dollars, story points) in the dimension-vector system -- SI physical quantities are the v1 target. A trivial passthrough dimension for such things could be added later without disturbing this design, but isn't part of it.
+- No species-level unit declaration -- units are per-mote data, per §1, consistent with species staying flat and property-required-ness staying deferred.
+- No UI work in this phase -- `units` is edited as raw JSON, same as `configuration` today. A per-row inline unit field is a real, separate design task for later.
+
+---
+
+## 10. Definition of done
+
+1. A mote's `units` property (a dict) is recognized as reserved and round-trips through ordinary mote read/write, with no schema change.
+2. `core/units.py` converts between compatible units correctly, including affine temperature units, and rejects incompatible ones.
+3. A rule's equation can be checked for dimensional consistency against the `units` declared on the motes it runs against, surfacing mismatches without blocking a normal (non-`strict_units`) run.
+4. Two motes tracking the same dimension in different declared units solve correctly together, and each keeps its own unit after being written back -- verified by a test, not just inspection.
+5. A garden with no `units` anywhere behaves identically, numerically, to today -- verified against an existing example script.
