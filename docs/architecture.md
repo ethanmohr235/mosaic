@@ -349,3 +349,12 @@ exception, which is why `mora/api.py` sets `busy_timeout` on its
 connection for the same reason `mcp_server/server.py` does. `core/db.py`
 is deliberately left alone, so the CLI and the graph window keep the
 behavior they have.
+
+Two apps at once also means the two must not want the same HTTP port or
+the same WebKit storage directory, and the port is the one with teeth:
+pywebview pins its server to 42001 unless told otherwise, and the
+process that loses that race does not fail visibly -- it points its
+window at the winner's address and loads the other app's page against
+its own bridge. `mora/app.py::choose_port` asks for 42002 and falls back
+to an ephemeral port; `.webview_data_mora/` is its own storage. See
+`docs/ui-setup.md`.

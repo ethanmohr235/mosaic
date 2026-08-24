@@ -83,12 +83,18 @@ def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
 MORA_SCRIPT = Path(__file__).resolve().parent.parent / "run_mora.py"
 
 
-def _popen_detached(args: list[str]) -> None:
+def _popen_detached(args: list[str], *, quiet: bool = True) -> None:
     """Launches args without waiting on it (see _open_with_os_default for
     why), but still reaps the child on a background thread so it doesn't
     sit as a zombie for as long as MonOSS keeps running -- this app is
-    long-lived and every Open click spawns one of these."""
-    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    long-lived and every Open click spawns one of these.
+
+    `quiet` discards the child's output, which is right for an OS opener
+    (`gio open` chatters about nothing we can act on) and wrong for our
+    own apps: a discarded traceback is how a crashed Mora came to look
+    like a mysteriously wrong window instead of an error."""
+    streams = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if quiet else {}
+    proc = subprocess.Popen(args, **streams)
     threading.Thread(target=proc.wait, daemon=True).start()
 
 
@@ -435,11 +441,15 @@ class Api:
         garden file. Neither observes the other's writes until it
         refetches -- the same rule the MCP server already lives under
         (docs/architecture.md) -- but nothing is lost either way, since
-        both write one property at a time."""
+        both write one property at a time.
+
+        `quiet=False` so a Mora that fails to start says so on the
+        terminal this app was launched from, rather than failing
+        silently. That mattered once already."""
         command = [sys.executable, str(MORA_SCRIPT), "--garden", self._current_garden]
         if mote_id:
             command += ["--note", mote_id]
-        _popen_detached(command)
+        _popen_detached(command, quiet=False)
         return {"garden": self._current_garden, "note": mote_id}
 
     # ---- relationships ----

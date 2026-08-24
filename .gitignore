@@ -4,4 +4,5 @@ __pycache__/
 .pytest_cache/
 gardens/
 .webview_data/
+.webview_data_mora/
 .credentials/

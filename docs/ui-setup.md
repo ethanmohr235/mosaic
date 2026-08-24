@@ -337,7 +337,20 @@ Three ways, all of them the same launch with different arguments:
 
 `ui/api.py::open_mora` spawns it detached with `sys.executable` -- the
 virtualenv the app is already running in -- so it is a sibling process,
-not a child window, and closing the graph does not close it.
+not a child window, and closing the graph does not close it. Its output
+is *not* discarded: a Mora that fails to start prints its traceback on
+whatever terminal the graph window was launched from.
+
+The two apps must not want the same HTTP port. pywebview pins its
+built-in server to 42001 whenever `private_mode` is off and no port is
+given, which the graph window takes; Mora asks for **42002**, falling
+back to whatever the OS hands out if that is busy (a second Mora
+window). This is not a tidiness point -- the process that loses that
+race still points its window at the winner's address, so it comes up
+showing the other app's page against its own bridge. Mora keeps its own
+WebKit storage directory (`.webview_data_mora/`) for the same reason:
+the graph window's is not something two processes should share, least of
+all when each clears its own cache on startup.
 
 Two consequences worth knowing. The two processes hold separate
 connections to the same garden file, so neither sees the other's writes

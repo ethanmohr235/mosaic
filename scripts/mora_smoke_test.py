@@ -15,7 +15,10 @@ Projected, and that Save really writes only the note. Never touches real
 data: GARDENS_DIR and the webview storage_path are both a fresh temp
 directory.
 """
+import functools
+import http.server
 import json
+import socketserver
 import sys
 import tempfile
 import threading
@@ -38,9 +41,17 @@ from core.modoc import write_source  # noqa: E402
 from core.motes import create_mote, get_mote  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
 from mora.api import Api  # noqa: E402
+from mora.app import choose_port  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "mora" / "frontend"
 GARDEN = "smoke"
+
+# The port pywebview pins the *graph* window to (its DEFAULT_HTTP_PORT,
+# whenever private_mode is off). The whole run happens with it occupied,
+# because that is the real condition -- Mora is opened from a running
+# MonOSS -- and because it is the condition that broke: Mora asked for
+# the same port, lost, and loaded the graph window's page instead.
+GRAPH_WINDOW_PORT = 42001
 
 NOTE = r"""% a note about the migration
 \section{Atlas Migration}
@@ -129,7 +140,27 @@ def seed():
 
 
 def run_checks(window):
-    assert wait_until(lambda: js(window, "!!window.__moraPayload || !!document.querySelector('#rendered h1')"))
+    # First, and deliberately a named check rather than a bare assert:
+    # everything below assumes this window is Mora, and when that stopped
+    # being true the suite died on an unattributed assertion at the top
+    # of the run and reported "0/0 checks passed" -- a true result and a
+    # useless one.
+    def mora_loads_its_own_frontend_not_the_graph_windows():
+        url = js(window, "location.href")
+        assert f":{GRAPH_WINDOW_PORT}/" not in url, \
+            f"Mora must not serve off the graph window's port, got {url}"
+        assert js(window, "!!document.getElementById('editor')") is True, \
+            f"the page in this window is not Mora's ({url})"
+        assert js(window, "!document.getElementById('graph')") is True, \
+            f"this window loaded the MonOSS graph, not Mora ({url})"
+        assert wait_until(
+            lambda: js(window, "!!document.querySelector('#rendered h1')")
+        ), "Mora's frontend loaded but never rendered the note"
+
+    check("Mora comes up on its own port with its own frontend",
+          mora_loads_its_own_frontend_not_the_graph_windows)
+    if not results[-1][1]:
+        return  # nothing below can mean anything if this window is not Mora
 
     def the_note_opens_and_renders():
         assert wait_until(lambda: text_of(window, "#rendered h1") == "Atlas Migration"), \
@@ -357,8 +388,25 @@ def drive():
         window.destroy()
 
 
+def _occupy_graph_window_port():
+    """Stand in for a running MonOSS: hold 42001 and serve ui/frontend
+    off it, so a Mora that asks for the wrong port doesn't merely fail --
+    it loads the graph window's page, exactly as it did in the bug."""
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(PROJECT_ROOT / "ui" / "frontend")
+    )
+    try:
+        server = socketserver.TCPServer(("127.0.0.1", GRAPH_WINDOW_PORT), handler)
+    except OSError:
+        print(f"note: port {GRAPH_WINDOW_PORT} already in use -- using the real occupant")
+        return None
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
 def main():
     seed()
+    squatter = _occupy_graph_window_port()
     api = Api(GARDEN, ids["project"])
     window = webview.create_window(
         "Mora smoke test", url=str(FRONTEND_DIR / "index.html"), js_api=api,
@@ -369,7 +417,17 @@ def main():
     window.events.loaded += _page_loaded.set
 
     threading.Thread(target=drive, daemon=True).start()
-    webview.start(http_server=True, private_mode=False, storage_path=str(_TMP / "webview_data"))
+    # The same settings mora/app.py::launch uses, choose_port() included:
+    # a suite that picked its own port would not be testing the thing
+    # that broke.
+    webview.start(
+        http_server=True,
+        http_port=choose_port(),
+        private_mode=False,
+        storage_path=str(_TMP / "webview_data"),
+    )
+    if squatter is not None:
+        squatter.shutdown()
 
     failed = [r for r in results if not r[1]]
     print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")

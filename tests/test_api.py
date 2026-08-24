@@ -517,7 +517,9 @@ def test_open_link_missing_file_raises(api):
 def _mora_commands(monkeypatch):
     """What open_mora would actually launch, without launching it."""
     launched = []
-    monkeypatch.setattr(ui.api, "_popen_detached", lambda args: launched.append(args))
+    monkeypatch.setattr(
+        ui.api, "_popen_detached", lambda args, **kwargs: launched.append(args)
+    )
     return launched
 
 

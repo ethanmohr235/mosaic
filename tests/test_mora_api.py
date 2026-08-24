@@ -14,6 +14,7 @@ from core.modoc import MODOC_KEY, read_source
 from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
 from mora.api import MAX_STEP, Api
+from mora.app import DEFAULT_HTTP_PORT, choose_port
 
 
 @pytest.fixture
@@ -182,3 +183,40 @@ def test_switch_garden_moves_the_connection(api, project):
     assert api.switch_garden("other") == {"garden": "other"}
     assert api.current_garden() == "other"
     assert api.list_notes() == []
+
+
+# ---- the window's own port ----
+#
+# pywebview pins its server to 42001 whenever private_mode is off and no
+# port is given, and the graph window takes that one. Two apps wanting it
+# is not a near miss: the loser fails to bind but still points its window
+# at that address, so it loads the winner's page against its own bridge.
+# That shipped once, as a window titled Mora showing the MonOSS graph.
+
+def test_mora_does_not_ask_for_the_graph_windows_port():
+    assert DEFAULT_HTTP_PORT != 42001
+
+
+def test_the_preferred_port_is_used_when_it_is_free():
+    port = _a_free_port()
+    assert choose_port(port) == port
+
+
+def test_a_taken_port_falls_back_instead_of_colliding():
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        taken = held.getsockname()[1]
+        chosen = choose_port(taken)
+        assert chosen != taken
+        assert 1024 <= chosen <= 65535
+
+
+def _a_free_port() -> int:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
