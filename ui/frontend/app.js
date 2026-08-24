@@ -3182,6 +3182,16 @@ function setupViewControls() {
     await openDetailPanel(focusId);
   });
 
+  // Mirrors quick-add's own Enter-to-submit (setupQuickAdd) -- this is the
+  // same "type key/value, press Enter" gesture, and only one of the two
+  // required a click on its button to actually do anything.
+  $("detail-add-property").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.tagName === "INPUT") {
+      e.preventDefault();
+      $("detail-add-property-btn").click();
+    }
+  });
+
   $("delete-mote-btn").addEventListener("click", deleteSelection);
   $("delete-selection-btn").addEventListener("click", deleteSelection);
   $("delete-relationship-selection-btn").addEventListener("click", deleteRelationshipSelection);
