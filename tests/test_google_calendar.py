@@ -326,6 +326,19 @@ def test_exportable_motes_keeps_dated_motes_and_drops_templates():
     assert [m["id"] for m in gcal.exportable_motes(motes, {"template"})] == ["exam"]
 
 
+def test_exportable_motes_drops_every_id_in_the_excluded_set():
+    # excluded_ids is a union the caller builds -- templates
+    # (core/species.py::template_mote_ids) and scenario overrides
+    # (core/scenarios.py::override_mote_ids) both belong in it, since
+    # both hold replacement values rather than real data.
+    motes = [
+        _mote({"name": "Exam", "date": "2026-08-15"}, id="exam"),
+        _mote({"name": "Template", "date": "2026-08-15"}, id="template"),
+        _mote({"name": "Winter override", "date": "2026-12-01"}, id="override"),
+    ]
+    assert [m["id"] for m in gcal.exportable_motes(motes, {"template", "override"})] == ["exam"]
+
+
 def test_export_events_creates_and_records_new_event_ids(monkeypatch):
     pushed, _ = _exporter(monkeypatch)
     recorded = []

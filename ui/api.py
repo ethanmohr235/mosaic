@@ -801,11 +801,16 @@ class Api:
         all_motes = self.list_motes()
         # Lock held only for this brief read, same discipline as every
         # other DB touch in this deliberately-not-@_synchronized method.
+        # Templates and scenario overrides both hold non-real values, so
+        # both are kept out of the export -- see exportable_motes().
         with self._lock:
             template_ids = species_repo.template_mote_ids(self._conn)
+            override_ids = scenarios_repo.override_mote_ids(
+                rel_repo.list_relationships(self._conn, type_=scenarios_repo.OVERRIDES)
+            )
 
         summary = gcal_repo.export_events(
-            gcal_repo.exportable_motes(all_motes, template_ids),
+            gcal_repo.exportable_motes(all_motes, template_ids | override_ids),
             gcal_repo.get_credentials(),
             record_event_id=lambda mote_id, event_id: self.update_mote(
                 mote_id, {"gcal_event_id": event_id}

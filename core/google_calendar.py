@@ -148,12 +148,15 @@ def dated_motes(motes: list[dict]) -> list[dict]:
     ]
 
 
-def exportable_motes(motes: list[dict], template_ids: set[str]) -> list[dict]:
-    """The dated motes an export should actually push. Templates hold
-    starting properties for a species rather than real data -- usually
-    incomplete fields that would export as a nonsense event -- so a dated
-    template is excluded like any other non-eligible mote."""
-    return [m for m in dated_motes(motes) if m["id"] not in template_ids]
+def exportable_motes(motes: list[dict], excluded_ids: set[str]) -> list[dict]:
+    """The dated motes an export should actually push. `excluded_ids` is
+    every mote that holds replacement or starting values rather than real
+    data -- a species' template (core/species.py::template_mote_ids) and a
+    scenario's override (core/scenarios.py::override_mote_ids) both
+    qualify, and the caller is expected to pass their union: a dated
+    template or a dated override would otherwise export as a nonsense
+    event for something that never actually happened."""
+    return [m for m in dated_motes(motes) if m["id"] not in excluded_ids]
 
 
 @dataclass(frozen=True)
