@@ -29,6 +29,7 @@ from core import modoc
 from core import modoc_bind
 from core import motes as motes_repo
 from core import simulation as simulation_repo
+from core import sync as sync_repo
 from core.db import get_connection, initialize_database
 from mora import payload as payload_repo
 
@@ -72,6 +73,7 @@ class Api:
         self._initial_note = note
         self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
+        self._best_effort_sync()
 
     def _open(self, garden: str):
         conn = get_connection(garden)
@@ -79,8 +81,23 @@ class Api:
         initialize_database(conn)
         return conn
 
+    def _best_effort_sync(self) -> None:
+        """Same call, same reasoning, as ui/api.py::Api._best_effort_sync:
+        run_mora.py is its own launch path, not only ever opened from the
+        graph window, so a note edited here must converge on its own
+        rather than depending on that other window's session having also
+        been open to carry it. Never allowed to block opening, switching
+        or closing this window."""
+        if gardens_repo.get_sync_dir(self._garden) is None:
+            return
+        try:
+            sync_repo.run(self._conn, self._garden)
+        except Exception:
+            logger.exception("garden sync failed for %r", self._garden)
+
     @_synchronized
     def shutdown(self) -> None:
+        self._best_effort_sync()
         self._conn.close()
 
     # ---- gardens ----
@@ -99,6 +116,7 @@ class Api:
         self._conn.close()
         self._conn = self._open(resolved)
         self._garden = resolved
+        self._best_effort_sync()
         return {"garden": resolved}
 
     # ---- notes ----

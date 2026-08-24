@@ -9,7 +9,8 @@ call a function. Same line ui/api.py's own tests draw.
 """
 import pytest
 
-from core.gardens import create_garden
+from core.db import get_connection, initialize_database
+from core.gardens import create_garden, set_sync_dir
 from core.modoc import MODOC_KEY, read_source
 from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
@@ -183,6 +184,54 @@ def test_switch_garden_moves_the_connection(api, project):
     assert api.switch_garden("other") == {"garden": "other"}
     assert api.current_garden() == "other"
     assert api.list_notes() == []
+
+
+# ---- best-effort sync ----
+#
+# run_mora.py is its own launch path, not only ever opened from the graph
+# window (ui/app.py) -- so a garden pointed at a sync folder must converge
+# from a Mora-only session too, the same way ui/api.py::Api does on open,
+# switch and close.
+
+def test_opening_mora_pushes_pending_local_changes(tmp_path):
+    create_garden("synced")
+    conn = get_connection("synced")
+    initialize_database(conn)
+    create_mote(conn, {"name": "written before Mora opened"})
+    conn.close()
+
+    sync_dir = tmp_path / "shared"
+    set_sync_dir("synced", str(sync_dir))
+
+    instance = Api("synced")
+    instance.shutdown()
+
+    assert any((sync_dir / "synced" / "ops").glob("*.jsonl"))
+
+
+def test_switching_garden_pushes_the_new_gardens_pending_changes(tmp_path):
+    create_garden("plain")
+    instance = Api("plain")
+
+    create_garden("synced")
+    conn = get_connection("synced")
+    initialize_database(conn)
+    create_mote(conn, {"name": "written before switching in"})
+    conn.close()
+
+    sync_dir = tmp_path / "shared"
+    set_sync_dir("synced", str(sync_dir))
+
+    instance.switch_garden("synced")
+    instance.shutdown()
+
+    assert any((sync_dir / "synced" / "ops").glob("*.jsonl"))
+
+
+def test_opening_mora_on_an_unsynced_garden_does_nothing(api):
+    # No sync folder configured for "test" (the `api` fixture's garden) --
+    # must not raise or create one implicitly.
+    assert api.current_garden() == "test"
 
 
 # ---- the window's own port ----
