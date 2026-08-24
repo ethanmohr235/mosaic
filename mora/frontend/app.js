@@ -183,9 +183,7 @@ function buildBlock(block) {
     return list;
   }
   if (block.type === "equation") {
-    const node = el("div", "math display-math");
-    mathInto(node, block.spans);
-    return node;
+    return mathInto(el("div", "math display-math"), block.tex, true);
   }
   return buildFigure(block);
 }
@@ -201,16 +199,37 @@ function buildInline(node) {
     const tag = { bold: "strong", emph: "em", code: "code" }[node.style];
     return el(tag, null, node.text);
   }
-  if (node.type === "math") return mathInto(el("span", "math"), node.spans);
+  if (node.type === "math") return mathInto(el("span", "math"), node.tex, false);
   if (node.type === "link") return buildLink(node);
   return buildValue(node);
 }
 
-function mathInto(parent, spans) {
-  spans.forEach((span) => {
-    if (span.kind === "text") parent.append(document.createTextNode(span.text));
-    else parent.append(el(span.kind, null, span.text));
-  });
+/** The second thing this frontend reads for itself, and only because
+ *  there is no tree to read: core/modoc.py keeps a `$...$` body raw on
+ *  purpose, so what arrives is the TeX the author typed and KaTeX lays
+ *  it out here.
+ *
+ *  throwOnError:false is the same bargain the parser strikes -- a note
+ *  with a bad formula in it still renders, with the broken formula
+ *  visibly broken in red, rather than one typo blanking the page. The
+ *  catch below is for the tier past that (KaTeX missing or throwing
+ *  something that isn't a ParseError): fall back to showing the source,
+ *  which is never as good as typesetting it and always better than
+ *  showing nothing. `trust` is left at its default of false, which is
+ *  what keeps \href and \includegraphics out of a note that may have
+ *  arrived over a garden sync. */
+function mathInto(parent, tex, display) {
+  try {
+    katex.render(tex, parent, {
+      displayMode: display,
+      throwOnError: false,
+      errorColor: "var(--danger)",
+      strict: false,
+    });
+  } catch (e) {
+    parent.classList.add("math-raw");
+    parent.textContent = tex;
+  }
   return parent;
 }
 

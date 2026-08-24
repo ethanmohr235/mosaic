@@ -236,13 +236,23 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
 }
 #rendered strong { font-weight: 600; color: var(--fg-bright); }
 #rendered code { font-family: var(--mono); font-size: 0.88em; color: oklch(0.8 0 0); }
-.math { font-family: var(--serif); font-style: italic; color: oklch(0.9 0 0); }
-.math sup, .math sub { font-size: 0.7em; font-style: normal; }
+/* KaTeX brings its own faces and its own italics, so .math sets colour
+   and size and then gets out of the way -- a serif/italic of ours here
+   would fight the typesetting rather than join it. */
+.math { color: oklch(0.9 0 0); }
+.math .katex { font-size: 1.05em; }
 .display-math {
-  font-size: 16px; color: var(--fg-bright); text-align: center;
+  color: var(--fg-bright);
   margin: 22px 0; padding: 14px 0;
   border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft);
+  /* An align* block is often wider than the pane. Scrolling it beats
+     wrapping it, which for math means breaking it. */
+  overflow-x: auto; overflow-y: hidden;
 }
+.display-math .katex-display { margin: 0; }
+.display-math .katex { font-size: 1.15em; }
+/* KaTeX absent or thrown past throwOnError: the source, plainly. */
+.math-raw { font-family: var(--mono); font-size: 0.88em; color: var(--muted); }
 
 .mote-link {
   background: none; border: none; padding: 0 0 1px; font: inherit;

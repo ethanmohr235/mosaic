@@ -62,6 +62,8 @@ in scope and \val{sum(targets('contains').progress)} points logged.
 \graph{targets('contains') by status}
 
 \subsection{Throughput}
+Cost grows as $r^{2}$, with a shear modulus of $G = \frac{E}{2(1+\nu)}$.
+
 \begin{itemize}
 \item \mote{Task 0} is \textbf{ahead}.
 \item \mote{Nowhere} is not a mote.
@@ -70,7 +72,10 @@ in scope and \val{sum(targets('contains').progress)} points logged.
 \graph{sum(targets('contains').progress) over t}
 
 \begin{equation}
-C = \alpha n + \beta n r^{2}
+\begin{aligned}
+C &= \alpha n + \beta n r^{2} \\
+\lambda &= \frac{4G^2 \nu}{E - 6G\nu}
+\end{aligned}
 \end{equation}
 
 Broken on purpose: \val{nonesuch}.
@@ -204,13 +209,29 @@ def run_checks(window):
 
     check("both \\graph forms draw", both_graph_forms_draw)
 
-    def math_renders_symbols_and_superscripts():
-        display = text_of(window, "#rendered .display-math")
-        assert "α" in display and "β" in display, f"symbols not substituted: {display!r}"
-        sup = text_of(window, "#rendered .display-math sup")
-        assert sup == "2", f"superscript not rendered, got {sup!r}"
+    def math_is_typeset_by_katex():
+        """The `.katex-html` layer specifically, not the whole node: KaTeX
+        emits a hidden MathML copy beside it, so textContent on the parent
+        reads every symbol twice."""
+        assert js(window, "!!window.katex"), "katex.min.js did not load"
+        assert js(window, "!document.querySelector('#rendered .math-raw')"), \
+            "math fell back to raw source, so KaTeX threw"
+        assert js(window, "!document.querySelector('#rendered .katex-error')"), \
+            "KaTeX reported a parse error in the sample note"
 
-    check("display math substitutes symbols and raises exponents", math_renders_symbols_and_superscripts)
+        display = text_of(window, "#rendered .display-math .katex-html")
+        assert "α" in display and "λ" in display, f"symbols not typeset: {display!r}"
+        # A real fraction box -- the thing the substitution renderer this
+        # replaced could not build at all.
+        fracs = js(window, "document.querySelectorAll('#rendered .display-math .mfrac').length")
+        assert fracs == 1, f"expected one typeset fraction in the equation, got {fracs}"
+        rows = js(window, "document.querySelectorAll('#rendered .display-math .vlist-t').length")
+        assert rows > 0, "the aligned environment did not lay out"
+
+        inline = js(window, "document.querySelectorAll('#rendered p .math .katex').length")
+        assert inline == 2, f"expected two inline formulas typeset, got {inline}"
+
+    check("math is typeset by KaTeX, inline and display", math_is_typeset_by_katex)
 
     def the_panel_starts_on_the_note_mote():
         assert wait_until(lambda: text_of(window, "#panel-name") == "Atlas Migration"), \

@@ -8,9 +8,13 @@ what a note means: there is one parser (core/modoc.py), one resolver
 (core/modoc_bind.py), and this, which only reshapes their answers into
 JSON-able dicts.
 
-The one thing JavaScript does read for itself is the source pane's
-syntax highlighting -- colour is presentation, not meaning, and running
-it locally is what keeps typing feel immediate.
+Two things JavaScript does read for itself. The source pane's syntax
+highlighting -- colour is presentation, not meaning, and running it
+locally is what keeps typing feel immediate. And the body of a `$...$`
+or an `\\begin{equation}`, which arrives here as the raw TeX the author
+typed and is laid out by KaTeX in the browser: core/modoc.py deliberately
+does not parse inside math (see its `Math` node), so there is no tree to
+send and nothing for the two sides to disagree about.
 
 Resolution is inlined onto each node rather than sent alongside as a
 keyed table. A `\\val` node arrives already carrying the text it renders
@@ -110,7 +114,7 @@ def _block(block, resolution: Resolution, directory: Directory) -> dict:
         return {"type": "list",
                 "items": [_content(i, resolution, directory) for i in block.items]}
     if isinstance(block, modoc.Equation):
-        return {"type": "equation", "spans": _spans(block.text)}
+        return {"type": "equation", "tex": block.text}
     return _graph_block(block, resolution)
 
 
@@ -138,7 +142,7 @@ def _inline(node, resolution: Resolution, directory: Directory) -> dict:
     if isinstance(node, modoc.Styled):
         return {"type": "styled", "style": node.style, "text": node.text}
     if isinstance(node, modoc.Math):
-        return {"type": "math", "spans": _spans(node.text)}
+        return {"type": "math", "tex": node.text}
     if isinstance(node, modoc.Link):
         target = resolution.links.get(node.ref)
         return {"type": "link", "label": node.label,
@@ -173,10 +177,6 @@ def _linked(document: modoc.Document, resolution: Resolution, directory: Directo
         for ref, count in counts.items()
     ]
     return sorted(entries, key=lambda e: (-e["count"], e["name"]))
-
-
-def _spans(text: str) -> list[dict]:
-    return [{"kind": s.kind, "text": s.text} for s in modoc.math_spans(text)]
 
 
 def panel_payload(mote: Mote, directory: Directory) -> dict:

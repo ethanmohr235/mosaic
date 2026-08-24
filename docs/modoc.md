@@ -64,8 +64,32 @@ may contain inline macros (`\section{Status of \mote{atlas}{Atlas}}`).
 ### Inline
 
 `\textbf{...}`, `\emph{...}`, `\texttt{...}`, and `$...$` for maths.
-`$...$` is a symbol and script substitution -- `\alpha` becomes α, `r^{2}`
-raises the 2 -- not a TeX engine, and deliberately so: a note is a note.
+
+Maths is the one place this grammar does not look inside. A `$...$` body
+and an `\begin{equation}` body are kept as the TeX you typed and are
+typeset by [KaTeX](https://katex.org) (vendored under
+`mora/frontend/vendor/katex/`), so `\frac`, `\sum` with limits, `\left(`,
+and environments KaTeX knows -- `aligned`, `matrix`, `cases` -- all work:
+
+    \begin{equation}
+    \begin{aligned}
+    G &= \frac{E}{2(1+\nu)} \\
+    \lambda &= \frac{4G^2 \nu}{E - 6G\nu}
+    \end{aligned}
+    \end{equation}
+
+Nothing outside a formula changes: the macros above are still flat, and
+a `\frac` in a formula is never mistaken for an unknown command because
+the parser never reads into `$...$` at all. Broken TeX renders in red
+where it stands rather than taking the note down with it -- the same
+bargain the rest of the format strikes.
+
+`monoss modoc render` has no typesetter to hand, so in the terminal a
+formula falls back to symbol and script substitution: `\alpha` becomes
+α, `r^{2}` raises the 2, and a `\frac` prints as itself.
+
+The two limits worth knowing: a `$...$` body cannot contain a `$`, and
+`\[...\]` is not display-math syntax here -- use `\begin{equation}`.
 
 Escapes: `\\`, `\{`, `\}`, `\%`, `\$`.
 

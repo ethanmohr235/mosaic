@@ -204,6 +204,10 @@ def test_word_count_ignores_punctuation_stranded_by_a_macro():
     ("\\alpha n", [("text", "\u03b1 n")]),
     ("r^{2}", [("text", "r"), ("sup", "2")]),
     ("x_i + 1", [("text", "x"), ("sub", "i"), ("text", " + 1")]),
+    # A symbol name that is a prefix of a longer command must not be
+    # substituted inside it: `\left(` is not `\u2264ft(`.
+    ("\\left(a\\right)", [("text", "\\left(a\\right)")]),
+    ("\\theta \\le \\infty", [("text", "\u03b8 \u2264 \u221e")]),
 ])
 def test_math_spans(source, expected):
     assert [(s.kind, s.text) for s in math_spans(source)] == expected

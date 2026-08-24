@@ -89,8 +89,10 @@ class Styled:
 
 @dataclass(frozen=True)
 class Math:
-    """`$...$`. The raw source; see math_spans() for the shared reading
-    of it, so the CLI and Mora never disagree about what an alpha is."""
+    """`$...$`. The raw source, kept raw: math is the one place this
+    grammar does not look inside. Mora hands the string to KaTeX and the
+    CLI reduces it with math_spans(); neither reading belongs in a parse
+    tree the other has to agree with."""
     text: str
 
 
@@ -464,6 +466,17 @@ MATH_SYMBOLS = {
     "\\partial": "\u2202",
 }
 
+# Whole control sequences only. Replacing these as plain substrings --
+# which is what this did -- turns `\left(` into `≤ft(`, because `\le` is
+# a prefix of it. The trailing lookahead is the fix, and it matters more
+# now than it used to: KaTeX typesets `\left`, `\theta`, `\ne`-prefixed
+# names and the rest happily, so a formula that renders correctly in
+# Mora reaches this reducer as a matter of course.
+_SYMBOL_RE = re.compile(
+    "(?:" + "|".join(re.escape(name) for name in sorted(MATH_SYMBOLS, key=len, reverse=True))
+    + r")(?![a-zA-Z])"
+)
+
 _SCRIPT_RE = re.compile(r"([\^_])\{([^{}]*)\}|([\^_])(\S)")
 
 
@@ -475,10 +488,16 @@ class MathSpan:
 
 
 def math_spans(text: str) -> list[MathSpan]:
-    """`$...$` and equation bodies, read once here so every surface
-    renders the same alpha and the same superscript."""
-    for name, symbol in MATH_SYMBOLS.items():
-        text = text.replace(name, symbol)
+    """`$...$` and equation bodies, reduced to what a terminal can show:
+    Greek for the handful of names below, and one level of super/
+    subscript. cli/render.py is the only caller.
+
+    Mora renders the same source with KaTeX instead. That is not the two
+    surfaces disagreeing about the note -- the note is the TeX, and this
+    is a lossy view of it for a device with no glyphs for a fraction bar.
+    A `\\frac` reads here as the literal `\\frac`, which is worse than a
+    typeset one and better than a silent lie about the formula."""
+    text = _SYMBOL_RE.sub(lambda m: MATH_SYMBOLS[m.group(0)], text)
 
     spans: list[MathSpan] = []
     position = 0
