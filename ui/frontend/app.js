@@ -3722,6 +3722,10 @@ function setupKeyboard() {
     // lives in, so it comes first -- one Esc puts the graph back to
     // editable, a second puts the panel away.
     if (attractorMode) { exitAttractorMode(); return; }
+    // Runs history and advanced view settings share a corner and are
+    // mutually exclusive (see openRunsPanel/openViewSettings), so at most
+    // one of these two ever fires.
+    if (!$("runs-panel").classList.contains("hidden")) { closeRunsPanel(); return; }
     if (viewSettingsOpen()) { closeViewSettings(); return; }
     // The sim bar is non-blocking (the rest of the UI stays usable while
     // it's open), so it sits behind every other panel in the Esc chain --
