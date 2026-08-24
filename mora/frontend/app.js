@@ -659,10 +659,6 @@ function wire() {
   editor.addEventListener("blur", closePicker);
   editor.addEventListener("keydown", (event) => {
     if (onPickerKey(event)) { event.preventDefault(); return; }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      save();
-    }
   });
   editor.addEventListener("click", updatePicker);
 
@@ -689,6 +685,14 @@ function wire() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { closeNoteMenu(); closePicker(); }
+    // Window-level rather than scoped to the editor (as this used to be):
+    // Save has its own persistent topbar button and dirty-state pill, so
+    // Ctrl/Cmd+S reads as "save the note" from anywhere in the window, not
+    // just while the caret happens to be sitting in the source pane.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      save();
+    }
   });
 }
 
