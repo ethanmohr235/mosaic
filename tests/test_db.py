@@ -101,9 +101,9 @@ def _pre_rename_garden(conn):
     cur = conn.cursor()
     cur.executescript("""
         INSERT INTO motes (id) VALUES ('species-1'), ('instance-1'), ('plain-1');
-        INSERT INTO mote_properties VALUES ('species-1', 'unknowns', '"voltage"');
-        INSERT INTO mote_properties VALUES ('plain-1', 'unknowns', '"my own data"');
-        INSERT INTO relationships VALUES ('r1', 'instance-1', 'species-1', 'instance_of');
+        INSERT INTO mote_properties (mote_id, key, value) VALUES ('species-1', 'unknowns', '"voltage"');
+        INSERT INTO mote_properties (mote_id, key, value) VALUES ('plain-1', 'unknowns', '"my own data"');
+        INSERT INTO relationships (id, from_id, to_id, type) VALUES ('r1', 'instance-1', 'species-1', 'instance_of');
     """)
     conn.commit()
     return cur
@@ -162,7 +162,7 @@ def test_the_freedoms_migration_never_clobbers_an_existing_freedoms():
     create_garden("test")
     conn = db.get_connection("test")
     cur = _pre_rename_garden(conn)
-    cur.execute("INSERT INTO mote_properties VALUES ('species-1', 'freedoms', '\"current\"')")
+    cur.execute("INSERT INTO mote_properties (mote_id, key, value) VALUES ('species-1', 'freedoms', '\"current\"')")
     conn.commit()
 
     db.initialize_database(conn)

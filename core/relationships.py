@@ -1,7 +1,9 @@
 # core/relationships.py
 import sqlite3
 
+from core import oplog
 from core.db import generate_uuid
+from core.device import get_device_id
 from core.entities import Relationship
 
 # Relationships programmatically modifying mote properties is the
@@ -15,9 +17,14 @@ def create_relationship(
 ) -> str:
     cur = conn.cursor()
     rel_id = id or generate_uuid()
+    ts = oplog.now_iso()
     cur.execute(
-        "INSERT INTO relationships (id, from_id, to_id, type) VALUES (?, ?, ?, ?)",
-        (rel_id, from_id, to_id, type_)
+        "INSERT INTO relationships (id, from_id, to_id, type, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (rel_id, from_id, to_id, type_, ts)
+    )
+    oplog.append(
+        conn, get_device_id(), "relationship", rel_id, "create_relationship",
+        {"id": rel_id, "from_id": from_id, "to_id": to_id, "type": type_}, ts=ts,
     )
     conn.commit()
     return rel_id
@@ -64,18 +71,28 @@ def update_relationship(
     if not fields:
         raise ValueError("update_relationship requires at least one field to update")
 
-    set_clause = ", ".join(f"{col} = ?" for col in fields)
+    ts = oplog.now_iso()
+    set_clause = ", ".join(f"{col} = ?" for col in fields) + ", updated_at = ?"
     cur = conn.cursor()
     cur.execute(
         f"UPDATE relationships SET {set_clause} WHERE id=?",
-        (*fields.values(), rel_id)
+        (*fields.values(), ts, rel_id)
     )
+    found = cur.rowcount > 0
+    if found:
+        oplog.append(
+            conn, get_device_id(), "relationship", rel_id, "update_relationship",
+            {"id": rel_id, **fields}, ts=ts,
+        )
     conn.commit()
-    return cur.rowcount > 0
+    return found
 
 
 def delete_relationship(conn: sqlite3.Connection, rel_id: str) -> bool:
     cur = conn.cursor()
     cur.execute("DELETE FROM relationships WHERE id=?", (rel_id,))
+    found = cur.rowcount > 0
+    if found:
+        oplog.append(conn, get_device_id(), "relationship", rel_id, "delete_relationship", {"id": rel_id})
     conn.commit()
-    return cur.rowcount > 0
+    return found

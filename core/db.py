@@ -94,6 +94,42 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships(type);
     """)
 
+    # The change log multi-device sync (core/sync.py) is built on. Every
+    # mutation in core/motes.py and core/relationships.py appends one row
+    # here, in the same transaction as the write it describes -- see
+    # core/oplog.py. No FK to motes/relationships: a delete's own op must
+    # survive the row it deleted, the same reason simulation_changes below
+    # has none either.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS oplog (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        op_id TEXT UNIQUE NOT NULL,
+        device_id TEXT NOT NULL,
+        ts TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        payload TEXT NOT NULL
+    );
+    """)
+
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_oplog_device_seq ON oplog(device_id, seq);
+    """)
+
+    # How far this garden has replayed each other device's oplog
+    # (core/sync.py::pull), keyed by that device's id. Also holds one row
+    # keyed by *this* device's own id, whose last_applied_seq then means
+    # "how much of my own oplog I've already pushed out" -- push
+    # progress and pull progress are the same shape of bookkeeping, so
+    # one table covers both rather than two near-identical ones.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS sync_state (
+        remote_device_id TEXT PRIMARY KEY,
+        last_applied_seq INTEGER NOT NULL DEFAULT 0
+    );
+    """)
+
     # Simulation audit log. Failed runs are recorded too -- a run that blew
     # up is exactly the one worth looking back at. simulation_changes
     # deliberately has no foreign key on mote_id, so the history of what a
@@ -225,6 +261,21 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     # NULL means the garden as it actually stands.
     if "scenario_id" not in run_columns:
         cursor.execute("ALTER TABLE simulation_runs ADD COLUMN scenario_id TEXT")
+
+    # Sync (core/sync.py) needs to tell, for a property or relationship
+    # already stored locally, whether an incoming remote edit is newer --
+    # last-write-wins per field, not per whole mote. NULL on a row
+    # written before this column existed is treated as "very old" by the
+    # comparison, which is correct: it predates sync entirely.
+    cursor.execute("PRAGMA table_info(mote_properties)")
+    prop_columns = {row["name"] for row in cursor.fetchall()}
+    if "updated_at" not in prop_columns:
+        cursor.execute("ALTER TABLE mote_properties ADD COLUMN updated_at TEXT")
+
+    cursor.execute("PRAGMA table_info(relationships)")
+    rel_columns = {row["name"] for row in cursor.fetchall()}
+    if "updated_at" not in rel_columns:
+        cursor.execute("ALTER TABLE relationships ADD COLUMN updated_at TEXT")
 
     # `unknowns` was renamed `freedoms` when the declaration moved from
     # the species to the mote: these are the properties a thing is free

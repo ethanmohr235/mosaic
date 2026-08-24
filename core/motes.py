@@ -3,7 +3,9 @@ import json
 import re
 import sqlite3
 
+from core import oplog
 from core.db import generate_uuid
+from core.device import get_device_id
 from core.entities import Mote
 
 # Matches "key = value" (or "key=value"), e.g. "priority = high" --
@@ -60,12 +62,17 @@ def create_mote(conn: sqlite3.Connection, properties: dict | None = None, id: st
     mote_id = id or generate_uuid()
     cur.execute("INSERT INTO motes (id) VALUES (?)", (mote_id,))
 
+    ts = oplog.now_iso()
     for key, value in properties.items():
         cur.execute(
-            "INSERT INTO mote_properties (mote_id, key, value) VALUES (?, ?, ?)",
-            (mote_id, key, _encode_value(value))
+            "INSERT INTO mote_properties (mote_id, key, value, updated_at) VALUES (?, ?, ?, ?)",
+            (mote_id, key, _encode_value(value), ts)
         )
 
+    oplog.append(
+        conn, get_device_id(), "mote", mote_id, "create_mote",
+        {"id": mote_id, "properties": properties}, ts=ts,
+    )
     conn.commit()
     return mote_id
 
@@ -184,19 +191,32 @@ def copy_mote(
 def delete_mote(conn: sqlite3.Connection, id: str) -> bool:
     cur = conn.cursor()
     cur.execute("DELETE FROM motes WHERE id=?", (id,))
+    found = cur.rowcount > 0
+    if found:
+        oplog.append(conn, get_device_id(), "mote", id, "delete_mote", {"id": id})
     conn.commit()
-    return cur.rowcount > 0
+    return found
 
 
 def update_mote(conn: sqlite3.Connection, mote_id: str, new_props: dict) -> None:
+    """One oplog row per changed key, not one for the whole call --
+    concurrent edits to *different* properties on the same mote from two
+    devices then merge with no conflict at all (core/sync.py)."""
     cur = conn.cursor()
+    device_id = get_device_id()
 
-    cur.executemany("""
-        INSERT INTO mote_properties (mote_id, key, value)
-        VALUES (?, ?, ?)
-        ON CONFLICT(mote_id, key)
-        DO UPDATE SET value = excluded.value
-    """, [(mote_id, k, _encode_value(v)) for k, v in new_props.items()])
+    for key, value in new_props.items():
+        ts = oplog.now_iso()
+        cur.execute("""
+            INSERT INTO mote_properties (mote_id, key, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(mote_id, key)
+            DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        """, (mote_id, key, _encode_value(value), ts))
+        oplog.append(
+            conn, device_id, "mote", mote_id, "set_property",
+            {"mote_id": mote_id, "key": key, "value": value}, ts=ts,
+        )
 
     conn.commit()
 
@@ -206,5 +226,11 @@ def delete_property(conn: sqlite3.Connection, mote_id: str, key: str) -> bool:
     cur.execute(
         "DELETE FROM mote_properties WHERE mote_id=? AND key=?", (mote_id, key)
     )
+    found = cur.rowcount > 0
+    if found:
+        oplog.append(
+            conn, get_device_id(), "mote", mote_id, "delete_property",
+            {"mote_id": mote_id, "key": key},
+        )
     conn.commit()
-    return cur.rowcount > 0
+    return found

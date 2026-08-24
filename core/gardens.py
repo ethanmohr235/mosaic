@@ -105,6 +105,26 @@ def clear_default_garden() -> None:
     _default_garden_config_path().unlink(missing_ok=True)
 
 
+def _sync_dir_path(name: str) -> Path:
+    path = garden_db_path(name)
+    return path.with_name(path.name + ".sync_dir")
+
+
+def get_sync_dir(name: str) -> str | None:
+    """The folder this garden syncs through (core/sync.py), or None if
+    `sync init` has never been run for it. Per garden, not per device --
+    a pointer file beside the garden's own .db, same pattern as
+    _default_garden_config_path() above."""
+    path = _sync_dir_path(name)
+    if not path.exists():
+        return None
+    return path.read_text().strip() or None
+
+
+def set_sync_dir(name: str, sync_dir: str) -> None:
+    _sync_dir_path(name).write_text(str(sync_dir))
+
+
 def resolve_garden(name: str | None) -> str:
     if name is None:
         preferred = get_default_garden()

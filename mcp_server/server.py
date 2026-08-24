@@ -38,7 +38,8 @@ from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import simulation as simulation_repo
 from core import species as species_repo
-from core.db import get_connection, initialize_database
+from core import sync as sync_repo
+from core.db import DEFAULT_GARDEN, get_connection, initialize_database
 
 # How long a write waits out a lock held by another process (the GUI,
 # the CLI) before giving up. core/db.py deliberately isn't touched: this
@@ -98,6 +99,57 @@ def export_garden(garden: str | None = None) -> dict[str, Any]:
     analysis."""
     with _connect(garden) as conn:
         return garden_io.export_garden(conn)
+
+
+# ---- multi-device sync ----
+#
+# A garden syncs through a shared folder (whatever a tool like
+# Syncthing/Dropbox/iCloud Drive keeps identical across devices) rather
+# than over the network itself -- see core/sync.py. sync_init points a
+# garden at one; the others read/write that garden's own change log
+# through it. None of this touches the reserved `_library` garden.
+
+
+def sync_init(sync_dir: str, garden: str | None = None, clone: bool = False) -> dict[str, Any]:
+    """Point a garden at a shared sync folder. If that folder already
+    holds sync history for this garden and the garden doesn't exist
+    locally yet, pass clone=True to materialize it from that history --
+    otherwise this refuses, rather than silently creating an empty
+    garden that would then diverge from history you clearly meant to
+    join."""
+    name = garden or gardens_repo.get_default_garden() or DEFAULT_GARDEN
+    return sync_repo.init(name, sync_dir, clone=clone)
+
+
+def sync_push(garden: str | None = None) -> dict[str, Any]:
+    """Write this device's changes since the last push out to the sync
+    folder, as one new file. Other devices pick them up on their next
+    sync_pull()."""
+    with _connect(garden) as conn:
+        return sync_repo.push(conn, gardens_repo.resolve_garden(garden))
+
+
+def sync_pull(garden: str | None = None) -> dict[str, Any]:
+    """Apply other devices' changes from the sync folder. `skipped`
+    lists anything not applied as-is and why: "shadowed" means a local
+    edit was already newer (last-write-wins, per property); "delete_won"
+    means the entity this change targets was already deleted locally."""
+    with _connect(garden) as conn:
+        return sync_repo.pull(conn, gardens_repo.resolve_garden(garden))
+
+
+def sync_run(garden: str | None = None) -> dict[str, Any]:
+    """sync_push() then sync_pull() -- the everyday one-shot sync."""
+    with _connect(garden) as conn:
+        return sync_repo.run(conn, gardens_repo.resolve_garden(garden))
+
+
+def sync_status(garden: str | None = None) -> dict[str, Any]:
+    """This garden's sync configuration and progress: the folder it
+    syncs through, how many local changes are still unpushed, and how
+    far each other known device's changes have been applied."""
+    with _connect(garden) as conn:
+        return sync_repo.status(conn, gardens_repo.resolve_garden(garden))
 
 
 # ---- motes ----
@@ -742,6 +794,7 @@ def reserved_names() -> dict[str, Any]:
 # without duplicating every signature and docstring.
 _TOOLS: tuple[Callable[..., Any], ...] = (
     list_gardens, create_garden, export_garden,
+    sync_init, sync_push, sync_pull, sync_run, sync_status,
     list_motes, search_motes, get_mote, create_mote, update_mote, delete_property, delete_mote,
     list_relationships, mote_relationships, create_relationship, update_relationship,
     delete_relationship,

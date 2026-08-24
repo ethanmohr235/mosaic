@@ -47,6 +47,11 @@ from mcp_server.server import (
     set_species,
     set_template,
     species_of,
+    sync_init,
+    sync_pull,
+    sync_push,
+    sync_run,
+    sync_status,
     template_for,
     update_mote,
     update_relationship,
@@ -649,3 +654,44 @@ def test_preview_simulation_is_quiet_when_constraints_hold(box):
     create_relationship(limit["id"], box["species_id"], APPLIES_TO, GARDEN)
 
     assert preview_simulation(1, GARDEN)["constraint_violations"] == []
+
+
+# ---- sync ----
+# Just the MCP plumbing -- core/sync.py's own multi-device merge
+# behavior (tests/test_sync.py) is exercised there, since simulating a
+# second device needs switching GARDENS_DIR mid-test, which none of the
+# other tools here do.
+
+
+def test_sync_init_then_status_reports_the_folder(tmp_path):
+    sync_dir = str(tmp_path / "shared")
+    result = sync_init(sync_dir, GARDEN)
+    assert result["garden"] == GARDEN
+    assert result["cloned"] is False
+
+    status = sync_status(GARDEN)
+    assert status["sync_dir"] == sync_dir
+    assert status["remotes"] == []
+
+
+def test_sync_push_then_status_shows_nothing_pending(tmp_path):
+    create_mote({"name": "Alice"}, GARDEN)
+    sync_init(str(tmp_path / "shared"), GARDEN)
+
+    pushed = sync_push(GARDEN)
+    assert pushed["pushed"] == 1
+    assert sync_status(GARDEN)["local_ops_pending"] == 0
+
+
+def test_sync_pull_with_no_other_device_is_a_noop(tmp_path):
+    sync_init(str(tmp_path / "shared"), GARDEN)
+    assert sync_pull(GARDEN) == {"applied": 0, "skipped": []}
+
+
+def test_sync_run_pushes_and_pulls_in_one_call(tmp_path):
+    create_mote({"name": "Alice"}, GARDEN)
+    sync_init(str(tmp_path / "shared"), GARDEN)
+
+    result = sync_run(GARDEN)
+    assert result["push"]["pushed"] == 1
+    assert result["pull"] == {"applied": 0, "skipped": []}

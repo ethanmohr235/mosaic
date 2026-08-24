@@ -2,6 +2,7 @@
 import dataclasses
 import functools
 import json
+import logging
 import os
 import platform
 import subprocess
@@ -28,6 +29,7 @@ from core import reserved as reserved_repo
 from core import kinds as kinds_repo
 from core import scenarios as scenarios_repo
 from core import simulation as simulation_repo
+from core import sync as sync_repo
 from core import solvers as solvers_repo
 from core import species as species_repo
 
@@ -185,6 +187,9 @@ def _open_with_os_default(path: str) -> None:
             _popen_detached(["xdg-open", path])
 
 
+logger = logging.getLogger(__name__)
+
+
 def _synchronized(method):
     """pywebview invokes exposed methods from a worker thread, not
     necessarily the same one each time. Api holds one long-lived sqlite3
@@ -223,9 +228,26 @@ class Api:
         # needs this Api instance to exist first, as its js_api) -- used
         # for native file dialogs in export/import.
         self._window: webview.Window | None = None
+        self._best_effort_sync()
+
+    def _best_effort_sync(self) -> None:
+        """Push and pull this garden's changes if it's been pointed at a
+        sync folder (`sync init`, core/sync.py) -- called on open, on
+        garden switch, and on close, so "edit on one device, open the
+        app on another later" converges with no action from the user.
+        Never allowed to block opening or closing the app: a sync
+        folder that's a moment-unmounted cloud drive just means this
+        pass is skipped, not a failure to launch."""
+        if gardens_repo.get_sync_dir(self._current_garden) is None:
+            return
+        try:
+            sync_repo.run(self._conn, self._current_garden)
+        except Exception:
+            logger.exception("garden sync failed for %r", self._current_garden)
 
     @_synchronized
     def shutdown(self) -> None:
+        self._best_effort_sync()
         self._conn.close()
 
     # ---- garden management ----
@@ -252,6 +274,7 @@ class Api:
         self._conn = get_connection(resolved)
         initialize_database(self._conn)
         self._current_garden = resolved
+        self._best_effort_sync()
         return {"garden": resolved}
 
     @_synchronized

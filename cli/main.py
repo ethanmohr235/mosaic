@@ -25,8 +25,16 @@ from core.relationships import (
     update_relationship,
     delete_relationship,
 )
-from core.gardens import create_garden, delete_garden, list_gardens, resolve_garden, restore_garden
-from core.db import get_connection, initialize_database
+from core.gardens import (
+    create_garden,
+    delete_garden,
+    get_default_garden,
+    list_gardens,
+    resolve_garden,
+    restore_garden,
+)
+from core import sync as sync_repo
+from core.db import DEFAULT_GARDEN, get_connection, initialize_database
 from cli.render import (
     BASE_UNIT_NOTE,
     change_lines,
@@ -83,6 +91,26 @@ def build_parser() -> argparse.ArgumentParser:
     garden_delete.add_argument("name", help="Garden name")
     garden_restore = garden_sub.add_parser("restore", help="Restore a deleted garden")
     garden_restore.add_argument("name", help="Garden name")
+
+    # ------------------ SYNC COMMANDS ------------------
+    # A sibling of `mote`/`rel`, not `garden`: push/pull/run/status need
+    # an open connection to the garden's own oplog, the same way those
+    # do. `init` is the one action that may need to create the garden
+    # first (cloning from existing sync history), so it's special-cased
+    # in main() the same way `garden` itself is.
+    sync_parser = subparsers.add_parser("sync", help="Sync a garden between devices")
+    sync_sub = sync_parser.add_subparsers(dest="action")
+    sync_init = sync_sub.add_parser("init", help="Point this garden at a shared sync folder")
+    sync_init.add_argument("folder", help="Path to the shared folder (e.g. a Syncthing/Dropbox/iCloud folder)")
+    sync_init.add_argument(
+        "--clone", action="store_true",
+        help="If the folder already has history for this garden and it doesn't exist "
+             "locally yet, create it here from that history",
+    )
+    sync_sub.add_parser("push", help="Write local changes out to the sync folder")
+    sync_sub.add_parser("pull", help="Apply other devices' changes from the sync folder")
+    sync_sub.add_parser("run", help="push, then pull (the everyday one-shot sync)")
+    sync_sub.add_parser("status", help="Show sync progress and any conflicts from the last pull")
 
     # ------------------ MOTE COMMANDS ------------------
     mote_parser = subparsers.add_parser("mote", help="Manage motes")
@@ -329,6 +357,50 @@ def _handle_garden(args) -> None:
         print(f"Garden restored: {args.name}")
     else:
         print("Specify a garden action: create, list, delete, restore")
+
+
+def _handle_sync_init(garden: str, args) -> None:
+    result = sync_repo.init(garden, args.folder, clone=args.clone)
+    if result["cloned"]:
+        print(f"Garden {garden!r} synced to {args.folder} (cloned existing history)")
+    else:
+        print(f"Garden {garden!r} now syncs through {args.folder}")
+
+
+def _print_sync_notes(skipped: list[dict]) -> None:
+    for note in skipped:
+        print(f"  {note['reason']}: {note['entity']} (from device {note['device_id']})")
+
+
+def _handle_sync(conn, garden: str, args) -> None:
+    if args.action == "push":
+        result = sync_repo.push(conn, garden)
+        print(f"Pushed {result['pushed']} change(s)")
+
+    elif args.action == "pull":
+        result = sync_repo.pull(conn, garden)
+        print(f"Applied {result['applied']} change(s)")
+        _print_sync_notes(result["skipped"])
+
+    elif args.action == "run":
+        result = sync_repo.run(conn, garden)
+        print(f"Pushed {result['push']['pushed']} change(s), applied {result['pull']['applied']} change(s)")
+        _print_sync_notes(result["pull"]["skipped"])
+
+    elif args.action == "status":
+        result = sync_repo.status(conn, garden)
+        if result["sync_dir"] is None:
+            print(f"Garden {garden!r} is not syncing -- run `sync init <folder>` first")
+            return
+        print(f"Sync folder: {result['sync_dir']}")
+        print(f"Local changes: {result['local_ops']} total, {result['local_ops_pending']} not yet pushed")
+        if not result["remotes"]:
+            print("No other device has synced with this garden yet.")
+        for remote in result["remotes"]:
+            print(f"  device {remote['device_id']}: {remote['last_applied_seq']} change(s) applied from it")
+
+    else:
+        print("Specify a sync action: init, push, pull, run, status")
 
 
 def _handle_mote(conn, args) -> None:
@@ -701,6 +773,14 @@ def main() -> None:
             _handle_garden(args)
             return
 
+        if args.command == "sync" and args.action == "init":
+            # Not resolve_garden(): that raises if the name doesn't exist
+            # yet, but init's whole job may be to create it (cloning from
+            # existing sync history onto a brand-new garden name).
+            garden = args.garden or get_default_garden() or DEFAULT_GARDEN
+            _handle_sync_init(garden, args)
+            return
+
         garden = resolve_garden(args.garden)
         conn = get_connection(garden)
         try:
@@ -709,6 +789,8 @@ def main() -> None:
                 _handle_mote(conn, args)
             elif args.command == "rel":
                 _handle_rel(conn, args)
+            elif args.command == "sync":
+                _handle_sync(conn, garden, args)
             elif args.command == "species":
                 _handle_species(conn, args)
             elif args.command == "folder":
