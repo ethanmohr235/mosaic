@@ -36,9 +36,14 @@ _TMP = Path(tempfile.mkdtemp(prefix="monoss-smoke-"))
 db.GARDENS_DIR = _TMP / "gardens"
 
 import webview  # noqa: E402  (import after GARDENS_DIR patched, matches app startup order)
+from mora.app import choose_port  # noqa: E402
 from ui.api import Api  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "ui" / "frontend"
+
+# Neither the graph window's 42001 (mora/app.py) nor Mora's 42002, so a
+# smoke run can share a desktop with both apps already open.
+SMOKE_HTTP_PORT = 42003
 
 results = []
 _page_loaded = threading.Event()
@@ -3276,7 +3281,16 @@ def main():
     window.events.loaded += _page_loaded.set
 
     threading.Thread(target=drive, daemon=True).start()
-    webview.start(http_server=True, private_mode=False, storage_path=str(_TMP / "webview_data"))
+    # An explicit free port, never pywebview's pinned 42001. ui/app.py
+    # takes that one, so running this while the real app is open meant
+    # the test's own server failed to bind and its window then loaded
+    # *the running app's* page off 42001 -- the exact failure mora/app.py
+    # documents and works around with choose_port(). The run did not blow
+    # up when that happened; it quietly scored 76/81 against the wrong
+    # page, which is the worse outcome. Same reasoning as
+    # mora_smoke_test.py, and the same helper.
+    webview.start(http_server=True, http_port=choose_port(SMOKE_HTTP_PORT),
+                  private_mode=False, storage_path=str(_TMP / "webview_data"))
 
     failed = [r for r in results if not r[1]]
     print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")
