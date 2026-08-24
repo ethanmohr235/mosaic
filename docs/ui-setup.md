@@ -86,7 +86,8 @@ view) -- the first way to reclaim that screen space, persisted across
 restarts -- and "Advanced view settings…" (below); Tools hosts the
 simulation step count and the Simulate…/Exit
 simulation trigger for the same non-blocking preview/scrub/commit bar
-described above. A handful of items (Export as CSV, Print graph,
+described above, plus "Notes (Mora)…", which opens the note editor on
+the current garden (see Mora, below). A handful of items (Export as CSV, Print graph,
 Timeline view, Group by type, Automations, Webhooks, API access) are
 inert placeholders with a small "soon" badge, staged for future
 expansion -- clicking one just toasts an explanation rather than doing
@@ -307,3 +308,106 @@ One check samples the canvas pixels directly. That is not paranoia: the
 graph's render loop was once entirely dead while every other check passed,
 because hit-testing works off node coordinates rather than what was drawn —
 clicking, dragging and connecting all succeeded against a blank canvas.
+
+---
+
+# Mora -- the note editor
+
+A second window, over the same gardens: `./run_mora.py`, or
+`.venv/bin/python run_mora.py`. Same stack as the main app -- pywebview
+over a local HTML/CSS/JS frontend, no browser tab, no build step -- but a
+separate process holding its own garden connection, so it opens and
+closes independently of the graph window.
+
+```
+./run_mora.py                       # the default garden
+./run_mora.py --garden reactor      # a specific garden
+./run_mora.py --note <mote id>      # straight to one mote's note
+```
+
+### Opening it from the graph
+
+Three ways, all of them the same launch with different arguments:
+
+| Where | Opens |
+|---|---|
+| Tools → **Notes (Mora)…** | Mora on the current garden |
+| Detail panel → **Write a note… / Open note…** | Mora on the selected mote |
+| Detail panel → the `modoc` row's ↗ | the same, from the property itself |
+
+`ui/api.py::open_mora` spawns it detached with `sys.executable` -- the
+virtualenv the app is already running in -- so it is a sibling process,
+not a child window, and closing the graph does not close it. Its output
+is *not* discarded: a Mora that fails to start prints its traceback on
+whatever terminal the graph window was launched from.
+
+The two apps must not want the same HTTP port. pywebview pins its
+built-in server to 42001 whenever `private_mode` is off and no port is
+given, which the graph window takes; Mora asks for **42002**, falling
+back to whatever the OS hands out if that is busy (a second Mora
+window). This is not a tidiness point -- the process that loses that
+race still points its window at the winner's address, so it comes up
+showing the other app's page against its own bridge. Mora keeps its own
+WebKit storage directory (`.webview_data_mora/`) for the same reason:
+the graph window's is not something two processes should share, least of
+all when each clears its own cache on startup.
+
+Two consequences worth knowing. The two processes hold separate
+connections to the same garden file, so neither sees the other's writes
+until it refetches -- refocus the graph after saving in Mora. Nothing is
+lost either way: both write one property at a time, so editing a mote in
+the panel never clobbers a note saved next door.
+
+A note is a property like any other, so it also appears in the detail
+panel's Properties list -- as a `N lines — edit in Mora` summary rather
+than an editable field, because a document is not a thing to edit through
+a one-line box in a side panel. Deleting it is an ordinary property
+delete, because that is all it is.
+
+With neither flag it opens the first mote in the garden that already
+carries a note, and otherwise the most recent mote -- as an empty page to
+start writing on, not an error. `docs/modoc.md` is the language; this is
+the window.
+
+| Pane | |
+|---|---|
+| Source | a textarea over a syntax-highlight layer. `@` opens a mote picker that inserts `\mote{<id>}{<name>}` |
+| Rendered | the note with every macro resolved. Clicking a `\mote` link moves the data panel to it |
+| Data | the anchor mote's properties and relationships, everything linked from the text with reference counts, and any Problems |
+
+`Source` / `Split` / `Read` choose which panes are shown; `Data` toggles
+the right one.
+
+| Control | Action |
+|---|---|
+| Ctrl/Cmd+S, or **Save** | Write the source back to the mote's `modoc` property -- and nothing else |
+| `t+N` stepper | Resolve the whole note against a simulation preview N steps out. The label flips **Real** to **Projected**; nothing is written |
+| **Apply t+N…** | Commit that projection to the graph. Asks first, and is disabled at t+0 |
+| Esc | Close the note menu or the `@` picker |
+
+Save and Apply are two buttons on purpose: saving a note must never be a
+way to write simulation results.
+
+### Smoke test
+
+`scripts/mora_smoke_test.py` is Mora's equivalent of the UI smoke test
+above, and exists for the same reason -- the half of the app pytest
+cannot reach. It drives a real window against a seeded throwaway garden
+and checks that the note renders, that `\val` and `\mote` resolve (and
+visibly fail when they can't), that both `\graph` forms draw, that a link
+moves the data panel and back returns, that the stepper projects without
+writing, that Save writes only the note, and that no uncaught JS errors
+were logged. The entry points *into* Mora belong to the main window, so
+they are checked by `scripts/ui_smoke_test.py` instead, with `open_mora`
+stubbed -- an automated suite has no business spawning a second app.
+
+Run the two one at a time. Both drive real windows with synthetic
+gestures, and the timing-sensitive checks flake when they compete.
+
+```
+.venv/bin/python scripts/mora_smoke_test.py
+```
+
+Prints PASS/FAIL per check and exits non-zero if anything failed. Never
+touches real data: `GARDENS_DIR` and the webview storage dir are both a
+fresh temp directory.

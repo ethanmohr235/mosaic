@@ -2,10 +2,13 @@
 import argparse
 import json
 import logging
+from pathlib import Path
 
 from cli import output
 from core.folders import folder_members, folders_of, list_folders, set_folder
 from core.library import LIBRARY_GARDEN, reuse_from_library, save_to_library
+from core import modoc
+from core.modoc_bind import resolve as resolve_modoc
 from core.motes import create_mote, list_motes, get_mote, delete_mote, search_motes, update_mote
 from core.portals import create_portal, resolve_portal
 from core.species import (
@@ -136,6 +139,23 @@ def build_parser() -> argparse.ArgumentParser:
     library_use.add_argument("--properties", help="JSON overrides applied on top of the entry")
 
     # ------------------ RELATIONSHIP COMMANDS ------------------
+    modoc_parser = subparsers.add_parser("modoc", help="Notes written about the graph")
+    modoc_sub = modoc_parser.add_subparsers(dest="action")
+    modoc_render = modoc_sub.add_parser("render", help="Render a mote's note, values resolved")
+    modoc_render.add_argument("id")
+    modoc_render.add_argument("--step", type=int, default=0, help="Resolve at t+N (a preview; never written)")
+    modoc_check = modoc_sub.add_parser("check", help="Report a note's unresolved links and values")
+    modoc_check.add_argument("id")
+    modoc_values = modoc_sub.add_parser("values", help="Every \\val in a note and what it resolves to")
+    modoc_values.add_argument("id")
+    modoc_values.add_argument("--step", type=int, default=0)
+    modoc_export = modoc_sub.add_parser("export", help="Write a note out as a .modoc file")
+    modoc_export.add_argument("id")
+    modoc_export.add_argument("--out", help="File to write (default: <id>.modoc)")
+    modoc_import = modoc_sub.add_parser("import", help="Read a .modoc file onto a mote")
+    modoc_import.add_argument("file")
+    modoc_import.add_argument("--mote", help="Existing mote to write onto (default: create one)")
+
     rel_parser = subparsers.add_parser("rel", help="Manage relationships")
     rel_sub = rel_parser.add_subparsers(dest="action")
 
@@ -323,6 +343,42 @@ def _handle_library(conn, args) -> None:
         print("Specify a library action: list, save, use")
 
 
+def _handle_modoc(conn, args) -> None:
+    if args.action == "export":
+        path = Path(args.out) if args.out else Path(f"{args.id}.modoc")
+        print(f"Note written to {modoc.export_file(conn, args.id, path)}")
+        return
+
+    if args.action == "import":
+        mote_id = modoc.import_file(conn, Path(args.file), args.mote)
+        print(f"Note read onto mote id={mote_id}")
+        return
+
+    if args.action not in ("render", "check", "values"):
+        print("Specify a modoc action: render, check, values, export, import")
+        return
+
+    document = modoc.parse(modoc.read_source(conn, args.id))
+    resolution = resolve_modoc(conn, args.id, document, step=getattr(args, "step", 0))
+    if args.action == "check":
+        if output.print_diagnostics(document, resolution) == 0:
+            print("No problems.")
+    elif args.action == "values":
+        _print_modoc_values(document, resolution)
+    else:
+        output.print_modoc(document, resolution)
+
+
+def _print_modoc_values(document, resolution) -> None:
+    """Every \\val a note contains, flat -- the scriptable form of what
+    `render` shows in prose."""
+    for node in modoc.values(document):
+        result = resolution.values[modoc.value_key(node)]
+        where = f"[{node.ref}]" if node.ref else ""
+        detail = f"  ({result.error})" if result.error else ""
+        print(f"{where}{node.expression} = {result.text}{detail}")
+
+
 def _handle_rel(conn, args) -> None:
     if args.action == "create":
         rel_id = create_relationship(conn, args.from_id, args.to_id, args.type)
@@ -404,6 +460,8 @@ def main() -> None:
                 _handle_portal(conn, args)
             elif args.command == "library":
                 _handle_library(conn, args)
+            elif args.command == "modoc":
+                _handle_modoc(conn, args)
             elif args.command == "model":
                 _handle_model(conn, args)
             elif args.command == "simulate":

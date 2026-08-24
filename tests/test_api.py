@@ -1,4 +1,5 @@
 import json
+import sys
 import webbrowser
 
 import pytest
@@ -509,6 +510,43 @@ def test_open_with_os_default_falls_back_to_xdg_open_if_gio_is_missing(monkeypat
 def test_open_link_missing_file_raises(api):
     with pytest.raises(FileNotFoundError):
         api.open_link("/no/such/file/anywhere")
+
+
+# ---- opening Mora ----
+
+def _mora_commands(monkeypatch):
+    """What open_mora would actually launch, without launching it."""
+    launched = []
+    monkeypatch.setattr(
+        ui.api, "_popen_detached", lambda args, **kwargs: launched.append(args)
+    )
+    return launched
+
+
+def test_open_mora_launches_the_editor_on_the_current_garden(api, monkeypatch):
+    launched = _mora_commands(monkeypatch)
+    assert api.open_mora() == {"garden": "test", "note": None}
+    (command,) = launched
+    # The venv the app is running in, not a bare `python` off PATH --
+    # see docs/ui-setup.md.
+    assert command[0] == sys.executable
+    assert command[1].endswith("run_mora.py")
+    assert command[2:] == ["--garden", "test"]
+
+
+def test_open_mora_passes_the_mote_whose_note_was_asked_for(api, monkeypatch):
+    launched = _mora_commands(monkeypatch)
+    mote_id = api.create_mote({"name": "Notebook"})["id"]
+    assert api.open_mora(mote_id)["note"] == mote_id
+    assert launched[0][-2:] == ["--note", mote_id]
+
+
+def test_open_mora_follows_a_garden_switch(api, monkeypatch):
+    launched = _mora_commands(monkeypatch)
+    create_garden("elsewhere")
+    api.switch_garden("elsewhere")
+    api.open_mora()
+    assert launched[0][2:] == ["--garden", "elsewhere"]
 
 
 class _FakeCredentials:

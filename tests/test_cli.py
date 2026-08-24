@@ -5,6 +5,7 @@ from cli.main import (
     _handle_garden,
     _handle_library,
     _handle_model,
+    _handle_modoc,
     _handle_mote,
     _handle_portal,
     _handle_simulate,
@@ -316,3 +317,100 @@ def test_portal_create_and_resolve(conn, capsys):
     out = capsys.readouterr().out
     assert "Garden: elsewhere" in out
     assert "Reactor" in out
+
+
+# ---- modoc ----
+
+@pytest.fixture
+def note(conn):
+    """A project of two tasks with a note on it, so every modoc command
+    below has both a resolving `\\val` and a broken one to report."""
+    project = create_mote(conn, {"name": "Atlas", "due": "2026-09-30"})
+    for index in range(2):
+        create_relationship(conn, project, create_mote(conn, {"name": f"T{index}"}), "contains")
+    create_mote(conn, {"name": "unused"})
+    from core.modoc import write_source
+
+    write_source(conn, project, (
+        "\\section{Atlas}\n\n"
+        "Due \\val{due}, \\val{count(targets('contains'))} tasks, "
+        "see \\mote{T0} and \\mote{Nowhere}. \\val{nonesuch}\n"
+    ))
+    return project
+
+
+def test_modoc_render_resolves_values_and_links(conn, capsys, note):
+    _handle_modoc(conn, parse(["modoc", "render", note]))
+    out = capsys.readouterr().out
+    assert "Atlas\n=====" in out
+    assert "Due 2026-09-30, 2 tasks" in out
+    assert "see T0 and Nowhere" in out
+
+
+def test_modoc_check_lists_only_what_did_not_resolve(conn, capsys, note):
+    _handle_modoc(conn, parse(["modoc", "check", note]))
+    out = capsys.readouterr().out
+    assert "Nowhere" in out and "nonesuch" in out
+    assert "2026-09-30" not in out
+
+
+def test_modoc_check_says_so_when_a_note_is_clean(conn, capsys):
+    from core.modoc import write_source
+
+    mote = create_mote(conn, {"name": "A", "due": "soon"})
+    write_source(conn, mote, "Due \\val{due}.")
+    _handle_modoc(conn, parse(["modoc", "check", mote]))
+    assert capsys.readouterr().out.strip() == "No problems."
+
+
+def test_modoc_values_prints_every_binding(conn, capsys, note):
+    _handle_modoc(conn, parse(["modoc", "values", note]))
+    out = capsys.readouterr().out
+    assert "due = 2026-09-30" in out
+    assert "count(targets('contains')) = 2" in out
+    assert "nonesuch = ?nonesuch" in out
+
+
+def test_modoc_export_and_import_round_trip(conn, capsys, note, tmp_path):
+    from core.modoc import read_source
+
+    path = tmp_path / "note.modoc"
+    _handle_modoc(conn, parse(["modoc", "export", note, "--out", str(path)]))
+    capsys.readouterr()
+    assert path.read_text() == read_source(conn, note)
+
+    _handle_modoc(conn, parse(["modoc", "import", str(path)]))
+    new_id = capsys.readouterr().out.split("id=")[-1].strip()
+    assert read_source(conn, new_id) == path.read_text()
+
+
+def test_modoc_import_can_target_an_existing_mote(conn, capsys, note, tmp_path):
+    from core.modoc import read_source
+
+    path = tmp_path / "note.modoc"
+    path.write_text("\\section{Replaced}")
+    _handle_modoc(conn, parse(["modoc", "import", str(path), "--mote", note]))
+    assert read_source(conn, note) == "\\section{Replaced}"
+
+
+def test_modoc_render_at_a_step_never_writes(conn, capsys):
+    from core.modoc import write_source
+    from core.motes import get_mote
+
+    species = create_mote(conn, {"name": "Task", "unknowns": "progress"})
+    rule = create_mote(conn, {"name": "Grow", "equation": "progress == prev(progress) + 10"})
+    create_relationship(conn, rule, species, APPLIES_TO)
+    task = create_mote(conn, {"name": "T", "progress": 5})
+    set_species(conn, task, species)
+    write_source(conn, task, "\\val{progress}")
+
+    _handle_modoc(conn, parse(["modoc", "render", task, "--step", "4"]))
+    assert "45" in capsys.readouterr().out
+    assert get_mote(conn, task).properties["progress"] == 5
+
+
+def test_modoc_rejects_an_unknown_action(conn, capsys, note):
+    args = parse(["modoc", "render", note])
+    args.action = "frobnicate"
+    _handle_modoc(conn, args)
+    assert "Specify a modoc action" in capsys.readouterr().out

@@ -46,8 +46,8 @@ both.
 library (`list_library`, `save_to_library`, `reuse_from_library`),
 portals (`create_portal`, `resolve_portal`), graph (`neighborhood`,
 `whole_garden`), simulation (`preview_simulation`, `list_runs`,
-`get_run`, `run_changes`, `run_ticks`, `mote_history`), and
-`reserved_names`.
+`get_run`, `run_changes`, `run_ticks`, `mote_history`), notes
+(`resolve_modoc`), and `reserved_names`.
 
 Folders and the library used to exist only in the desktop app. They are
 graph edits like any other, which is what this surface is for — see "What
@@ -81,6 +81,14 @@ A run's steps come back as `{"steps": [...]}` from both
 rather than read back from the log). They are the same steps either way,
 so they have the same shape either way — `run_ticks` used to return a
 bare list.
+
+`resolve_modoc(mote, step)` reads a mote's `.modoc` note and everything
+its macros currently resolve to -- which mote each `\mote{...}` points at,
+what each `\val{...}` comes to, each `\graph{...}`'s series, and what
+didn't resolve. `step` behaves exactly like `preview_simulation`'s: 0 is
+the garden as stored, higher is a projection that far ahead, and neither
+writes. There is no write tool -- a note is a property, so `update_mote`
+on `modoc` is how you edit one. See `docs/modoc.md`.
 
 `reserved_names()` is the complete equation/simulation reference for an
 MCP client, not just a list of reserved keys: it also returns what each

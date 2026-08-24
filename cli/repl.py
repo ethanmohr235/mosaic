@@ -2,11 +2,14 @@
 import json
 import logging
 import shlex
+from pathlib import Path
 
 from cli import output
 from core.db import get_connection, initialize_database
 from core.folders import folder_members, folders_of, list_folders, set_folder
 from core.library import LIBRARY_GARDEN, reuse_from_library, save_to_library
+from core import modoc
+from core.modoc_bind import resolve as resolve_modoc
 from core.motes import create_mote, list_motes, get_mote, delete_mote, search_motes, update_mote
 from core.portals import create_portal, resolve_portal
 from core.species import (
@@ -69,6 +72,12 @@ HELP_TEXT = """
     library list                                           List reusable-mote entries
     library save id=<mote_id>                              Save a mote's properties to the library
     library use id=<entry_id> [key=value ...]              Copy an entry into this garden
+
+    modoc render id=<mote_id> [step=<n>]                   Render a mote's note, values resolved
+    modoc check id=<mote_id>                               Report unresolved links and values
+    modoc values id=<mote_id> [step=<n>]                   Every \\val and what it resolves to
+    modoc export id=<mote_id> [out=<file>]                 Write the note out as a .modoc file
+    modoc import file=<path> [id=<mote_id>]                Read a .modoc file onto a mote
 
     rel create from=<mote_id> to=<mote_id> type=<type>     Create a relationship
     rel get id=<rel_id>                                    Get a relationship by id
@@ -200,6 +209,39 @@ def _handle_library(conn, action: str, action_args: dict) -> None:
         print(f"Unknown library action: {action}")
 
 
+def _handle_modoc(conn, action: str, action_args: dict) -> None:
+    """The same five actions cli/main.py offers, so a note reads the same
+    whichever front end you typed it into."""
+    if action == "import":
+        if _require(action_args, "file"):
+            mote_id = modoc.import_file(conn, Path(action_args["file"]), action_args.get("id"))
+            print(f"Note read onto mote id={mote_id}")
+        return
+    if action not in ("render", "check", "values", "export"):
+        print(f"Unknown modoc action: {action}")
+        return
+    if not _require(action_args, "id"):
+        return
+
+    note_id = action_args["id"]
+    if action == "export":
+        path = Path(action_args.get("out") or f"{note_id}.modoc")
+        print(f"Note written to {modoc.export_file(conn, note_id, path)}")
+        return
+
+    document = modoc.parse(modoc.read_source(conn, note_id))
+    resolution = resolve_modoc(conn, note_id, document, step=int(action_args.get("step", 0)))
+    if action == "check":
+        if output.print_diagnostics(document, resolution) == 0:
+            print("No problems.")
+    elif action == "values":
+        for node in modoc.values(document):
+            result = resolution.values[modoc.value_key(node)]
+            print(f"{f'[{node.ref}]' if node.ref else ''}{node.expression} = {result.text}")
+    else:
+        output.print_modoc(document, resolution)
+
+
 def repl(garden: str | None = None) -> None:
     current_garden = resolve_garden(garden)
     conn = get_connection(current_garden)
@@ -329,8 +371,8 @@ def repl(garden: str | None = None) -> None:
                 else:
                     print(f"Unknown mote action: {action}")
 
-            # --------- SPECIES / FOLDER / PORTAL / LIBRARY ---------
-            elif cmd in ("species", "folder", "portal", "library"):
+            # --------- SPECIES / FOLDER / PORTAL / LIBRARY / MODOC ---------
+            elif cmd in ("species", "folder", "portal", "library", "modoc"):
                 if not args:
                     print(f"Specify a {cmd} action")
                     continue
@@ -339,6 +381,7 @@ def repl(garden: str | None = None) -> None:
                     "folder": _handle_folder,
                     "portal": _handle_portal,
                     "library": _handle_library,
+                    "modoc": _handle_modoc,
                 }[cmd]
                 handler(conn, args[0].lower(), parse_properties(args[1:]))
 

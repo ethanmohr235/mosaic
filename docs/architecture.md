@@ -59,7 +59,7 @@ This is the "relationships modify mote properties programmatically" capability d
 
 A rule is a mote with an `equation` property and an `applies_to` relationship pointing at a species. The engine runs each rule against every instance of its species. A species declares which of its instances' properties the solver may determine, via an `unknowns` property.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model` and `in_folder` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden` and `portal_mote` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `in_folder` and `about` are reserved relationship types; `equation`, `unknowns`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `portal_garden`, `portal_mote` and `modoc` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 # Physical property models
 
@@ -143,8 +143,8 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `ui/` and `mcp_server/` are three
-adapters over it, and each one's job is a different question, so none of
+`core/` is the whole system. `cli/`, `ui/`, `mora/` and `mcp_server/`
+are four adapters over it, and each one's job is a different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
 folders and the library existed only in the app, property models only in
@@ -161,6 +161,10 @@ The charter:
 * **UI** -- everything interactive. Anything a person would reach for
   while looking at a graph, including the things only a live window can
   do: opening links, exporting to Calendar, approving a simulation.
+* **Mora** -- the same charter as the UI, for one thing: writing and
+  reading .modoc notes (see Notes below). A second window rather than a
+  fourth kind of adapter -- it is the UI's charter applied to a surface
+  a graph canvas has no room for.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -270,3 +274,87 @@ grouping alongside free-text search.
 
 This first pass covers `core/` and the UI (`ui/api.py`,
 `ui/frontend/`) only; CLI and MCP exposure are deferred to a follow-up.
+
+# Notes
+
+`modoc` (`core/modoc.py`) holds a **.modoc note**: prose written *about*
+the graph, in a small LaTeX subset whose three MonOSS macros --
+`\mote{...}`, `\val{...}`, `\graph{...}` -- resolve against the garden
+every time the note is read. A due date or a task count in a note is a
+lookup, not a copy, so a note cannot go stale the way a typed-in number
+does. See `docs/modoc.md` for the language.
+
+Storage is one reserved property on an ordinary mote, and that is the
+whole design. A note is not a new object type, and carrying one is
+deliberately **not** a role (Roles above): every entry in that table is a
+job a mote does in the graph's machinery -- a rule solves, a portal
+navigates -- and `modoc` changes nothing about how a mote is treated. It
+is data, exactly like `url` and `date`, neither of which is a role
+either. This was briefly got wrong, and the cost was immediate and
+visible: because a role displaces the species in the detail panel's type
+label, a project that gained a note stopped reading as a project. The
+consequence worth stating is what nobody had to build:
+notes are inside `mote_history`, garden export/import, the UI's undo, and
+MCP's `update_mote` already, because they are properties. `.modoc` files
+exist only for import and export, and a file is exactly the property's
+string -- no header naming the garden it came from, which was the first
+design and would have cost the round trip its byte-for-byte identity for
+a line meaningful to one program.
+
+A note reads from its own mote by default. `about` (a reserved
+relationship type, `note --about--> subject`) moves that anchor, so a
+note can live on its own mote while speaking about another. Exactly one
+`about` moves it; several is ambiguous and falls back to the note itself
+with a diagnostic, rather than picking one.
+
+`\val` is deliberately not a second expression language. It hands its
+argument to `core/formula.py` -- the one rules use -- so `targets()`,
+`sum()`, `prev()` and `t` are all available in a note without being
+implemented twice. The one thing in front of it is a plain-property fast
+path: `core/formula.py` is numeric by construction, so `\val{due}` has to
+be read as a property before an evaluator that can only return numbers
+sees it. `core/simulation.py::expression_context()` builds the context,
+clearing the view's declared unknowns first -- a note *reads state*, and
+a free variable with no solver behind it is useless rather than correct.
+
+Stepping a note forward in time is `run_time_series(commit=False)`, the
+preview that already existed: `t+0` is the garden as stored, `t+N`
+resolves every macro against a projection N steps out, and nothing is
+written or logged either way. Turning a projection into fact stays a
+separate, explicit act (Mora's `Apply t+N…`, which asks first). Saving a
+note and applying a run are two buttons on purpose: a save must never be
+a way to write simulation results.
+
+Nothing in the note path raises. A note with a typo still renders with
+the broken part visibly broken, and every failure -- unknown command,
+unresolved reference, unevaluable expression -- becomes a `Diagnostic`.
+What counts as a problem is answered once, in
+`core/modoc_bind.py::problems()`, for the same reason `core/roles.py`
+exists: it was briefly the CLI's own, and Mora promptly reported a note
+with a dangling `\mote{...}` in it as having no problems at all.
+
+`mora/` is the editor (`run_mora.py`) -- a second pywebview window with
+its own garden connection, source/rendered/data panes, and the `t+N`
+stepper. It parses nothing itself: the rendered pane is built from the
+tree `core/` produced and `mora/payload.py` shaped, which is why the
+window and `monoss modoc render` cannot come to disagree about what a
+note means. Only the source pane's syntax highlighting runs in
+JavaScript, colour being presentation rather than meaning.
+
+The graph window reaches it through `ui/api.py::open_mora`, which spawns
+`run_mora.py` detached under `sys.executable` -- a sibling process, not a
+child window, so neither app's lifetime is tied to the other's. That
+makes two processes on one garden file the normal case rather than the
+exception, which is why `mora/api.py` sets `busy_timeout` on its
+connection for the same reason `mcp_server/server.py` does. `core/db.py`
+is deliberately left alone, so the CLI and the graph window keep the
+behavior they have.
+
+Two apps at once also means the two must not want the same HTTP port or
+the same WebKit storage directory, and the port is the one with teeth:
+pywebview pins its server to 42001 unless told otherwise, and the
+process that loses that race does not fail visibly -- it points its
+window at the winner's address and loads the other app's page against
+its own bridge. `mora/app.py::choose_port` asks for 42002 and falls back
+to an ephemeral port; `.webview_data_mora/` is its own storage. See
+`docs/ui-setup.md`.

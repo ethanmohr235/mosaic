@@ -14,8 +14,10 @@ WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data"
 def _clear_http_cache() -> None:
     """Drop WebKit's HTTP cache before the window opens.
 
-    pywebview serves the frontend from a fixed port (42001), so the origin
-    is identical on every run and WebKit happily reuses cached copies of
+    pywebview serves the frontend from a fixed port (42001 -- its
+    DEFAULT_HTTP_PORT, used whenever private_mode is off and no port is
+    given), so the origin is identical on every run and WebKit happily
+    reuses cached copies of
     index.html/app.js/style.css from a previous launch -- meaning an edit
     to the frontend silently doesn't appear. This was caught for real:
     after adding the Run simulation button, the running app still rendered
@@ -26,6 +28,12 @@ def _clear_http_cache() -> None:
     Only `cache/` is removed. Sibling `localstorage/` holds each garden's
     saved node positions and last-focused mote, which must survive. There
     is nothing to gain from caching files served off local disk anyway.
+
+    Mora is the other app on these gardens and it must not want this
+    port: it runs at the same time as this one (see Api.open_mora), and
+    the loser of that race does not merely fail to bind -- it points its
+    window at the winner's address and loads the wrong app's page. See
+    mora/app.py, which asks for 42002 and its own storage directory.
     """
     shutil.rmtree(WEBVIEW_STORAGE_DIR / "cache", ignore_errors=True)
 

@@ -191,11 +191,34 @@ def evaluate_equation(text: str, ctx: Context) -> Equation:
 def evaluate_expression(text: str, ctx: Context) -> LinearExpr:
     """Evaluate a bare (non-equation) expression -- used by tests and by
     anything that just wants a value."""
+    return _as_expr(_evaluate(_parse_expression(text), ctx))
+
+
+def evaluate_selection(text: str, ctx: Context) -> list[str]:
+    """The mote ids an expression *selects*, e.g. `targets('contains')`.
+
+    The counterpart to evaluate_expression(), which insists on a number
+    and so rejects a bare navigation. Some callers want the motes
+    themselves: core/modoc_bind.py's `\\graph{targets('contains') by
+    status}` groups them by a property rather than reducing them to one
+    value. Kept here, beside the walker, so "what selects motes" stays a
+    fact about the language rather than something an adapter reaches
+    through a private function to find out."""
+    value = _evaluate(_parse_expression(text), ctx)
+    if isinstance(value, MoteSet):
+        return list(value.mote_ids)
+    raise FormulaError(
+        f"{text!r} does not select motes -- expected a navigation "
+        f"like targets('contains') or sources('works_on')"
+    )
+
+
+def _parse_expression(text: str) -> ast.AST:
     try:
         tree = ast.parse(text.strip(), mode="eval")
     except SyntaxError as e:
         raise FormulaError(f"could not parse formula {text!r}: {e.msg}") from e
-    return _as_expr(_evaluate(tree.body, ctx))
+    return tree.body
 
 
 _BIN_OPS = {

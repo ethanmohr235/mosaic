@@ -13,9 +13,12 @@ docs/style.md's "no print debugging" rule is not about.
 """
 import json
 import sqlite3
+import textwrap
 from collections.abc import Iterable
 
 from core import model_resolver
+from core import modoc
+from core import modoc_bind
 from core.entities import Mote
 from core.motes import get_mote, get_motes  # noqa: F401  (get_mote: print_model_detail)
 from core.providers import PropertyModelError, PropertyProvider
@@ -117,3 +120,105 @@ def print_run_detail(conn: sqlite3.Connection, run_id: str) -> None:
     if run.detail:
         print(f"detail: {run.detail}")
     print_changes(run_changes(conn, run.run_id))
+
+
+# --- .modoc ----------------------------------------------------------
+#
+# The terminal's renderer. core/modoc.py hands out a tree and
+# core/modoc_bind.py hands out what it resolves to; turning that into
+# *something a reader sees* is each surface's own job, which is why
+# Mora's renderer is JavaScript and this one is here. What the two must
+# never disagree about -- what a macro means -- neither of them decides.
+
+_WIDTH = 78
+_BAR_WIDTH = 24
+_SPARKS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+
+
+def print_modoc(document: "modoc.Document", resolution) -> None:
+    for index, block in enumerate(document.blocks):
+        if index:
+            print()
+        _print_block(block, resolution)
+
+
+def print_diagnostics(document: "modoc.Document", resolution) -> int:
+    """Everything wrong with a note, and how many there were. What counts
+    as a problem is core/modoc_bind.py::problems() -- one answer, so
+    `modoc check` and Mora's problems panel can never disagree about
+    whether a note is clean."""
+    found = modoc_bind.problems(document, resolution)
+    for problem in found:
+        where = f"line {problem.line}" if problem.line else "note"
+        print(f"{where}: {problem.kind}: {problem.message}")
+    return len(found)
+
+
+def _print_block(block, resolution) -> None:
+    if isinstance(block, modoc.Heading):
+        text = _inline_text(block.content, resolution)
+        print(text if block.level == 1 else text.upper())
+        if block.level == 1:
+            print("=" * len(text))
+    elif isinstance(block, modoc.Paragraph):
+        print(textwrap.fill(_inline_text(block.content, resolution), _WIDTH))
+    elif isinstance(block, modoc.ItemList):
+        for item in block.items:
+            print(textwrap.fill(
+                _inline_text(item, resolution), _WIDTH,
+                initial_indent="  - ", subsequent_indent="    ",
+            ))
+    elif isinstance(block, modoc.Equation):
+        print(f"    {_math_text(block.text)}")
+    elif isinstance(block, modoc.Graph):
+        _print_series(resolution.graphs.get(modoc.graph_key(block)))
+
+
+def _inline_text(nodes, resolution) -> str:
+    parts = []
+    for node in nodes:
+        if isinstance(node, modoc.Text):
+            parts.append(node.text)
+        elif isinstance(node, modoc.Styled):
+            parts.append(node.text.upper() if node.style == "bold" else node.text)
+        elif isinstance(node, modoc.Math):
+            parts.append(_math_text(node.text))
+        elif isinstance(node, modoc.Link):
+            target = resolution.links.get(node.ref)
+            parts.append(node.label or (target.name if target else node.ref))
+        elif isinstance(node, modoc.Value):
+            result = resolution.values.get(modoc.value_key(node))
+            parts.append(result.text if result else f"?{node.expression}")
+    return "".join(parts)
+
+
+def _math_text(text: str) -> str:
+    spans = modoc.math_spans(text)
+    marker = {"sup": "^", "sub": "_", "text": ""}
+    return "".join(marker[s.kind] + s.text for s in spans)
+
+
+def _print_series(series) -> None:
+    if series is None or series.error and not series.values:
+        print(f"    [graph: {series.error if series else 'unresolved'}]")
+        return
+    if series.kind == modoc.OVER_T:
+        _print_sparkline(series)
+        return
+    width = max((len(label) for label in series.labels), default=0)
+    peak = max(series.values, default=0) or 1
+    for label, value in zip(series.labels, series.values):
+        filled = round(_BAR_WIDTH * value / peak)
+        print(f"    {label:<{width}}  {'#' * filled:<{_BAR_WIDTH}}  {value:g}")
+
+
+def _print_sparkline(series) -> None:
+    """A projection is a shape before it is a table -- one line of it
+    reads faster than nine rows, and the endpoints carry the numbers."""
+    low, high = min(series.values), max(series.values)
+    span = (high - low) or 1
+    spark = "".join(
+        _SPARKS[round((v - low) / span * (len(_SPARKS) - 1))] for v in series.values
+    )
+    print(f"    {spark}")
+    print(f"    {series.labels[0]} {low:g}  ->  {series.labels[-1]} {series.values[-1]:g}")

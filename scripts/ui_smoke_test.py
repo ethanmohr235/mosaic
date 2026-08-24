@@ -1202,6 +1202,84 @@ def run_checks(window):
 
     check("Export to Calendar button calls the API and reports the result", export_to_calendar_button_calls_the_api_and_reports_the_result)
 
+    def opening_mora_from_the_graph_passes_the_right_mote():
+        # Stubbed: the real call spawns a second pywebview process, which
+        # has no business being started by an automated suite.
+        js(window, """
+            window.__moraCalls = [];
+            window.__origOpenMora = api.open_mora.bind(api);
+            api.open_mora = (moteId) => {
+                window.__moraCalls.push(moteId === undefined ? null : moteId);
+                return Promise.resolve({garden: 'test', note: moteId});
+            };
+        """)
+        js(window, "document.getElementById('tools-btn').click();")
+        time.sleep(0.2)
+        js(window, "document.getElementById('open-mora-btn').click();")
+        time.sleep(0.4)
+        calls = json.loads(js(window, "JSON.stringify(window.__moraCalls)"))
+        assert calls == [None], f"the Tools item should open Mora with no mote, got {calls}"
+        closed = js(window, "document.getElementById('tools-menu').classList.contains('hidden')")
+        assert closed is True, "opening Mora should close the Tools menu like any other action"
+
+        # A mote of its own, created here: by this point in the run the
+        # seeded ones have been renamed, moved and deleted by other checks.
+        js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'Notebook'});
+                window.__noteMote = m.id;
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = document.getElementById('open-note-btn').textContent;
+            }
+        """, wait=3.0)
+        label = json.loads(js(window, "JSON.stringify(window.__result)"))
+        assert label == "Write a note\u2026", \
+            f"a mote with no note should offer to start one, got {label!r}"
+
+        js(window, "document.getElementById('open-note-btn').click();")
+        time.sleep(0.4)
+        calls = json.loads(js(window, "JSON.stringify(window.__moraCalls)"))
+        expected = js(window, "window.__noteMote")
+        assert calls[-1] == expected, \
+            f"the panel button should open Mora on the selected mote, got {calls[-1]!r}"
+
+        js(window, "api.open_mora = window.__origOpenMora;")
+
+    check("Notes (Mora) opens on the garden, and the panel button on the mote",
+          opening_mora_from_the_graph_passes_the_right_mote)
+
+    def a_note_property_shows_as_a_summary_not_a_wall_of_text():
+        # Injected as JSON rather than written inline: a .modoc source is
+        # backslashes and newlines all the way down, and nesting it in a
+        # Python string in a JS string in an eval is three escapings deep.
+        js(window, f"window.__noteSource = {json.dumps(chr(92) + 'section{A}' + chr(10) * 2 + 'line two' + chr(10))};")
+        js_async(window, """
+            async () => {
+                await api.update_mote(window.__noteMote, {modoc: window.__noteSource});
+                await openDetailPanel(window.__noteMote);
+                const rows = Array.from(document.querySelectorAll('#detail-properties .detail-row'));
+                const row = rows.find(r => r.querySelector('.key').textContent === 'modoc');
+                const field = row.querySelector('input, textarea');
+                window.__result = {
+                    label: document.getElementById('open-note-btn').textContent,
+                    value: field.value,
+                    readOnly: field.readOnly,
+                    hasOpen: !!row.querySelector('.open-link'),
+                };
+            }
+        """, wait=3.0)
+        summary = json.loads(js(window, "JSON.stringify(window.__result)"))
+        assert "4 lines" in summary["value"], \
+            f"the row should summarize the note, got {summary['value']!r}"
+        assert summary["readOnly"] is True, "a note must not be editable from the properties list"
+        assert summary["hasOpen"] is True, "the note row should offer a way into Mora"
+        assert summary["label"] == "Open note\u2026", \
+            f"a mote that has a note should offer to open it, got {summary['label']!r}"
+
+    check("a `modoc` property renders as a summary with a way into Mora",
+          a_note_property_shows_as_a_summary_not_a_wall_of_text)
+
     def depth_control_limits_the_graph():
         def visible_at(value):
             js(window, f"""

@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import threading
 import webbrowser
 from pathlib import Path
@@ -76,12 +77,24 @@ def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
     }
 
 
-def _popen_detached(args: list[str]) -> None:
+# Mora, the .modoc note editor (docs/modoc.md), launched as its own
+# process rather than a second window on this one: it holds its own
+# garden connection and outlives or predeceases this window freely.
+MORA_SCRIPT = Path(__file__).resolve().parent.parent / "run_mora.py"
+
+
+def _popen_detached(args: list[str], *, quiet: bool = True) -> None:
     """Launches args without waiting on it (see _open_with_os_default for
     why), but still reaps the child on a background thread so it doesn't
     sit as a zombie for as long as MonOSS keeps running -- this app is
-    long-lived and every Open click spawns one of these."""
-    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    long-lived and every Open click spawns one of these.
+
+    `quiet` discards the child's output, which is right for an OS opener
+    (`gio open` chatters about nothing we can act on) and wrong for our
+    own apps: a discarded traceback is how a crashed Mora came to look
+    like a mysteriously wrong window instead of an error."""
+    streams = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if quiet else {}
+    proc = subprocess.Popen(args, **streams)
     threading.Thread(target=proc.wait, daemon=True).start()
 
 
@@ -412,6 +425,32 @@ class Api:
         else:
             _open_with_os_default(value)
         return {"opened": target}
+
+    @_synchronized
+    def open_mora(self, mote_id: str | None = None) -> dict:
+        """Open Mora on this garden, optionally straight to one mote's
+        note. Fire-and-forget, through the same detached launcher the
+        Open-link action uses, so nothing here blocks on a window that
+        may outlive this one.
+
+        `sys.executable` rather than a bare `python`: the app is running
+        in a specific virtualenv (docs/ui-setup.md), and the editor has
+        to come up in that same one.
+
+        The two processes then hold separate connections to the same
+        garden file. Neither observes the other's writes until it
+        refetches -- the same rule the MCP server already lives under
+        (docs/architecture.md) -- but nothing is lost either way, since
+        both write one property at a time.
+
+        `quiet=False` so a Mora that fails to start says so on the
+        terminal this app was launched from, rather than failing
+        silently. That mattered once already."""
+        command = [sys.executable, str(MORA_SCRIPT), "--garden", self._current_garden]
+        if mote_id:
+            command += ["--note", mote_id]
+        _popen_detached(command, quiet=False)
+        return {"garden": self._current_garden, "note": mote_id}
 
     # ---- relationships ----
 
