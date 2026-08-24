@@ -57,18 +57,18 @@ function hueFor(seed) {
  *  species, grey if it has no type at all. */
 function colorOf(entry) {
   if (!entry) return UNKNOWN_COLOR;
-  if ((entry.roles || []).includes("species")) return `oklch(0.80 0.13 ${hueFor(entry.id || entry.moteId || "")})`;
+  if ((entry.kinds || []).includes("species")) return `oklch(0.80 0.13 ${hueFor(entry.id || entry.moteId || "")})`;
   if (!entry.speciesId) return UNKNOWN_COLOR;
   return `oklch(0.72 0.11 ${hueFor(entry.speciesId)})`;
 }
 
-/** What a mote *is*: the roles core says it plays, else its species,
- *  else plain "mote". The same order ui/frontend/app.js::kindLabel uses,
- *  so the two windows describe a mote the same way. */
+/** What a mote *is*: the kinds core says it is, else its species, else
+ *  plain "mote". The same order ui/frontend/app.js::kindLabel uses, so
+ *  the two windows describe a mote the same way. */
 function kindOf(entry) {
   if (!entry) return "mote";
-  const roles = entry.roles || [];
-  if (roles.length) return roles.map((r) => r.replace(/_/g, " ")).join(" · ");
+  const kinds = entry.kinds || [];
+  if (kinds.length) return kinds.map((k) => k.replace(/_/g, " ")).join(" · ");
   return entry.speciesName || "mote";
 }
 

@@ -72,8 +72,8 @@ def test_an_unresolved_link_reports_rather_than_vanishing(conn, garden):
     assert "no mote" in target.error
 
 
-def test_a_link_carries_the_roles_the_rest_of_the_app_uses(conn, garden):
-    assert resolved(conn, garden, "\\mote{Task}").links["Task"].roles == ["species"]
+def test_a_link_carries_the_kinds_the_rest_of_the_app_uses(conn, garden):
+    assert resolved(conn, garden, "\\mote{Task}").links["Task"].kinds == ["species"]
 
 
 # ---- values ----

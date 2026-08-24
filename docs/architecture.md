@@ -32,13 +32,15 @@ A mote can act as a **folder** -- a purely organizational container that other m
 
 Folders have no effect on simulation or storage beyond the relationship itself: a folder mote is never touched by `core/simulation.py` unless it's separately declared an `instance_of` a species, and nothing about Calendar export or garden export/import treats a folder or an `in_folder` relationship differently from ordinary data. The one concrete distinction is visual -- the UI renders a folder mote with its own shape (a square, distinct from a species' diamond and an ordinary mote's circle) and offers a "Folders" legend section with the same hide/show behavior species get. The detail panel treats folders as the parallel of species throughout: a "Folders" section listing the folders a mote belongs to, and, on a folder itself, a member count line matching the instance count a species gets.
 
-# Roles
+# Kinds
 
-Species, template, folder, property model, rule and portal are all the same idea: an ordinary mote that plays a **role** because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
+Species, template, folder, property model, rule and portal are all the same idea: an ordinary mote that *is* one of these -- a **kind** -- because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
 
-`core/roles.py` is where it is answered, once. It is an index, not an implementation: each role's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()` -- and the `ROLES` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for roles, and `docs/style.md` rules out the global mutable state a `register_role()` would need.
+Called kinds and not roles, which is what this was: `core/roles.py` answers a different question -- what an assembly's parts are *called* (see Roles below). **A kind is what a mote is; a role is what something else calls it.** A kind is derived and never stored; a role is a declared property. The frontend was already using this word (`kindLabel`, `kindOf`), so the rename made existing names correct rather than inventing one.
 
-| role | recognized by |
+`core/kinds.py` is where it is answered, once. It is an index, not an implementation: each kind's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()` -- and the `KINDS` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for kinds, and `docs/style.md` rules out the global mutable state a `register_kind()` would need.
+
+| kind | recognized by |
 | --- | --- |
 | species | target of `instance_of` or `template_of` |
 | template | source of `template_of` |
@@ -47,9 +49,9 @@ Species, template, folder, property model, rule and portal are all the same idea
 | rule | source of `applies_to` **and** carries an `equation` |
 | portal | carries `portal_garden` + `portal_mote` |
 
-Two forms, one answer: `roles_in(motes, relationships)` for a caller holding an already-fetched subgraph (each role's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Roles are not exclusive -- a species can also be a folder, and a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
+Two forms, one answer: `kinds_in(motes, relationships)` for a caller holding an already-fetched subgraph (each kind's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Kinds are not exclusive -- a species can also be a folder, and a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
 
-`ui/api.py::focus()` and `library_snapshot()` return this as one `roles` map (mote id -> role names; motes with no role are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six roles hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a role is now a change to the table, not to a payload.
+`ui/api.py::focus()` and `library_snapshot()` return this as one `kinds` map (mote id -> kind names; motes of no particular kind are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six kinds hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a kind is now a change to the table, not to a payload.
 
 Adapters must not answer "is this a species" for themselves. That is how a subtlety ends up true in one surface and false in another.
 
@@ -286,12 +288,12 @@ does. See `docs/modoc.md` for the language.
 
 Storage is one reserved property on an ordinary mote, and that is the
 whole design. A note is not a new object type, and carrying one is
-deliberately **not** a role (Roles above): every entry in that table is a
+deliberately **not** a kind (Kinds above): every entry in that table is a
 job a mote does in the graph's machinery -- a rule solves, a portal
 navigates -- and `modoc` changes nothing about how a mote is treated. It
-is data, exactly like `url` and `date`, neither of which is a role
+is data, exactly like `url` and `date`, neither of which is a kind
 either. This was briefly got wrong, and the cost was immediate and
-visible: because a role displaces the species in the detail panel's type
+visible: because a kind displaces the species in the detail panel's type
 label, a project that gained a note stopped reading as a project. The
 consequence worth stating is what nobody had to build:
 notes are inside `mote_history`, garden export/import, the UI's undo, and
@@ -329,7 +331,7 @@ Nothing in the note path raises. A note with a typo still renders with
 the broken part visibly broken, and every failure -- unknown command,
 unresolved reference, unevaluable expression -- becomes a `Diagnostic`.
 What counts as a problem is answered once, in
-`core/modoc_bind.py::problems()`, for the same reason `core/roles.py`
+`core/modoc_bind.py::problems()`, for the same reason `core/kinds.py`
 exists: it was briefly the CLI's own, and Mora promptly reported a note
 with a dangling `\mote{...}` in it as having no problems at all.
 

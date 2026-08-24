@@ -34,7 +34,7 @@ def test_focus_empty_garden_returns_none(api):
     result = api.focus()
     assert result["focus_id"] is None
     assert result["motes"] == []
-    assert result["roles"] == {}
+    assert result["kinds"] == {}
 
 
 def test_focus_none_picks_most_recent(api):
@@ -93,8 +93,8 @@ def test_species_with_only_a_template_is_reported_as_a_species(api):
     api.set_template(template["id"], species["id"])
 
     result = api.focus(template["id"], None)
-    assert result["roles"][species["id"]] == ["species"]
-    assert result["roles"][template["id"]] == ["template"]
+    assert result["kinds"][species["id"]] == ["species"]
+    assert result["kinds"][template["id"]] == ["template"]
 
 
 def test_list_species_reports_every_species_in_the_garden(api):
@@ -108,13 +108,13 @@ def test_list_species_reports_every_species_in_the_garden(api):
     assert [m["id"] for m in api.list_species()] == [species["id"]]
 
 
-def test_focus_reports_the_folder_role(api):
+def test_focus_reports_the_folder_kind(api):
     folder = api.create_mote({"name": "Thermodynamics"})
     member = api.create_mote({"name": "Entropy"})
     api.set_folder(member["id"], folder["id"])
 
     result = api.focus(member["id"], None)
-    assert result["roles"] == {folder["id"]: ["folder"]}
+    assert result["kinds"] == {folder["id"]: ["folder"]}
 
 
 def test_set_folder_creates_an_in_folder_relationship(api):
@@ -207,10 +207,10 @@ def test_library_snapshot_returns_motes_relationships_and_classification(api):
     result = api.library_snapshot()
     assert any(m["properties"].get("name") == "Task" for m in result["motes"])
     assert result["relationships"] == []
-    assert result["roles"] == {}
+    assert result["kinds"] == {}
 
 
-def test_library_snapshot_reports_roles_from_within_the_library(api):
+def test_library_snapshot_reports_kinds_from_within_the_library(api):
     api.open_library()
     folder = api.create_mote({"name": "Thermodynamics"})
     member = api.create_mote({"name": "Entropy"})
@@ -218,7 +218,7 @@ def test_library_snapshot_reports_roles_from_within_the_library(api):
     api.switch_garden("test")
 
     result = api.library_snapshot()
-    assert result["roles"] == {folder["id"]: ["folder"]}
+    assert result["kinds"] == {folder["id"]: ["folder"]}
 
 
 def test_reuse_from_library_copies_an_entry_into_the_current_garden(api):
@@ -367,13 +367,13 @@ def test_export_garden_to_file_defaults_to_the_current_garden(api, tmp_path):
     assert names == ["CurrentMote"]
 
 
-def test_whole_garden_still_reports_roles(api):
+def test_whole_garden_still_reports_kinds(api):
     species = api.create_mote({"name": "Node"})
     instance = api.create_mote({"name": "N1"})
     api.set_species(instance["id"], species["id"])
 
     result = api.focus(instance["id"], None)
-    assert result["roles"][species["id"]] == ["species"]
+    assert result["kinds"][species["id"]] == ["species"]
 
 
 def test_coerce_properties_matches_repl_json_fallback_semantics():

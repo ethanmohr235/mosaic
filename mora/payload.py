@@ -20,7 +20,7 @@ keys or agree with it about traversal order.
 from dataclasses import dataclass
 
 from core import modoc
-from core import roles as roles_repo
+from core import kinds as kinds_repo
 from core import species as species_repo
 from core.entities import Mote, Relationship
 from core.modoc_bind import LinkTarget, Resolution, problems
@@ -32,22 +32,22 @@ NAME_KEY = "name"
 class Directory:
     """Everything the payloads need to say about a mote beyond its id:
     its name, its species (which is what colours it, in both windows) and
-    its roles. Built once per request from one read of the garden."""
+    its kinds. Built once per request from one read of the garden."""
     motes: dict[str, Mote]
     relationships: list[Relationship]
-    roles: dict[str, list[str]]
+    kinds: dict[str, list[str]]
 
     @staticmethod
     def of(motes: list[Mote], relationships: list[Relationship]) -> "Directory":
         return Directory(
-            {m.id: m for m in motes}, relationships, roles_repo.roles_in(motes, relationships)
+            {m.id: m for m in motes}, relationships, kinds_repo.kinds_in(motes, relationships)
         )
 
     def describe(self, mote_id: str | None) -> dict:
         mote = self.motes.get(mote_id) if mote_id else None
         if mote is None:
             return {"id": mote_id, "name": mote_id or "", "speciesId": None,
-                    "speciesName": None, "roles": []}
+                    "speciesName": None, "kinds": []}
         species_id = self._species_id(mote.id)
         species = self.motes.get(species_id) if species_id else None
         return {
@@ -58,7 +58,7 @@ class Directory:
             # name is what "what is this?" actually wants -- "Project",
             # not a UUID, and not the bare word "mote".
             "speciesName": name_of(species) if species else None,
-            "roles": self.roles.get(mote.id, []),
+            "kinds": self.kinds.get(mote.id, []),
         }
 
     def _species_id(self, mote_id: str) -> str | None:
@@ -155,7 +155,7 @@ def _inline(node, resolution: Resolution, directory: Directory) -> dict:
 
 def _target_payload(ref: str, target: LinkTarget | None, directory: Directory) -> dict:
     if target is None or target.mote_id is None:
-        return {"ref": ref, "moteId": None, "name": ref, "speciesId": None, "roles": [],
+        return {"ref": ref, "moteId": None, "name": ref, "speciesId": None, "kinds": [],
                 "error": target.error if target else "unresolved reference"}
     return {"ref": ref, "error": None, "moteId": target.mote_id,
             **{k: v for k, v in directory.describe(target.mote_id).items() if k != "id"}}

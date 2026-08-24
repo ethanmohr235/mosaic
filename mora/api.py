@@ -107,13 +107,13 @@ class Api:
     def list_notes(self) -> list[dict]:
         """Every mote carrying a note.
 
-        Asked of the property, not of core/roles.py, because carrying a
-        note is deliberately not a role: every role in that table is a
+        Asked of the property, not of core/kinds.py, because carrying a
+        note is deliberately not a kind: every kind in that table is a
         job a mote does in the graph's machinery, and `modoc` changes
         nothing about how a mote is treated -- it is data, like `url` or
-        `date`, neither of which is a role either. Making it one meant a
+        `date`, neither of which is a kind either. Making it one meant a
         project that gained a note stopped reading as a project, since a
-        role displaces the species in the main app's type label."""
+        kind displaces the species in the main app's type label."""
         motes, relationships = graph_repo.whole_garden(self._conn)
         directory = payload_repo.Directory.of(motes, relationships)
         notes = [directory.describe(m.id) for m in motes if modoc.has_modoc(m.properties)]

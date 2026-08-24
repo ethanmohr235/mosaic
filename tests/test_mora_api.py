@@ -120,7 +120,7 @@ def test_render_clamps_a_step_out_of_range(api, project):
 def test_render_colours_a_link_by_the_species_the_canvas_uses(api, project):
     link = api.render(project, "\\mote{Task 0}", 0)["blocks"][0]["content"][0]
     assert link["speciesId"] is not None
-    assert link["roles"] == []
+    assert link["kinds"] == []
 
 
 def test_render_reports_problems_rather_than_failing(api, project):
@@ -145,11 +145,11 @@ def test_focus_returns_relationships_with_their_direction(api, project):
 
 
 def test_focus_names_the_species_so_the_panel_can_say_what_a_mote_is(api, project):
-    """Carrying a note is not a role (core/roles.py), so a note mote has
-    no role to label it -- its species is what "what is this?" wants."""
+    """Carrying a note is not a kind (core/kinds.py), so a note mote has
+    no kind to label it -- its species is what "what is this?" wants."""
     task = next(r["other"]["id"] for r in api.focus(project)["relationships"])
     panel = api.focus(task)
-    assert panel["roles"] == []
+    assert panel["kinds"] == []
     assert panel["speciesName"] == "Task"
 
 

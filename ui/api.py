@@ -24,7 +24,7 @@ from core import motes as motes_repo
 from core import portals as portals_repo
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
-from core import roles as roles_repo
+from core import kinds as kinds_repo
 from core import simulation as simulation_repo
 from core import species as species_repo
 
@@ -55,13 +55,13 @@ def _classify(motes: list, rels: list) -> dict:
     open garden) and library_snapshot() (a read of _library) so the two
     don't drift.
 
-    One `roles` map rather than the species_ids/folder_ids arrays this
-    used to return: those were two of six roles core recognizes
-    (core/roles.py), and the frontend had no way to hear about the other
+    One `kinds` map rather than the species_ids/folder_ids arrays this
+    used to return: those were two of six kinds core recognizes
+    (core/kinds.py), and the frontend had no way to hear about the other
     four, which is why a portal mote's detail panel said "Mote" while
-    the canvas drew it with a portal ring. Adding a role is now a change
+    the canvas drew it with a portal ring. Adding a kind is now a change
     to the table, not to this payload's shape."""
-    return {"roles": roles_repo.roles_in(motes, rels)}
+    return {"kinds": kinds_repo.kinds_in(motes, rels)}
 
 
 def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
@@ -656,7 +656,7 @@ class Api:
         if mote_id is None:
             mote_id = graph_repo.most_recent_mote_id(self._conn)
         if mote_id is None:
-            return {"focus_id": None, "motes": [], "relationships": [], "roles": {}}
+            return {"focus_id": None, "motes": [], "relationships": [], "kinds": {}}
 
         if hops is None:
             motes, rels = graph_repo.whole_garden(self._conn)

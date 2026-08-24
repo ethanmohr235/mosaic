@@ -9,10 +9,10 @@
 // Coordinates: nodes live in world space; the camera maps world -> screen
 // as `screen = center + camera.xy + world * scale`.
 
-// The roles core/roles.py recognizes. Mirrors that table's names -- the
+// The kinds core/kinds.py recognizes. Mirrors that table's names -- the
 // frontend never decides for itself what a mote is, it only decides how
 // to draw and label what core says it already is.
-const ROLE = {
+const KIND = {
   SPECIES: "species",
   TEMPLATE: "template",
   FOLDER: "folder",
@@ -22,8 +22,8 @@ const ROLE = {
 };
 
 // Human labels for the same, shown in the detail panel and search
-// results. Keyed by role name so an added role is one line here.
-const ROLE_LABEL = {
+// results. Keyed by kind name so an added kind is one line here.
+const KIND_LABEL = {
   species: "Species",
   template: "Template",
   folder: "Folder",
@@ -32,10 +32,10 @@ const ROLE_LABEL = {
   portal: "Portal",
 };
 
-/** The mote ids playing `role`, out of the roles map ui/api.py returns.
+/** The mote ids of `kind`, out of the kinds map ui/api.py returns.
  *  Lives in graph.js because it loads first and both files need it. */
-function idsWithRole(roles, role) {
-  return Object.keys(roles || {}).filter((id) => (roles[id] || []).includes(role));
+function idsWithKind(kinds, kind) {
+  return Object.keys(kinds || {}).filter((id) => (kinds[id] || []).includes(kind));
 }
 
 const REPULSION = 1500;
@@ -172,12 +172,12 @@ class MonossGraph {
   setData(payload, pinnedPositions = {}) {
     this.motes = payload.motes || [];
     this.relationships = payload.relationships || [];
-    // What a mote is comes from core's role table (core/roles.py) as one
-    // `roles` map, rather than a separate id array per role -- adding a
-    // role upstream doesn't change this payload's shape.
-    this.roles = payload.roles || {};
-    this.speciesIds = new Set(idsWithRole(this.roles, ROLE.SPECIES));
-    this.folderIds = new Set(idsWithRole(this.roles, ROLE.FOLDER));
+    // What a mote is comes from core's kind table (core/kinds.py) as one
+    // `kinds` map, rather than a separate id array per kind -- adding a
+    // kind upstream doesn't change this payload's shape.
+    this.kinds = payload.kinds || {};
+    this.speciesIds = new Set(idsWithKind(this.kinds, KIND.SPECIES));
+    this.folderIds = new Set(idsWithKind(this.kinds, KIND.FOLDER));
     this._moteById = new Map(this.motes.map((m) => [m.id, m]));
     this._invalidateColors();
 

@@ -19,7 +19,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from core import modoc
-from core import roles as roles_repo
+from core import kinds as kinds_repo
 from core.entities import Mote, Relationship
 from core.formula import Context, FormulaError, evaluate_expression, evaluate_selection
 from core.motes import list_motes
@@ -47,7 +47,7 @@ class LinkTarget:
     ref: str
     mote_id: str | None
     name: str
-    roles: list[str] = field(default_factory=list)
+    kinds: list[str] = field(default_factory=list)
     error: str | None = None
 
 
@@ -173,7 +173,7 @@ def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Dia
     answer. It was briefly the CLI's own -- assembled inside `modoc
     check` -- and Mora promptly reported a note with a dangling
     `\\mote{...}` in it as having no problems at all, which is exactly
-    the drift core/roles.py exists to prevent for a different question.
+    the drift core/kinds.py exists to prevent for a different question.
     Line numbers come off the nodes, not off the resolution, so a
     reference that fails twice is reported at both places it failed."""
     found = list(document.diagnostics) + list(resolution.diagnostics)
@@ -208,7 +208,7 @@ def _link(ref: str, motes: list[Mote], relationships: list[Relationship]) -> Lin
     mote, error = _find(ref, motes)
     if mote is None:
         return LinkTarget(ref, None, ref, [], error)
-    return LinkTarget(ref, mote.id, _name(mote), roles_repo.roles_of(mote, relationships))
+    return LinkTarget(ref, mote.id, _name(mote), kinds_repo.kinds_of(mote, relationships))
 
 
 def _find(ref: str, motes: list[Mote]) -> tuple[Mote | None, str | None]:

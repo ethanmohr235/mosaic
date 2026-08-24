@@ -496,7 +496,8 @@ def math_spans(text: str) -> list[MathSpan]:
 # --- the graph side --------------------------------------------------
 
 def has_modoc(properties: dict) -> bool:
-    """The `note` role (core/roles.py): a mote carrying a note."""
+    """Whether a mote carries a note. Deliberately not a kind
+    (core/kinds.py) -- see docs/architecture.md's Notes section."""
     return isinstance(properties.get(MODOC_KEY), str)
 
 
