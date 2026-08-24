@@ -1,0 +1,226 @@
+% MEGN 324 -- Lecture 1. Converted from LaTeX to .modoc.
+% Preamble, \maketitle, titleformat, enumerate and tabular have no
+% equivalent here; see the notes at the foot of this file.
+
+\section{MEGN 324 — Introduction to Finite Element Analysis}
+
+\emph{Lecture 1: Introduction to FEA} — Colorado School of Mines,
+Mechanical Engineering. Fall 2026.
+
+\subsection{Today's Learning Objectives}
+\begin{itemize}
+\item Instructor & TA introductions
+\item Course organization / Canvas & recommended texts
+\item Recall key concepts from the syllabus (learning outcomes, assignments, schedule)
+\item Define FEA
+\item Recall the steps in \textbf{every} FE analysis
+\end{itemize}
+
+\section{Course Logistics}
+
+\subsection{Instructors}
+\begin{itemize}
+\item \textbf{Dr. Katie Knaus} (Section F) — Assistant Professor, Biomechanics; \texttt{katherine.knaus@mines.edu}
+\item \textbf{Jim Wong} (Sections A, B, D) — \texttt{jwong@mines.edu}; background in metallurgical/mechanical engineering, solar industry and agricultural/off-highway equipment
+\item \textbf{Omid Babaie Rizvandi} (Sections C, E, G) — Research Assistant Professor; \texttt{obabaierizvandi@mines.edu}
+\item \emph{Always include "324" in the email subject line.}
+\end{itemize}
+
+\subsection{Teaching Assistants & Office Hours}
+\begin{itemize}
+\item Section TAs cover time slots from 8:00 am through 6:15 pm across Sections A–G.
+\item For \textbf{assignment help}: contact any TA or the instructor.
+\item For \textbf{non-exam grading} questions: contact your section's TA.
+\item For \textbf{exam grading} questions: contact your instructor.
+\end{itemize}
+
+\subsection{Deliverables Overview}
+\begin{itemize}
+\item \textbf{Lecture} — topic of the day, 15–45 minutes
+\item \textbf{Labs/Tutorials} — due before the next class
+\item \textbf{HW} — weekly, in two parts
+\item HW Part 1: Technical (advanced course topics)
+\item HW Part 2: Written (a subsection of the cumulative FEA report; may not directly relate to Part 1)
+\item \textbf{Gots/Needs} — brief daily reflection, due end of day
+\item \textbf{Final Project} — full FEA analysis with complete report
+\end{itemize}
+
+\subsection{Grading Policy}
+\begin{itemize}
+\item Labs & Tutorials — 10\%
+\item Participation (Gots/Needs; discussions) — 5\%
+\item Homework Assignments — 15\%
+\item Final Project — 10\%
+\item Exams — 60\%
+\end{itemize}
+
+\subsection{Recommended Texts}
+\begin{itemize}
+\item Kurowski, P. \emph{Engineering Analysis with SOLIDWORKS Simulation} (2025 or 2026 ed.)
+\item TMS, \emph{Verification & Validation of Computational Models Associated with the Mechanics of Materials} (free electronic version available)
+\item ASME V&V 10-2006: \emph{Guide for Verification and Validation in Computational Solid Mechanics}
+\item ASME V&V 10.1-2012: \emph{An Illustration of the Concepts of Verification and Validation in Computational Solid Mechanics}
+\end{itemize}
+
+\section{What is FEA?}
+
+\subsection{Definitions}
+\begin{itemize}
+\item \textbf{FEM (Finite Element Method):} "a numerical procedure to get \emph{approximate} solutions to mathematical equations (usually PDEs) and their boundary conditions that govern a problem of engineering interest."
+\item \textbf{FEA (Finite Element Analysis):} the application of FEM to practical engineering problems.
+\item Focus of MEGN 324: FEA for \textbf{structural mechanics} (with brief coverage of buckling and frequency analysis).
+\item FEA is a standard Computer-Aided Engineering (CAE) tool used throughout industry, government, and academia.
+\end{itemize}
+
+\subsection{Common Commercial FEA Software}
+\begin{itemize}
+\item \textbf{Abaqus} — world leader, powerful but expensive
+\item \textbf{ANSYS} — comparable to Abaqus, also expensive
+\item \textbf{COMSOL} — known for multiphysics coupling (structural + electromagnetic + thermal)
+\item \textbf{SolidWorks Simulation} — affordable, common in industry
+\item Specialized tools: \textbf{FEBio} (open-source, biomechanics), \textbf{ProCast} (casting flow/solidification)
+\end{itemize}
+
+\subsection{Example Governing PDEs}
+
+\textbf{Solid Mechanics} — 3-D steady linear-elastic stress analysis:
+
+\begin{equation}
+\begin{aligned}
+\frac{\partial \sigma_x}{\partial x} + \frac{\partial \tau_{yx}}{\partial y} + \frac{\partial \tau_{zx}}{\partial z} &= -F_x \\
+\frac{\partial \tau_{xy}}{\partial x} + \frac{\partial \sigma_y}{\partial y} + \frac{\partial \tau_{zy}}{\partial z} &= -F_y \\
+\frac{\partial \tau_{xz}}{\partial x} + \frac{\partial \tau_{yz}}{\partial y} + \frac{\partial \sigma_z}{\partial z} &= -F_z
+\end{aligned}
+\end{equation}
+
+with constitutive relations
+
+\begin{equation}
+\sigma_x = (2G+\lambda)\varepsilon_{xx} + \lambda(\varepsilon_{yy}+\varepsilon_{zz}), \qquad \tau_{xy} = G\,\gamma_{xy}, \quad \text{etc.}
+\end{equation}
+
+and strain–displacement relations $\varepsilon_x = \partial u/\partial x$ and
+$\gamma_{xy} = \partial u/\partial y + \partial v/\partial x$, where
+
+\begin{equation}
+G = \frac{E}{2(1+\nu)}, \qquad \lambda = \frac{4G^2 \nu}{E - 6G\nu}
+\end{equation}
+
+\textbf{Fluid Mechanics} — 2-D laminar Newtonian flow:
+
+\begin{equation}
+\begin{aligned}
+\frac{\partial v_x}{\partial x} + \frac{\partial v_y}{\partial y} &= 0 \\
+\rho\left(\frac{\partial v_x}{\partial t} + v_x \frac{\partial v_x}{\partial x} + v_y \frac{\partial v_x}{\partial y}\right) &= -\frac{\partial P}{\partial x} + \mu\left(\frac{\partial^2 v_x}{\partial x^2} + \frac{\partial^2 v_x}{\partial y^2}\right) + \rho g_x
+\end{aligned}
+\end{equation}
+
+\textbf{Dynamics and Vibrations} — 1-D spring–mass–damper:
+
+\begin{equation}
+m\frac{\partial^2 u}{\partial t^2} + c\frac{\partial u}{\partial t} + k u = F
+\end{equation}
+
+Other example PDE domains covered by FEM: heat transfer.
+
+\subsection{How FEM Works}
+\begin{itemize}
+\item The real domain is split into \textbf{elements} connected at \textbf{nodes} (points).
+\item Simple assumed shape/behavior within each element.
+\item Elements are connected to approximate the solution of a complex problem.
+\item Element dimensionality: \textbf{1D} = line, \textbf{2D} = area, \textbf{3D} = volume.
+\end{itemize}
+
+\subsection{Modeling Pipeline}
+
+Real World $\rightarrow$ Mathematical Model (choose governing theory/equations)
+$\rightarrow$ FEM (solve approximately for displacements, strains, stresses, forces)
+$\rightarrow$ Analysis (interpret results, generate practical insight).
+
+\emph{Example insight:} stress in a support bracket exceeds the endurance
+limit under moderate wind loading $\Rightarrow$ redesign needed to avoid
+fatigue failure.
+
+\subsection{FEA Applications}
+\begin{itemize}
+\item Lunar excavator blade structural design
+\item Total knee replacement implant mechanics (Halloran, Petrella & Rullkoetter, \emph{J. Biomechanics}, 2005)
+\item Lifetime prediction modeling of turbine airfoils for advanced power generation (Karaivanov, PhD thesis, Univ. of Pittsburgh, 2009)
+\end{itemize}
+
+\section{Steps in Every FE Analysis}
+
+\textbf{First:} Understand the nature/behavior of the physical system
+(shape — beam, plate, block, membrane; deformation mode — bending,
+twisting, inflation).
+
+\textbf{Next:} Choose the appropriate theory for the mathematical model
+(domain, equations, boundary conditions).
+
+\textbf{Then}, the FE modeling process:
+
+\begin{itemize}
+\item 1. Create/obtain \textbf{Geometry} (usually from CAD)
+\item 2. Select \textbf{Materials} (properties)
+\item 3. Define \textbf{Fixtures} (fixed degrees of freedom, i.e. boundary conditions)
+\item 4. Define \textbf{External Loads}
+\item 5. Discretize geometry with a \textbf{Mesh} of nodes/elements
+\item 6. Compute the numerical \textbf{Solution} of the FE model
+\item 7. Conduct \textbf{Verification and Validation (V&V)} of the FE model
+\item 8. Return to Step 1 and \textbf{Repeat} until V&V is satisfied
+\item 9. \textbf{Document} Steps 1–7 in a clear, concise \textbf{Report}
+\end{itemize}
+
+\emph{Note: MEGN 324 focuses on the linear-elastic class of problems.}
+
+\subsection{Worked Example: Cantilever Beam (I-beam with hole)}
+\begin{itemize}
+\item 1. \textbf{Geometry:} 1000 mm I-beam, obtained from SolidWorks, with a hole through the web (not capturable by beam theory alone $\Rightarrow$ 3-D solid mechanics needed).
+\item 2. \textbf{Materials:} linear-elastic steel.
+\item 3. \textbf{Fixtures:} fixed at the left end.
+\item 4. \textbf{External Loads:} applied at the right (free) end.
+\item 5. \textbf{Mesh:} tetrahedral finite elements.
+\item 6. \textbf{Solution:} z-direction normal stress and y-direction displacement (deflection) computed and plotted.
+\item 7. \textbf{V&V:} Is the mesh too coarse for smooth results? Do results agree with Solid Mechanics (MoM) expectations? — \emph{checking this is critical.}
+\item 8. \textbf{Repeat:} refine the mesh around the hole (stress concentration region).
+\item 9. \textbf{Report:} document Steps 1–7 clearly so results are reproducible.
+\end{itemize}
+
+\section{Verification and Validation (V&V)}
+
+\subsection{Verification — "Qualitative", the domain of mathematics}
+\begin{itemize}
+\item In short: does the FEA program do what it is supposed to do (model set up correctly, no bugs)?
+\item \textbf{NASA:} the process for determining whether a product fulfills its established requirements/specifications.
+\item \textbf{ASME:} the process of determining that a computational model accurately represents the underlying mathematical model and its solution.
+\item Two sub-types: \textbf{Code Verification} (does the code do what it's supposed to?) and \textbf{Calculation Verification} (are you modeling what you intend to?).
+\end{itemize}
+
+\subsection{Validation — "Quantitative", the domain of physics}
+\begin{itemize}
+\item In short: how well does the model approximate \emph{reality} (e.g. agreement with a physical test)?
+\item \textbf{NASA:} assessment of a planned/delivered system against the sponsor's operational need in the most realistic achievable environment.
+\item \textbf{ASME:} the degree to which a model is an accurate representation of the real world for its intended use.
+\item \textbf{MITRE:} the degree to which a model accurately represents reality (experiments) within its intended range of use.
+\end{itemize}
+
+\textbf{Both verification and validation are required} for a trustworthy FE model.
+
+\section{Computer & File Management Recommendations}
+\begin{itemize}
+\item Mines classroom computers: recommended for all assignments, \textbf{required for exams}. Do not store anything "locally" that cannot be lost — save to the CSM network drive (\texttt{Z:}), cloud, or an external drive.
+\item Personal computers: install SolidWorks 2026 and Mathcad Prime 12 (\emph{not} Mathcad 15) — both free.
+\item Mines virtual computers ("GPU Desktop"): good option for old/slow/Mac machines; Documents/Desktop sync to the account.
+\item Always keep a backup. SolidWorks Simulation runs faster with local (\texttt{C:}) storage.
+\item Computer/login/technical issues are \textbf{not} valid excuses for incorrect, missing, or late work.
+\end{itemize}
+
+\section{Action Items / To-Do}
+\begin{itemize}
+\item \textbf{Gots/Needs} — due tonight
+\item \textbf{Lab 1} (Final Grade Calculator) — due before next class; read questions carefully
+\item \textbf{Tutorials 1 & 2} (Intro to Mathcad) — due before next class; VPN needed off-campus (not needed for GPU Desktop)
+\item \textbf{HW 1} (MoM Concepts Review, time-limited) — due next Monday, 11:59 pm; a rescore opportunity is available during Week 2
+\item Review Solid Mechanics: combined loading problem from MEGN 212 (see Canvas for supplemental resources)
+\item Be ready to solve the cantilever beam deflection problem next class (Thursday)
+\end{itemize}
