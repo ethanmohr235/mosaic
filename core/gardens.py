@@ -48,6 +48,18 @@ def delete_garden(name: str) -> None:
         trash.unlink()
     garden_db_path(name).rename(trash)
 
+    # The sync-dir pointer (set_sync_dir) is trashed alongside the .db,
+    # not left behind -- otherwise a brand-new, unrelated garden later
+    # created under this same name would silently inherit it and start
+    # pushing/pulling through a shared folder that has nothing to do with
+    # it. restore_garden() below brings it back with the rest.
+    sync_dir = _sync_dir_path(name)
+    if sync_dir.exists():
+        sync_trash = _sync_dir_trash_path(name)
+        if sync_trash.exists():
+            sync_trash.unlink()
+        sync_dir.rename(sync_trash)
+
 
 def restore_garden(name: str) -> None:
     trash = _trash_path(name)
@@ -56,6 +68,10 @@ def restore_garden(name: str) -> None:
     if garden_exists(name):
         raise FileExistsError(f"Garden already exists: {name!r}")
     trash.rename(garden_db_path(name))
+
+    sync_trash = _sync_dir_trash_path(name)
+    if sync_trash.exists():
+        sync_trash.rename(_sync_dir_path(name))
 
 
 def create_garden(name: str) -> str:
@@ -108,6 +124,10 @@ def clear_default_garden() -> None:
 def _sync_dir_path(name: str) -> Path:
     path = garden_db_path(name)
     return path.with_name(path.name + ".sync_dir")
+
+
+def _sync_dir_trash_path(name: str) -> Path:
+    return _sync_dir_path(name).with_name(_sync_dir_path(name).name + ".trash")
 
 
 def get_sync_dir(name: str) -> str | None:

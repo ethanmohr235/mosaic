@@ -7,10 +7,12 @@ from core.gardens import (
     delete_garden,
     garden_exists,
     get_default_garden,
+    get_sync_dir,
     list_gardens,
     resolve_garden,
     restore_garden,
     set_default_garden,
+    set_sync_dir,
 )
 
 
@@ -128,6 +130,38 @@ def test_resolve_garden_none_falls_back_when_preferred_deleted():
     delete_garden("work")
     assert resolve_garden(None) == "default"
     assert garden_exists("default")
+
+
+# ---- sync-dir pointer survives delete/restore, but not a fresh re-create ----
+#
+# get_sync_dir/set_sync_dir (core/gardens.py) point a garden at a shared
+# folder for core/sync.py. Deleting a garden trashes its .db by renaming it
+# aside; the sync-dir pointer must travel with it, otherwise a later,
+# unrelated garden created under the same name would silently inherit it
+# and start pushing/pulling through a shared folder that has nothing to do
+# with it.
+
+def test_delete_garden_trashes_the_sync_dir_pointer_too():
+    create_garden("work")
+    set_sync_dir("work", "/shared/work")
+    delete_garden("work")
+    assert get_sync_dir("work") is None
+
+
+def test_restore_garden_brings_the_sync_dir_pointer_back():
+    create_garden("work")
+    set_sync_dir("work", "/shared/work")
+    delete_garden("work")
+    restore_garden("work")
+    assert get_sync_dir("work") == "/shared/work"
+
+
+def test_a_fresh_garden_does_not_inherit_a_deleted_namesakes_sync_dir():
+    create_garden("work")
+    set_sync_dir("work", "/shared/work")
+    delete_garden("work")
+    create_garden("work")
+    assert get_sync_dir("work") is None
 
 
 # ---- reserved gardens ----
