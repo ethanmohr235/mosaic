@@ -2048,6 +2048,38 @@ function openQuickAddAt(worldX, worldY, clientX, clientY) {
   }
 }
 
+/** Arrow-key highlight + Enter-to-choose for a type-to-filter result list
+ *  built from .search-result-row markup -- the species/folder/portal/
+ *  library pickers below all show exactly the kind of list the main
+ *  search palette does (openSearch/renderSearchResults), but unlike it
+ *  never grew arrow keys or Enter, leaving the mouse as the only way to
+ *  pick a result. Reads/writes the highlighted row straight from the DOM
+ *  instead of keeping its own index, so each picker's render function
+ *  needs nothing more than marking row 0 highlighted the way
+ *  renderSearchResults already does. Re-dispatches the row's own
+ *  mousedown on Enter rather than duplicating what each row's listener
+ *  does -- and targets .label specifically, since the library picker's
+ *  row (uniquely) puts its "choose" listener there rather than on the
+ *  row itself, to keep it from firing when its Delete button is clicked. */
+function setupPickerKeyNav(input, resultsContainer) {
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
+    const rows = [...resultsContainer.querySelectorAll(".search-result-row")];
+    if (rows.length === 0) return;
+    e.preventDefault();
+    const current = Math.max(0, rows.findIndex((r) => r.classList.contains("highlighted")));
+    if (e.key === "Enter") {
+      const target = rows[current].querySelector(".label") || rows[current];
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      return;
+    }
+    const next = Math.max(0, Math.min(current + (e.key === "ArrowDown" ? 1 : -1), rows.length - 1));
+    rows[current].classList.remove("highlighted");
+    rows[next].classList.add("highlighted");
+    rows[next].scrollIntoView({ block: "nearest" });
+  });
+}
+
 // ---- species picker + new instance ----
 
 function hideSpeciesPicker() {
@@ -2089,9 +2121,9 @@ function renderSpeciesPickerResults(query) {
     container.innerHTML = '<div class="search-empty">No matches</div>';
     return;
   }
-  for (const mote of candidates) {
+  candidates.forEach((mote, i) => {
     const row = document.createElement("div");
-    row.className = "search-result-row";
+    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
     row.innerHTML = '<span class="label"></span>';
     row.querySelector(".label").textContent = nodeLabel(mote);
     row.addEventListener("mousedown", async (e) => {
@@ -2110,7 +2142,7 @@ function renderSpeciesPickerResults(query) {
       showToast(mode === "template" ? "Template set." : "Species set.");
     });
     container.appendChild(row);
-  }
+  });
 }
 
 function setupSpeciesControls() {
@@ -2122,6 +2154,7 @@ function setupSpeciesControls() {
   $("species-picker-input").addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideSpeciesPicker();
   });
+  setupPickerKeyNav($("species-picker-input"), $("species-picker-results"));
 
   $("new-instance-btn").addEventListener("click", async () => {
     if (editBlocked()) return;
@@ -2161,9 +2194,9 @@ function renderFolderPickerResults(query) {
     container.innerHTML = '<div class="search-empty">No matches</div>';
     return;
   }
-  for (const mote of candidates) {
+  candidates.forEach((mote, i) => {
     const row = document.createElement("div");
-    row.className = "search-result-row";
+    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
     row.innerHTML = '<span class="label"></span>';
     row.querySelector(".label").textContent = nodeLabel(mote);
     row.addEventListener("mousedown", async (e) => {
@@ -2176,7 +2209,7 @@ function renderFolderPickerResults(query) {
       await openDetailPanel(targetId);
     });
     container.appendChild(row);
-  }
+  });
 }
 
 function setupFolderControls() {
@@ -2194,6 +2227,7 @@ function setupFolderControls() {
   $("folder-picker-input").addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideFolderPicker();
   });
+  setupPickerKeyNav($("folder-picker-input"), $("folder-picker-results"));
 }
 
 // ---- search palette ----
@@ -2942,9 +2976,9 @@ function renderPortalResults(results) {
     container.innerHTML = '<div class="search-empty">No matches</div>';
     return;
   }
-  for (const mote of results) {
+  results.forEach((mote, i) => {
     const row = document.createElement("div");
-    row.className = "search-result-row";
+    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
     row.innerHTML = '<span class="label"></span>';
     row.querySelector(".label").textContent = nodeLabel(mote);
     row.addEventListener("mousedown", async (e) => {
@@ -2966,7 +3000,7 @@ function renderPortalResults(results) {
       showToast(`Portal to '${garden}' created.`);
     });
     container.appendChild(row);
-  }
+  });
 }
 
 function setupPortalModal() {
@@ -2978,6 +3012,7 @@ function setupPortalModal() {
     clearTimeout(portalSearchTimer);
     portalSearchTimer = setTimeout(refreshPortalResults, 150);
   });
+  setupPickerKeyNav($("portal-search-input"), $("portal-search-results"));
 }
 
 // ---- library picker ----
@@ -3064,9 +3099,9 @@ function renderLibraryResults(query) {
     container.innerHTML = '<div class="search-empty">No matches</div>';
     return;
   }
-  for (const entry of results) {
+  results.forEach((entry, i) => {
     const row = document.createElement("div");
-    row.className = "search-result-row";
+    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
     row.innerHTML =
       '<span class="label"></span><button type="button" class="danger delete-entry">Delete</button>';
     row.querySelector(".label").textContent = nodeLabel(entry);
@@ -3090,13 +3125,25 @@ function renderLibraryResults(query) {
     row.querySelector(".delete-entry").addEventListener("click", async (e) => {
       e.stopPropagation();
       if (!window.confirm(`Remove '${nodeLabel(entry)}' from the library?`)) return;
+      // Snapshotted before deleting, same reason deleteSelection() snapshots
+      // a mote's properties first -- there is nothing left to read back
+      // afterward if the user hits Undo.
+      const label = nodeLabel(entry);
+      const snapshot = { id: entry.id, properties: { ...entry.properties } };
       await call(api.delete_library_entry(entry.id));
       librarySnapshot = await call(api.library_snapshot());
       renderLibraryChips();
       renderLibraryResults($("library-search-input").value);
+      showUndoToast(`Removed '${label}' from the library.`, async () => {
+        await call(api.restore_library_entry(snapshot.properties, snapshot.id));
+        librarySnapshot = await call(api.library_snapshot());
+        renderLibraryChips();
+        renderLibraryResults($("library-search-input").value);
+        showToast("Restored to the library.");
+      });
     });
     container.appendChild(row);
-  }
+  });
 }
 
 function setupLibraryModal() {
@@ -3104,6 +3151,7 @@ function setupLibraryModal() {
     if (e.target === $("library-overlay")) closeLibraryModal();
   });
   $("library-search-input").addEventListener("input", (e) => renderLibraryResults(e.target.value));
+  setupPickerKeyNav($("library-search-input"), $("library-search-results"));
 }
 
 // ---- view controls ----

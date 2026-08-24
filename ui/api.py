@@ -466,6 +466,24 @@ class Api:
         finally:
             conn.close()
 
+    @_synchronized
+    def restore_library_entry(self, raw_properties: dict, id: str) -> dict:
+        """Undo counterpart to delete_library_entry() -- recreates a
+        just-removed entry with its original id and properties, the same
+        create-with-explicit-id pattern deleteSelection()'s own mote-undo
+        already uses via create_mote(). Properties arrive already typed
+        (the deleted entry's own dict, round-tripped through the undo
+        toast's closure) rather than raw form text, same as
+        copySelection/pasteAt -- _coerce_properties leaves non-strings
+        alone."""
+        conn = get_connection(library_repo.LIBRARY_GARDEN)
+        try:
+            initialize_database(conn)
+            mote_id = motes_repo.create_mote(conn, _coerce_properties(raw_properties), id=id)
+            return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
+        finally:
+            conn.close()
+
     # ---- motes ----
 
     @_synchronized
