@@ -141,6 +141,9 @@ def _explanation_payload(explanation) -> dict:
 # garden connection and outlives or predeceases this window freely.
 MORA_SCRIPT = Path(__file__).resolve().parent.parent / "run_mora.py"
 
+# Monastery, the calendar window, on exactly the same terms.
+MONASTERY_SCRIPT = Path(__file__).resolve().parent.parent / "run_monastery.py"
+
 
 def _popen_detached(args: list[str], *, quiet: bool = True) -> None:
     """Launches args without waiting on it (see _open_with_os_default for
@@ -549,6 +552,19 @@ class Api:
             command += ["--note", mote_id]
         _popen_detached(command, quiet=False)
         return {"garden": self._current_garden, "note": mote_id}
+
+    @_synchronized
+    def open_monastery(self, mote_id: str | None = None) -> dict:
+        """Open Monastery, the calendar, on this garden -- optionally with
+        one mote already selected. Everything open_mora says applies here
+        unchanged: fire-and-forget through the detached launcher, under
+        `sys.executable` so it comes up in this virtualenv, holding its
+        own connection to the same garden file."""
+        command = [sys.executable, str(MONASTERY_SCRIPT), "--garden", self._current_garden]
+        if mote_id:
+            command += ["--focus", mote_id]
+        _popen_detached(command, quiet=False)
+        return {"garden": self._current_garden, "focus": mote_id}
 
     # ---- relationships ----
 

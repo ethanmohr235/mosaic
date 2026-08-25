@@ -362,8 +362,9 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `ui/`, `mora/` and `mcp_server/`
-are four adapters over it, and each one's job is a different question, so none of
+`core/` is the whole system. `cli/`, `ui/`, `mora/`, `monastery/` and
+`mcp_server/` are five adapters over it, and each one's job is a
+different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
 folders and the library existed only in the app, property models only in
@@ -384,6 +385,9 @@ The charter:
   reading .modoc notes (see Notes below). A second window rather than a
   fourth kind of adapter -- it is the UI's charter applied to a surface
   a graph canvas has no room for.
+* **Monastery** -- likewise, for motes that have a time (see The
+  calendar below). A third window on the same terms, and for the same
+  reason: a week is a shape a graph canvas cannot draw.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -577,3 +581,65 @@ window at the winner's address and loads the other app's page against
 its own bridge. `mora/app.py::choose_port` asks for 42002 and falls back
 to an ephemeral port; `.webview_data_mora/` is its own storage. See
 `docs/ui-setup.md`.
+
+# The calendar
+
+`core/calendar.py` places motes in time, and `monastery/` is the window
+that draws them (`run_monastery.py`).
+
+The design decision worth stating is what it does *not* do: there is no
+calendar-entry type, and no property that means "this is an event."
+Instead a **binding** is any property key whose value parses as a date,
+discovered per garden rather than declared -- so a garden where meetings
+say `when`, tasks say `due` and events say `starts` shows all three
+without a migration and without agreeing on a key first. Nothing is
+stored to make a key a binding, exactly as nothing is stored to make a
+mote a species: it is answered by looking. This is the monism paying for
+itself again -- the calendar needed no new object type, no new
+relationship, and no new reserved property.
+
+That generality is deliberately **read-side only**. Creating a mote from
+the grid always writes the reserved `date` (plus `duration`), the key
+`core/google_calendar.py` already treats as canonical. Reading is general
+because a garden is; a *new* date has one right home, and having two
+would be how a garden ends up with the same event under three keys.
+
+`recurrence` -- already reserved, already an RFC 5545 RRULE, and until
+now passed to Google without MonOSS ever interpreting it -- is expanded
+locally by `dateutil.rrule` (the one new dependency, approved for this)
+into one occurrence per repetition inside the visible range. Every
+occurrence carries the same mote, so clicking any of them opens that
+mote: the "one mote → one event → the whole series" model the export
+side already documents, now true on the read side too. A rule that
+doesn't parse places the mote on its own date rather than hiding it --
+the same permissiveness `core/modoc_bind.py` gives a broken note, and
+for the same reason.
+
+Everything in `core/calendar.py` is pure: motes in, occurrences out, no
+connection. That is the discipline `core/scenarios.py::apply()` and
+`core/incidence.py` already follow, and it is why the whole calendar is
+testable without a window (`tests/test_calendar.py`). `monastery/api.py`
+adds only what a window knows -- which garden is open, and which
+bindings the person switched off -- and `monastery/payload.py` only
+reshapes.
+
+Two exclusions are inherited rather than reinvented. Templates and
+scenario overrides are never placed, even when dated, because they hold
+replacement values rather than real data -- the same set
+`exportable_motes()` skips. And a mote is coloured by its species
+through the same hash the graph canvas uses, so it reads the same colour
+in all three windows.
+
+**This does not replace Calendar export.** They answer different
+questions: Monastery is the live, editable view of the garden itself,
+and `core/google_calendar.py` still pushes dated motes out to Google for
+the things a local window cannot do -- a phone, a shared calendar, an
+invite. Neither knows about the other.
+
+Monastery is a third process on the same terms as Mora, which means the
+same two collisions to avoid: `monastery/app.py::choose_port` asks for
+42003 (42001 is the graph window's, 42002 Mora's) and falls back to an
+ephemeral port, and `.webview_data_monastery/` is its own WebKit
+storage. And since nothing in MonOSS pushes -- no adapter announces its
+writes -- the window **polls** while focused rather than waiting to be
+told. See `docs/ui-setup.md`.

@@ -4,5 +4,6 @@ google-auth-oauthlib
 mcp
 numpy
 pytest
+python-dateutil
 pywebview
 requests

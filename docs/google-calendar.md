@@ -1,5 +1,12 @@
 # Exporting to Google Calendar
 
+> Not to be confused with **Monastery** (`docs/ui-setup.md`), the calendar
+> window: that is the live, editable view of the garden's own dated motes
+> and involves no network at all. This page is the one-way push *out* to
+> Google, for the things a local window can't do -- a phone, a shared
+> calendar, an invite. The two are independent; neither knows about the
+> other.
+
 Any mote with a `date` property can be pushed to Google Calendar via the
 topbar's "Export to Calendar" button. This is one-way (MonOSS → Calendar)
 and manual: clicking it walks every dated mote in the current garden and

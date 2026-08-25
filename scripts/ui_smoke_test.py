@@ -1254,6 +1254,32 @@ def run_checks(window):
     check("Notes (Mora) opens on the garden, and the panel button on the mote",
           opening_mora_from_the_graph_passes_the_right_mote)
 
+    def opening_monastery_from_the_graph():
+        # Stubbed for the same reason open_mora is: the real call spawns
+        # a third pywebview process.
+        js(window, """
+            window.__monasteryCalls = [];
+            window.__origOpenMonastery = api.open_monastery.bind(api);
+            api.open_monastery = (moteId) => {
+                window.__monasteryCalls.push(moteId === undefined ? null : moteId);
+                return Promise.resolve({garden: 'test', focus: moteId});
+            };
+        """)
+        js(window, "document.getElementById('tools-btn').click();")
+        time.sleep(0.2)
+        js(window, "document.getElementById('open-monastery-btn').click();")
+        time.sleep(0.4)
+        calls = json.loads(js(window, "JSON.stringify(window.__monasteryCalls)"))
+        assert calls == [None], \
+            f"the Tools item should open Monastery with no mote, got {calls}"
+        closed = js(window, "document.getElementById('tools-menu').classList.contains('hidden')")
+        assert closed is True, \
+            "opening Monastery should close the Tools menu like any other action"
+        js(window, "api.open_monastery = window.__origOpenMonastery;")
+
+    check("Calendar (Monastery) opens on the current garden",
+          opening_monastery_from_the_graph)
+
     def a_note_property_shows_as_a_summary_not_a_wall_of_text():
         # Injected as JSON rather than written inline: a .modoc source is
         # backslashes and newlines all the way down, and nesting it in a

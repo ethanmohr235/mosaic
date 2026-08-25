@@ -456,3 +456,120 @@ gestures, and the timing-sensitive checks flake when they compete.
 Prints PASS/FAIL per check and exits non-zero if anything failed. Never
 touches real data: `GARDENS_DIR` and the webview storage dir are both a
 fresh temp directory.
+
+---
+
+# Monastery -- the calendar
+
+A third window, over the same gardens: `./run_monastery.py`, or
+`.venv/bin/python run_monastery.py`. Same stack and the same terms as
+Mora -- pywebview over a local HTML/CSS/JS frontend, its own process,
+its own garden connection, opening and closing independently of the
+graph window.
+
+```
+./run_monastery.py                      # the default garden
+./run_monastery.py --garden reactor     # a specific garden
+./run_monastery.py --focus <mote id>    # open with one mote selected
+```
+
+### Date bindings
+
+Monastery does not have a "calendar entry" type, because MonOSS does not
+have types. It reads **every** property whose value parses as a date and
+offers each such key as a **binding** -- so a garden where meetings say
+`when`, tasks say `due` and events say `starts` shows all three at once,
+with no migration and nothing declared. The sidebar lists every binding
+it found with a count, and toggling one off empties the grid of the motes
+it placed without touching them.
+
+This is a read-side heuristic only. Creating a mote from the calendar
+always writes the reserved `date` (plus `duration`), the same key
+Calendar export uses: reading is general because a garden is, but a new
+date has one right home.
+
+| Value | Placed as |
+|---|---|
+| `2026-08-24` | all-day |
+| `2026-08-24T09:15:00`, or `2026-08-24 09:15` | timed |
+| `ends` / `end` on the same mote | the occurrence's end, all-day ends being inclusive as people write them |
+| `duration` | minutes when timed, days when all-day -- exactly as `core/google_calendar.py` reads it |
+| `recurrence` | an RFC 5545 RRULE, expanded into one occurrence per repetition inside the visible range |
+
+A recurring mote is still **one mote**: every occurrence it draws opens
+the same detail panel, the same "one mote → one event → the whole series"
+model the Calendar export already documents. A rule that doesn't parse
+places the mote on its own date rather than hiding it -- the same
+permissiveness a broken note gets in Mora.
+
+Templates and scenario overrides are never placed, even when dated: they
+hold replacement values rather than real data, which is the exclusion
+`exportable_motes()` already makes for the export.
+
+### The window
+
+| Area | |
+|---|---|
+| Week | a 24-hour grid; overlapping events are packed into side-by-side lanes, all-day ones pin to a row above it |
+| Month | six weeks of day cells, three chips each and a `+N more` that opens that week |
+| Bindings rail | the mini calendar, the date-binding toggles, and a species filter |
+| Detail panel | which property placed the mote, its properties (calendar-owned keys marked), and its relationships |
+
+| Control | Action |
+|---|---|
+| `‹` / `›`, or ← / → | Previous / next week or month |
+| **Today**, or `T` | Back to the current week |
+| `W` / `M` | Week or month view |
+| Click any empty slot | Open the draft popover there |
+| Enter, in the draft's name field | Create the mote |
+| Esc | Close the draft, else the detail panel |
+
+The draft popover's type picker lists the garden's own **species** --
+whatever motes are pointed at by `instance_of` -- rather than a fixed set
+of kinds, and picking one adds that relationship to the new mote.
+
+### Live updates
+
+Nothing in MonOSS pushes: the graph window, the CLI and the MCP server
+all write the same file and none of them announces it. So Monastery
+**polls**, every few seconds, and only while its window has focus -- an
+edit made anywhere else appears on the next tick without a refresh. A
+poll never runs while the draft popover is open, so it cannot reload the
+inputs out from under someone typing into them.
+
+### Ports
+
+The third window means a third port. pywebview pins its server to 42001
+unless told otherwise (the graph window), Mora asks for 42002, and
+Monastery asks for **42003**, each falling back to an ephemeral port if
+theirs is taken. This is not tidiness: the process that loses that race
+still points its window at the winner's address, so it comes up showing
+another app's page against its own bridge -- which is exactly what
+happened to Mora once. `.webview_data_monastery/` is its own WebKit
+storage for the same reason.
+
+### Smoke test
+
+`scripts/monastery_smoke_test.py`, the same instrument as Mora's and for
+the same reason. It drives a real window against a seeded throwaway
+garden -- seeded relative to *today*, since the week view draws whatever
+week it opens on -- and checks that motes place under every binding, that
+an all-day span pins across each of its days, that a recurrence expands,
+that overlapping events share the column, that a dated template stays
+off the grid, that the toggles filter, that clicking an event opens the
+panel, that the draft popover writes a mote dated with the reserved key,
+and that an edit from another process arrives on the next poll. It holds
+42001 and 42002 for the whole run, because a Monastery that asks for the
+wrong port must fail visibly rather than load another app's page.
+
+Run the smoke tests one at a time. All three drive real windows with
+synthetic gestures, and the timing-sensitive checks flake when they
+compete.
+
+```
+.venv/bin/python scripts/monastery_smoke_test.py
+```
+
+Prints PASS/FAIL per check and exits non-zero if anything failed. Never
+touches real data: `GARDENS_DIR` and the webview storage dir are both a
+fresh temp directory.

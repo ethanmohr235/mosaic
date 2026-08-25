@@ -817,6 +817,15 @@ function openMora(moteId) {
   );
 }
 
+function openMonastery(moteId) {
+  call(api.open_monastery(moteId || null));
+  showToast(
+    moteId
+      ? "Opening Monastery… dates changed there appear here after a refocus."
+      : "Opening Monastery…",
+  );
+}
+
 function withSimOverlay(mote) {
   const overlay = {};
   for (const c of cumulativeSimChanges()) {
@@ -3563,6 +3572,13 @@ function setupMora() {
   });
 }
 
+function setupMonastery() {
+  $("open-monastery-btn").addEventListener("click", () => {
+    closeTopMenus();
+    openMonastery(null);
+  });
+}
+
 
 function setupRunsPanel() {
   $("toggle-runs-panel-btn").addEventListener("click", () => {
@@ -3824,6 +3840,7 @@ async function init() {
   setupSimulation();
   setupRunsPanel();
   setupMora();
+  setupMonastery();
   setupCalendarExport();
   setupContextMenu();
   setupKeyboard();
