@@ -259,6 +259,169 @@ def test_push_with_nothing_new_is_a_noop(tmp_path, monkeypatch):
     conn_a.close()
 
 
+# ---- backfilling history for motes/relationships that predate oplog
+# logging (core/sync.py::_backfill_orphans) ----
+#
+# A garden that had data before the oplog table's logging existed has
+# entities in `motes`/`relationships` with no corresponding create_*
+# oplog row -- never logged, because the logging code didn't exist yet.
+# `DELETE FROM oplog WHERE entity_id = ?` after an ordinary create is
+# how these tests fake that: the row/entity still exists, only its
+# create op is gone, which is the actual invariant push() has to repair
+# (not *why* it's missing).
+
+def test_backfill_logs_an_orphan_mote_and_relationship(tmp_path, monkeypatch):
+    sync_dir = tmp_path / "shared"
+
+    conn_a = _new_device(monkeypatch, tmp_path / "a")
+    with as_device(monkeypatch, tmp_path / "a"):
+        safe = create_mote(conn_a, {"name": "safe"})
+        orphan = create_mote(conn_a, {"name": "orphan"})
+        rel_id = create_relationship(conn_a, orphan, safe, "knows")
+        conn_a.execute("DELETE FROM oplog WHERE entity_id IN (?, ?)", (orphan, rel_id))
+        conn_a.commit()
+
+        sync.init("g", sync_dir)
+        sync.push(conn_a, "g", sync_dir)
+
+        mote_rows = conn_a.execute(
+            "SELECT action, ts FROM oplog WHERE entity_id = ?", (orphan,)
+        ).fetchall()
+        assert len(mote_rows) == 1 and mote_rows[0]["action"] == "create_mote"
+
+        safe_ts = conn_a.execute(
+            "SELECT ts FROM oplog WHERE entity_id = ? AND action = 'create_mote'", (safe,)
+        ).fetchone()["ts"]
+        assert mote_rows[0]["ts"] < safe_ts  # backfilled anchor sorts before real history
+
+        rel_rows = conn_a.execute(
+            "SELECT action FROM oplog WHERE entity_id = ?", (rel_id,)
+        ).fetchall()
+        assert len(rel_rows) == 1 and rel_rows[0]["action"] == "create_relationship"
+
+    conn_a.close()
+
+
+def test_orphan_backfill_end_to_end_matches_source(tmp_path, monkeypatch):
+    sync_dir = tmp_path / "shared"
+
+    conn_a = _new_device(monkeypatch, tmp_path / "a")
+    with as_device(monkeypatch, tmp_path / "a"):
+        safe = create_mote(conn_a, {"name": "safe"})
+        orphan = create_mote(conn_a, {"name": "orphan"})
+        rel_id = create_relationship(conn_a, orphan, safe, "knows")
+        conn_a.execute("DELETE FROM oplog WHERE entity_id IN (?, ?)", (orphan, rel_id))
+        conn_a.commit()
+
+        sync.init("g", sync_dir)
+        sync.push(conn_a, "g", sync_dir)
+
+    with as_device(monkeypatch, tmp_path / "b"):
+        sync.init("g", sync_dir, clone=True)
+        conn_b = db.get_connection("g")
+        # Not just the one earliest mote -- the whole garden, which is
+        # the actual regression this fix targets.
+        assert len(list_motes(conn_b)) == 2
+        assert len(list_relationships(conn_b)) == 1
+        assert get_mote(conn_b, orphan).properties == {"name": "orphan"}
+
+    conn_a.close()
+    conn_b.close()
+
+
+def test_backfill_is_idempotent(tmp_path, monkeypatch):
+    sync_dir = tmp_path / "shared"
+
+    conn_a = _new_device(monkeypatch, tmp_path / "a")
+    with as_device(monkeypatch, tmp_path / "a"):
+        orphan = create_mote(conn_a, {"name": "orphan"})
+        conn_a.execute("DELETE FROM oplog WHERE entity_id = ?", (orphan,))
+        conn_a.commit()
+
+        sync.init("g", sync_dir)
+        sync.push(conn_a, "g", sync_dir)
+        sync.push(conn_a, "g", sync_dir)
+
+        count = conn_a.execute(
+            "SELECT COUNT(*) AS c FROM oplog WHERE entity_id = ? AND action = 'create_mote'",
+            (orphan,),
+        ).fetchone()["c"]
+        assert count == 1
+
+    conn_a.close()
+
+
+def test_self_heal_repairs_a_device_that_already_stalled(tmp_path, monkeypatch):
+    sync_dir = tmp_path / "shared"
+
+    conn_a = _new_device(monkeypatch, tmp_path / "a")
+    with as_device(monkeypatch, tmp_path / "a"):
+        orphan = create_mote(conn_a, {"name": "orphan"})
+        safe = create_mote(conn_a, {"name": "safe"})
+        create_relationship(conn_a, orphan, safe, "knows")
+        # Only the mote predates logging -- the relationship pointing at
+        # it was created (and logged) normally, exactly like the
+        # real-world garden this was diagnosed against.
+        conn_a.execute("DELETE FROM oplog WHERE entity_id = ?", (orphan,))
+        conn_a.commit()
+
+        sync.init("g", sync_dir)
+        # Simulate a push from before this fix existed: the gap ships
+        # as-is, with nothing to repair it downstream.
+        with monkeypatch.context() as old_push:
+            old_push.setattr(sync, "_backfill_orphans", lambda conn, device_id: None)
+            sync.push(conn_a, "g", sync_dir)
+
+    with as_device(monkeypatch, tmp_path / "b"):
+        sync.init("g", sync_dir, clone=True)
+        conn_b = db.get_connection("g")
+        # Stalled: the relationship's FK failure on the missing orphan
+        # skips everything queued after it in this pull.
+        assert len(list_motes(conn_b)) == 1
+        assert list_relationships(conn_b) == []
+
+    with as_device(monkeypatch, tmp_path / "a"):
+        sync.push(conn_a, "g", sync_dir)  # backfill runs for real this time
+
+    with as_device(monkeypatch, tmp_path / "b"):
+        sync.pull(conn_b, "g", sync_dir)
+        assert len(list_motes(conn_b)) == 2
+        assert len(list_relationships(conn_b)) == 1
+
+    conn_a.close()
+    conn_b.close()
+
+
+def test_backfill_relationship_referencing_a_non_orphan_mote(tmp_path, monkeypatch):
+    sync_dir = tmp_path / "shared"
+
+    conn_a = _new_device(monkeypatch, tmp_path / "a")
+    with as_device(monkeypatch, tmp_path / "a"):
+        mote1 = create_mote(conn_a, {"name": "one"})
+        mote2 = create_mote(conn_a, {"name": "two"})
+        rel_id = create_relationship(conn_a, mote1, mote2, "knows")
+        # Only the relationship's own oplog row is missing -- both
+        # endpoints' create_mote rows are real and intact, so the
+        # backfilled ts must sort after both of *those*, not just after
+        # the generic anchor (the max()-not-flat-epsilon fix).
+        conn_a.execute("DELETE FROM oplog WHERE entity_id = ?", (rel_id,))
+        conn_a.commit()
+
+        sync.init("g", sync_dir)
+        sync.push(conn_a, "g", sync_dir)
+
+    with as_device(monkeypatch, tmp_path / "b"):
+        sync.init("g", sync_dir, clone=True)
+        conn_b = db.get_connection("g")
+        assert len(list_motes(conn_b)) == 2
+        rels = list_relationships(conn_b)
+        assert len(rels) == 1
+        assert rels[0].from_id == mote1 and rels[0].to_id == mote2
+
+    conn_a.close()
+    conn_b.close()
+
+
 def test_status_reports_local_and_remote_progress(tmp_path, monkeypatch):
     sync_dir = tmp_path / "shared"
 
