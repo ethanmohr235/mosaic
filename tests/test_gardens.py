@@ -3,14 +3,17 @@ import pytest
 from core.db import garden_db_path, get_connection, initialize_database
 from core.gardens import (
     clear_default_garden,
+    clear_sync_dir,
     create_garden,
     delete_garden,
     garden_exists,
+    get_auto_sync_enabled,
     get_default_garden,
     get_sync_dir,
     list_gardens,
     resolve_garden,
     restore_garden,
+    set_auto_sync_enabled,
     set_default_garden,
     set_sync_dir,
 )
@@ -162,6 +165,58 @@ def test_a_fresh_garden_does_not_inherit_a_deleted_namesakes_sync_dir():
     delete_garden("work")
     create_garden("work")
     assert get_sync_dir("work") is None
+
+
+def test_clear_sync_dir_removes_it():
+    create_garden("work")
+    set_sync_dir("work", "/shared/work")
+    clear_sync_dir("work")
+    assert get_sync_dir("work") is None
+
+
+def test_clear_sync_dir_on_a_garden_without_one_is_a_noop():
+    create_garden("work")
+    clear_sync_dir("work")
+    assert get_sync_dir("work") is None
+
+
+# ---- auto-sync flag: gates ui/api.py's lifecycle sync points, mirrors the
+# sync-dir pointer's own delete/restore behavior ----
+
+def test_get_auto_sync_enabled_defaults_true_when_unset():
+    create_garden("work")
+    assert get_auto_sync_enabled("work") is True
+
+
+def test_set_auto_sync_enabled_round_trips():
+    create_garden("work")
+    set_auto_sync_enabled("work", False)
+    assert get_auto_sync_enabled("work") is False
+    set_auto_sync_enabled("work", True)
+    assert get_auto_sync_enabled("work") is True
+
+
+def test_delete_garden_trashes_the_auto_sync_pointer_too():
+    create_garden("work")
+    set_auto_sync_enabled("work", False)
+    delete_garden("work")
+    assert get_auto_sync_enabled("work") is True  # back to absent-file default
+
+
+def test_restore_garden_brings_the_auto_sync_pointer_back():
+    create_garden("work")
+    set_auto_sync_enabled("work", False)
+    delete_garden("work")
+    restore_garden("work")
+    assert get_auto_sync_enabled("work") is False
+
+
+def test_a_fresh_garden_does_not_inherit_a_deleted_namesakes_auto_sync_setting():
+    create_garden("work")
+    set_auto_sync_enabled("work", False)
+    delete_garden("work")
+    create_garden("work")
+    assert get_auto_sync_enabled("work") is True
 
 
 # ---- reserved gardens ----

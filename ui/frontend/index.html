@@ -81,6 +81,7 @@
         <div class="menu-sep"></div>
         <button id="open-mora-btn" class="menu-item" type="button" title="Open Mora, the .modoc note editor, on this garden">Notes (Mora)…</button>
         <button id="open-monastery-btn" class="menu-item" type="button" title="Open Monastery, the calendar, on this garden">Calendar (Monastery)…</button>
+        <button id="open-sync-btn" class="menu-item" type="button">Sync…</button>
         <div class="menu-sep"></div>
         <button class="menu-item soon" type="button" data-soon="Automations">Automations<span class="menu-badge">soon</span></button>
         <button class="menu-item soon" type="button" data-soon="Webhooks">Webhooks<span class="menu-badge">soon</span></button>
@@ -343,6 +344,38 @@
     <div id="library-folder-chips" class="chip-row"></div>
     <div id="library-rel-chips" class="chip-row"></div>
     <div id="library-search-results"></div>
+  </div>
+</div>
+
+<div id="sync-overlay" class="hidden">
+  <div id="sync-modal">
+    <div class="panel-title">Sync</div>
+
+    <div id="sync-disabled-body">
+      <p class="settings-note">This garden isn't syncing yet. Choose a folder shared between your devices (Syncthing, Dropbox, iCloud Drive…) to enable it.</p>
+      <button id="sync-enable-btn" type="button" class="primary">Choose folder…</button>
+    </div>
+
+    <div id="sync-enabled-body" class="hidden">
+      <div class="settings-row">
+        <span>Folder</span>
+        <span id="sync-folder-path"></span>
+      </div>
+      <button id="sync-change-folder-btn" type="button" class="ghost">Choose different folder…</button>
+
+      <label class="settings-row">
+        <span>Sync automatically</span>
+        <input type="checkbox" id="sync-auto-checkbox">
+      </label>
+
+      <div id="sync-status-lines" class="settings-note"></div>
+
+      <div id="sync-modal-actions">
+        <button id="sync-now-btn" type="button" class="primary">Sync now</button>
+        <div class="spacer"></div>
+        <button id="sync-disable-btn" type="button" class="danger">Disable sync…</button>
+      </div>
+    </div>
   </div>
 </div>
 

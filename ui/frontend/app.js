@@ -2933,6 +2933,92 @@ function setupGardensModal() {
   $("import-garden-btn").addEventListener("click", importGardenFlow);
 }
 
+// ---- sync modal ----
+//
+// Reached from Tools -> Sync…. core/sync.py already does the real work
+// (push/pull over an append-only oplog, safe for a folder-sync tool like
+// Syncthing/Dropbox/iCloud Drive to carry); this modal just exposes
+// enable/disable, folder choice, manual sync, and the auto-sync flag
+// that gates ui/api.py's existing lifecycle sync points (open, garden
+// switch, close) -- there's no new timer here, "automatic" means those
+// three call sites, not a background poll.
+
+async function renderSyncModal() {
+  const status = await call(api.sync_status());
+  const enabled = !!status.sync_dir;
+
+  $("sync-disabled-body").classList.toggle("hidden", enabled);
+  $("sync-enabled-body").classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+
+  $("sync-folder-path").textContent = status.sync_dir;
+  $("sync-folder-path").title = status.sync_dir;
+  $("sync-auto-checkbox").checked = status.auto_sync;
+
+  const lines = [`${status.local_ops_pending} of ${status.local_ops} local change(s) not yet pushed.`];
+  lines.push(status.remotes.length
+    ? `${status.remotes.length} other device(s) seen.`
+    : "No other devices seen yet.");
+  $("sync-status-lines").innerHTML = lines.map((l) => `<p>${l}</p>`).join("");
+}
+
+function openSyncModal() {
+  $("sync-overlay").classList.remove("hidden");
+  renderSyncModal();
+}
+
+function closeSyncModal() {
+  $("sync-overlay").classList.add("hidden");
+}
+
+function setupSyncModal() {
+  $("sync-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("sync-overlay")) closeSyncModal();
+  });
+
+  const enableFlow = async () => {
+    const picked = await call(api.choose_sync_folder());
+    if (picked.cancelled) return;
+    await call(api.enable_sync(picked.path));
+    await renderSyncModal();
+    showToast("Sync enabled.");
+  };
+  $("sync-enable-btn").addEventListener("click", enableFlow);
+  $("sync-change-folder-btn").addEventListener("click", enableFlow);
+
+  $("sync-auto-checkbox").addEventListener("change", (e) => {
+    call(api.set_auto_sync(e.target.checked));
+  });
+
+  $("sync-now-btn").addEventListener("click", async () => {
+    const btn = $("sync-now-btn");
+    btn.disabled = true;
+    btn.textContent = "Syncing…";
+    try {
+      await call(api.sync_now());
+      showToast("Synced.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Sync now";
+    }
+    await renderSyncModal();
+  });
+
+  $("sync-disable-btn").addEventListener("click", async () => {
+    if (!window.confirm("Stop syncing this garden? Your local data is unaffected.")) return;
+    await call(api.disable_sync());
+    await renderSyncModal();
+    showToast("Sync disabled.");
+  });
+}
+
+function setupSync() {
+  $("open-sync-btn").addEventListener("click", () => {
+    closeTopMenus();
+    openSyncModal();
+  });
+}
+
 // ---- portal picker ----
 //
 // Reached from "New portal…" on the empty-canvas context menu. Modeled on
@@ -3829,6 +3915,7 @@ async function init() {
   setupGardensModal();
   setupPortalModal();
   setupLibraryModal();
+  setupSyncModal();
   setupTopMenus();
   setupDetailResize();
   setupQuickAdd();
@@ -3841,6 +3928,7 @@ async function init() {
   setupRunsPanel();
   setupMora();
   setupMonastery();
+  setupSync();
   setupCalendarExport();
   setupContextMenu();
   setupKeyboard();

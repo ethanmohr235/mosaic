@@ -60,6 +60,13 @@ def delete_garden(name: str) -> None:
             sync_trash.unlink()
         sync_dir.rename(sync_trash)
 
+    auto_sync = _auto_sync_path(name)
+    if auto_sync.exists():
+        auto_sync_trash = _auto_sync_trash_path(name)
+        if auto_sync_trash.exists():
+            auto_sync_trash.unlink()
+        auto_sync.rename(auto_sync_trash)
+
 
 def restore_garden(name: str) -> None:
     trash = _trash_path(name)
@@ -72,6 +79,10 @@ def restore_garden(name: str) -> None:
     sync_trash = _sync_dir_trash_path(name)
     if sync_trash.exists():
         sync_trash.rename(_sync_dir_path(name))
+
+    auto_sync_trash = _auto_sync_trash_path(name)
+    if auto_sync_trash.exists():
+        auto_sync_trash.rename(_auto_sync_path(name))
 
 
 def create_garden(name: str) -> str:
@@ -143,6 +154,39 @@ def get_sync_dir(name: str) -> str | None:
 
 def set_sync_dir(name: str, sync_dir: str) -> None:
     _sync_dir_path(name).write_text(str(sync_dir))
+
+
+def clear_sync_dir(name: str) -> None:
+    """Stop syncing this garden -- removes the pointer set by
+    set_sync_dir() (core/sync.py::init) without touching the garden's own
+    data or its oplog history, so re-enabling sync later picks up right
+    where it left off."""
+    _sync_dir_path(name).unlink(missing_ok=True)
+
+
+def _auto_sync_path(name: str) -> Path:
+    path = garden_db_path(name)
+    return path.with_name(path.name + ".auto_sync")
+
+
+def _auto_sync_trash_path(name: str) -> Path:
+    return _auto_sync_path(name).with_name(_auto_sync_path(name).name + ".trash")
+
+
+def get_auto_sync_enabled(name: str) -> bool:
+    """Whether the lifecycle sync points (ui/api.py::_best_effort_sync)
+    should fire automatically. Defaults to True when absent, so a garden
+    that already had a sync dir configured keeps today's always-on
+    behavior. False doesn't touch the sync dir itself -- "Sync now"
+    still works either way."""
+    path = _auto_sync_path(name)
+    if not path.exists():
+        return True
+    return path.read_text().strip() != "0"
+
+
+def set_auto_sync_enabled(name: str, enabled: bool) -> None:
+    _auto_sync_path(name).write_text("1" if enabled else "0")
 
 
 def resolve_garden(name: str | None) -> str:

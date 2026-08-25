@@ -243,6 +243,8 @@ class Api:
         pass is skipped, not a failure to launch."""
         if gardens_repo.get_sync_dir(self._current_garden) is None:
             return
+        if not gardens_repo.get_auto_sync_enabled(self._current_garden):
+            return
         try:
             sync_repo.run(self._conn, self._current_garden)
         except Exception:
@@ -355,6 +357,45 @@ class Api:
         finally:
             conn.close()
         return {"garden": new_garden_name, "motes": motes, "relationships": rels}
+
+    # ---- sync ----
+
+    @_synchronized
+    def sync_status(self) -> dict:
+        status = sync_repo.status(self._conn, self._current_garden)
+        status["auto_sync"] = gardens_repo.get_auto_sync_enabled(self._current_garden)
+        return status
+
+    @_synchronized
+    def choose_sync_folder(self) -> dict:
+        """Native folder picker -- same cancel-handling shape as
+        export_garden_to_file's SAVE dialog."""
+        path = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+        if not path:
+            return {"cancelled": True}
+        return {"path": path if isinstance(path, str) else path[0]}
+
+    @_synchronized
+    def enable_sync(self, folder: str) -> dict:
+        # clone=True is always safe here: the only case sync.init() needs
+        # it for is "garden doesn't exist locally yet," which can't be
+        # true for a garden the GUI already has open.
+        return sync_repo.init(self._current_garden, folder, clone=True)
+
+    @_synchronized
+    def disable_sync(self) -> None:
+        gardens_repo.clear_sync_dir(self._current_garden)
+
+    @_synchronized
+    def set_auto_sync(self, enabled: bool) -> None:
+        gardens_repo.set_auto_sync_enabled(self._current_garden, enabled)
+
+    @_synchronized
+    def sync_now(self) -> dict:
+        """Unlike _best_effort_sync(), a manual click doesn't swallow
+        errors -- surfaced to the user as a toast via call()'s existing
+        rejection handling."""
+        return sync_repo.run(self._conn, self._current_garden)
 
     # ---- portals ----
 

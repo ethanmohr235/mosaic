@@ -5,7 +5,7 @@ import webbrowser
 import pytest
 
 import ui.api
-from core.gardens import create_garden, garden_exists
+from core.gardens import create_garden, garden_exists, get_sync_dir
 from core.simulation import SimulationError, run_simulation
 from ui.api import Api, _coerce_properties
 
@@ -416,6 +416,87 @@ def test_switch_garden_swaps_connection(api):
     api.switch_garden("test")
     names = [m["properties"]["name"] for m in api.list_motes()]
     assert names == ["InTest"]
+
+
+# ---- sync (Tools -> Sync…, backed by core/sync.py) ----
+
+def test_choose_sync_folder_cancelled(api):
+    api._window = _StubWindow(None)
+    assert api.choose_sync_folder() == {"cancelled": True}
+
+
+def test_choose_sync_folder_returns_path(api, tmp_path):
+    api._window = _StubWindow(str(tmp_path))
+    assert api.choose_sync_folder() == {"path": str(tmp_path)}
+
+
+def test_enable_sync_points_the_garden_at_the_folder(api, tmp_path):
+    result = api.enable_sync(str(tmp_path))
+    assert result["garden"] == "test"
+    assert get_sync_dir("test") == str(tmp_path)
+
+
+def test_disable_sync_clears_the_folder(api, tmp_path):
+    api.enable_sync(str(tmp_path))
+    api.disable_sync()
+    assert get_sync_dir("test") is None
+
+
+def test_sync_now_pushes_local_changes(api, tmp_path):
+    api.enable_sync(str(tmp_path))
+    api.create_mote({"name": "Alice"})
+    result = api.sync_now()
+    assert result["push"]["pushed"] >= 1
+
+
+def test_sync_status_reports_auto_sync_flag(api, tmp_path):
+    api.enable_sync(str(tmp_path))
+    assert api.sync_status()["auto_sync"] is True
+    api.set_auto_sync(False)
+    assert api.sync_status()["auto_sync"] is False
+
+
+def test_best_effort_sync_skips_when_auto_sync_disabled(api, tmp_path, monkeypatch):
+    # _best_effort_sync() runs against self._current_garden *after* a
+    # switch completes, so exercising the guard on "test" means switching
+    # away and back to it, not just switching away.
+    api.enable_sync(str(tmp_path))
+    api.set_auto_sync(False)
+    create_garden("other")
+
+    calls = []
+    monkeypatch.setattr(ui.api.sync_repo, "run", lambda *a, **k: calls.append(1))
+
+    api.switch_garden("other")  # "other" has no sync dir -- guard never reached
+    api.switch_garden("test")   # back on "test": sync dir set, auto-sync off
+    assert calls == []
+
+
+def test_best_effort_sync_runs_when_auto_sync_enabled(api, tmp_path, monkeypatch):
+    api.enable_sync(str(tmp_path))
+    create_garden("other")
+
+    calls = []
+    monkeypatch.setattr(ui.api.sync_repo, "run", lambda *a, **k: calls.append(1))
+
+    api.switch_garden("other")
+    api.switch_garden("test")
+    assert calls == [1]
+
+
+def test_shutdown_skips_sync_when_auto_sync_disabled(tmp_path, monkeypatch):
+    # A fresh instance, not the `api` fixture -- the fixture's own
+    # teardown calls shutdown() too, which would double-fire this.
+    create_garden("shut")
+    inst = Api("shut")
+    inst.enable_sync(str(tmp_path))
+    inst.set_auto_sync(False)
+
+    calls = []
+    monkeypatch.setattr(ui.api.sync_repo, "run", lambda *a, **k: calls.append(1))
+
+    inst.shutdown()
+    assert calls == []
 
 
 def test_create_mote_returns_plain_dict(api):
