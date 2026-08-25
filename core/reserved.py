@@ -85,7 +85,11 @@ PROPERTY_MEANINGS: dict[str, str] = {
     "duration": "Minutes for a timed `date` (one with a 'T'), or days for an "
         "all-day `date`. Defaults to 60 or 1 if absent.",
     "recurrence": "An RFC 5545 RRULE ('FREQ=WEEKLY;COUNT=5'), with or "
-        "without a leading 'RRULE:', for a recurring calendar event.",
+        "without a leading 'RRULE:', for a recurring calendar event. May "
+        "carry further lines beneath the rule: an 'EXDATE:20260831T091500' "
+        "line excepts one occurrence out of the series, which is how the "
+        "calendar window deletes a single repetition without touching the "
+        "mote.",
     "gcal_event_id": "Auto-set by the UI's calendar export after pushing "
         "this mote as an event, so the next export updates it instead of "
         "creating a duplicate. Not meant to be hand-authored.",

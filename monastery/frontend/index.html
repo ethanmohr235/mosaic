@@ -97,6 +97,14 @@
         <div id="month-grid"></div>
       </section>
 
+      <div id="chooser" class="hidden">
+        <div id="chooser-title"></div>
+        <div id="chooser-note">Change just the one you dragged, or every repetition?</div>
+        <button id="chooser-one" type="button">Just this occurrence</button>
+        <button id="chooser-all" class="primary" type="button">The whole series</button>
+        <button id="chooser-cancel" class="ghost" type="button">Cancel</button>
+      </div>
+
       <div id="draft" class="hidden">
         <div id="draft-head">
           <span id="draft-title">New mote</span>
@@ -133,6 +141,7 @@
             <span id="panel-dot"></span>
             <span id="panel-kind-text">mote</span>
           </div>
+          <button id="panel-delete" class="panel-delete hidden" type="button">Delete</button>
           <button id="panel-close" class="close-button" type="button" title="Close">×</button>
         </div>
         <div id="panel-name">…</div>
@@ -163,7 +172,7 @@
     <span class="dot">·</span>
     <span id="stat-bindings">no bindings active</span>
     <div class="spacer"></div>
-    <span class="hint">click any slot to add a mote</span>
+    <span class="hint">drag to move or resize · drag empty space to add a mote</span>
   </footer>
 
 </div>

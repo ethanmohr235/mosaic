@@ -4,16 +4,22 @@ Everything here is pure: motes in, occurrences out. No connection, no
 window. That is the point of the module living in core/ rather than in
 monastery/, and these tests are what it buys.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core.calendar import (
     DEFAULT_TIMED_MINUTES,
     Occurrence,
     binding_counts,
     default_bindings,
+    detached_properties,
+    is_recurring,
+    moved_properties,
     occurrences,
     parse_date_value,
+    resized_properties,
+    span_of,
     undated_count,
+    with_exception,
 )
 from core.entities import Mote
 
@@ -266,3 +272,182 @@ def test_undated_count_ignores_which_bindings_are_toggled_on():
     reason."""
     motes = [_mote({"due": "2026-08-25"})]
     assert undated_count(motes) == 0
+
+
+# ---- exceptions ----
+#
+# One occurrence taken out of a series is an EXDATE line inside the same
+# `recurrence` property. No new reserved property, because RFC 5545 --
+# and dateutil -- could already say it.
+
+def test_an_excepted_occurrence_is_not_placed():
+    motes = [_mote({"when": "2026-08-24 09:00",
+                    "recurrence": "FREQ=DAILY\nEXDATE:20260826T090000"})]
+    assert [o.start.day for o in _in_week(motes, ["when"])] == [24, 25, 27, 28, 29, 30]
+
+
+def test_an_all_day_exception_uses_the_date_form():
+    motes = [_mote({"starts": "2026-08-24",
+                    "recurrence": "FREQ=DAILY\nEXDATE;VALUE=DATE:20260826"})]
+    assert [o.start.day for o in _in_week(motes, ["starts"])] == [24, 25, 27, 28, 29, 30]
+
+
+def test_excepting_the_anchor_itself_works():
+    """RFC 5545 allows an EXDATE on DTSTART, and Monastery needs it: the
+    first occurrence of a series is as deletable as any other. The mote
+    keeps its `date` and goes on expanding from it."""
+    motes = [_mote({"when": "2026-08-24 09:00",
+                    "recurrence": "FREQ=DAILY;COUNT=3\nEXDATE:20260824T090000"})]
+    assert [o.start.day for o in _in_week(motes, ["when"])] == [25, 26]
+
+
+def test_a_rule_with_an_exception_still_carries_its_span():
+    motes = [_mote({"when": "2026-08-24 09:00", "duration": 30,
+                    "recurrence": "FREQ=DAILY\nEXDATE:20260825T090000"})]
+    placed = _in_week(motes, ["when"])
+    assert all(o.end - o.start == timedelta(minutes=30) for o in placed)
+
+
+def test_with_exception_appends_one_line_and_tags_the_rule():
+    rule = with_exception({"recurrence": "FREQ=WEEKLY"}, datetime(2026, 8, 31, 9, 15), False)
+    assert rule == "RRULE:FREQ=WEEKLY\nEXDATE:20260831T091500"
+
+
+def test_excepting_the_same_occurrence_twice_changes_nothing():
+    once = with_exception({"recurrence": "FREQ=WEEKLY"}, datetime(2026, 8, 31, 9, 15), False)
+    assert with_exception({"recurrence": once}, datetime(2026, 8, 31, 9, 15), False) == once
+
+
+def test_a_mote_that_does_not_recur_has_nothing_to_except():
+    assert with_exception({"when": "2026-08-24"}, datetime(2026, 8, 24), True) is None
+
+
+def test_a_placement_says_whether_it_came_from_a_rule():
+    plain = _in_week([_mote({"when": "2026-08-24 09:00"})], ["when"])
+    assert [o.recurring for o in plain] == [False]
+    series = _in_week([_mote({"when": "2026-08-24 09:00", "recurrence": "FREQ=DAILY;COUNT=2"})], ["when"])
+    assert [o.recurring for o in series] == [True, True]
+
+
+def test_a_broken_rule_does_not_count_as_recurring():
+    """It already draws as one placement on its own date, so offering to
+    except an occurrence out of it would be offering to edit something
+    the calendar never showed."""
+    assert is_recurring(_mote({"when": "2026-08-24", "recurrence": "FREQ=NONSENSE"})) is False
+    assert is_recurring(_mote({"when": "2026-08-24", "recurrence": "FREQ=DAILY"})) is True
+
+
+# ---- moving ----
+
+def test_a_move_rewrites_the_binding_that_placed_it():
+    """Not `date`. A task on the grid by `due` is a task whose `due` you
+    just dragged; writing `date` instead would leave `due` where it was
+    and place the mote twice."""
+    mote = _mote({"due": "2026-08-28", "name": "Runbook"})
+    moved = moved_properties(mote, "due", datetime(2026, 8, 28), datetime(2026, 8, 30))
+    assert moved == {"due": "2026-08-30"}
+
+
+def test_a_move_keeps_the_shape_the_date_was_written_in():
+    mote = _mote({"when": "2026-08-24 09:15"})
+    moved = moved_properties(mote, "when", datetime(2026, 8, 24, 9, 15), datetime(2026, 8, 25, 10, 0))
+    assert moved["when"] == "2026-08-25 10:00"
+
+
+def test_a_move_takes_an_explicit_end_with_it():
+    mote = _mote({"starts": "2026-08-26", "ends": "2026-08-27"})
+    moved = moved_properties(mote, "starts", datetime(2026, 8, 26), datetime(2026, 8, 28))
+    assert moved == {"starts": "2026-08-28", "ends": "2026-08-29"}
+
+
+def test_moving_one_occurrence_of_a_series_shifts_the_whole_anchor():
+    """Dragging the second Monday of a weekly meeting to Tuesday moves
+    every Monday: one mote is the whole series, so a series move is a
+    shift by the same delta."""
+    mote = _mote({"when": "2026-08-24 09:15", "recurrence": "FREQ=WEEKLY;BYDAY=MO"})
+    moved = moved_properties(mote, "when", datetime(2026, 8, 31, 9, 15), datetime(2026, 9, 1, 10, 0))
+    assert moved["when"] == "2026-08-25 10:00"
+
+
+def test_a_series_moved_across_days_takes_its_byday_with_it():
+    """Otherwise the rule overrules the shifted anchor and the drag
+    silently does nothing."""
+    mote = _mote({"when": "2026-08-24 09:15", "recurrence": "FREQ=WEEKLY;BYDAY=MO,WE,FR"})
+    moved = moved_properties(mote, "when", datetime(2026, 8, 24, 9, 15), datetime(2026, 8, 25, 9, 15))
+    assert moved["recurrence"] == "FREQ=WEEKLY;BYDAY=TU,WE,FR"
+
+
+def test_a_series_moved_within_a_day_leaves_its_rule_alone():
+    mote = _mote({"when": "2026-08-24 09:15", "recurrence": "FREQ=WEEKLY;BYDAY=MO"})
+    moved = moved_properties(mote, "when", datetime(2026, 8, 24, 9, 15), datetime(2026, 8, 24, 11, 0))
+    assert "recurrence" not in moved
+
+
+def test_a_move_that_moves_nothing_writes_nothing():
+    mote = _mote({"when": "2026-08-24 09:15"})
+    assert moved_properties(mote, "when", datetime(2026, 8, 24, 9, 15), datetime(2026, 8, 24, 9, 15)) == {}
+
+
+# ---- resizing ----
+
+def test_a_resize_writes_duration_when_that_is_how_the_mote_says_it():
+    mote = _mote({"when": "2026-08-24 09:00", "duration": 20})
+    assert resized_properties(
+        mote, "when", datetime(2026, 8, 24, 9, 0), datetime(2026, 8, 24, 10, 30)
+    ) == {"duration": 90}
+
+
+def test_a_resize_writes_ends_when_that_is_how_the_mote_says_it():
+    """The key the mote already uses, for the same reason a move writes
+    the binding: an edit changes what you were shown rather than adding a
+    second answer beside it."""
+    mote = _mote({"starts": "2026-08-26", "ends": "2026-08-27"})
+    resized = resized_properties(mote, "starts", datetime(2026, 8, 26), datetime(2026, 8, 30))
+    assert resized == {"ends": "2026-08-29"}
+
+
+def test_an_all_day_resize_writes_duration_in_days():
+    mote = _mote({"starts": "2026-08-26"})
+    assert resized_properties(
+        mote, "starts", datetime(2026, 8, 26), datetime(2026, 8, 29)
+    ) == {"duration": 3}
+
+
+def test_resizing_one_occurrence_of_a_series_measures_from_that_occurrence():
+    mote = _mote({"when": "2026-08-24 09:00", "duration": 30,
+                  "recurrence": "FREQ=WEEKLY"})
+    resized = resized_properties(
+        mote, "when", datetime(2026, 8, 31, 9, 0), datetime(2026, 8, 31, 10, 0)
+    )
+    assert resized == {"duration": 60}
+
+
+def test_a_resize_that_would_end_before_it_starts_writes_nothing():
+    mote = _mote({"when": "2026-08-24 09:00"})
+    assert resized_properties(
+        mote, "when", datetime(2026, 8, 24, 9, 0), datetime(2026, 8, 24, 8, 0)
+    ) == {}
+
+
+# ---- detaching ----
+
+def test_a_detached_occurrence_lands_where_it_was_dropped():
+    mote = _mote({"when": "2026-08-24 09:00", "duration": 30, "recurrence": "FREQ=WEEKLY"})
+    detached = detached_properties(
+        mote, "when", datetime(2026, 9, 7, 11, 0), datetime(2026, 9, 7, 11, 45)
+    )
+    assert detached == {"when": "2026-09-07 11:00", "duration": 45}
+
+
+def test_a_detached_all_day_occurrence_keeps_the_end_key_it_had():
+    mote = _mote({"starts": "2026-08-26", "ends": "2026-08-27", "recurrence": "FREQ=WEEKLY"})
+    detached = detached_properties(
+        mote, "starts", datetime(2026, 9, 2), datetime(2026, 9, 4)
+    )
+    assert detached == {"starts": "2026-09-02", "ends": "2026-09-03"}
+
+
+def test_span_of_answers_what_every_placement_lasts():
+    assert span_of(_mote({"when": "2026-08-24 09:00", "duration": 20}), "when") == timedelta(minutes=20)
+    assert span_of(_mote({"when": "2026-08-24 09:00"}), "when") == timedelta(minutes=DEFAULT_TIMED_MINUTES)
+    assert span_of(_mote({"name": "Rina"}), "when") is None

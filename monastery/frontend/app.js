@@ -20,14 +20,24 @@ let bindings = null;         // null until the first answer; then string[]
 let hiddenSpecies = new Set();
 let selectedId = null;
 let panel = null;            // the last focus() answer
-let draft = null;            // {dateKey, start, end, allDay, speciesId, rows, left, top}
+let draft = null;            // {dateKey, start, end, allDay, days, speciesId, rows, left, top}
 let railOpen = true;
 let toastTimer = null;
 let pollTimer = null;
 let refreshSeq = 0;          // guards against two refreshes landing out of order
+let selectedKey = null;      // which occurrence of the selected mote was clicked
+let drag = null;             // the pointer gesture in flight, if any
+let chooser = null;          // the this-one-or-the-series question, while it is up
+let justDragged = false;     // swallows the click a finished drag leaves behind
+let chooserFresh = false;    // ... and the one that put the chooser up
+let lastPointer = { x: 0, y: 0 };
 
 const POLL_MS = 4000;
 const HOUR_PX = 48;          // must match --hour in style.css
+const DRAG_PX = 4;           // how far a press moves before it counts as a drag
+const EDGE_PX = 6;           // how deep an event's resize edges reach
+const SNAP_MIN = 15;         // what a dragged time rounds to
+const MIN_MINUTES = 15;      // the shortest event a drag can leave behind
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = ["January", "February", "March", "April", "May", "June",
                 "July", "August", "September", "October", "November", "December"];
@@ -135,6 +145,17 @@ function todayKey() {
   return keyOf(new Date());
 }
 
+const addMinutes = (d, n) => new Date(d.getTime() + n * 60000);
+const atMinutes = (day, minutes) =>
+  new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, minutes);
+const snap = (minutes) => Math.round(minutes / SNAP_MIN) * SNAP_MIN;
+const daysBetween = (from, to) => Math.round((startOfDay(to) - startOfDay(from)) / 86400000);
+// addDays() builds from the date parts alone and so drops the time of
+// day; a month chip dragged to Thursday has to keep its 14:00.
+const shiftDays = (d, n) => new Date(
+  d.getFullYear(), d.getMonth(), d.getDate() + n, d.getHours(), d.getMinutes(), d.getSeconds(),
+);
+
 /** The half-open range currently on screen. The month view asks for the
  *  whole six-week grid it draws, not just the month, so a placement in
  *  the leading or trailing week is not silently missing. */
@@ -168,13 +189,21 @@ function button(className, text) {
   return node;
 }
 
-function toast(message, isError) {
-  const node = $("toast");
-  node.textContent = message;
+/** `action` is an optional {label, run}. It is what makes a delete
+ *  undoable without a modal in the way: the sentence saying what
+ *  happened is also where you take it back. */
+function toast(message, isError, action) {
+  const node = clear($("toast"));
+  node.append(el("span", null, message));
+  if (action) {
+    const undo = button("toast-action", action.label);
+    undo.onclick = () => { node.classList.add("hidden"); action.run(); };
+    node.append(undo);
+  }
   node.classList.toggle("error", !!isError);
   node.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.add("hidden"), 4200);
+  toastTimer = setTimeout(() => node.classList.add("hidden"), action ? 8000 : 4200);
 }
 
 /** Every api call goes through here: a bridge error is a toast, never a
@@ -392,8 +421,14 @@ function drawWeek() {
   gutter.append(el("span", "gutter-label", "all day"));
   allday.append(gutter);
   days.forEach((day) => {
+    const key = keyOf(day);
     const cell = el("div", "allday-cell");
-    (placed.get(keyOf(day)) || []).filter((o) => o.allDay).forEach((o) => cell.append(pinFor(o)));
+    cell.dataset.day = key;
+    (placed.get(key) || []).filter((o) => o.allDay).forEach((o) => cell.append(pinFor(o, key)));
+    cell.onpointerdown = (event) => {
+      if (event.target.closest(".pin")) return;
+      beginDrag(event, { kind: "sweep-days", dayKey: key });
+    };
     allday.append(cell);
   });
 
@@ -413,6 +448,10 @@ function drawWeek() {
   days.forEach((day) => {
     const key = keyOf(day);
     const col = el("div", "day-col");
+    // Every droppable surface says which day it is, so a drag can ask
+    // the DOM where the pointer ended up instead of recomputing the
+    // week's arithmetic a second time.
+    col.dataset.day = key;
     if (key === todayKey()) col.classList.add("today");
     for (let h = 1; h < 24; h++) {
       const line = el("div", "hour-line");
@@ -426,9 +465,14 @@ function drawWeek() {
       col.append(now);
     }
     lanes((placed.get(key) || []).filter((o) => !o.allDay)).forEach((o) => col.append(eventFor(o)));
-    col.onclick = (event) => {
+    col.onpointerdown = (event) => {
       if (event.target.closest(".event")) return;
-      openDraftAt(event, key, minutesAt(event, col));
+      // `host` is the column the sweep began in: a rectangle drawn
+      // across two days says two different things and means neither, so
+      // the drag stays in the column it started from.
+      beginDrag(event, {
+        kind: "sweep-time", dayKey: key, minutes: minutesAt(event, col), host: col,
+      });
     };
     grid.append(col);
   });
@@ -487,12 +531,56 @@ function eventFor(o) {
   if (!compact) name.style.webkitLineClamp = String(Math.max(1, Math.floor((height - 16) / 15)));
   node.append(name);
 
+  node.append(killFor(o));
   node.title = `${o.name} — placed by ${o.binding}`;
-  node.onclick = (event) => { event.stopPropagation(); select(o.id); };
+  node.onpointerdown = (event) => {
+    if (event.target.closest(".kill")) return;
+    event.stopPropagation();
+    beginDrag(event, {
+      kind: "event", o, node,
+      mode: edgeMode(event, node), grip: gripMinutes(event, node),
+    });
+  };
+  node.onclick = (event) => {
+    event.stopPropagation();
+    if (justDragged) return;
+    select(o.id, o.key);
+  };
   return node;
 }
 
-function pinFor(o) {
+/** The × that removes a placement. Hidden until the rectangle is hovered
+ *  or selected (style.css), because a calendar covered in delete buttons
+ *  is a calendar you read past rather than read. */
+function killFor(o) {
+  const node = button("kill", "×");
+  node.title = "Delete";
+  node.onpointerdown = (event) => event.stopPropagation();
+  node.onclick = (event) => { event.stopPropagation(); deleteOccurrence(o); };
+  return node;
+}
+
+/** Which part of an event the press landed on. A short rectangle keeps
+ *  its whole body draggable -- edges that met in the middle would leave
+ *  a 15-minute event with no way to move it at all. */
+function edgeMode(event, node) {
+  const rect = node.getBoundingClientRect();
+  const reach = Math.min(EDGE_PX, Math.max(3, rect.height / 3));
+  const offset = event.clientY - rect.top;
+  if (rect.height >= 24 && offset <= reach) return "top";
+  if (offset >= rect.height - reach) return "bottom";
+  return "move";
+}
+
+/** How far into the event the grab was, in minutes -- so a moved event
+ *  keeps the grip you took it by instead of jumping its top edge to the
+ *  cursor. */
+function gripMinutes(event, node) {
+  const rect = node.getBoundingClientRect();
+  return ((event.clientY - rect.top) / HOUR_PX) * 60;
+}
+
+function pinFor(o, dayKey) {
   const tint = eventTint(o, o.id === selectedId);
   const node = button("pin");
   node.style.background = tint.bg;
@@ -502,8 +590,23 @@ function pinFor(o) {
   node.append(dot);
   node.append(el("span", "pin-name", o.name));
   node.append(el("span", "pin-binding", o.binding));
+  node.append(killFor(o));
   node.title = `${o.name} — placed by ${o.binding}`;
-  node.onclick = (event) => { event.stopPropagation(); select(o.id); };
+  node.onpointerdown = (event) => {
+    if (event.target.closest(".kill")) return;
+    event.stopPropagation();
+    // Only the right edge resizes an all-day pin. Dragging its left edge
+    // would move the start and change the length at once, and there is
+    // no honest single answer to which of the two you meant.
+    const rect = node.getBoundingClientRect();
+    const mode = event.clientX >= rect.right - EDGE_PX ? "bottom" : "move";
+    beginDrag(event, { kind: "day", o, node, mode, dayKey });
+  };
+  node.onclick = (event) => {
+    event.stopPropagation();
+    if (justDragged) return;
+    select(o.id, o.key);
+  };
   return node;
 }
 
@@ -527,6 +630,7 @@ function drawMonth() {
       const day = addDays(start, w * 7 + d);
       const key = keyOf(day);
       const cell = el("div", "month-cell");
+      cell.dataset.day = key;
       if (day.getMonth() !== anchor.getMonth()) cell.classList.add("other");
       if (key === todayKey()) cell.classList.add("today");
 
@@ -547,7 +651,7 @@ function drawMonth() {
         if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
         return a._start - b._start;
       });
-      all.slice(0, 3).forEach((o) => cell.append(chipFor(o)));
+      all.slice(0, 3).forEach((o) => cell.append(chipFor(o, key)));
       if (all.length > 3) {
         const more = button("month-more", `+${all.length - 3} more`);
         more.onclick = (event) => {
@@ -560,9 +664,9 @@ function drawMonth() {
         cell.append(more);
       }
 
-      cell.onclick = (event) => {
+      cell.onpointerdown = (event) => {
         if (event.target.closest(".chip") || event.target.closest(".month-num")) return;
-        openDraftAt(event, key, 9 * 60);
+        beginDrag(event, { kind: "sweep-days", dayKey: key });
       };
       row.append(cell);
     }
@@ -570,7 +674,7 @@ function drawMonth() {
   }
 }
 
-function chipFor(o) {
+function chipFor(o, dayKey) {
   const tint = eventTint(o, o.id === selectedId);
   const node = button("chip");
   node.style.background = tint.bg;
@@ -580,9 +684,373 @@ function chipFor(o) {
   node.append(dot);
   node.append(el("span", "chip-time", o.allDay ? o.binding : fmtTime(o._start)));
   node.append(el("span", "chip-name", o.name));
+  node.append(killFor(o));
   node.title = `${o.name} — placed by ${o.binding}`;
-  node.onclick = (event) => { event.stopPropagation(); select(o.id); };
+  node.onpointerdown = (event) => {
+    if (event.target.closest(".kill")) return;
+    event.stopPropagation();
+    // A month chip moves by whole days and keeps its time of day: the
+    // cell is a day, so there is nothing finer for it to mean.
+    beginDrag(event, { kind: "day", o, node, mode: "move", dayKey });
+  };
+  node.onclick = (event) => {
+    event.stopPropagation();
+    if (justDragged) return;
+    select(o.id, o.key);
+  };
   return node;
+}
+
+// ---- dragging ------------------------------------------------------
+//
+// One pointer layer for every gesture on the grid: moving a placement,
+// dragging its edge, and sweeping empty space to draw a new one. It
+// listens on `window` for the length of the gesture rather than calling
+// setPointerCapture, because scripts/monastery_smoke_test.py drives this
+// window with synthetic events and a synthetic pointerId makes capture
+// throw.
+//
+// Nothing is written until the pointer comes up and nothing is
+// re-rendered while it is down: a refresh mid-gesture would replace the
+// very node being dragged. Everything before commitPlacement() is
+// pixels.
+
+function beginDrag(event, gesture) {
+  // A press with the draft open belongs to the draft -- the document's
+  // click handler closes it, and starting a drag underneath would fight
+  // the popover for the same pointer.
+  if (event.button !== 0 || chooser || draft) return;
+  lastPointer = { x: event.clientX, y: event.clientY };
+  drag = {
+    ...gesture,
+    x0: event.clientX, y0: event.clientY,
+    x: event.clientX, y: event.clientY,
+    moved: false,
+  };
+  window.addEventListener("pointermove", onDragMove);
+  window.addEventListener("pointerup", onDragUp);
+}
+
+function onDragMove(event) {
+  if (!drag) return;
+  drag.x = event.clientX;
+  drag.y = event.clientY;
+  if (!drag.moved) {
+    // Below the threshold this is still a click: a calendar where a
+    // one-pixel wobble moves a meeting is a calendar you cannot select
+    // anything in.
+    if (Math.abs(drag.x - drag.x0) < DRAG_PX && Math.abs(drag.y - drag.y0) < DRAG_PX) return;
+    drag.moved = true;
+    if (drag.node) drag.node.classList.add("dragging");
+    document.body.classList.add("dragging-on");
+  }
+  event.preventDefault();
+  paintDrag();
+}
+
+function onDragUp(event) {
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", onDragUp);
+  const gesture = drag;
+  drag = null;
+  document.body.classList.remove("dragging-on");
+  clearHints();
+  if (!gesture) return;
+  lastPointer = { x: event.clientX, y: event.clientY };
+  if (!gesture.moved) { finishTap(gesture); return; }
+  // A click still follows this pointerup, and without this the drag
+  // would count as one too -- reselecting, or reopening what it just
+  // dropped. The timer runs after that click has been delivered.
+  justDragged = true;
+  setTimeout(() => { justDragged = false; }, 0);
+  finishDrag(gesture);
+}
+
+function clearHints() {
+  document.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+  document.querySelectorAll(".sweep").forEach((n) => n.remove());
+  document.querySelectorAll(".dragging").forEach((n) => n.classList.remove("dragging"));
+}
+
+/** Which of these nodes the pointer is over -- nearest rather than
+ *  strictly inside, so a drag that wanders past the edge of the grid
+ *  still lands on the day it was heading for. */
+function nearestNode(nodes, x, y) {
+  let best = null;
+  let bestDistance = Infinity;
+  nodes.forEach((node) => {
+    const rect = node.getBoundingClientRect();
+    const dx = Math.max(rect.left - x, 0, x - rect.right);
+    const dy = Math.max(rect.top - y, 0, y - rect.bottom);
+    const distance = dx * dx + dy * dy;
+    if (distance < bestDistance) { bestDistance = distance; best = node; }
+  });
+  return best;
+}
+
+const timeColumns = () => [...document.querySelectorAll("#week-grid .day-col")];
+const dayCells = () => [...document.querySelectorAll(
+  view === "month" ? ".month-cell" : ".allday-cell",
+)];
+
+function minutesFrom(node, y) {
+  const rect = node.getBoundingClientRect();
+  return snap(((y - rect.top) / HOUR_PX) * 60);
+}
+
+/** Where a timed gesture currently says its event begins and ends.
+ *  An edge drag stays on its own day: only the body of an event moves
+ *  it, so a shaky hand on the bottom edge cannot also change the date. */
+function timedPlacement(gesture) {
+  const start = fromIso(gesture.o.start);
+  const end = fromIso(gesture.o.end);
+  const column = gesture.node.closest(".day-col");
+
+  if (gesture.mode === "move") {
+    const target = nearestNode(timeColumns(), gesture.x, gesture.y) || column;
+    const rect = target.getBoundingClientRect();
+    const raw = ((gesture.y - rect.top) / HOUR_PX) * 60 - gesture.grip;
+    const minutes = Math.max(0, Math.min(24 * 60 - MIN_MINUTES, snap(raw)));
+    const moved = atMinutes(parseKey(target.dataset.day), minutes);
+    return [moved, addMinutes(moved, Math.max(MIN_MINUTES, (end - start) / 60000))];
+  }
+
+  const day = startOfDay(start);
+  const pointer = minutesFrom(column, gesture.y);
+  if (gesture.mode === "bottom") {
+    const minutes = Math.max(minutesInto(start) + MIN_MINUTES, Math.min(24 * 60, pointer));
+    return [start, atMinutes(day, minutes)];
+  }
+  return [atMinutes(day, Math.max(0, Math.min(minutesInto(end) - MIN_MINUTES, pointer))), end];
+}
+
+/** Where a whole-day gesture says its placement goes: the cell under
+ *  the pointer, and the start and end that follow from it. */
+function dayPlacement(gesture) {
+  const cell = nearestNode(dayCells(), gesture.x, gesture.y);
+  const target = parseKey(cell.dataset.day);
+  const start = fromIso(gesture.o.start);
+  const end = fromIso(gesture.o.end);
+  if (gesture.mode === "bottom") {
+    // The right edge of an all-day pin names the last day it covers,
+    // and the end the bridge wants is the day after that.
+    const last = Math.max(0, daysBetween(start, target));
+    return [cell, start, addDays(startOfDay(start), last + 1)];
+  }
+  const delta = daysBetween(parseKey(gesture.dayKey), target);
+  return [cell, shiftDays(start, delta), shiftDays(end, delta)];
+}
+
+/** A sweep down an empty column, as [from, to] minutes. It stays in the
+ *  column it began in: a rectangle drawn across two days says two
+ *  different things and means neither. */
+function sweepTimePlacement(gesture) {
+  const pointer = Math.max(0, Math.min(24 * 60, minutesFrom(gesture.host, gesture.y)));
+  // Either direction: sweeping upwards from 14:00 to 12:00 draws
+  // 12:00-14:00, not 12:00 to wherever the press happened to be plus a
+  // quarter hour.
+  const from = Math.min(gesture.minutes, pointer);
+  return [from, Math.max(from + MIN_MINUTES, gesture.minutes, pointer)];
+}
+
+/** A sweep across empty cells, as the [first, last] day it covers --
+ *  either direction, since dragging backwards is a range too. */
+function sweepDaysPlacement(gesture) {
+  const cell = nearestNode(dayCells(), gesture.x, gesture.y);
+  const from = parseKey(gesture.dayKey);
+  const to = parseKey(cell.dataset.day);
+  return from <= to ? [from, to] : [to, from];
+}
+
+function paintDrag() {
+  clearHints();
+  if (drag.node) drag.node.classList.add("dragging");
+  if (drag.kind === "event") paintTimedDrag();
+  else if (drag.kind === "day") paintDayDrag();
+  else if (drag.kind === "sweep-time") paintSweepTime();
+  else paintSweepDays();
+}
+
+function paintTimedDrag() {
+  const [start, end] = timedPlacement(drag);
+  const column = drag.node.closest(".day-col");
+  const target = drag.mode === "move"
+    ? (nearestNode(timeColumns(), drag.x, drag.y) || column)
+    : column;
+  drag.node.style.top = `${Math.round((minutesInto(start) / 60) * HOUR_PX)}px`;
+  drag.node.style.height =
+    `${Math.max(20, Math.round(((end - start) / 3600000) * HOUR_PX) - 2)}px`;
+  const shift = target.getBoundingClientRect().left - column.getBoundingClientRect().left;
+  drag.node.style.transform = `translateX(${Math.round(shift)}px)`;
+  const time = drag.node.querySelector(".event-time");
+  if (time) time.textContent = drag.node.classList.contains("compact")
+    ? fmtTime(start)
+    : `${fmtTime(start)}–${fmtTime(end)}`;
+}
+
+function paintDayDrag() {
+  const [cell] = dayPlacement(drag);
+  if (cell) cell.classList.add("drop-target");
+}
+
+function paintSweepTime() {
+  const [from, to] = sweepTimePlacement(drag);
+  const preview = el("div", "sweep");
+  preview.style.top = `${Math.round((from / 60) * HOUR_PX)}px`;
+  preview.style.height = `${Math.max(12, Math.round(((to - from) / 60) * HOUR_PX))}px`;
+  preview.append(el("span", "sweep-label", `${fmtMinutes(from)}–${fmtMinutes(to)}`));
+  drag.host.append(preview);
+}
+
+function paintSweepDays() {
+  const [from, to] = sweepDaysPlacement(drag);
+  dayCells().forEach((cell) => {
+    const day = parseKey(cell.dataset.day);
+    if (day >= from && day <= to) cell.classList.add("drop-target");
+  });
+}
+
+/** A press that never became a drag. An event, pin or chip handles its
+ *  own click (selection); empty space drafts a mote, which is what a
+ *  click on the grid has always done. */
+function finishTap(gesture) {
+  if (gesture.kind === "sweep-time") {
+    openDraftAt(gesture, gesture.dayKey, gesture.minutes);
+  } else if (gesture.kind === "sweep-days") {
+    // A tapped month cell drafts a working-hours event, as it did before
+    // there were gestures; a tapped all-day cell drafts an all-day one,
+    // because that is the row you tapped.
+    openDraftAt(gesture, gesture.dayKey, view === "month" ? 9 * 60 : null);
+  }
+}
+
+function finishDrag(gesture) {
+  if (gesture.kind === "event") {
+    const [start, end] = timedPlacement(gesture);
+    commitPlacement(gesture.o, start, end);
+  } else if (gesture.kind === "day") {
+    const [, start, end] = dayPlacement(gesture);
+    commitPlacement(gesture.o, start, end);
+  } else if (gesture.kind === "sweep-time") {
+    const [from, to] = sweepTimePlacement(gesture);
+    openDraftAt(gesture, gesture.dayKey, from, to);
+  } else {
+    const [from, to] = sweepDaysPlacement(gesture);
+    openDraftAt(gesture, keyOf(from), null, null, daysBetween(from, to) + 1);
+  }
+}
+
+/** Where a rectangle came to rest, written down. The bridge decides what
+ *  that means in properties (monastery/api.py::place_occurrence); this
+ *  only says which placement was grabbed and where it ended up. */
+async function commitPlacement(o, start, end) {
+  if (isoLocal(start) === isoLocal(fromIso(o.start))
+      && isoLocal(end) === isoLocal(fromIso(o.end))) {
+    draw();
+    return;
+  }
+  const scope = await askScope(o);
+  if (scope === null) { draw(); return; }
+
+  const answer = await call(
+    api.place_occurrence(o.id, o.binding, o.start, isoLocal(start), isoLocal(end), scope),
+    "Could not move that mote.",
+  );
+  if (answer === null) { await refresh(); return; }
+
+  if (scope === "occurrence") {
+    selectedId = answer.id;
+    selectedKey = null;
+    panel = answer;
+    toast(`${answer.name} split off from its series.`);
+  } else if (selectedId === o.id) {
+    panel = answer;
+  }
+  await refresh();
+  drawPanel();
+}
+
+// ---- this occurrence, or the series? -------------------------------
+//
+// One mote is the whole series (docs/architecture.md), so an edit to a
+// repeating placement is genuinely ambiguous and the window asks rather
+// than guessing. `recurring` comes from core, which parsed the rule
+// while expanding it -- no JavaScript reads an RRULE.
+
+function askScope(o) {
+  if (!o.recurring) return Promise.resolve("series");
+  return new Promise((resolve) => {
+    chooser = { name: o.name, resolve };
+    // Every way of asking this -- a drop, the × on a rectangle, the
+    // panel's Delete -- happens inside a click that is still on its way
+    // to the document handler below, where it would read as "clicked
+    // away" and cancel the very thing being asked about. The timer runs
+    // after that click has been delivered.
+    chooserFresh = true;
+    setTimeout(() => { chooserFresh = false; }, 0);
+    drawChooser();
+  });
+}
+
+function answerChooser(scope) {
+  const pending = chooser;
+  chooser = null;
+  chooserFresh = false;
+  $("chooser").classList.add("hidden");
+  if (pending) pending.resolve(scope);
+}
+
+function drawChooser() {
+  const node = $("chooser");
+  if (!chooser) { node.classList.add("hidden"); return; }
+  $("chooser-title").textContent = `“${chooser.name}” repeats.`;
+  node.classList.remove("hidden");
+  const host = $("cal").getBoundingClientRect();
+  const width = node.offsetWidth || 240;
+  node.style.left = `${Math.round(
+    Math.max(10, Math.min(host.width - width - 10, lastPointer.x - host.left - width / 2)),
+  )}px`;
+  node.style.top = `${Math.round(
+    Math.max(10, Math.min(Math.max(10, host.height - 150), lastPointer.y - host.top + 14)),
+  )}px`;
+}
+
+// ---- deleting ------------------------------------------------------
+
+/** The placement the panel and the keyboard act on: the one that was
+ *  clicked, else any of the selected mote's that is on screen. */
+function selectedOccurrence() {
+  if (!payload || !selectedId) return null;
+  return payload.occurrences.find((o) => o.key === selectedKey)
+    || payload.occurrences.find((o) => o.id === selectedId)
+    || null;
+}
+
+async function deleteOccurrence(o) {
+  const scope = await askScope(o);
+  if (scope === null) return;
+
+  const answer = await call(
+    api.delete_occurrence(o.id, o.binding, o.start, scope),
+    "Could not delete that mote.",
+  );
+  if (answer === null) return;
+  if (answer.scope === "series" && selectedId === o.id) closePanel();
+  await refresh();
+  toast(
+    answer.scope === "occurrence"
+      ? `One occurrence of ${answer.name} removed.`
+      : `${answer.name} deleted.`,
+    false,
+    { label: "Undo", run: () => undoDelete(answer.undo) },
+  );
+}
+
+async function undoDelete(token) {
+  const restored = await call(api.undo_delete(token), "Could not undo that.");
+  if (restored === null) return;
+  await refresh();
+  toast(`${restored.name} restored.`);
 }
 
 // ---- status bar ----
@@ -600,8 +1068,12 @@ function drawStatus() {
 
 // ---- detail panel ----
 
-async function select(moteId) {
+async function select(moteId, occurrenceKey) {
   selectedId = moteId;
+  // Which *placement* was clicked, not just which mote: a weekly standup
+  // draws five rectangles, and deleting "this one" has to know which one
+  // you meant.
+  selectedKey = occurrenceKey || null;
   closeDraft();
   panel = await call(api.focus(moteId), "Could not read that mote.");
   drawPanel();
@@ -610,6 +1082,7 @@ async function select(moteId) {
 
 function closePanel() {
   selectedId = null;
+  selectedKey = null;
   panel = null;
   $("panel").classList.add("hidden");
   draw();
@@ -627,7 +1100,8 @@ function drawPanel() {
   $("panel-id").textContent = panel.id;
 
   const placed = clear($("panel-placed"));
-  const occurrence = (payload ? payload.occurrences : []).find((o) => o.id === panel.id);
+  const occurrence = selectedOccurrence();
+  $("panel-delete").classList.toggle("hidden", !occurrence);
   if (occurrence) {
     const row = el("div", "placed-by");
     row.append(el("span", "key", occurrence.binding));
@@ -668,21 +1142,31 @@ function drawPanel() {
 
 // ---- the draft popover ----
 
-function openDraftAt(event, dateKey, minutes) {
+/** The popover a new mote is written in. `point` is where the gesture
+ *  ended; `minutes`/`endMinutes` and `days` are what it drew -- a sweep
+ *  down a column arrives with both times already decided, and a sweep
+ *  across cells with a count of days, so the drawn rectangle and the
+ *  drafted mote cannot disagree. */
+function openDraftAt(point, dateKey, minutes, endMinutes, days) {
   const host = $("cal").getBoundingClientRect();
-  const left = Math.max(10, Math.min(host.width - 316, event.clientX - host.left + 12));
-  const top = Math.max(10, Math.min(Math.max(10, host.height - 420), event.clientY - host.top - 40));
-  const start = minutes === null ? null : Math.round(minutes / 15) * 15;
+  const left = Math.max(10, Math.min(host.width - 316, point.x - host.left + 12));
+  const top = Math.max(10, Math.min(Math.max(10, host.height - 420), point.y - host.top - 40));
+  const start = minutes === null || minutes === undefined ? null : snap(minutes);
+  const end = start === null
+    ? null
+    : Math.min(23 * 60 + 59, endMinutes ? snap(endMinutes) : start + 60);
 
   selectedId = null;
+  selectedKey = null;
   panel = null;
   $("panel").classList.add("hidden");
 
   draft = {
     dateKey,
     allDay: start === null,
+    days: Math.max(1, days || 1),
     start: start === null ? "" : fmtMinutes(start),
-    end: start === null ? "" : fmtMinutes(Math.min(23 * 60 + 59, start + 60)),
+    end: start === null ? "" : fmtMinutes(end),
     speciesId: null,
     rows: [],
     left,
@@ -709,7 +1193,9 @@ function drawDraft() {
   node.style.left = `${Math.round(draft.left)}px`;
   node.style.top = `${Math.round(draft.top)}px`;
 
-  $("draft-anchor").textContent = `date · ${draft.dateKey}`;
+  $("draft-anchor").textContent = draft.allDay && draft.days > 1
+    ? `date · ${draft.dateKey} · ${draft.days} days`
+    : `date · ${draft.dateKey}`;
   $("draft-date").value = draft.dateKey;
   $("draft-start").value = draft.start;
   $("draft-end").value = draft.end;
@@ -786,6 +1272,9 @@ function draftProperties() {
 
   if (draft.allDay) {
     properties.date = dateKey;
+    // Days, not minutes, for an all-day mote -- the same reading
+    // core/calendar.py::_duration_for gives it.
+    if (draft.days > 1) properties.duration = String(draft.days);
   } else {
     const start = parseHm($("draft-start").value);
     const end = parseHm($("draft-end").value);
@@ -882,9 +1371,11 @@ function setView(next) {
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(() => {
-    // A poll must never fight the person typing: reopening the draft's
-    // inputs underneath them would lose the keystroke in flight.
-    if (draft) return;
+    // A poll must never fight the person typing -- reopening the draft's
+    // inputs underneath them would lose the keystroke in flight -- nor
+    // the person dragging, whose rectangle a redraw would replace
+    // mid-gesture, nor a question that is still on screen.
+    if (draft || drag || chooser) return;
     refresh();
   }, POLL_MS);
 }
@@ -907,6 +1398,15 @@ function wire() {
   $("garden-btn").onclick = openGardenMenu;
 
   $("panel-close").onclick = closePanel;
+  $("panel-delete").onclick = (event) => {
+    lastPointer = { x: event.clientX, y: event.clientY };
+    const occurrence = selectedOccurrence();
+    if (occurrence) deleteOccurrence(occurrence);
+  };
+
+  $("chooser-one").onclick = () => answerChooser("occurrence");
+  $("chooser-all").onclick = () => answerChooser("series");
+  $("chooser-cancel").onclick = () => answerChooser(null);
 
   $("draft-allday").onclick = () => {
     draft.allDay = !draft.allDay;
@@ -939,8 +1439,11 @@ function wire() {
 
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".topbar-menu")) closeGardenMenu();
+    // A question is answered by answering it, not by clicking past it --
+    // except by the click that asked it (see askScope).
+    if (chooser && !chooserFresh && !event.target.closest("#chooser")) answerChooser(null);
     if (draft && !clickedInDraft && !event.target.closest(".day-col")
-        && !event.target.closest(".month-cell")) {
+        && !event.target.closest(".month-cell") && !event.target.closest(".allday-cell")) {
       closeDraft();
       draw();
     }
@@ -950,13 +1453,19 @@ function wire() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeGardenMenu();
-      if (draft) { closeDraft(); draw(); }
+      if (chooser) answerChooser(null);
+      else if (draft) { closeDraft(); draw(); }
       else if (selectedId) closePanel();
       return;
     }
     // Not while typing into the draft -- these are navigation, and a
     // name with a "t" in it is not a request to jump to today.
     if (event.target.tagName === "INPUT") return;
+    if (event.key === "Delete" || event.key === "Backspace") {
+      const occurrence = selectedOccurrence();
+      if (occurrence) { event.preventDefault(); deleteOccurrence(occurrence); }
+      return;
+    }
     if (event.key === "ArrowLeft") step(-1);
     else if (event.key === "ArrowRight") step(1);
     else if (event.key.toLowerCase() === "t") { anchor = new Date(); closeDraft(); refresh(); }

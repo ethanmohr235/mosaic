@@ -19,6 +19,7 @@ is what core/scenarios.py::apply() and core/incidence.py already do, and
 it is what lets the whole calendar be tested without a window or a
 database.
 """
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -38,6 +39,13 @@ END_KEYS = ("ends", "end")
 # meeting as different lengths.
 DEFAULT_TIMED_MINUTES = 60
 DEFAULT_ALL_DAY_DAYS = 1
+
+# Lines a `recurrence` property may carry besides the rule itself.
+# EXDATE is the one Monastery writes: taking a single occurrence out of a
+# series is what RFC 5545 already calls an exception, so "delete this
+# one" needed no new reserved property -- `recurrence` could always say
+# it, and dateutil could always read it (rrulestr(..., forceset=True)).
+EXCEPTION_PREFIXES = ("EXDATE", "RDATE", "EXRULE")
 
 # A rule with no UNTIL/COUNT is infinite, so an expansion is always
 # clipped to the window being drawn. This bounds the pathological case --
@@ -59,6 +67,11 @@ class Occurrence:
     start: datetime
     end: datetime
     all_day: bool
+    # Whether this placement came out of a rule rather than standing
+    # alone. Answered here, where the rule was parsed anyway, so
+    # Monastery can ask "this occurrence or the whole series?" without
+    # parsing anything in JavaScript.
+    recurring: bool = False
 
 
 def parse_date_value(value) -> tuple[datetime, bool] | None:
@@ -158,15 +171,42 @@ def _end_for(mote: Mote, start: datetime, all_day: bool) -> datetime:
     return end if end is not None else start + _duration_for(mote.properties, all_day)
 
 
-def _recurrence_rule(properties: dict) -> str | None:
-    """The mote's RRULE, normalized the way event_payload() normalizes it
-    -- a leading `RRULE:` stripped, since RRULE-builder tools hand you
-    the whole line as often as just the rule."""
-    raw = properties.get("recurrence")
+def _recurrence_lines(raw) -> list[str]:
+    """A `recurrence` property as the RFC 5545 lines it stands for, each
+    one carrying its own tag.
+
+    A bare `FREQ=...` gets `RRULE:` *added* rather than stripped -- the
+    way event_payload() adds it back when it pushes. Once the property
+    can hold exception lines too (see EXCEPTION_PREFIXES), an untagged
+    first line is ambiguous, and rrulestr() reads a tagged one just as
+    happily either way.
+
+    `UNTIL` also gets its trailing `Z` stripped when present. Google
+    Calendar always writes `UNTIL` in UTC, but parse_date_value() never
+    attaches tzinfo to a mote's `date`, so a UTC-anchored UNTIL paired
+    with our always-naive dtstart is exactly the mix dateutil refuses to
+    compare -- rrulestr() raises and _starts() falls back to a single
+    occurrence, silently dropping every recurrence a Google sync wrote.
+    """
     if not isinstance(raw, str) or not raw.strip():
-        return None
-    rule = raw.strip()
-    return rule[len("RRULE:"):] if rule.upper().startswith("RRULE:") else rule
+        return []
+    lines = []
+    for line in raw.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        upper = text.upper()
+        if not upper.startswith("RRULE:") and not upper.startswith(EXCEPTION_PREFIXES):
+            text = f"RRULE:{text}"
+        lines.append(re.sub(r"(UNTIL=\d{8}T\d{6})Z\b", r"\1", text, flags=re.IGNORECASE))
+    return lines
+
+
+def _recurrence_rule(properties: dict) -> str | None:
+    """The mote's recurrence as one normalized block, ready for
+    rrulestr(), or None if it has none."""
+    lines = _recurrence_lines(properties.get("recurrence"))
+    return "\n".join(lines) if lines else None
 
 
 def _starts(
@@ -189,7 +229,7 @@ def _starts(
     if rule is None:
         return [start]
     try:
-        expansion = rrulestr(rule, dtstart=start)
+        expansion = rrulestr(rule, dtstart=start, forceset=True)
     except (ValueError, TypeError):
         return [start]
     # Widened by the span before clipping: an occurrence that *began*
@@ -233,6 +273,7 @@ def occurrences(
     for mote in motes:
         if mote.id in excluded:
             continue
+        recurring = is_recurring(mote)
         for binding in enabled:
             if binding not in mote.properties:
                 continue
@@ -254,6 +295,7 @@ def occurrences(
                     start=occurrence_start,
                     end=occurrence_start + span,
                     all_day=all_day,
+                    recurring=recurring,
                 ))
 
     return sorted(found, key=lambda o: (o.start, not o.all_day, o.mote.id))
@@ -280,3 +322,234 @@ def is_calendar_property(key: str) -> bool:
     structurally, rather than user data the detail panel should list
     plainly. Used only for presentation."""
     return key in RESERVED_KEYS or key in END_KEYS
+
+
+# ---- writing -------------------------------------------------------
+#
+# Monastery lets you drag a rectangle; everything below says what that
+# means in properties. Still pure -- a mote and a datetime or two in, a
+# dict of properties out -- so what a drag *means* is tested in
+# tests/test_calendar.py without a window, and monastery/api.py only has
+# to write down what it is handed.
+#
+# Which key a drag rewrites is the binding that placed the rectangle,
+# never `date`. Reading is deliberately general (a task placed by `due`
+# is a task on the grid), so an edit of what you can see has to be an
+# edit of the key you can see it by -- writing `date` instead would
+# leave `due` where it was and place the mote twice. Creating a mote is
+# the other way round and stays that way: one right home for a new date
+# (monastery/api.py::create_mote).
+
+_WEEKDAY_CODES = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+
+# A dtstart for parse-only checks. Any value works -- rrulestr() needs
+# one to build a rule it will never expand -- and a constant keeps
+# is_recurring() from depending on what time it is.
+_PARSE_ANCHOR = datetime(2000, 1, 1)
+
+
+def is_recurring(mote: Mote) -> bool:
+    """Whether this mote is a series rather than a single placement,
+    which is what decides whether Monastery asks "this occurrence, or the
+    whole series?" before writing.
+
+    A rule that does not parse is deliberately *not* recurring: it
+    already draws as one placement on its own date (_starts()), and
+    offering to except an occurrence out of it would be offering to edit
+    something the calendar never drew.
+    """
+    rule = _recurrence_rule(mote.properties)
+    if rule is None:
+        return False
+    try:
+        rrulestr(rule, dtstart=_PARSE_ANCHOR, forceset=True)
+    except (ValueError, TypeError):
+        return False
+    return True
+
+
+def _exception_line(when: datetime, all_day: bool) -> str:
+    """One occurrence, said the way RFC 5545 says it. An all-day start
+    gets the `VALUE=DATE` form because that is what it actually is -- a
+    date, not midnight -- and an exclusion only excludes a start it
+    compares equal to."""
+    if all_day:
+        return f"EXDATE;VALUE=DATE:{when.strftime('%Y%m%d')}"
+    return f"EXDATE:{when.strftime('%Y%m%dT%H%M%S')}"
+
+
+def with_exception(properties: dict, occurrence_start: datetime, all_day: bool) -> str | None:
+    """The mote's `recurrence` with one more occurrence taken out of it,
+    or None when there is no rule to take it out of -- a mote that does
+    not recur has nothing to except, and the caller deletes the mote
+    itself instead (monastery/api.py::delete_occurrence).
+
+    Excluding the *anchor* occurrence is allowed and works: the series
+    goes on expanding from a `date` that no longer places anything, which
+    is exactly what RFC 5545 means by an EXDATE on DTSTART. Excluding one
+    twice is a no-op rather than a second identical line.
+    """
+    lines = _recurrence_lines(properties.get("recurrence"))
+    if not lines:
+        return None
+    line = _exception_line(occurrence_start, all_day)
+    return "\n".join(lines if line in lines else [*lines, line])
+
+
+def _format_like(original: str, when: datetime, all_day: bool) -> str:
+    """`when`, written the way `original` was written.
+
+    A garden holds dates people typed -- "2026-08-28", "2026-08-24 09:15",
+    full ISO -- and a drag should move a value, not reformat it. A mote
+    whose `due` grows a ":00" every time you nudge it is a mote whose
+    history (core/oplog.py records one row per changed key) is noise.
+    """
+    if all_day:
+        return when.strftime("%Y-%m-%d")
+    separator = " " if " " in original and "T" not in original else "T"
+    time_part = when.strftime("%H:%M:%S") if original.count(":") >= 2 else when.strftime("%H:%M")
+    return f"{when.strftime('%Y-%m-%d')}{separator}{time_part}"
+
+
+def _shift_byday(rule: str, from_weekday: int, to_weekday: int) -> str:
+    """A rule's `BYDAY` moved off one weekday and onto another.
+
+    Dragging Monday's standup to Tuesday has to rewrite `BYDAY=MO`, or
+    the shifted dtstart is overruled by the rule and dateutil goes on
+    producing Mondays -- the drag would appear to do nothing. Only the
+    tokens naming the day you moved are touched, so `BYDAY=MO,WE,FR`
+    dragged off Monday becomes `TU,WE,FR` rather than collapsing to one
+    day, and an ordinal token ("-1FR") keeps its ordinal.
+    """
+    old, new = _WEEKDAY_CODES[from_weekday], _WEEKDAY_CODES[to_weekday]
+
+    def replace(match: re.Match) -> str:
+        moved: list[str] = []
+        for token in (t.strip() for t in match.group(1).split(",")):
+            if not token:
+                continue
+            day = token[:-2] + new if token[-2:].upper() == old else token
+            if day not in moved:
+                moved.append(day)
+        return f"BYDAY={','.join(moved)}"
+
+    return re.sub(r"BYDAY=([A-Za-z0-9,+\-]+)", replace, rule, flags=re.IGNORECASE)
+
+
+def _span_properties(properties: dict, start: datetime, all_day: bool, span: timedelta) -> dict:
+    """How long something lasts, written in whichever of the two ways
+    this mote already says it: an explicit `ends`/`end` if it has one,
+    else `duration`.
+
+    Rewriting the key the mote already uses is the same principle as
+    writing back to the binding that placed it -- an edit should change
+    what you were shown, not leave it standing and add a second answer
+    beside it, which is exactly what _end_for() would then have to choose
+    between.
+    """
+    for key in END_KEYS:
+        if parse_date_value(properties.get(key)) is not None:
+            end = start + span
+            # `ends` is inclusive on an all-day mote as people write it
+            # (_explicit_end() reads it back that way), so the exclusive
+            # span this module works in is converted before it is written.
+            return {key: _format_like(
+                properties[key], end - timedelta(days=1) if all_day else end, all_day
+            )}
+    length = span.days if all_day else round(span.total_seconds() / 60)
+    return {"duration": max(1, length)}
+
+
+def span_of(mote: Mote, binding: str) -> timedelta | None:
+    """How long each of this mote's placements under `binding` lasts --
+    its `ends`/`end` if it declares one, else what `duration` implies.
+
+    The same answer occurrences() hands every start (_end_for()), asked
+    without a window, so a move can carry forward a span it is not
+    changing.
+    """
+    parsed = parse_date_value(mote.properties.get(binding))
+    if parsed is None:
+        return None
+    start, all_day = parsed
+    return _end_for(mote, start, all_day) - start
+
+
+def moved_properties(
+    mote: Mote, binding: str, occurrence_start: datetime, new_start: datetime
+) -> dict:
+    """The series shifted so that the occurrence at `occurrence_start`
+    lands on `new_start`.
+
+    A shift, not a reassignment: every other occurrence moves by the same
+    delta, which is what makes dragging any occurrence of a series mean
+    the same thing as dragging its first. `ends`/`end` travels with it --
+    a move does not change a span -- and a rule naming its weekdays has
+    those moved too, or the shifted anchor would be silently overruled.
+    """
+    parsed = parse_date_value(mote.properties.get(binding))
+    if parsed is None:
+        return {}
+    anchor, all_day = parsed
+    delta = new_start - occurrence_start
+    if not delta:
+        return {}
+    moved_anchor = anchor + delta
+    moved = {binding: _format_like(mote.properties[binding], moved_anchor, all_day)}
+
+    for key in END_KEYS:
+        end = parse_date_value(mote.properties.get(key))
+        if end is not None:
+            moved[key] = _format_like(mote.properties[key], end[0] + delta, end[1])
+            break
+
+    rule = mote.properties.get("recurrence")
+    if isinstance(rule, str) and rule.strip() and anchor.weekday() != moved_anchor.weekday():
+        shifted = _shift_byday(rule, anchor.weekday(), moved_anchor.weekday())
+        if shifted != rule:
+            moved["recurrence"] = shifted
+    return moved
+
+
+def resized_properties(
+    mote: Mote, binding: str, occurrence_start: datetime, new_end: datetime
+) -> dict:
+    """The mote's span changed so that the occurrence beginning at
+    `occurrence_start` now ends at `new_end`.
+
+    One span, every occurrence: core reads a single length off the mote
+    and hands it to each start (_end_for()), so lengthening one Tuesday
+    of a weekly meeting lengthens all of them. That is the same "one mote
+    is the whole series" the export side has always meant, and the reason
+    Monastery asks first when a mote recurs.
+    """
+    parsed = parse_date_value(mote.properties.get(binding))
+    if parsed is None:
+        return {}
+    anchor, all_day = parsed
+    span = new_end - occurrence_start
+    if span <= timedelta(0):
+        return {}
+    return _span_properties(mote.properties, anchor, all_day, span)
+
+
+def detached_properties(
+    mote: Mote, binding: str, new_start: datetime, new_end: datetime
+) -> dict:
+    """The properties that make one occurrence stand on its own -- what
+    monastery/api.py copies the mote with when you move or resize a
+    single occurrence instead of the series.
+
+    The copy is a plain mote at a plain time: the caller drops
+    `recurrence` (it is one event now, not a series) and `gcal_event_id`
+    (two motes must never claim one Google event). Everything else the
+    original said is kept, because a Tuesday moved out of a weekly
+    standup is still that standup.
+    """
+    parsed = parse_date_value(mote.properties.get(binding))
+    if parsed is None:
+        return {}
+    _, all_day = parsed
+    detached = {binding: _format_like(mote.properties[binding], new_start, all_day)}
+    detached.update(_span_properties(mote.properties, new_start, all_day, new_end - new_start))
+    return detached

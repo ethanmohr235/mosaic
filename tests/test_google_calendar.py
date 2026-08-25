@@ -411,3 +411,31 @@ def test_export_events_stops_writing_back_once_still_exporting_goes_false(monkey
     assert recorded == []
     assert deleted == [], "a stale event must not be deleted either once the world moved on"
     assert summary == gcal.ExportSummary(created=0, updated=0, skipped=0, deleted=0, total=1)
+
+
+def test_event_payload_forwards_an_exception_as_its_own_line():
+    """Monastery writes "delete this one occurrence" as an EXDATE inside
+    the same `recurrence` property (core/calendar.py::with_exception).
+    Forwarding only the rule would resurrect that occurrence on the next
+    export."""
+    mote = _mote({
+        "date": "2026-08-15T09:00:00",
+        "recurrence": "RRULE:FREQ=WEEKLY\nEXDATE;VALUE=DATE:20260822",
+    })
+    assert event_payload(mote)["recurrence"] == [
+        "RRULE:FREQ=WEEKLY", "EXDATE;VALUE=DATE:20260822",
+    ]
+
+
+def test_event_payload_tags_a_timed_exception_with_the_events_zone(monkeypatch):
+    """MonOSS stores naive local times and Google reads an untagged
+    EXDATE as UTC -- which would except an occurrence that was never
+    there and leave the deleted one standing."""
+    monkeypatch.setattr(gcal, "_local_timezone_name", lambda: "America/Denver")
+    mote = _mote({
+        "date": "2026-08-15T09:00:00",
+        "recurrence": "FREQ=WEEKLY\nEXDATE:20260822T090000",
+    })
+    assert event_payload(mote)["recurrence"] == [
+        "RRULE:FREQ=WEEKLY", "EXDATE;TZID=America/Denver:20260822T090000",
+    ]

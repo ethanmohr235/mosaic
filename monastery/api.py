@@ -20,6 +20,7 @@ open, and which bindings the person has turned off.
 import functools
 import json
 import logging
+import sqlite3
 import threading
 from datetime import datetime
 
@@ -34,6 +35,7 @@ from core import scenarios as scenarios_repo
 from core import species as species_repo
 from core import sync as sync_repo
 from core.db import get_connection, initialize_database
+from core.entities import Mote
 from monastery import payload as payload_repo
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,13 @@ logger = logging.getLogger(__name__)
 # set this. core/db.py stays untouched, so the CLI and the main UI keep
 # their current behavior exactly.
 _BUSY_TIMEOUT_MS = 5000
+
+# What a dragged or deleted rectangle was meant to change when the mote
+# behind it recurs. The window asks before it writes (the chooser in
+# monastery/frontend/app.js) and sends one of these back; nothing is
+# guessed on this side.
+SERIES = "series"
+OCCURRENCE = "occurrence"
 
 
 def _synchronized(method):
@@ -231,3 +240,183 @@ class Api:
     @_synchronized
     def delete_mote(self, mote_id: str) -> bool:
         return motes_repo.delete_mote(self._conn, mote_id)
+
+    # ---- editing an occurrence ----
+    #
+    # A rectangle on the grid is a *placement*, not a mote: one mote can
+    # draw fifty of them. So each of these takes the binding that placed
+    # it and the start that identifies it within its series, and asks
+    # core/calendar.py what the drag means in properties. Nothing here
+    # decides which key to write -- that answer lives in one place, with
+    # the code that read it.
+
+    def _occurrence(self, mote_id: str, binding: str, occurrence_start: str):
+        """The mote, the placement's start, and whether it is all-day --
+        what every edit below needs. None when the mote is gone or no
+        longer carries that binding, which a poll racing another window's
+        write can legitimately produce."""
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None:
+            return None
+        parsed = calendar_repo.parse_date_value(mote.properties.get(binding))
+        if parsed is None:
+            return None
+        return mote, datetime.fromisoformat(occurrence_start), parsed[1]
+
+    def _detach(self, mote, binding: str, occurrence_start: datetime, all_day: bool,
+                new_start: datetime, new_end: datetime) -> str:
+        """One occurrence lifted out of its series into a mote of its
+        own: an exception where it used to be, a copy where it now is.
+
+        This is the only honest reading of "just this one" in a garden
+        where one mote *is* the whole series. RFC 5545 would call the
+        copy a RECURRENCE-ID override; MonOSS has no such thing on
+        purpose, and an ordinary mote says the same thing without
+        inventing a second kind of event.
+        """
+        rule = calendar_repo.with_exception(mote.properties, occurrence_start, all_day)
+        if rule is not None:
+            motes_repo.update_mote(self._conn, mote.id, {"recurrence": rule})
+        detached_id = motes_repo.copy_mote(
+            self._conn, self._conn, mote.id,
+            calendar_repo.detached_properties(mote, binding, new_start, new_end),
+        )
+        # A copy that kept these would go on recurring, and would fight
+        # the original over one Google event.
+        for key in ("recurrence", "gcal_event_id"):
+            motes_repo.delete_property(self._conn, detached_id, key)
+        # copy_mote() is properties only -- there is no general answer for
+        # relationships -- but the species is the one a split-off
+        # occurrence has to keep, because it is what colours it.
+        for species in species_repo.species_of(self._conn, mote.id):
+            species_repo.set_species(self._conn, detached_id, species.id)
+        return detached_id
+
+    @_synchronized
+    def place_occurrence(self, mote_id: str, binding: str, occurrence_start: str,
+                         new_start: str, new_end: str, scope: str = SERIES) -> dict | None:
+        """Where a dragged rectangle came to rest: this placement now
+        occupies [new_start, new_end).
+
+        One method for moving and resizing both, because the top edge of
+        an event is both at once -- dragging it moves the start and keeps
+        the end, and two separate writes would mean two oplog rows for
+        one gesture and, on a series, two detachments for one drop.
+
+        What is written follows from what actually changed: a start that
+        moved rewrites the binding that placed it (never `date` -- see
+        core/calendar.py's writing section), and a span that changed
+        rewrites whichever of `ends`/`duration` the mote already declares.
+        A move that kept its length therefore leaves the length alone
+        rather than pinning a default of 60 onto a mote that never said
+        one.
+        """
+        found = self._occurrence(mote_id, binding, occurrence_start)
+        if found is None:
+            return None
+        mote, start, all_day = found
+        target, target_end = datetime.fromisoformat(new_start), datetime.fromisoformat(new_end)
+        if target_end <= target:
+            return self._panel(mote.id)
+
+        if scope == OCCURRENCE and calendar_repo.is_recurring(mote):
+            return self._panel(self._detach(mote, binding, start, all_day, target, target_end))
+
+        moved = (
+            calendar_repo.moved_properties(mote, binding, start, target)
+            if target != start else {}
+        )
+        # Measured against the *moved* mote: an `ends` written from the
+        # old anchor would land the span a drag's worth of days away from
+        # where the rectangle now is.
+        after = Mote(properties={**mote.properties, **moved}, id=mote.id)
+        resized = (
+            calendar_repo.resized_properties(after, binding, target, target_end)
+            if target_end - target != calendar_repo.span_of(mote, binding) else {}
+        )
+        motes_repo.update_mote(self._conn, mote.id, {**moved, **resized})
+        return self._panel(mote.id)
+
+    @_synchronized
+    def delete_occurrence(self, mote_id: str, binding: str, occurrence_start: str,
+                          scope: str = SERIES) -> dict | None:
+        """Removing what you can see, which is a placement rather than
+        necessarily a mote.
+
+        `scope="occurrence"` on a series writes an exception: the mote
+        stays, one repetition stops happening. Anything else deletes the
+        mote, because a mote that does not recur *is* its placement.
+        Both hand back what undo_delete() needs to put it back, which is
+        why this returns a token rather than a bare bool.
+        """
+        found = self._occurrence(mote_id, binding, occurrence_start)
+        if found is None:
+            return None
+        mote, start, all_day = found
+        name = payload_repo.name_of(mote)
+
+        if scope == OCCURRENCE:
+            rule = calendar_repo.with_exception(mote.properties, start, all_day)
+            if rule is not None:
+                motes_repo.update_mote(self._conn, mote.id, {"recurrence": rule})
+                return {"name": name, "scope": OCCURRENCE, "undo": {
+                    "kind": "recurrence",
+                    "moteId": mote.id,
+                    "recurrence": mote.properties.get("recurrence"),
+                }}
+
+        # Recorded before the delete, not after: relationships cascade
+        # with the mote (core/db.py's ON DELETE CASCADE), so this is the
+        # last moment they can be read.
+        relationships = [
+            {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+            for r in rel_repo.list_relationships(self._conn)
+            if mote.id in (r.from_id, r.to_id)
+        ]
+        motes_repo.delete_mote(self._conn, mote.id)
+        return {"name": name, "scope": SERIES, "undo": {
+            "kind": "mote",
+            "moteId": mote.id,
+            "properties": mote.properties,
+            "relationships": relationships,
+        }}
+
+    @_synchronized
+    def undo_delete(self, token: dict) -> dict | None:
+        """Put back exactly what delete_occurrence() took.
+
+        A deleted mote returns under its own id, with the relationships
+        that touched it under theirs -- create_mote() and
+        create_relationship() both accept one -- so undo restores the
+        graph rather than a lookalike, and every arrow that pointed at it
+        still points at it.
+        """
+        if not isinstance(token, dict):
+            return None
+
+        if token.get("kind") == "recurrence":
+            mote_id = token.get("moteId")
+            previous = token.get("recurrence")
+            if previous is None:
+                motes_repo.delete_property(self._conn, mote_id, "recurrence")
+            else:
+                motes_repo.update_mote(self._conn, mote_id, {"recurrence": previous})
+            return self._panel(mote_id)
+
+        if token.get("kind") != "mote":
+            return None
+        restored = motes_repo.create_mote(
+            self._conn, token.get("properties") or {}, id=token.get("moteId")
+        )
+        for relationship in token.get("relationships") or []:
+            try:
+                rel_repo.create_relationship(
+                    self._conn, relationship["fromId"], relationship["toId"],
+                    relationship["type"], id=relationship["id"],
+                )
+            except sqlite3.IntegrityError:
+                # The mote at the other end went away while the undo toast
+                # was still up. Restoring the rest is better than refusing
+                # the whole undo over an arrow with nothing to point at.
+                logger.warning("could not restore relationship %r", relationship.get("id"))
+        return self._panel(restored)

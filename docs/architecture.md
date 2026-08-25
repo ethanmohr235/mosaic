@@ -598,11 +598,25 @@ mote a species: it is answered by looking. This is the monism paying for
 itself again -- the calendar needed no new object type, no new
 relationship, and no new reserved property.
 
-That generality is deliberately **read-side only**. Creating a mote from
-the grid always writes the reserved `date` (plus `duration`), the key
-`core/google_calendar.py` already treats as canonical. Reading is general
-because a garden is; a *new* date has one right home, and having two
-would be how a garden ends up with the same event under three keys.
+That generality is deliberately **read-side only** for *creation*.
+Creating a mote from the grid always writes the reserved `date` (plus
+`duration`), the key `core/google_calendar.py` already treats as
+canonical. Reading is general because a garden is; a *new* date has one
+right home, and having two would be how a garden ends up with the same
+event under three keys.
+
+Editing goes the other way, and has to. A rectangle dragged across the
+grid rewrites **the binding that placed it** -- drag a task placed by
+`due` and `due` moves -- because an edit should change the thing you were
+shown. Writing `date` instead would leave `due` where it was and place
+the mote on the grid twice. The same principle picks the key a resize
+writes: whichever of `ends`/`duration` the mote already declares, never
+the other. All of it is computed by pure functions in
+`core/calendar.py`'s writing section (`moved_properties`,
+`resized_properties`, `detached_properties`), so what a drag *means*
+is tested without a window, and `monastery/api.py::place_occurrence`
+only writes down what it is handed. Move and resize are one bridge
+method because the top edge of an event is both at once.
 
 `recurrence` -- already reserved, already an RFC 5545 RRULE, and until
 now passed to Google without MonOSS ever interpreting it -- is expanded
@@ -614,6 +628,23 @@ side already documents, now true on the read side too. A rule that
 doesn't parse places the mote on its own date rather than hiding it --
 the same permissiveness `core/modoc_bind.py` gives a broken note, and
 for the same reason.
+
+Deleting one occurrence of a series needed no new reserved property
+either: RFC 5545 already says "except this one" with an `EXDATE` line,
+`dateutil` already reads a rule and its exceptions as one set, and
+Google already accepts them. So the exception lives in the same
+`recurrence` string, and `core/google_calendar.py` forwards each line
+(tagging a timed one with the event's `TZID`) so an occurrence deleted
+here stays deleted there.
+
+Moving or resizing *one* occurrence of a series is the same mechanism
+read forwards: an `EXDATE` where it was, and an ordinary copy where it
+now is, carrying the original's species and dropping its `recurrence`
+and `gcal_event_id`. RFC 5545 would call that copy a `RECURRENCE-ID`
+override; MonOSS has no such thing on purpose, and a plain mote says the
+same thing without a second kind of event. Because one mote *is* the
+whole series, the window asks which was meant rather than guessing --
+the only question Monastery puts in front of a write.
 
 Everything in `core/calendar.py` is pure: motes in, occurrences out, no
 connection. That is the discipline `core/scenarios.py::apply()` and

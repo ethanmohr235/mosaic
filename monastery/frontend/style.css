@@ -248,7 +248,7 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 }
 .allday-cell {
   flex: 1; min-width: 0; border-left: 1px solid oklch(1 0 0 / 0.06);
-  padding: 4px; display: flex; flex-direction: column; gap: 3px;
+  padding: 4px; display: flex; flex-direction: column; gap: 3px; cursor: copy;
 }
 
 .pin {
@@ -464,3 +464,84 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
 }
 #toast.error { border-color: var(--danger); color: oklch(0.85 0.08 25); }
+
+/* ---- dragging ---- */
+/*
+   The resize edges are pseudo-elements only so the cursor changes where
+   the gesture actually starts; app.js::edgeMode decides what a press
+   means from its own arithmetic, so these strips carry no behavior.
+*/
+.event::before, .event::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 6px;
+  cursor: ns-resize;
+}
+.event::before { top: 0; }
+.event::after { bottom: 0; }
+.pin::after {
+  content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 6px;
+  cursor: ew-resize;
+}
+/* which the strip above is positioned against */
+.pin { position: relative; }
+
+.event.dragging, .pin.dragging, .chip.dragging {
+  opacity: 0.75; z-index: 12; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+body.dragging-on { user-select: none; cursor: grabbing; }
+body.dragging-on .event, body.dragging-on .pin, body.dragging-on .chip { pointer-events: none; }
+
+.allday-cell.drop-target, .month-cell.drop-target {
+  background: var(--accent-soft); box-shadow: inset 0 0 0 1px oklch(0.74 0.10 68 / 0.5);
+}
+
+/* The rectangle a sweep across empty space is drawing. */
+.sweep {
+  position: absolute; left: 2px; right: 3px; z-index: 11; pointer-events: none;
+  border-radius: 6px; border: 1px dashed oklch(0.74 0.10 68 / 0.7);
+  background: var(--accent-soft); display: flex; align-items: flex-start; padding: 2px 5px;
+}
+.sweep-label { font-family: var(--mono); font-size: 9px; color: var(--accent-bright); }
+
+/* The × on a placement: out of the way until you are looking at it. */
+.kill {
+  position: absolute; top: 1px; right: 2px; z-index: 2;
+  background: oklch(0.2 0 0 / 0.85); border: none; border-radius: 4px;
+  color: var(--faint); font-size: 12px; line-height: 1; padding: 1px 4px;
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.event:hover .kill, .pin:hover .kill, .chip:hover .kill,
+.event.selected .kill { opacity: 1; }
+.kill:hover { color: oklch(0.85 0.08 25); }
+.chip .kill, .pin .kill { top: 50%; transform: translateY(-50%); }
+
+/* ---- this occurrence, or the series? ---- */
+
+#chooser {
+  position: absolute; width: 244px; z-index: 16;
+  background: oklch(0.185 0 0); border: 1px solid oklch(1 0 0 / 0.12);
+  border-radius: 12px; padding: 13px;
+  display: flex; flex-direction: column; gap: 7px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35), 0 22px 50px rgba(0, 0, 0, 0.55);
+}
+#chooser-title { font-size: 12.5px; color: var(--fg-bright); }
+#chooser-note { font-size: 11px; color: var(--faint); line-height: 1.4; margin-bottom: 3px; }
+#chooser button {
+  border-radius: 8px; padding: 6px 10px; font-size: 11.5px; text-align: left;
+  background: transparent; border: 1px solid oklch(1 0 0 / 0.12); color: oklch(0.9 0 0);
+}
+#chooser button:hover { background: oklch(0.24 0 0); }
+#chooser button.primary { background: var(--accent); border: none; color: oklch(0.16 0 0); }
+#chooser button.ghost { border: none; color: var(--faint); padding: 3px 10px; }
+
+/* ---- deleting ---- */
+
+.panel-delete {
+  background: transparent; border: 1px solid oklch(1 0 0 / 0.14); border-radius: 7px;
+  color: var(--faint); font-size: 10.5px; padding: 3px 9px; margin-left: auto;
+}
+.panel-delete:hover { border-color: var(--danger); color: oklch(0.8 0.1 25); }
+.toast-action {
+  background: transparent; border: none; color: var(--accent-bright);
+  font-size: 12px; padding: 0 0 0 12px; text-decoration: underline;
+}
+.chip { position: relative; }

@@ -11,8 +11,9 @@ import pytest
 
 from core.db import get_connection, initialize_database
 from core.gardens import create_garden, set_sync_dir
-from core.motes import create_mote, get_mote
+from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
+from core.species import set_species
 from monastery.api import Api
 from monastery.app import DEFAULT_HTTP_PORT, choose_port
 
@@ -178,6 +179,144 @@ def test_deleting_a_date_property_unplaces_the_mote(api, week):
 def test_delete_mote_removes_it(api, week):
     assert api.delete_mote(week["standup"]) is True
     assert get_mote(api._conn, week["standup"]) is None
+
+
+# ---- editing an occurrence ----
+#
+# A rectangle on the grid is a placement, not a mote: one mote can draw
+# fifty of them. What earns a test here is the choice this layer makes
+# between the two -- what "the whole series" writes, what "just this one"
+# splits off, and that undo puts back what was there.
+
+
+@pytest.fixture
+def series(api):
+    """A weekly standup: four Mondays in the garden, one mote."""
+    return create_mote(api._conn, {
+        "name": "Standup", "when": "2026-08-24 09:15", "duration": 20,
+        "recurrence": "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+    })
+
+
+def test_a_move_writes_the_binding_that_placed_it(api, week):
+    api.place_occurrence(
+        week["standup"], "when", "2026-08-24T09:15:00", "2026-08-26T11:00:00", "2026-08-26T11:20:00",
+    )
+    properties = get_mote(api._conn, week["standup"]).properties
+    assert properties["when"] == "2026-08-26 11:00"
+    assert "date" not in properties, "a drag edits what placed it, not a second key"
+
+
+def test_moving_a_series_shifts_every_occurrence(api, series):
+    api.place_occurrence(
+        series, "when", "2026-08-31T09:15:00", "2026-09-01T09:15:00", "2026-09-01T09:35:00",
+    )
+    starts = [o["start"] for o in _calendar(api)["occurrences"]]
+    assert starts == ["2026-08-25T09:15:00"], "the whole series moved to Tuesdays"
+    assert get_mote(api._conn, series).properties["recurrence"] == "FREQ=WEEKLY;BYDAY=TU;COUNT=4"
+
+
+def test_moving_one_occurrence_splits_it_off_as_its_own_mote(api, series, week):
+    set_species(api._conn, series, week["species"])
+
+    panel = api.place_occurrence(
+        series, "when", "2026-08-31T09:15:00", "2026-09-01T11:00:00", "2026-09-01T11:20:00",
+        scope="occurrence",
+    )
+    assert panel["id"] != series, "the moved occurrence is a mote of its own now"
+    assert panel["properties"]["when"] == "2026-09-01 11:00"
+    assert panel["properties"]["duration"] == 20, "it keeps the span it was drawn with"
+    assert "recurrence" not in panel["properties"], "one event, not a second series"
+    assert panel["speciesName"] == "Meeting", "and the colour it was drawn in"
+    assert "EXDATE:20260831T091500" in get_mote(api._conn, series).properties["recurrence"]
+
+
+def test_a_split_off_occurrence_never_claims_the_originals_google_event(api, series):
+    update_mote(api._conn, series, {"gcal_event_id": "already-exported"})
+    panel = api.place_occurrence(
+        series, "when", "2026-08-31T09:15:00", "2026-09-01T11:00:00", "2026-09-01T11:20:00",
+        scope="occurrence",
+    )
+    assert "gcal_event_id" not in panel["properties"]
+
+
+def test_a_resize_writes_the_span_the_mote_already_declares(api, week):
+    api.place_occurrence(
+        week["standup"], "when", "2026-08-24T09:15:00", "2026-08-24T09:15:00", "2026-08-24T10:15:00",
+    )
+    assert get_mote(api._conn, week["standup"]).properties["duration"] == 60
+
+
+def test_a_resize_of_a_ranged_mote_moves_its_end(api, week):
+    mote_id = next(
+        o["id"] for o in _calendar(api)["occurrences"] if o["name"] == "Read-only window"
+    )
+    api.place_occurrence(
+        mote_id, "starts", "2026-08-26T00:00:00", "2026-08-26T00:00:00", "2026-08-30T00:00:00",
+    )
+    assert get_mote(api._conn, mote_id).properties["ends"] == "2026-08-29"
+
+
+def test_a_move_that_keeps_its_length_does_not_invent_a_duration(api, week):
+    """A mote that never declared how long it lasts should not acquire a
+    `duration` just because you dragged it an hour later."""
+    mote_id = create_mote(api._conn, {"name": "Sync", "when": "2026-08-25 14:00"})
+    api.place_occurrence(mote_id, "when", "2026-08-25T14:00:00", "2026-08-25T15:00:00", "2026-08-25T16:00:00")
+    assert "duration" not in get_mote(api._conn, mote_id).properties
+
+
+def test_dragging_the_top_edge_moves_the_start_and_keeps_the_end(api, week):
+    """One gesture, one write: the top edge is a move and a resize at
+    once, which is why there is one method rather than two."""
+    api.place_occurrence(
+        week["standup"], "when", "2026-08-24T09:15:00", "2026-08-24T09:00:00", "2026-08-24T09:35:00",
+    )
+    properties = get_mote(api._conn, week["standup"]).properties
+    assert properties["when"] == "2026-08-24 09:00"
+    assert properties["duration"] == 35
+
+
+def test_deleting_one_occurrence_leaves_the_series_standing(api, series):
+    answer = api.delete_occurrence(series, "when", "2026-08-31T09:15:00", scope="occurrence")
+    assert answer["scope"] == "occurrence"
+    assert get_mote(api._conn, series) is not None
+    assert [o["start"] for o in _calendar(api, ["when"])["occurrences"]] == ["2026-08-24T09:15:00"]
+
+
+def test_deleting_a_series_deletes_the_mote(api, series):
+    answer = api.delete_occurrence(series, "when", "2026-08-24T09:15:00")
+    assert answer["scope"] == "series"
+    assert get_mote(api._conn, series) is None
+
+
+def test_deleting_the_only_placement_of_a_plain_mote_deletes_it(api, week):
+    """A mote that does not recur *is* its placement, so "just this one"
+    can only mean the mote."""
+    api.delete_occurrence(week["standup"], "when", "2026-08-24T09:15:00", scope="occurrence")
+    assert get_mote(api._conn, week["standup"]) is None
+
+
+def test_undo_puts_back_a_deleted_occurrence(api, series):
+    answer = api.delete_occurrence(series, "when", "2026-08-31T09:15:00", scope="occurrence")
+    api.undo_delete(answer["undo"])
+    assert get_mote(api._conn, series).properties["recurrence"] == "FREQ=WEEKLY;BYDAY=MO;COUNT=4"
+
+
+def test_undo_puts_back_a_deleted_mote_with_its_id_and_arrows(api, week):
+    answer = api.delete_occurrence(week["standup"], "when", "2026-08-24T09:15:00")
+    panel = api.undo_delete(answer["undo"])
+    assert panel["id"] == week["standup"], "the same mote, not a lookalike"
+    assert panel["properties"]["when"] == "2026-08-24 09:15"
+    assert [r["type"] for r in panel["relationships"]] == ["instance_of"]
+
+
+def test_editing_an_occurrence_of_a_vanished_mote_says_nothing_happened(api, week):
+    """Another window can delete the mote between the paint and the drop
+    -- Monastery polls rather than being told."""
+    api.delete_mote(week["standup"])
+    assert api.place_occurrence(
+        week["standup"], "when", "2026-08-24T09:15:00", "2026-08-26T09:15:00", "2026-08-26T09:35:00"
+    ) is None
 
 
 # ---- gardens ----

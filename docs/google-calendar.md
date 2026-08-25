@@ -40,7 +40,12 @@ you edited or deleted an event by hand in Calendar in the meantime.
   non-recurring mote. Removing the property (or never having set it) is
   itself exported: the next export explicitly clears recurrence on the
   existing event rather than leaving the old rule in place, so an event
-  can go from recurring back to a single occurrence.
+  can go from recurring back to a single occurrence. The property may
+  also hold `EXDATE` lines beneath the rule -- that's how Monastery
+  deletes a single occurrence of a series (see docs/architecture.md) --
+  and each line is forwarded as its own entry, with the event's `TZID`
+  attached to a timed one, so an occurrence deleted locally stays deleted
+  in Google.
 - **`gcal_event_id`** -- written back onto the mote automatically after
   its first export. Its presence is what makes a second export update the
   same event (or, for a recurring one, the whole series) instead of

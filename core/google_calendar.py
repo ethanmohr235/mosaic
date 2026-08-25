@@ -69,6 +69,39 @@ def _local_timezone_name() -> str | None:
     return target.split("zoneinfo/", 1)[1] if "zoneinfo/" in target else None
 
 
+def _recurrence_lines(recurrence: str, timezone_name: str | None) -> list[str]:
+    """A mote's `recurrence` property as the Calendar API's list of RFC
+    5545 lines.
+
+    A list rather than one rule, because the property can carry
+    exceptions now: deleting a single occurrence in Monastery adds an
+    `EXDATE` line (core/calendar.py::with_exception), and forwarding only
+    the RRULE would resurrect that occurrence on the next export. A
+    leading `RRULE:` is stripped and re-added on the rule line, since
+    some RRULE-builder tools hand you the full line rather than the rule.
+
+    A timed `EXDATE` is tagged with the same `TZID` the start and end
+    carry. MonOSS stores naive local times and Google reads an untagged
+    EXDATE as UTC -- which would except an occurrence that was never
+    there and leave the one you deleted standing.
+    """
+    lines = []
+    for raw_line in recurrence.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        upper = line.upper()
+        if upper.startswith(("EXDATE", "RDATE", "EXRULE")):
+            if timezone_name and "VALUE=DATE" not in upper and "TZID=" not in upper:
+                keyword, _, value = line.partition(":")
+                line = f"{keyword};TZID={timezone_name}:{value}"
+            lines.append(line)
+            continue
+        rule = line[len("RRULE:"):] if upper.startswith("RRULE:") else line
+        lines.append(f"RRULE:{rule}")
+    return lines
+
+
 def event_payload(mote: dict) -> dict:
     """Builds a Calendar v3 event body from a mote's properties. Raises
     ValueError if `date` is missing or unparseable."""
@@ -79,6 +112,10 @@ def event_payload(mote: dict) -> dict:
 
     payload = {"summary": _label_for(mote), "description": _description_for(mote)}
     duration = props.get("duration")
+    # Held past the timed branch below so an EXDATE can be tagged with the
+    # same zone the start and end are; an all-day event has none, and its
+    # exceptions are `VALUE=DATE` anyway.
+    timezone_name = None
 
     if "T" in raw_date:
         try:
@@ -112,16 +149,10 @@ def event_payload(mote: dict) -> dict:
 
     recurrence = props.get("recurrence")
     if isinstance(recurrence, str) and recurrence.strip():
-        # Pasted in as-is (RFC 5545 RRULE syntax) -- not parsed or
-        # validated here, just forwarded; Google's own 400 response for a
-        # malformed rule already surfaces as a toast via the existing
-        # error path. A leading "RRULE:" is stripped first and re-added,
-        # since some RRULE-builder tools give you the full line rather
-        # than just the rule part.
-        rule = recurrence.strip()
-        if rule.upper().startswith("RRULE:"):
-            rule = rule[len("RRULE:"):]
-        payload["recurrence"] = [f"RRULE:{rule}"]
+        # Pasted in as-is (RFC 5545 syntax) -- not parsed or validated
+        # here, just forwarded; Google's own 400 response for a malformed
+        # rule already surfaces as a toast via the existing error path.
+        payload["recurrence"] = _recurrence_lines(recurrence, timezone_name)
     else:
         # Explicit null, not an absent key: push_event's PATCH only touches
         # keys present in the payload, so a mote that lost its recurrence

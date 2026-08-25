@@ -77,7 +77,10 @@ def occurrence_payload(occurrence: Occurrence, directory: Directory) -> dict:
     asking a second question. `key` is per-occurrence rather than per-mote
     because a recurring mote appears many times in one week and the DOM
     needs to tell those apart; `id` stays the mote's, because clicking
-    any of them opens the same mote."""
+    any of them opens the same mote. `start` and `end` are also what a
+    drag sends back to say which placement it grabbed -- an occurrence
+    has no id of its own, and its start is what identifies it inside a
+    series."""
     return {
         **directory.describe(occurrence.mote.id),
         "key": f"{occurrence.mote.id}:{occurrence.binding}:{occurrence.start.isoformat()}",
@@ -85,6 +88,11 @@ def occurrence_payload(occurrence: Occurrence, directory: Directory) -> dict:
         "start": occurrence.start.isoformat(),
         "end": occurrence.end.isoformat(),
         "allDay": occurrence.all_day,
+        # Whether dropping this rectangle somewhere else has to ask
+        # "this occurrence, or the whole series?" first. core answered it
+        # while expanding the rule (core/calendar.py::is_recurring), so
+        # no JavaScript ever parses an RRULE.
+        "recurring": occurrence.recurring,
     }
 
 
