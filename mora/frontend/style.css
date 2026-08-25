@@ -1,6 +1,6 @@
 /* mora/frontend/style.css
    Mora's window, sharing the main app's palette so the two read as one
-   product -- the tokens below are ui/frontend/style.css's, deliberately
+   product -- the tokens below are monarch/frontend/style.css's, deliberately
    copied rather than imported: pywebview's http server roots at the
    directory of the page it serves, so a stylesheet one directory over
    is not reachable. Colours are OKLCH, which this WebKitGTK build

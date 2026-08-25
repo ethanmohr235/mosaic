@@ -1,12 +1,12 @@
 # mora/api.py
 """JS-facing bridge for Mora, the .modoc editor.
 
-A fourth adapter over core/, alongside cli/, ui/ and mcp_server/ -- not
-part of ui/, because Mora is its own window with its own concerns and
-sharing ui/api.py would mean sharing a garden connection between two
+A fourth adapter over core/, alongside cli/, monarch/ and mcp_server/ -- not
+part of monarch/, because Mora is its own window with its own concerns and
+sharing monarch/api.py would mean sharing a garden connection between two
 windows that open and close independently.
 
-It follows ui/api.py's shape deliberately: one long-lived connection for
+It follows monarch/api.py's shape deliberately: one long-lived connection for
 the open garden, held as instance state, with every exposed method
 serialized behind a lock because pywebview calls in from a pool of
 worker threads.
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 MAX_STEP = 60
 _SEARCH_LIMIT = 12
 # How long a write waits out a lock held by another process before
-# giving up. Mora is opened *from* the graph window (ui/api.py::
+# giving up. Mora is opened *from* Monarch (monarch/api.py::
 # open_mora), so two processes holding the same garden file open at
 # once is the normal case here, not the exception -- the same reason
 # mcp_server/server.py sets this. core/db.py stays untouched, so the
@@ -50,7 +50,7 @@ def _synchronized(method):
     """pywebview invokes exposed methods from a worker thread, and not
     the same one each time. The connection is opened check_same_thread=
     False, so serializing here is this class's job -- the same reason
-    ui/api.py has this decorator."""
+    monarch/api.py has this decorator."""
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         with self._lock:
@@ -82,7 +82,7 @@ class Api:
         return conn
 
     def _best_effort_sync(self) -> None:
-        """Same call, same reasoning, as ui/api.py::Api._best_effort_sync:
+        """Same call, same reasoning, as monarch/api.py::Api._best_effort_sync:
         run_mora.py is its own launch path, not only ever opened from the
         graph window, so a note edited here must converge on its own
         rather than depending on that other window's session having also

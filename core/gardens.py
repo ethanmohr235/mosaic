@@ -90,7 +90,7 @@ def create_garden(name: str) -> str:
     # A reserved garden is MonOSS's own, brought into being lazily by
     # whatever owns it (core/library.py) rather than created by hand --
     # letting a user create one would mean colliding with that storage.
-    # This used to be checked in ui/api.py alone, so the CLI and MCP
+    # This used to be checked in monarch/api.py alone, so the CLI and MCP
     # could both create a garden the UI then refused to show.
     if is_reserved_garden(name):
         raise ValueError(f"{name!r} is reserved for MonOSS's own use.")
@@ -174,7 +174,7 @@ def _auto_sync_trash_path(name: str) -> Path:
 
 
 def get_auto_sync_enabled(name: str) -> bool:
-    """Whether the lifecycle sync points (ui/api.py::_best_effort_sync)
+    """Whether the lifecycle sync points (monarch/api.py::_best_effort_sync)
     should fire automatically. Defaults to True when absent, so a garden
     that already had a sync dir configured keeps today's always-on
     behavior. False doesn't touch the sync dir itself -- "Sync now"

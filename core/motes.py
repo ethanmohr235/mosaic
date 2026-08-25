@@ -10,7 +10,7 @@ from core.entities import Mote
 
 # Matches "key = value" (or "key=value"), e.g. "priority = high" --
 # structured equality on a specific property, shared with
-# ui/frontend/app.js::matchesQuery so a query behaves the same whether
+# monarch/frontend/app.js::matchesQuery so a query behaves the same whether
 # typed into the graph's search bar or an LLM's MCP call.
 _KEY_VALUE_QUERY_RE = re.compile(r"^\s*([^=\s][^=]*?)\s*=\s*(.*)$")
 
@@ -115,7 +115,7 @@ def search_motes(conn: sqlite3.Connection, query: str, limit: int = 60) -> list[
     value. An empty/blank query matches everything, same as the UI's own
     search palette does with nothing typed.
 
-    ui/frontend/app.js::matchesQuery is the same function for the search
+    monarch/frontend/app.js::matchesQuery is the same function for the search
     palette (which filters an already-cached array rather than round-
     tripping per keystroke). The two are kept behaviourally identical --
     same query forms, matched against the same three things -- so a query

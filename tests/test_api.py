@@ -4,10 +4,10 @@ import webbrowser
 
 import pytest
 
-import ui.api
+import monarch.api
 from core.gardens import create_garden, garden_exists, get_sync_dir
 from core.simulation import SimulationError, run_simulation
-from ui.api import Api, _coerce_properties
+from monarch.api import Api, _coerce_properties
 
 
 class _StubWindow:
@@ -465,7 +465,7 @@ def test_best_effort_sync_skips_when_auto_sync_disabled(api, tmp_path, monkeypat
     create_garden("other")
 
     calls = []
-    monkeypatch.setattr(ui.api.sync_repo, "run", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(monarch.api.sync_repo, "run", lambda *a, **k: calls.append(1))
 
     api.switch_garden("other")  # "other" has no sync dir -- guard never reached
     api.switch_garden("test")   # back on "test": sync dir set, auto-sync off
@@ -477,7 +477,7 @@ def test_best_effort_sync_runs_when_auto_sync_enabled(api, tmp_path, monkeypatch
     create_garden("other")
 
     calls = []
-    monkeypatch.setattr(ui.api.sync_repo, "run", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(monarch.api.sync_repo, "run", lambda *a, **k: calls.append(1))
 
     api.switch_garden("other")
     api.switch_garden("test")
@@ -493,7 +493,7 @@ def test_shutdown_skips_sync_when_auto_sync_disabled(tmp_path, monkeypatch):
     inst.set_auto_sync(False)
 
     calls = []
-    monkeypatch.setattr(ui.api.sync_repo, "run", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(monarch.api.sync_repo, "run", lambda *a, **k: calls.append(1))
 
     inst.shutdown()
     assert calls == []
@@ -543,7 +543,7 @@ def test_open_link_launches_a_local_file_via_the_os_default_app(api, monkeypatch
     f = tmp_path / "note.txt"
     f.write_text("hi")
     calls = []
-    monkeypatch.setattr(ui.api, "_open_with_os_default", lambda p: calls.append(p))
+    monkeypatch.setattr(monarch.api, "_open_with_os_default", lambda p: calls.append(p))
     browser_calls = []
     monkeypatch.setattr(webbrowser, "open", lambda x: browser_calls.append(x))
 
@@ -562,17 +562,17 @@ def test_open_with_os_default_prefers_gio_on_linux(monkeypatch):
     # gio detects content-type the same way GTK file managers do; xdg-open
     # uses a cruder heuristic that can disagree and silently land on the
     # wrong app (this is the actual bug that was reported and reproduced).
-    monkeypatch.setattr(ui.api.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(monarch.api.platform, "system", lambda: "Linux")
     calls = []
-    monkeypatch.setattr(ui.api.subprocess, "Popen", lambda args, **kw: calls.append(args) or _FakeProc())
+    monkeypatch.setattr(monarch.api.subprocess, "Popen", lambda args, **kw: calls.append(args) or _FakeProc())
 
-    ui.api._open_with_os_default("/tmp/some/file.py")
+    monarch.api._open_with_os_default("/tmp/some/file.py")
 
     assert calls == [["gio", "open", "/tmp/some/file.py"]]
 
 
 def test_open_with_os_default_falls_back_to_xdg_open_if_gio_is_missing(monkeypatch):
-    monkeypatch.setattr(ui.api.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(monarch.api.platform, "system", lambda: "Linux")
     calls = []
 
     def fake_popen(args, **kwargs):
@@ -581,9 +581,9 @@ def test_open_with_os_default_falls_back_to_xdg_open_if_gio_is_missing(monkeypat
             raise FileNotFoundError()
         return _FakeProc()
 
-    monkeypatch.setattr(ui.api.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(monarch.api.subprocess, "Popen", fake_popen)
 
-    ui.api._open_with_os_default("/tmp/some/file.py")
+    monarch.api._open_with_os_default("/tmp/some/file.py")
 
     assert calls == [["gio", "open", "/tmp/some/file.py"], ["xdg-open", "/tmp/some/file.py"]]
 
@@ -599,7 +599,7 @@ def _mora_commands(monkeypatch):
     """What open_mora would actually launch, without launching it."""
     launched = []
     monkeypatch.setattr(
-        ui.api, "_popen_detached", lambda args, **kwargs: launched.append(args)
+        monarch.api, "_popen_detached", lambda args, **kwargs: launched.append(args)
     )
     return launched
 
@@ -644,9 +644,9 @@ def test_export_to_google_calendar_creates_events_and_writes_back_ids(api, monke
         pushed.append((payload["summary"], existing_event_id))
         return f"event-for-{payload['summary']}"
 
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
-    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
-    monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "list_managed_events", lambda credentials: {})
+    monkeypatch.setattr(monarch.api.gcal_repo, "push_event", fake_push_event)
 
     result = api.export_to_google_calendar()
 
@@ -663,10 +663,10 @@ def test_export_to_google_calendar_excludes_a_dated_template_mote(api, monkeypat
     real = api.create_mote({"name": "Real deadline", "date": "2026-08-20"})
 
     pushed = []
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
-    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "list_managed_events", lambda credentials: {})
     monkeypatch.setattr(
-        ui.api.gcal_repo, "push_event",
+        monarch.api.gcal_repo, "push_event",
         lambda credentials, payload, existing_event_id: pushed.append(payload["summary"]) or "evt",
     )
 
@@ -685,10 +685,10 @@ def test_export_to_google_calendar_excludes_a_dated_scenario_override(api, monke
     api.create_relationship(override["id"], task["id"], "overrides")
 
     pushed = []
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
-    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "list_managed_events", lambda credentials: {})
     monkeypatch.setattr(
-        ui.api.gcal_repo, "push_event",
+        monarch.api.gcal_repo, "push_event",
         lambda credentials, payload, existing_event_id: pushed.append(payload["summary"]) or "evt",
     )
 
@@ -707,9 +707,9 @@ def test_export_to_google_calendar_reuses_the_existing_event_id_on_a_second_run(
         calls.append(existing_event_id)
         return "same-event-id"
 
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
-    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
-    monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "list_managed_events", lambda credentials: {})
+    monkeypatch.setattr(monarch.api.gcal_repo, "push_event", fake_push_event)
 
     first = api.export_to_google_calendar()
     second = api.export_to_google_calendar()
@@ -723,9 +723,9 @@ def test_export_to_google_calendar_reuses_the_existing_event_id_on_a_second_run(
 def test_export_to_google_calendar_skips_a_mote_with_an_unparseable_date(api, monkeypatch):
     api.create_mote({"name": "Bad", "date": "not-a-date"})
     calls = []
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
-    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
-    monkeypatch.setattr(ui.api.gcal_repo, "push_event", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "list_managed_events", lambda credentials: {})
+    monkeypatch.setattr(monarch.api.gcal_repo, "push_event", lambda *a, **k: calls.append(1))
 
     result = api.export_to_google_calendar()
 
@@ -743,9 +743,9 @@ def test_export_to_google_calendar_does_not_write_back_if_the_garden_changed_mid
         api.switch_garden("other")
         return "event-id"
 
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
-    monkeypatch.setattr(ui.api.gcal_repo, "list_managed_events", lambda credentials: {})
-    monkeypatch.setattr(ui.api.gcal_repo, "push_event", fake_push_event)
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "list_managed_events", lambda credentials: {})
+    monkeypatch.setattr(monarch.api.gcal_repo, "push_event", fake_push_event)
 
     api.export_to_google_calendar()
 
@@ -755,12 +755,12 @@ def test_export_to_google_calendar_does_not_write_back_if_the_garden_changed_mid
 
 def test_export_to_google_calendar_deletes_an_event_whose_mote_is_gone(api, monkeypatch):
     deleted = []
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
     monkeypatch.setattr(
-        ui.api.gcal_repo, "list_managed_events",
+        monarch.api.gcal_repo, "list_managed_events",
         lambda credentials: {"never-existed-or-deleted": "orphan-event-id"},
     )
-    monkeypatch.setattr(ui.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
+    monkeypatch.setattr(monarch.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
 
     result = api.export_to_google_calendar()
 
@@ -771,12 +771,12 @@ def test_export_to_google_calendar_deletes_an_event_whose_mote_is_gone(api, monk
 def test_export_to_google_calendar_deletes_an_event_whose_mote_lost_its_date(api, monkeypatch):
     m = api.create_mote({"name": "No longer dated"})  # never had a date
     deleted = []
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
     monkeypatch.setattr(
-        ui.api.gcal_repo, "list_managed_events",
+        monarch.api.gcal_repo, "list_managed_events",
         lambda credentials: {m["id"]: "stale-event-id"},
     )
-    monkeypatch.setattr(ui.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
+    monkeypatch.setattr(monarch.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
 
     result = api.export_to_google_calendar()
 
@@ -787,13 +787,13 @@ def test_export_to_google_calendar_deletes_an_event_whose_mote_lost_its_date(api
 def test_export_to_google_calendar_does_not_delete_a_still_dated_motes_event(api, monkeypatch):
     m = api.create_mote({"name": "Still dated", "date": "2026-08-15T09:00:00"})
     deleted = []
-    monkeypatch.setattr(ui.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
+    monkeypatch.setattr(monarch.api.gcal_repo, "get_credentials", lambda: _FakeCredentials())
     monkeypatch.setattr(
-        ui.api.gcal_repo, "list_managed_events",
+        monarch.api.gcal_repo, "list_managed_events",
         lambda credentials: {m["id"]: "current-event-id"},
     )
-    monkeypatch.setattr(ui.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
-    monkeypatch.setattr(ui.api.gcal_repo, "push_event", lambda credentials, payload, existing_event_id: "current-event-id")
+    monkeypatch.setattr(monarch.api.gcal_repo, "delete_event", lambda credentials, event_id: deleted.append(event_id))
+    monkeypatch.setattr(monarch.api.gcal_repo, "push_event", lambda credentials, payload, existing_event_id: "current-event-id")
 
     result = api.export_to_google_calendar()
 

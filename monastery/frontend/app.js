@@ -49,7 +49,7 @@ const $ = (id) => document.getElementById(id);
 
 // ---- colour -------------------------------------------------------
 //
-// Byte-for-byte the hash ui/frontend/graph.js uses, the same copy Mora
+// Byte-for-byte the hash monarch/frontend/graph.js uses, the same copy Mora
 // carries. Three windows disagreeing about what colour "Meeting" is
 // would be worse than any of them being arbitrary.
 
@@ -103,7 +103,7 @@ function eventTint(entry, selected) {
 }
 
 /** What a mote *is*: the kinds core says it is, else its species, else
- *  plain "mote". The same order ui/frontend/app.js::kindLabel uses. */
+ *  plain "mote". The same order monarch/frontend/app.js::kindLabel uses. */
 function kindOf(entry) {
   if (!entry) return "mote";
   const kinds = entry.kinds || [];
@@ -1362,7 +1362,7 @@ function setView(next) {
 
 // ---- polling -------------------------------------------------------
 //
-// Nothing in MonOSS pushes: the graph window, the CLI and the MCP server
+// Nothing in MonOSS pushes: Monarch, the CLI and the MCP server
 // all write the same file and none of them announces it (see
 // docs/architecture.md). So the calendar asks again, on a timer, and
 // only while the window is focused -- a background window polling a

@@ -1,14 +1,26 @@
-# ui/app.py
+# monarch/app.py
+"""The Monarch window: the graph itself, and the first of the three.
+
+Mora (mora/app.py) and Monastery (monastery/app.py) are its twins --
+same pywebview settings, same cache workaround, different frontend and
+different Api. Each is its own window on the same gardens rather than a
+pane inside this one, so any of them can be closed, moved to a second
+monitor, or opened alone.
+"""
 import shutil
 from pathlib import Path
 
 import webview
 
-from ui.api import Api
+from monarch.api import Api
 
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data"
+# Its own storage directory, a sibling of Mora's and Monastery's and
+# never a parent of either. All three run at once by design, and
+# _clear_http_cache() below deletes what is under this path on startup --
+# a shared directory would mean deleting a running window's cache.
+WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_monarch"
 
 
 def _clear_http_cache() -> None:
@@ -29,11 +41,12 @@ def _clear_http_cache() -> None:
     saved node positions and last-focused mote, which must survive. There
     is nothing to gain from caching files served off local disk anyway.
 
-    Mora is the other app on these gardens and it must not want this
-    port: it runs at the same time as this one (see Api.open_mora), and
-    the loser of that race does not merely fail to bind -- it points its
-    window at the winner's address and loads the wrong app's page. See
-    mora/app.py, which asks for 42002 and its own storage directory.
+    Mora and Monastery are the other apps on these gardens and neither
+    may want this port: they run at the same time as this one (see
+    Api.open_mora/open_monastery), and the loser of that race does not
+    merely fail to bind -- it points its window at the winner's address
+    and loads the wrong app's page. See mora/app.py and monastery/app.py,
+    which ask for 42002 and 42003 and their own storage directories.
     """
     shutil.rmtree(WEBVIEW_STORAGE_DIR / "cache", ignore_errors=True)
 
@@ -42,7 +55,7 @@ def launch(garden: str | None = None) -> None:
     _clear_http_cache()
     api = Api(garden)
     window = webview.create_window(
-        "MonOSS",
+        "Monarch",
         url=str(FRONTEND_DIR / "index.html"),
         js_api=api,
         width=1280,

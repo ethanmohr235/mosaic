@@ -194,7 +194,7 @@ class _GardenView:
 
 def step_payloads(steps: "list[StepResult] | list[RunTick]") -> list[dict]:
     """The canonical JSON-safe form of a run's steps, shared by every
-    adapter that has to put them on a wire (ui/api.py's JS bridge,
+    adapter that has to put them on a wire (monarch/api.py's JS bridge,
     mcp_server/server.py's tools) so the same object never reaches two
     surfaces in two shapes -- which it previously did, one of them
     silently missing equation_count.

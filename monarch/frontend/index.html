@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>MonOSS</title>
+<title>Monarch</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,8 +17,13 @@
       <circle cx="88" cy="34" r="10" fill="var(--fg)"></circle>
       <circle cx="70" cy="92" r="10" fill="var(--fg)"></circle>
     </svg>
-    <span id="brand-name">MonOSS</span>
+    <div id="brand-text">
+      <span id="brand-name">Monarch</span>
+      <span id="brand-sub">MonOSS</span>
+    </div>
   </div>
+
+  <div class="rule"></div>
 
   <div class="topbar-menu">
     <button id="garden-btn" class="topbar-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
@@ -299,6 +304,23 @@
     </aside>
   </div>
 </main>
+
+<footer id="statusbar">
+  <span id="status-garden">…</span>
+  <span class="dot">·</span>
+  <span id="status-motes">0 motes</span>
+  <span class="dot">·</span>
+  <span id="status-rels">0 relationships</span>
+  <span class="dot">·</span>
+  <span id="status-depth">whole garden</span>
+  <span id="status-selection"></span>
+  <div class="spacer"></div>
+  <span class="hint"><kbd>⌘K</kbd> search</span>
+  <span class="dot">·</span>
+  <span class="hint"><kbd>ctrl+drag</kbd> connect</span>
+  <span class="dot">·</span>
+  <span class="hint"><kbd>scroll</kbd> zoom</span>
+</footer>
 
 <div id="context-menu" class="hidden menu"></div>
 

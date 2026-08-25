@@ -33,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 // ---- colour -------------------------------------------------------
 //
-// Byte-for-byte the hash ui/frontend/graph.js uses, so a mote is the
+// Byte-for-byte the hash monarch/frontend/graph.js uses, so a mote is the
 // same colour in Mora as it is on the canvas. Two windows disagreeing
 // about what colour "Task" is would be worse than either of them being
 // arbitrary.
@@ -63,7 +63,7 @@ function colorOf(entry) {
 }
 
 /** What a mote *is*: the kinds core says it is, else its species, else
- *  plain "mote". The same order ui/frontend/app.js::kindLabel uses, so
+ *  plain "mote". The same order monarch/frontend/app.js::kindLabel uses, so
  *  the two windows describe a mote the same way. */
 function kindOf(entry) {
   if (!entry) return "mote";

@@ -87,7 +87,7 @@ def test_folders_of_and_folder_members_issue_a_constant_number_of_queries(conn):
 
 def test_folder_ids_in_counts_only_in_folder_relationships():
     """Mirrors core/species.py::species_ids_in -- one definition of "is a
-    folder", used both by list_folders() and by ui/api.py classifying an
+    folder", used both by list_folders() and by monarch/api.py classifying an
     already-fetched subgraph."""
     rels = [
         Relationship(from_id="entropy", to_id="thermo", type="in_folder"),

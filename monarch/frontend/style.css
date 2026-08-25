@@ -1,7 +1,15 @@
-/* ui/frontend/style.css
-   Dark-only, following the Claude Design redesign. Colours are OKLCH --
-   verified working in this WebKitGTK build in both CSS and canvas
-   fillStyle, which is why graph.js can use the same notation. */
+/* monarch/frontend/style.css
+   Monarch's window. Dark-only, following the Claude Design redesign, and
+   the origin of the palette Mora and Monastery copy verbatim into their
+   own stylesheets -- pywebview's http server roots at the directory of
+   the page it serves, so a stylesheet one directory over is not
+   reachable, and three copies of the token block is the price of three
+   windows that look like one product. Keep the shared tokens below in
+   step with mora/frontend/style.css and monastery/frontend/style.css;
+   the ones after them (graph, selection, portal) are Monarch's own.
+   Colours are OKLCH -- verified working in this WebKitGTK build in both
+   CSS and canvas fillStyle, which is why graph.js can use the same
+   notation. */
 
 @font-face {
   font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400;
@@ -30,20 +38,33 @@
 
 :root {
   color-scheme: dark;
-  --bg: oklch(0.17 0 0);
-  --graph-bg: oklch(0.15 0 0);
-  --graph-label-bg: oklch(0.15 0 0 / 0.88);
+  /* ---- shared with Mora and Monastery ---- */
+  --bg: oklch(0.145 0 0);
   --panel: oklch(0.205 0 0);
+  --panel-bg: oklch(0.165 0 0);
   --raised: oklch(0.24 0 0);
   --border: oklch(0.32 0 0);
-  --border-soft: oklch(0.27 0 0);
+  --border-soft: oklch(1 0 0 / 0.08);
+  --hairline: oklch(1 0 0 / 0.05);
   --fg: oklch(0.93 0 0);
-  --fg-bright: oklch(0.96 0 0);
+  --fg-bright: oklch(0.97 0 0);
   --muted: oklch(0.68 0 0);
   --faint: oklch(0.48 0 0);
   --accent: oklch(0.74 0.10 68);
   --accent-bright: oklch(0.82 0.11 68);
+  --accent-soft: oklch(0.74 0.10 68 / 0.12);
   --danger: oklch(0.65 0.15 25);
+  --unknown: oklch(0.62 0 0);
+  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --serif: "IBM Plex Serif", Georgia, serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ---- Monarch's own ---- */
+  /* The canvas is this window's content surface, so it sits a shade
+     above the chrome around it -- the same relationship Mora's reading
+     pane and Monastery's week grid have to their own topbars. */
+  --graph-bg: oklch(0.155 0 0);
+  --graph-label-bg: oklch(0.155 0 0 / 0.88);
   /* Relationship-selection accent -- deliberately a different hue from
      --accent (amber) and --danger (red), so a directly-selected edge (via
      click, shift+click, or the shift+drag relation box-select) never
@@ -55,10 +76,6 @@
      from --accent (amber, selection/sim), --danger (red), and
      --select-rel (blue, relationship selection). */
   --portal-ring: oklch(0.76 0.16 300 / 0.9);
-  --accent-soft: oklch(0.74 0.10 68 / 0.12);
-  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --serif: "IBM Plex Serif", Georgia, serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -73,6 +90,16 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .hidden { display: none !important; }
 .spacer { flex: 1; }
 .muted { color: var(--muted); }
+/* The vertical hairline between topbar groups, same as Mora's. */
+.rule { width: 1px; align-self: stretch; margin: 11px 0; background: var(--border-soft); flex-shrink: 0; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 0.1); border-radius: 6px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: oklch(1 0 0 / 0.2); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
 
 /* ---- controls ---- */
 
@@ -81,8 +108,9 @@ button, input, select, textarea {
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 7px 10px;
+  padding: 5px 11px;
 }
+input, select, textarea { padding: 6px 9px; }
 button { cursor: pointer; }
 button:hover { border-color: oklch(0.42 0 0); }
 button:disabled { opacity: 0.55; cursor: default; }
@@ -99,23 +127,33 @@ button.ghost { background: transparent; color: var(--muted); }
 button.ghost:hover { color: var(--fg); border-color: var(--accent); }
 button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
 button.wide { width: 100%; }
+/* Mora's .link-button, under the name this window already used for it:
+   a small mono line, not a control with a box around it. */
 button.linkish {
   background: none; border: none; padding: 0;
-  color: var(--muted); font-size: 11.5px; text-align: left;
+  color: var(--faint); font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: 0.06em; text-align: left;
 }
-button.linkish:hover { color: var(--fg); }
+button.linkish:hover { color: var(--fg); border-color: transparent; }
 
 /* ---- topbar ---- */
 
 #topbar {
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 18px;
-  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+  height: 46px; padding: 0 14px;
+  border-bottom: 1px solid var(--border-soft); background: var(--bg);
   flex-shrink: 0; position: relative; z-index: 8;
 }
 
 #brand { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
-#brand-name { font-family: var(--serif); font-size: 19px; font-weight: 500; letter-spacing: 0.01em; }
+#brand-text { display: flex; flex-direction: column; gap: 1px; line-height: 1; }
+#brand-name { font-family: var(--serif); font-size: 15px; font-weight: 500; letter-spacing: 0.01em; }
+/* The window is Monarch; the product under all three windows is MonOSS.
+   Same two-line brand block Mora and Monastery carry. */
+#brand-sub {
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--faint);
+}
 
 #topbar-menus { display: flex; align-items: center; gap: 2px; }
 /* Anchors each dropdown's .menu (position:absolute) to its own trigger
@@ -128,37 +166,42 @@ button.linkish:hover { color: var(--fg); }
 .topbar-trigger {
   display: flex; align-items: center; gap: 8px;
   background: transparent; border: 1px solid transparent;
-  border-radius: 7px; padding: 6px 10px;
+  border-radius: 8px; padding: 5px 10px;
   font-size: 13px; color: var(--muted);
 }
-.topbar-trigger:hover { background: var(--panel); border-color: transparent; color: var(--fg); }
+.topbar-trigger:hover { background: var(--panel); border-color: var(--border-soft); color: var(--fg); }
 .topbar-trigger.open { background: var(--raised); color: var(--accent); }
-#garden-btn .caret { color: var(--faint); font-size: 11px; }
+#garden-btn { max-width: 30ch; }
+#garden-label {
+  font-family: var(--serif); font-size: 14px; color: var(--fg-bright);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.caret, #garden-btn .caret { color: var(--faint); font-size: 11px; }
 
 .menu {
   position: absolute; top: calc(100% + 6px); left: 0;
   min-width: 220px; background: var(--panel);
-  border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  overflow: hidden; z-index: 20;
+  border: 1px solid var(--border-soft); border-radius: 10px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  padding: 5px; z-index: 20;
 }
 .menu-item {
-  padding: 9px 14px; font-size: 13px; cursor: pointer;
+  padding: 6px 9px; font-size: 12.5px; cursor: pointer; border-radius: 7px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .menu-item:hover { background: var(--raised); }
 .menu-item.accent { color: var(--accent); }
 .menu-item.danger { color: var(--danger); }
 .menu-item.disabled { color: var(--faint); cursor: default; pointer-events: none; }
-.menu-sep { border-top: 1px solid var(--border-soft); }
+.menu-sep { border-top: 1px solid var(--border-soft); margin: 4px 5px; }
 
 /* The topbar's File/View/Tools/garden menus build their real items as
    actual <button>s (unlike #context-menu, which builds divs from JS) so
    disabled/soon rows get native semantics for free -- this resets the
    generic button look back to .menu-item's. */
 .menu button.menu-item {
-  width: 100%; background: none; border: none; border-radius: 0;
-  padding: 9px 14px; font: inherit; color: inherit; text-align: left;
+  width: 100%; background: none; border: none; border-radius: 7px;
+  padding: 6px 9px; font: inherit; color: inherit; text-align: left;
 }
 /* .menu button.menu-item's own specificity beats plain .menu-item:hover,
    so the hover background above was silently never winning for any of
@@ -182,7 +225,7 @@ button.linkish:hover { color: var(--fg); }
    there's no dedicated #sim-controls topbar slot. */
 .menu-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 8px 14px; font-size: 13px; color: var(--muted); cursor: default;
+  padding: 6px 9px; font-size: 12.5px; color: var(--muted); cursor: default;
 }
 .menu-row input { width: 64px; text-align: center; padding: 4px 6px; font-size: 12px; }
 .menu-row select { padding: 4px 6px; font-size: 12px; }
@@ -210,12 +253,14 @@ button.linkish:hover { color: var(--fg); }
 
 #search-btn {
   display: flex; align-items: center; gap: 9px;
-  width: 260px; background: var(--panel);
-  color: var(--muted); font-size: 13px; flex-shrink: 0;
+  width: 240px; background: oklch(0.185 0 0);
+  border-color: var(--border-soft); border-radius: 8px;
+  color: var(--faint); font-size: 12.5px; flex-shrink: 0;
 }
+#search-btn:hover { background: var(--raised); border-color: var(--border-soft); color: var(--muted); }
 #search-btn kbd {
-  margin-left: auto; font-family: var(--sans); font-size: 10.5px;
-  color: var(--faint); border: 1px solid var(--border);
+  margin-left: auto; font-family: var(--mono); font-size: 10px;
+  color: var(--faint); border: 1px solid var(--border-soft);
   border-radius: 4px; padding: 1px 5px;
 }
 .search-glyph {
@@ -235,25 +280,35 @@ main { flex: 1; min-height: 0; display: flex; }
 
 #empty-state {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 4px;
+  align-items: center; justify-content: center; gap: 6px;
   pointer-events: none; color: var(--muted);
 }
+#empty-state p:first-child { font-family: var(--serif); font-size: 16px; color: var(--fg-bright); }
+#empty-state .muted { font-size: 12px; color: var(--faint); }
 
+/* One eyebrow for every section head in the window, and the same one
+   Mora's pane labels and Monastery's rail/panel heads use: mono, small,
+   widely tracked, uppercase. It replaced a serif italic that was
+   Monarch's alone. */
 .panel-heading {
-  font-family: var(--serif); font-style: italic;
-  font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--faint); margin: 14px 0 8px;
+  font-family: var(--mono); font-size: 9.5px;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--faint); margin: 16px 0 9px;
 }
 .panel-heading:first-child { margin-top: 0; }
-.panel-title { font-family: var(--serif); font-size: 14px; margin-bottom: 10px; }
-.panel-divider { border-top: 1px solid var(--border-soft); margin: 12px 0 10px; }
+.panel-title {
+  font-family: var(--serif); font-size: 15px;
+  color: var(--fg-bright); margin-bottom: 11px;
+}
+.panel-divider { border-top: 1px solid var(--hairline); margin: 13px 0 11px; }
 
 #control-panel {
   position: absolute; top: 16px; right: 16px;
-  width: 210px; max-height: calc(100% - 32px); overflow-y: auto;
-  background: oklch(0.205 0 0 / 0.94);
-  border: 1px solid var(--border-soft); border-radius: 10px;
-  padding: 12px 13px; z-index: 4;
+  width: 214px; max-height: calc(100% - 32px); overflow-y: auto;
+  background: oklch(0.165 0 0 / 0.94);
+  border: 1px solid var(--border-soft); border-radius: 12px;
+  padding: 13px 14px; z-index: 4;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
 }
 
 /* ---- runs panel ---- */
@@ -261,9 +316,10 @@ main { flex: 1; min-height: 0; display: flex; }
 #runs-panel {
   position: absolute; top: 16px; left: 16px;
   width: 260px; max-height: calc(100% - 32px);
-  background: oklch(0.205 0 0 / 0.94);
-  border: 1px solid var(--border-soft); border-radius: 10px;
-  padding: 12px 13px; z-index: 4;
+  background: oklch(0.165 0 0 / 0.94);
+  border: 1px solid var(--border-soft); border-radius: 12px;
+  padding: 13px 14px; z-index: 4;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
   display: flex; flex-direction: column;
 }
 #close-runs-panel {
@@ -307,9 +363,10 @@ main { flex: 1; min-height: 0; display: flex; }
 #view-settings-panel {
   position: absolute; top: 16px; left: 16px;
   width: 272px; max-height: calc(100% - 32px);
-  background: oklch(0.205 0 0 / 0.94);
-  border: 1px solid var(--border-soft); border-radius: 10px;
-  padding: 12px 13px; z-index: 4;
+  background: oklch(0.165 0 0 / 0.94);
+  border: 1px solid var(--border-soft); border-radius: 12px;
+  padding: 13px 14px; z-index: 4;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
   display: flex; flex-direction: column;
 }
 #close-view-settings {
@@ -403,9 +460,9 @@ main { flex: 1; min-height: 0; display: flex; }
   display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
 }
 #quick-add {
-  width: 310px; background: var(--panel);
-  border: 1px solid var(--border); border-radius: 12px; padding: 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  width: 310px; background: oklch(0.185 0 0);
+  border: 1px solid var(--border-soft); border-radius: 14px; padding: 15px;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 26px 60px rgba(0, 0, 0, 0.55);
 }
 /* "New mote here" (right-click on empty canvas) opens the form near the
    click instead of always at the bottom-left corner -- fixed positioning
@@ -422,7 +479,7 @@ main { flex: 1; min-height: 0; display: flex; }
 #species-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .chip {
   display: flex; align-items: center; gap: 6px;
-  background: var(--raised); border: 1.5px solid var(--border);
+  background: var(--panel); border: 1.5px solid var(--border-soft);
   border-radius: 999px; padding: 4px 10px; font-size: 11.5px;
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -438,9 +495,9 @@ main { flex: 1; min-height: 0; display: flex; }
 
 #detail-panel {
   position: absolute; top: 0; right: 0; bottom: 0;
-  width: var(--detail-width, 360px); background: var(--panel);
-  border-left: 1px solid var(--border);
-  padding: 20px 20px 28px; overflow-y: auto; z-index: 6;
+  width: var(--detail-width, 360px); background: var(--panel-bg);
+  border-left: 1px solid var(--border-soft);
+  padding: 18px 18px 28px; overflow-y: auto; z-index: 6;
 }
 /* Straddles the panel's left border rather than sitting flush inside it,
    so the grab target isn't fighting the panel's own 20px content padding. */
@@ -470,12 +527,16 @@ main { flex: 1; min-height: 0; display: flex; }
 .multi-species-row .count { color: var(--faint); font-variant-numeric: tabular-nums; }
 #detail-type { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
 #detail-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
-#detail-type-label { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-#detail-title {
-  font-family: var(--serif); font-size: 21px;
-  color: var(--fg-bright); margin-bottom: 4px; word-break: break-word;
+#detail-type-label {
+  font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.16em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#detail-id { font-family: var(--mono); font-size: 11px; color: var(--faint); word-break: break-all; }
+#detail-title {
+  font-family: var(--serif); font-size: 18px; line-height: 1.3;
+  color: var(--fg-bright); margin-bottom: 5px; word-break: break-word;
+}
+#detail-id { font-family: var(--mono); font-size: 10px; color: var(--faint); word-break: break-all; }
 
 /* Key and value share a line -- the old panel was too narrow and stacked
    them, which is what made it ugly. Long values (rule equations) get a
@@ -591,14 +652,14 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 #search-modal {
   width: 560px; max-width: 90vw; max-height: 72vh;
-  background: var(--panel); border: 1px solid var(--border);
+  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
   border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   display: flex; flex-direction: column; overflow: hidden;
 }
 #search-input {
   border: none; border-bottom: 1px solid var(--border-soft);
   border-radius: 0; background: transparent;
-  padding: 17px 20px; font-size: 16px;
+  padding: 16px 20px; font-size: 15px; font-family: var(--serif);
 }
 .chip-row {
   display: flex; flex-wrap: wrap; gap: 6px;
@@ -622,7 +683,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .search-empty { padding: 20px; color: var(--faint); font-size: 13px; text-align: center; }
 #search-footer {
   padding: 8px 20px; border-top: 1px solid var(--border-soft);
-  color: var(--faint); font-size: 11px; display: flex; gap: 14px;
+  color: var(--faint); font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.06em; display: flex; gap: 14px;
 }
 
 /* ---- gardens modal ---- */
@@ -633,7 +695,7 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 #gardens-modal {
   width: 460px; max-width: 90vw; max-height: 72vh;
-  background: var(--panel); border: 1px solid var(--border);
+  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
   border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   display: flex; flex-direction: column; overflow: hidden;
   padding: 20px;
@@ -665,7 +727,7 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 #portal-modal {
   width: 480px; max-width: 90vw; max-height: 72vh;
-  background: var(--panel); border: 1px solid var(--border);
+  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
   border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   display: flex; flex-direction: column; overflow: hidden; padding: 20px;
 }
@@ -681,7 +743,7 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 #library-modal {
   width: 480px; max-width: 90vw; max-height: 72vh;
-  background: var(--panel); border: 1px solid var(--border);
+  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
   border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   display: flex; flex-direction: column; overflow: hidden; padding: 20px;
 }
@@ -699,7 +761,7 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 #sync-modal {
   width: 440px; max-width: 90vw; max-height: 72vh;
-  background: var(--panel); border: 1px solid var(--border);
+  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
   border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   display: flex; flex-direction: column; overflow: hidden; padding: 20px;
 }
@@ -722,9 +784,9 @@ main { flex: 1; min-height: 0; display: flex; }
 #sim-bar {
   position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
   z-index: 7; width: 560px; max-width: 92vw;
-  background: var(--panel); border: 1px solid var(--border);
+  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
   border-radius: 14px; padding: 14px 18px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 26px 60px rgba(0, 0, 0, 0.55);
   display: flex; flex-direction: column; gap: 11px;
 }
 #sim-bar.projected { border-color: oklch(0.55 0.14 68 / 0.6); }
@@ -733,7 +795,7 @@ main { flex: 1; min-height: 0; display: flex; }
 #sim-bar-top { display: flex; align-items: center; gap: 10px; }
 #sim-badge {
   display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em;
   text-transform: uppercase; color: var(--muted);
 }
 #sim-badge.projected { color: var(--accent); }
@@ -771,10 +833,11 @@ main { flex: 1; min-height: 0; display: flex; }
 /* ---- toast ---- */
 
 #toast {
-  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
-  background: var(--raised); border: 1px solid var(--border);
-  padding: 10px 18px; border-radius: 8px; font-size: 13px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); z-index: 40;
+  position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--border-soft);
+  padding: 8px 16px; border-radius: 10px; font-size: 12.5px;
+  color: oklch(0.92 0 0);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5); z-index: 40;
   max-width: 70vw;
 }
 
@@ -823,3 +886,28 @@ main { flex: 1; min-height: 0; display: flex; }
   color: var(--muted); border-left: 2px solid var(--accent);
 }
 #sim-bar-advisory .advisory-line { overflow-wrap: anywhere; }
+
+/* ---- status bar ---- */
+/*
+ * The window's bottom line, matching Mora's and Monastery's: mono, quiet,
+ * and never interactive. It answers "what am I looking at" -- which
+ * garden, how much of it is on screen at this depth, and what is selected
+ * -- so the canvas doesn't have to carry that in a floating panel.
+ */
+
+#statusbar {
+  height: 30px; flex-shrink: 0; border-top: 1px solid var(--border-soft);
+  background: var(--bg); display: flex; align-items: center; gap: 14px;
+  padding: 0 16px; font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+}
+#statusbar .dot { color: oklch(0.36 0 0); }
+#status-garden { color: var(--muted); }
+#status-selection { color: var(--accent-bright); }
+#status-selection:empty { display: none; }
+/* The hints sit at the far end and stay dimmer than the counts: they are
+   a reminder of a gesture, not a report on the graph. */
+#statusbar .hint { color: oklch(0.42 0 0); }
+#statusbar .hint kbd {
+  font-family: inherit; font-size: inherit; color: oklch(0.55 0 0);
+  border: none; background: none; padding: 0;
+}

@@ -59,7 +59,7 @@ class Directory:
 
     def _species_id(self, mote_id: str) -> str | None:
         """The first species a mote is an instance of -- the one the main
-        app's canvas colours it by (ui/frontend/graph.js::_speciesModeColor),
+        app's canvas colours it by (monarch/frontend/graph.js::_speciesModeColor),
         so a mote reads the same colour on the calendar as in the graph."""
         for relationship in self.relationships:
             if relationship.from_id == mote_id and relationship.type == species_repo.INSTANCE_OF:

@@ -296,7 +296,7 @@ def test_delete_event_tolerates_a_404(monkeypatch):
 
 # ---- the export itself ----
 #
-# This used to live in ui/api.py, where it could only be tested through a
+# This used to live in monarch/api.py, where it could only be tested through a
 # GUI bridge; it is core's now, so these drive it directly.
 
 class _FakeCredentials:

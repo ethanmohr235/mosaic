@@ -72,7 +72,7 @@ def create_portal(
     target_mote_id in target_garden. Validates both eagerly, before
     creating anything -- the target garden must exist, and the target
     mote must exist in it, checked via a short-lived second connection
-    (the pattern ui/api.py::export_garden already uses for reading a
+    (the pattern monarch/api.py::export_garden already uses for reading a
     named garden without disturbing the caller's own connection).
     Analogous to core/species.py's create_instance() being a validating
     convenience wrapper over create_mote()."""

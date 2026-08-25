@@ -1,11 +1,11 @@
 # mora/app.py
-"""The Mora window. ui/app.py's twin, and deliberately so -- same
+"""The Mora window. monarch/app.py's twin, and deliberately so -- same
 pywebview settings, same cache workaround, different frontend and
 different Api.
 
 A separate window rather than a view inside the main app: Mora opens on
 its own garden connection and closes independently, and a note editor
-that can only exist while the graph window is open is a note editor you
+that can only exist while Monarch is open is a note editor you
 cannot put on a second monitor.
 """
 import logging
@@ -21,7 +21,7 @@ FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Its own storage directory, next to but never inside the graph
-# window's. Both apps run at once by design (ui/api.py::open_mora), and
+# window's. Both apps run at once by design (monarch/api.py::open_mora), and
 # WebKit's cache/localstorage under one path is not something two
 # processes should be sharing -- least of all when _clear_http_cache()
 # below deletes it on startup, which would have been deleting the other
@@ -33,7 +33,7 @@ WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_mora"
 # window takes that one. Mora asking for it too is not a near miss: the
 # second process fails to bind, and its window then loads *the first
 # one's* page off 42001 and calls the wrong bridge. That is exactly what
-# happened -- a window titled Mora showing the MonOSS graph, failing on
+# happened -- a window titled Mora showing the Monarch graph, failing on
 # `api_reserved_names is not a function`.
 DEFAULT_HTTP_PORT = 42002
 
@@ -72,13 +72,13 @@ def _ephemeral_port() -> int:
 
 def _clear_http_cache() -> None:
     """Drop WebKit's HTTP cache before the window opens -- see
-    ui/app.py::_clear_http_cache for the bug this prevents: a fixed port
+    monarch/app.py::_clear_http_cache for the bug this prevents: a fixed port
     means an identical origin every run, so an edited frontend file
     silently doesn't appear.
 
     Only `cache/` goes; the sibling `localstorage/` is state meant to
     survive. Scoped to Mora's own storage directory, so this can never
-    reach into the graph window's."""
+    reach into Monarch's."""
     shutil.rmtree(WEBVIEW_STORAGE_DIR / "cache", ignore_errors=True)
 
 
