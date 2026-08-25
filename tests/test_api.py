@@ -456,6 +456,18 @@ def test_sync_status_reports_auto_sync_flag(api, tmp_path):
     assert api.sync_status()["auto_sync"] is False
 
 
+def test_refresh_skips_sync_when_not_configured(api):
+    assert api.refresh() == {"synced": False}
+
+
+def test_refresh_syncs_when_configured(api, tmp_path):
+    api.enable_sync(str(tmp_path))
+    api.create_mote({"name": "Alice"})
+    result = api.refresh()
+    assert result["synced"] is True
+    assert result["push"]["pushed"] >= 1
+
+
 def test_best_effort_sync_skips_when_auto_sync_disabled(api, tmp_path, monkeypatch):
     # _best_effort_sync() runs against self._current_garden *after* a
     # switch completes, so exercising the guard on "test" means switching

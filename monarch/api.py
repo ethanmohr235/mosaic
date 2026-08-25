@@ -397,6 +397,18 @@ class Api:
         rejection handling."""
         return sync_repo.run(self._conn, self._current_garden)
 
+    @_synchronized
+    def refresh(self) -> dict:
+        """Manual refresh button: sync (if configured) then let the
+        caller re-fetch the current view fresh from self._conn. Like
+        sync_now() and unlike _best_effort_sync(), a real sync error is
+        not swallowed. Unconfigured sync is not an error -- refresh is
+        also just "reload from disk" for a garden with no sync set up."""
+        if gardens_repo.get_sync_dir(self._current_garden) is None:
+            return {"synced": False}
+        result = sync_repo.run(self._conn, self._current_garden)
+        return {"synced": True, **result}
+
     # ---- portals ----
 
     @_synchronized

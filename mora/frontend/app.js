@@ -690,6 +690,24 @@ function wire() {
   editor.addEventListener("click", updatePicker);
 
   $("save").onclick = save;
+  $("refresh-btn").onclick = async () => {
+    const btn = $("refresh-btn");
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    try {
+      const result = await api.refresh();
+      notes = await api.list_notes();
+      const dirty = $("editor").value !== savedSource;
+      if (!dirty) await loadNote(noteId);
+      const base = result.synced ? "Synced" : "Refreshed";
+      toast(dirty ? `${base} (unsaved edits kept).` : `${base} and refreshed.`);
+    } catch (e) {
+      toast(String(e), true);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("spinning");
+    }
+  };
   $("data-toggle").onclick = () => { dataOpen = !dataOpen; applyLayout(); };
   document.querySelectorAll("#modes button").forEach((button) => {
     button.onclick = () => setMode(button.dataset.mode);

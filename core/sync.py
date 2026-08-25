@@ -30,6 +30,7 @@ worth the complexity of building around for v1.
 """
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,72 @@ def _row_to_op(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _backfill_orphans(conn: sqlite3.Connection, device_id: str) -> None:
+    """Synthesize the create_mote/create_relationship history that never
+    got logged for entities created before oplog logging existed in this
+    codebase (fc0b379) -- see module docstring. Idempotent: a second call
+    finds nothing, since the rows it inserts are themselves the evidence
+    it checks for next time. Called at the top of push() so every device
+    heals its own local garden before sending anything -- including a
+    device that already pushed an incomplete history once before this
+    existed, since the next push just sends the missing rows as new ones.
+
+    Only runs while this device has never pulled from a remote. A
+    replayed create is never logged locally on purpose (oplog.suppressed()
+    in pull(), so replay doesn't loop back out as if it were new local
+    history) -- so "no local create row" stops meaning "predates oplog"
+    the moment a second device's history has ever been merged in; it as
+    often just means "I received this from someone else." Only while
+    this device's own oplog is the entire story for the garden so far is
+    a missing create unambiguous.
+    """
+    if any(dev != device_id for dev in _all_state(conn)):
+        return
+
+    logged_motes: set[str] = set()
+    logged_rels: set[str] = set()
+    create_ts: dict[str, str] = {}
+    for row in conn.execute(
+        "SELECT action, payload, ts FROM oplog WHERE device_id = ? "
+        "AND action IN ('create_mote', 'create_relationship')", (device_id,)
+    ):
+        payload = json.loads(row["payload"])
+        (logged_motes if row["action"] == "create_mote" else logged_rels).add(payload["id"])
+        create_ts[payload["id"]] = row["ts"]
+
+    existing_ts = [r["ts"] for r in conn.execute(
+        "SELECT ts FROM oplog WHERE device_id = ?", (device_id,)
+    )]
+    anchor = (
+        (datetime.fromisoformat(min(existing_ts)) - timedelta(seconds=1)).isoformat()
+        if existing_ts else datetime(1970, 1, 1, tzinfo=timezone.utc).isoformat()
+    )
+
+    orphan_motes = [r["id"] for r in conn.execute("SELECT id FROM motes") if r["id"] not in logged_motes]
+    if orphan_motes:
+        props = motes_repo._properties_by_mote(conn, orphan_motes)
+        for mote_id in orphan_motes:
+            oplog.append(conn, device_id, "mote", mote_id, "create_mote",
+                         {"id": mote_id, "properties": props.get(mote_id, {})}, ts=anchor)
+            create_ts[mote_id] = anchor
+
+    orphan_rels = [r for r in conn.execute("SELECT * FROM relationships") if r["id"] not in logged_rels]
+    for rel in orphan_rels:
+        # max(), not a flat epsilon after the mote anchor: an orphan
+        # relationship could in principle reference an endpoint that
+        # *isn't* orphaned (a real, later create_mote already logged for
+        # it) -- ts has to sort after THAT mote's real create too, not
+        # just after the synthetic anchor, or replay would fail the
+        # exact same way against a mote that hasn't "arrived" yet.
+        rel_ts = max(create_ts.get(rel["from_id"], anchor), create_ts.get(rel["to_id"], anchor))
+        oplog.append(conn, device_id, "relationship", rel["id"], "create_relationship",
+                     {"id": rel["id"], "from_id": rel["from_id"], "to_id": rel["to_id"],
+                      "type": rel["type"]}, ts=rel_ts)
+
+    if orphan_motes or orphan_rels:
+        conn.commit()
+
+
 def push(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
     """Write this device's oplog rows since the last push as one new,
     immutable batch file. A device only ever creates files under ops/,
@@ -103,6 +170,7 @@ def push(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = No
     sync tool to carry."""
     sync_dir = _resolve_sync_dir(garden, sync_dir)
     device_id = get_device_id()
+    _backfill_orphans(conn, device_id)
     last_pushed = _get_state(conn, device_id)
 
     rows = conn.execute(

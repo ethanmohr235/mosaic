@@ -172,6 +172,10 @@ button.linkish:hover { color: var(--fg); border-color: transparent; }
 .topbar-trigger:hover { background: var(--panel); border-color: var(--border-soft); color: var(--fg); }
 .topbar-trigger.open { background: var(--raised); color: var(--accent); }
 #garden-btn { max-width: 30ch; }
+
+.icon-btn { font-size: 15px; line-height: 1; }
+.icon-btn.spinning { animation: icon-btn-spin 0.8s linear infinite; }
+@keyframes icon-btn-spin { to { transform: rotate(360deg); } }
 #garden-label {
   font-family: var(--serif); font-size: 14px; color: var(--fg-bright);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
