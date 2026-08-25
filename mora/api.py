@@ -138,6 +138,22 @@ class Api:
         return sorted(notes, key=lambda n: n["name"].casefold())
 
     @_synchronized
+    def create_note(self, name: str | None = None) -> dict:
+        """A fresh mote to start typing on, returned in open_note()'s
+        shape so the caller can drop straight into loadNote().
+
+        Writes an empty `modoc` property rather than leaving it unset --
+        that is what list_notes() and has_modoc() key on, so a note
+        created here shows up in the note switcher immediately rather
+        than only after the first save."""
+        properties = {modoc.MODOC_KEY: ""}
+        if name:
+            properties["name"] = name
+        mote_id = motes_repo.create_mote(self._conn, properties)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        return {"noteId": mote_id, "source": "", "name": payload_repo.name_of(mote)}
+
+    @_synchronized
     def open_note(self, mote_id: str | None = None) -> dict:
         """The note to start on: the one asked for, else the first note in
         the garden, else the most recent mote -- which opens as an empty

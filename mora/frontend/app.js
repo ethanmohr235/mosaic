@@ -525,13 +525,25 @@ async function save() {
   notes = await api.list_notes();
 }
 
-async function openNoteMenu() {
+/** Open/close is synchronous and is the single source of truth for
+ *  whether the menu is showing; refreshNoteMenu() below only fills in
+ *  its content and runs after an await. Keeping those separate means a
+ *  slow list_notes() that lands after the menu was already closed (e.g.
+ *  by "+ New note…", which closes the menu the moment it's clicked)
+ *  can't reopen it out from under the user with a stale list. */
+function openNoteMenu() {
   const menu = $("note-menu");
-  if (!menu.classList.contains("hidden")) return closeNoteMenu();
+  if (!menu.classList.contains("hidden")) { closeNoteMenu(); return; }
+  menu.classList.remove("hidden");
+  $("note-btn").setAttribute("aria-expanded", "true");
+  refreshNoteMenu();
+}
+
+async function refreshNoteMenu() {
   notes = await api.list_notes();
-  clear(menu);
+  const list = clear($("note-menu-list"));
   if (!notes.length) {
-    menu.append(el("div", "menu-empty", "No notes in this garden yet."));
+    list.append(el("div", "menu-empty", "No notes in this garden yet."));
   }
   notes.forEach((note) => {
     const row = el("button", "menu-item");
@@ -540,15 +552,30 @@ async function openNoteMenu() {
     dot.style.cssText = `width:6px;height:6px;border-radius:50%;background:${colorOf(note)}`;
     row.append(dot, el("span", null, note.name));
     row.onclick = () => { closeNoteMenu(); loadNote(note.id); };
-    menu.append(row);
+    list.append(row);
   });
-  menu.classList.remove("hidden");
-  $("note-btn").setAttribute("aria-expanded", "true");
 }
 
 function closeNoteMenu() {
   $("note-menu").classList.add("hidden");
   $("note-btn").setAttribute("aria-expanded", "false");
+}
+
+/** A note started on the spot, from the note switcher's "+ New note…"
+ *  row -- the same entry point Monastery's grid gives a new mote, minus
+ *  the date it has no equivalent of here. Name is optional: an empty
+ *  answer still opens a fresh page, with name_of()'s id-prefix fallback
+ *  standing in until it's given one. */
+async function createNote() {
+  closeNoteMenu();
+  const name = window.prompt("New note name:", "");
+  if (name === null) return;
+  try {
+    const created = await api.create_note(name.trim() || null);
+    await loadNote(created.noteId);
+  } catch (e) {
+    toast(String(e), true);
+  }
 }
 
 // ---- the @ picker --------------------------------------------------
@@ -669,6 +696,7 @@ function wire() {
   });
 
   $("note-btn").onclick = openNoteMenu;
+  $("note-menu-new").onclick = createNote;
   $("panel-back").onclick = () => { focusId = null; drawPanel(payload.anchor.id); };
   $("problems-btn").onclick = () => {
     dataOpen = true;

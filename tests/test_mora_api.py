@@ -80,6 +80,31 @@ def test_list_notes_is_only_the_motes_carrying_one(api, project):
     assert [n["id"] for n in api.list_notes()] == [project]
 
 
+# ---- creating ----
+
+def test_create_note_opens_on_an_empty_page(api):
+    created = api.create_note()
+    assert created["source"] == ""
+    assert get_mote(api._conn, created["noteId"]).properties == {MODOC_KEY: ""}
+
+
+def test_create_note_takes_the_given_name(api):
+    created = api.create_note("Field notes")
+    assert created["name"] == "Field notes"
+    assert get_mote(api._conn, created["noteId"]).properties["name"] == "Field notes"
+
+
+def test_create_note_without_a_name_falls_back_to_the_id_prefix(api):
+    created = api.create_note()
+    assert created["name"] == created["noteId"][:8]
+
+
+def test_a_created_note_shows_up_in_the_switcher(api, project):
+    api.save_note(project, "\\section{Atlas}")
+    created = api.create_note("Field notes")
+    assert {n["id"] for n in api.list_notes()} == {project, created["noteId"]}
+
+
 # ---- saving ----
 
 def test_save_note_writes_only_the_modoc_property(api, project):

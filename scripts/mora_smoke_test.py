@@ -38,7 +38,7 @@ import webview  # noqa: E402  (after GARDENS_DIR is patched, matching app startu
 from core.db import get_connection, initialize_database  # noqa: E402
 from core.gardens import create_garden  # noqa: E402
 from core.modoc import write_source  # noqa: E402
-from core.motes import create_mote, get_mote  # noqa: E402
+from core.motes import create_mote, get_mote, search_motes  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
 from mora.api import Api  # noqa: E402
 from mora.app import choose_port  # noqa: E402
@@ -365,6 +365,25 @@ def run_checks(window):
         assert comments >= 1, f"the leading %% comment is not highlighted, found {comments}"
 
     check("the source pane highlights commands and comments", the_source_pane_is_highlighted)
+
+    def new_note_opens_a_fresh_page_and_shows_up_in_the_switcher():
+        js(window, "window.prompt = () => 'Field notes';")
+        click(window, "#note-btn")
+        click(window, "#note-menu-new")
+        assert wait_until(lambda: text_of(window, "#note-title") == "Field notes"), \
+            f"the new note never became current, got {text_of(window, '#note-title')!r}"
+        assert js(window, "document.getElementById('editor').value") == "", \
+            "a freshly created note should open on an empty page"
+        found = search_motes(_conn(), "Field notes")
+        assert any(m.properties.get("modoc") == "" for m in found), \
+            "the new mote was not written with an empty modoc property"
+        click(window, "#note-btn")
+        assert wait_until(lambda: "Field notes" in text_of(window, "#note-menu-list")), \
+            "the new note did not appear in its own switcher"
+        click(window, "#note-btn")  # close the menu again
+
+    check("+ New note… opens a fresh page and lists it in the switcher",
+          new_note_opens_a_fresh_page_and_shows_up_in_the_switcher)
 
     def no_uncaught_errors():
         errors = js(window, "JSON.stringify(window.__moraErrors || [])")
