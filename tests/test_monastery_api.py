@@ -352,7 +352,7 @@ def test_opening_monastery_pushes_pending_local_changes(tmp_path):
 
 # ---- the window's own port ----
 #
-# The graph window takes pywebview's default 42001 and Mora takes 42002.
+# Monarch takes pywebview's default 42001 and Mora takes 42002.
 # A third app asking for either is not a near miss: the loser fails to
 # bind but still points its window at that address, loading the winner's
 # page against its own bridge. That shipped once already (mora/app.py).

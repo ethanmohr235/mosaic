@@ -6,7 +6,7 @@ assumes no GUI, but this spawns a real pywebview window against a real
 WebKit/GTK display, so it isn't collected automatically. Run it by hand
 after UI changes:
 
-    .venv/bin/python scripts/ui_smoke_test.py
+    .venv/bin/python scripts/monarch_smoke_test.py
 
 Consolidates checks that, across the sessions this was written in, only
 ever caught real regressions when written by hand as one-off throwaway
@@ -37,11 +37,11 @@ db.GARDENS_DIR = _TMP / "gardens"
 
 import webview  # noqa: E402  (import after GARDENS_DIR patched, matches app startup order)
 from mora.app import choose_port  # noqa: E402
-from ui.api import Api  # noqa: E402
+from monarch.api import Api  # noqa: E402
 
-FRONTEND_DIR = PROJECT_ROOT / "ui" / "frontend"
+FRONTEND_DIR = PROJECT_ROOT / "monarch" / "frontend"
 
-# Neither the graph window's 42001 (mora/app.py) nor Mora's 42002, so a
+# Neither Monarch's 42001 (mora/app.py) nor Mora's 42002, so a
 # smoke run can share a desktop with both apps already open.
 SMOKE_HTTP_PORT = 42003
 
@@ -135,6 +135,43 @@ def press_key(window, key, target="window"):
 def node_xy(window, id_expr):
     pos = json.loads(js(window, f"JSON.stringify(graph.screenPositionOf({id_expr}))"))
     return pos["x"], pos["y"]
+
+
+def empty_canvas_point(window, clearance=70):
+    """A canvas point with no node within `clearance` pixels.
+
+    The empty-canvas context menu (New mote here / Reuse from library… /
+    Paste) is a different menu from a mote's, so a check that wants it has
+    to right-click somewhere a mote is not. A hardcoded corner used to
+    stand in for "empty", which is only true until something moves the
+    layout -- resetView() fits the graph to whatever the canvas measures,
+    so a garden with a few more motes, or a canvas a few pixels shorter,
+    silently puts a node under that corner and hands the check a mote's
+    menu instead. This asks the graph where its nodes actually are.
+    """
+    point = json.loads(js(window, f"""
+        (function() {{
+            const canvas = document.getElementById('graph');
+            const rect = canvas.getBoundingClientRect();
+            const taken = [...graph.nodes.keys()]
+                .map((id) => graph.screenPositionOf(id))
+                .filter(Boolean);
+            for (let y = rect.top + 40; y < rect.bottom - 40; y += 20) {{
+                for (let x = rect.left + 40; x < rect.right - 40; x += 20) {{
+                    // elementFromPoint keeps this out from under the
+                    // floating panels, which sit over the canvas and would
+                    // swallow a real right-click.
+                    if (document.elementFromPoint(x, y) !== canvas) continue;
+                    if (taken.every((p) => Math.hypot(p.x - x, p.y - y) > {clearance})) {{
+                        return JSON.stringify({{x: x, y: y}});
+                    }}
+                }}
+            }}
+            return JSON.stringify(null);
+        }})()
+    """))
+    assert point is not None, "no empty canvas point to right-click -- the graph fills the window"
+    return point["x"], point["y"]
 
 
 def click_menu_item(window, label):
@@ -2084,7 +2121,7 @@ def run_checks(window):
         time.sleep(0.5)
         assert js(window, "clipboard !== null") is True, "Copy should populate the clipboard"
 
-        right_click(window, 60, 60)  # empty canvas, away from any node
+        right_click(window, *empty_canvas_point(window))
         time.sleep(0.5)
         click_menu_item(window, "Paste")
         time.sleep(2.0)
@@ -2125,7 +2162,7 @@ def run_checks(window):
         time.sleep(0.5)
         click_menu_item(window, "Copy")
         time.sleep(0.5)
-        right_click(window, 60, 60)
+        right_click(window, *empty_canvas_point(window))
         time.sleep(0.5)
         click_menu_item(window, "Paste")
         time.sleep(2.0)
@@ -2177,7 +2214,7 @@ def run_checks(window):
     def reuse_from_library_creates_an_independent_copy():
         js(window, "graph.resetView();")
         time.sleep(1.0)
-        right_click(window, 60, 60)  # empty canvas, away from any node
+        right_click(window, *empty_canvas_point(window))
         time.sleep(0.5)
         click_menu_item(window, "Reuse from library…")
         time.sleep(0.5)
@@ -2218,7 +2255,7 @@ def run_checks(window):
         js(window, "window.confirm = function() { return true; };")
         js(window, "graph.resetView();")
         time.sleep(1.0)
-        right_click(window, 60, 60)
+        right_click(window, *empty_canvas_point(window))
         time.sleep(0.5)
         click_menu_item(window, "Reuse from library…")
         time.sleep(0.5)
@@ -2335,7 +2372,7 @@ def run_checks(window):
 
         js(window, "graph.resetView();")
         time.sleep(1.0)
-        right_click(window, 60, 60)
+        right_click(window, *empty_canvas_point(window))
         time.sleep(0.5)
         click_menu_item(window, "Reuse from library…")
         time.sleep(0.5)
@@ -2399,7 +2436,7 @@ def run_checks(window):
         time.sleep(0.5)
         assert js(window, "clipboard.length") == 2, "Copy should capture both selected motes"
 
-        right_click(window, 700, 550)  # empty canvas, far from P/Q
+        right_click(window, *empty_canvas_point(window))
         time.sleep(0.5)
         paste_label = js(window, """
             Array.from(document.querySelectorAll('#context-menu .menu-item'))
@@ -2457,7 +2494,7 @@ def run_checks(window):
         click_menu_item(window, "Copy 2 motes")
         time.sleep(0.5)
 
-        right_click(window, 700, 550)
+        right_click(window, *empty_canvas_point(window))
         time.sleep(0.5)
         click_menu_item(window, "Paste 2 motes")
         time.sleep(2.5)
@@ -3299,7 +3336,7 @@ def drive():
 def main():
     api = Api(None)
     window = webview.create_window(
-        "MonOSS smoke test", url=str(FRONTEND_DIR / "index.html"), js_api=api,
+        "Monarch smoke test", url=str(FRONTEND_DIR / "index.html"), js_api=api,
         width=1400, height=900,
     )
     api._window = window
@@ -3307,7 +3344,7 @@ def main():
     window.events.loaded += _page_loaded.set
 
     threading.Thread(target=drive, daemon=True).start()
-    # An explicit free port, never pywebview's pinned 42001. ui/app.py
+    # An explicit free port, never pywebview's pinned 42001. monarch/app.py
     # takes that one, so running this while the real app is open meant
     # the test's own server failed to bind and its window then loaded
     # *the running app's* page off 42001 -- the exact failure mora/app.py

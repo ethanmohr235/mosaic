@@ -1,6 +1,6 @@
-// ui/frontend/app.js
+// monarch/frontend/app.js
 //
-// Wiring between ui/api.py and the canvas graph in graph.js. State lives
+// Wiring between monarch/api.py and the canvas graph in graph.js. State lives
 // here; graph.js owns only rendering, layout and pointer gestures.
 
 let api;
@@ -196,6 +196,41 @@ function isKind(moteId, kind) {
   return kindsOf(moteId).includes(kind);
 }
 
+// ---- status bar ----
+
+/** The bottom line: which garden, how much of it the current depth put on
+ *  screen, and what is selected. Read straight off the payload and
+ *  graph.js's own selection sets rather than kept in a parallel variable,
+ *  so it cannot drift from what is drawn -- every caller only has to say
+ *  "something changed."
+ *
+ *  `payload` is the depth-limited neighbourhood and `allMotes` is the
+ *  whole garden, which is why the mote count says "of N" only when the
+ *  two disagree: at whole-garden depth a second number would be the same
+ *  number twice. */
+function updateStatusbar() {
+  if (!graph) return;
+  const inView = payload.motes.length;
+  const total = allMotes.length;
+  $("status-garden").textContent = currentGarden || "\u2026";
+  $("status-motes").textContent =
+    total > inView ? `${inView} of ${total} motes` : plural(inView, "mote");
+  $("status-rels").textContent = plural(payload.relationships.length, "relationship");
+  const depth = loadDepth();
+  $("status-depth").textContent = depth === null ? "whole garden" : `depth ${depth}`;
+
+  const motes = graph.selectedIds.size;
+  const rels = graph.selectedRelIds.size;
+  $("status-selection").textContent =
+    motes > 0 ? `${plural(motes, "mote")} selected`
+    : rels > 0 ? `${plural(rels, "relationship")} selected`
+    : "";
+}
+
+function plural(count, noun) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
 // ---- graph data ----
 
 async function refocus(moteId, { pan = true, select = true } = {}) {
@@ -212,6 +247,7 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
   renderLegend();
   renderFolderLegend();
   renderRelFilters();
+  updateStatusbar();
   // Species and relationship types are what the settings panel is a list
   // of, so it has to follow the same data everything else here does.
   if (viewSettingsOpen()) renderViewSettings();
@@ -891,6 +927,7 @@ function closeDetailPanel() {
   hideSpeciesPicker();
   multiSelectIds = null;
   if (graph) graph.select(null);
+  updateStatusbar();
 }
 
 /** Shared by both places a relationship's type can be renamed (its own
@@ -2446,6 +2483,7 @@ function setupSearch() {
  *  after a right-click, since graph.js may replace the selection itself
  *  before the context menu callback fires. */
 async function syncSelectionPanel(ids) {
+  updateStatusbar();
   if (ids.length === 0) { closeDetailPanel(); return; }
   if (ids.length === 1) { await selectMote(ids[0], { pan: false }); return; }
   renderMultiSelectPanel(ids);
@@ -2939,7 +2977,7 @@ function setupGardensModal() {
 // (push/pull over an append-only oplog, safe for a folder-sync tool like
 // Syncthing/Dropbox/iCloud Drive to carry); this modal just exposes
 // enable/disable, folder choice, manual sync, and the auto-sync flag
-// that gates ui/api.py's existing lifecycle sync points (open, garden
+// that gates monarch/api.py's existing lifecycle sync points (open, garden
 // switch, close) -- there's no new timer here, "automatic" means those
 // three call sites, not a background poll.
 
@@ -3905,10 +3943,12 @@ async function init() {
       saveViewSettings();
       renderLayoutSettings();
     },
-    onRelationshipsSelected: (ids) =>
-      ids.length === 0 ? closeDetailPanel()
-      : ids.length === 1 ? openRelationshipPanel(ids[0])
-      : renderMultiRelationshipPanel(ids),
+    onRelationshipsSelected: (ids) => {
+      updateStatusbar();
+      return ids.length === 0 ? closeDetailPanel()
+        : ids.length === 1 ? openRelationshipPanel(ids[0])
+        : renderMultiRelationshipPanel(ids);
+    },
   });
   window.graph = graph;
 

@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 gardens/
-.webview_data/
+.webview_data_monarch/
 .webview_data_mora/
 .webview_data_monastery/
 .credentials/

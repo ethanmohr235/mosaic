@@ -5,7 +5,7 @@ when asked for none, that saving touches only the note, that a step is
 clamped, and the payload shape the frontend is written against. A method
 that only forwards to a repository is already covered by that
 repository's tests; asserting it again here would only prove Python can
-call a function. Same line ui/api.py's own tests draw.
+call a function. Same line monarch/api.py's own tests draw.
 """
 import pytest
 
@@ -196,8 +196,8 @@ def test_switch_garden_moves_the_connection(api, project):
 # ---- best-effort sync ----
 #
 # run_mora.py is its own launch path, not only ever opened from the graph
-# window (ui/app.py) -- so a garden pointed at a sync folder must converge
-# from a Mora-only session too, the same way ui/api.py::Api does on open,
+# window (monarch/app.py) -- so a garden pointed at a sync folder must converge
+# from a Mora-only session too, the same way monarch/api.py::Api does on open,
 # switch and close.
 
 def test_opening_mora_pushes_pending_local_changes(tmp_path):
@@ -244,10 +244,10 @@ def test_opening_mora_on_an_unsynced_garden_does_nothing(api):
 # ---- the window's own port ----
 #
 # pywebview pins its server to 42001 whenever private_mode is off and no
-# port is given, and the graph window takes that one. Two apps wanting it
+# port is given, and Monarch takes that one. Two apps wanting it
 # is not a near miss: the loser fails to bind but still points its window
 # at that address, so it loads the winner's page against its own bridge.
-# That shipped once, as a window titled Mora showing the MonOSS graph.
+# That shipped once, as a window titled Mora showing the Monarch graph.
 
 def test_mora_does_not_ask_for_the_graph_windows_port():
     assert DEFAULT_HTTP_PORT != 42001

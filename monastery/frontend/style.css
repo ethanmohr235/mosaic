@@ -1,6 +1,6 @@
 /* monastery/frontend/style.css
    Monastery's window, sharing the main app's palette so the three read
-   as one product -- the tokens below are ui/frontend/style.css's, and
+   as one product -- the tokens below are monarch/frontend/style.css's, and
    Mora copies them for the same reason: pywebview's http server roots at
    the directory of the page it serves, so a stylesheet one directory
    over is not reachable. Colours are OKLCH, which this WebKitGTK build

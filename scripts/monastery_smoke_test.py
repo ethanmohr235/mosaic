@@ -50,7 +50,7 @@ from monastery.app import choose_port  # noqa: E402
 FRONTEND_DIR = PROJECT_ROOT / "monastery" / "frontend"
 GARDEN = "smoke"
 
-# The ports pywebview pins the graph window and Mora to. The whole run
+# The ports pywebview pins Monarch and Mora to. The whole run
 # happens with both occupied, because that is the real condition --
 # Monastery is opened from a running MonOSS, possibly alongside Mora --
 # and because it is the condition that broke for Mora once: it asked for
@@ -203,13 +203,13 @@ def run_checks(window):
     def monastery_loads_its_own_frontend():
         url = js(window, "location.href")
         assert f":{GRAPH_WINDOW_PORT}/" not in url, \
-            f"Monastery must not serve off the graph window's port, got {url}"
+            f"Monastery must not serve off Monarch's port, got {url}"
         assert f":{MORA_PORT}/" not in url, \
             f"Monastery must not serve off Mora's port, got {url}"
         assert js(window, "!!document.getElementById('week-grid')") is True, \
             f"the page in this window is not Monastery's ({url})"
         assert js(window, "!document.getElementById('graph')") is True, \
-            f"this window loaded the MonOSS graph, not Monastery ({url})"
+            f"this window loaded the Monarch graph, not Monastery ({url})"
         assert js(window, "!document.getElementById('editor')") is True, \
             f"this window loaded Mora, not Monastery ({url})"
         assert wait_until(lambda: count(window, ".day-col") == 7), \
@@ -737,7 +737,7 @@ def run_checks(window):
     def an_outside_edit_shows_up_on_the_next_poll():
         """Nothing in MonOSS pushes -- this is the whole reason Monastery
         polls. A mote written by another process (here, this test's own
-        connection, standing in for the CLI or the graph window) must
+        connection, standing in for the CLI or Monarch) must
         appear without the user doing anything."""
         conn = _conn()
         try:
@@ -851,7 +851,7 @@ def _occupy(port, directory):
 def main():
     seed()
     squatters = [
-        _occupy(GRAPH_WINDOW_PORT, PROJECT_ROOT / "ui" / "frontend"),
+        _occupy(GRAPH_WINDOW_PORT, PROJECT_ROOT / "monarch" / "frontend"),
         _occupy(MORA_PORT, PROJECT_ROOT / "mora" / "frontend"),
     ]
     api = Api(GARDEN)

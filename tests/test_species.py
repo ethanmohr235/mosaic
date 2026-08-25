@@ -201,7 +201,7 @@ def test_simulation_ignores_template_motes(conn):
 
 def test_species_ids_in_counts_instance_of_and_template_of():
     """One definition of "is a species", shared by list_species() (which
-    queries) and ui/api.py's focus() (which classifies a subgraph it has
+    queries) and monarch/api.py's focus() (which classifies a subgraph it has
     already fetched) -- the two used to answer this separately."""
     rels = [
         Relationship(from_id="r1", to_id="resistor", type="instance_of"),

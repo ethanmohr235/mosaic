@@ -24,7 +24,7 @@ EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 
 
 def _label_for(mote: dict) -> str:
-    """Similar fallback order to ui/frontend/app.js::nodeLabel (name,
+    """Similar fallback order to monarch/frontend/app.js::nodeLabel (name,
     else first property, else the mote id), but skips RESERVED_KEYS when
     picking a fallback property -- unlike the graph label, a calendar
     event's title shouldn't just repeat the date/duration that's already
@@ -302,7 +302,7 @@ def export_events(
     """Push `motes` (already filtered by exportable_motes) to Calendar and
     clean up anything stale, returning what happened.
 
-    This is the export, and it lives here rather than in ui/api.py --
+    This is the export, and it lives here rather than in monarch/api.py --
     where it used to -- so it is testable without a GUI and reachable
     from any adapter. What the caller still owns is the two things only
     it can know: `record_event_id`, how to persist a new event id back

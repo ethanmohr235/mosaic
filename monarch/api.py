@@ -1,4 +1,4 @@
-# ui/api.py
+# monarch/api.py
 import dataclasses
 import functools
 import json
@@ -227,7 +227,7 @@ class Api:
         self._current_garden = gardens_repo.resolve_garden(garden)
         self._conn = get_connection(self._current_garden)
         initialize_database(self._conn)
-        # Set by ui/app.py right after the window is created (the window
+        # Set by monarch/app.py right after the window is created (the window
         # needs this Api instance to exist first, as its js_api) -- used
         # for native file dialogs in export/import.
         self._window: webview.Window | None = None

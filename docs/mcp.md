@@ -81,7 +81,7 @@ since the restriction is on discovery and creation rather than access.
 
 Property values keep whatever JSON type the client sends: `21` is stored
 as a number, `"21"` as a string. This is the one place the MCP adapter
-deliberately differs from `ui/api.py`, which interprets incoming strings
+deliberately differs from `monarch/api.py`, which interprets incoming strings
 as JSON because GUI text fields deliver everything as text.
 
 `preview_simulation` computes a run entirely in memory and returns what

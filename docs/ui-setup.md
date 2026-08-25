@@ -1,13 +1,27 @@
 # Running the desktop UI
 
-The UI is a native window (via `pywebview`) wrapping a local HTML/CSS/JS
-frontend — no browser tab, no local web server. Entry point: `run_ui.py`.
+Three native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+frontend — no browser tab, no local web server: **Monarch**, the graph
+(`run_monarch.py`); **Mora**, the note editor (`run_mora.py`); and
+**Monastery**, the calendar (`run_monastery.py`). They share one palette
+and one set of vendored fonts, so the three read as one product.
 
-The graph is drawn on a `<canvas>` by `ui/frontend/graph.js`, which owns the
+---
+
+# Monarch -- the graph
+
+`./run_monarch.py`, or `.venv/bin/python run_monarch.py`.
+
+```
+./run_monarch.py                       # the last garden opened
+./run_monarch.py --garden reactor      # a specific garden
+```
+
+The graph is drawn on a `<canvas>` by `monarch/frontend/graph.js`, which owns the
 force layout, camera and pointer gestures. There is no graph library: motes
 are clustered into radial sectors by species, and the camera pans to a mote
 on selection rather than re-fitting the whole view. Fonts are vendored under
-`ui/frontend/vendor/fonts/`, so nothing is fetched at runtime.
+`monarch/frontend/vendor/fonts/`, so nothing is fetched at runtime.
 
 ### Graph interactions
 
@@ -192,7 +206,7 @@ web address or a local file path) and its detail panel row gets an
 `core/links.py::classify_link` decides which: a web address goes to the
 stdlib `webbrowser` module, while a local file is instead handed to the
 OS's native "open with the registered default app" mechanism
-(`ui/api.py::_open_with_os_default`), not `webbrowser.open()`, since
+(`monarch/api.py::_open_with_os_default`), not `webbrowser.open()`, since
 that always launches the web browser itself and would show a `.py`
 file as plain text rather than opening it in, say, VSCode. On Linux
 that's `gio open` (falling back to `xdg-open` only if `gio` isn't
@@ -231,6 +245,30 @@ doesn't look like ordinary data -- hover it for a tooltip. This is
 purely a visual cue; the name still works exactly like any other
 property/relationship, editable and deletable like anything else.
 
+### Look and feel
+
+All three windows are dark-only and share one palette, one type pairing
+(IBM Plex Serif for names and titles, IBM Plex Sans for body, a mono for
+labels and ids) and one set of vendored fonts. The shared tokens are
+declared at the top of `monarch/frontend/style.css` and copied verbatim
+into `mora/frontend/style.css` and `monastery/frontend/style.css` --
+pywebview's http server roots at the directory of the page it serves, so
+a stylesheet one directory over is not reachable, and three copies is
+the price of three windows that look like one product. Change a shared
+token in one and change it in all three.
+
+The recurring pieces, so a new surface doesn't invent its own: a 46px
+topbar carrying a two-line brand block (the window's name over `MonOSS`
+in mono); section heads as a small, widely-tracked uppercase mono
+eyebrow; serif for a mote's name, a garden's name and a panel title;
+mono for ids, counts, keys and hints; and a 30px status bar along the
+bottom. Monarch's reports which garden is open, how much of it the
+current depth put on screen, and what is selected.
+
+Colours are OKLCH, which this WebKitGTK build handles in both CSS and
+canvas `fillStyle` -- which is why `graph.js` reads `--graph-bg` and the
+selection tokens straight off `:root` rather than keeping its own copies.
+
 ## This machine (Arch Linux)
 
 `webkit2gtk-4.1`, `gtk3`, and `python-gobject` are already installed system-
@@ -267,8 +305,8 @@ when a working system install already exists.
 python3 -c "import gi, webview; from importlib.metadata import version; print(version('pywebview'))"
 ```
 
-If that prints a version with no errors, `python3 run_ui.py` should open the
-MonOSS window.
+If that prints a version with no errors, `python3 run_monarch.py` should open the
+Monarch window.
 
 Note: if your `python3` on `PATH` resolves to a non-system interpreter (e.g.
 a conda/miniforge install), `--system-site-packages` won't see the system
@@ -289,7 +327,7 @@ cat > ~/.local/share/applications/monoss.desktop <<EOF
 Type=Application
 Name=MonOSS
 Comment=Personal knowledge-graph organizer
-Exec=$(pwd)/.venv/bin/python $(pwd)/run_ui.py
+Exec=$(pwd)/.venv/bin/python $(pwd)/run_monarch.py
 Icon=$(pwd)/assets/icon.svg
 Terminal=false
 Categories=Utility;
@@ -300,8 +338,8 @@ update-desktop-database ~/.local/share/applications/
 
 ## Regression testing
 
-`pytest` covers `core/`/`ui/api.py` in isolation, but doesn't touch the
-actual GTK/WebKit window. `scripts/ui_smoke_test.py` drives the real running
+`pytest` covers `core/`/`monarch/api.py` in isolation, but doesn't touch the
+actual GTK/WebKit window. `scripts/monarch_smoke_test.py` drives the real running
 app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
 layout position stability, search/browse/keyboard-nav, garden-switch
 isolation, species picking and templating, filters, depth, previewing
@@ -341,7 +379,7 @@ webview storage dir — never touches real data. Run it by hand after UI
 changes:
 
 ```
-.venv/bin/python scripts/ui_smoke_test.py
+.venv/bin/python scripts/monarch_smoke_test.py
 ```
 
 Prints PASS/FAIL per check and exits non-zero if anything failed. Its
@@ -362,7 +400,7 @@ A second window, over the same gardens: `./run_mora.py`, or
 `.venv/bin/python run_mora.py`. Same stack as the main app -- pywebview
 over a local HTML/CSS/JS frontend, no browser tab, no build step -- but a
 separate process holding its own garden connection, so it opens and
-closes independently of the graph window.
+closes independently of Monarch.
 
 ```
 ./run_mora.py                       # the default garden
@@ -380,21 +418,21 @@ Three ways, all of them the same launch with different arguments:
 | Detail panel → **Write a note… / Open note…** | Mora on the selected mote |
 | Detail panel → the `modoc` row's ↗ | the same, from the property itself |
 
-`ui/api.py::open_mora` spawns it detached with `sys.executable` -- the
+`monarch/api.py::open_mora` spawns it detached with `sys.executable` -- the
 virtualenv the app is already running in -- so it is a sibling process,
 not a child window, and closing the graph does not close it. Its output
 is *not* discarded: a Mora that fails to start prints its traceback on
-whatever terminal the graph window was launched from.
+whatever terminal Monarch was launched from.
 
 The two apps must not want the same HTTP port. pywebview pins its
 built-in server to 42001 whenever `private_mode` is off and no port is
-given, which the graph window takes; Mora asks for **42002**, falling
+given, which Monarch takes; Mora asks for **42002**, falling
 back to whatever the OS hands out if that is busy (a second Mora
 window). This is not a tidiness point -- the process that loses that
 race still points its window at the winner's address, so it comes up
 showing the other app's page against its own bridge. Mora keeps its own
 WebKit storage directory (`.webview_data_mora/`) for the same reason:
-the graph window's is not something two processes should share, least of
+Monarch's is not something two processes should share, least of
 all when each clears its own cache on startup.
 
 Two consequences worth knowing. The two processes hold separate
@@ -443,7 +481,7 @@ visibly fail when they can't), that both `\graph` forms draw, that a link
 moves the data panel and back returns, that the stepper projects without
 writing, that Save writes only the note, and that no uncaught JS errors
 were logged. The entry points *into* Mora belong to the main window, so
-they are checked by `scripts/ui_smoke_test.py` instead, with `open_mora`
+they are checked by `scripts/monarch_smoke_test.py` instead, with `open_mora`
 stubbed -- an automated suite has no business spawning a second app.
 
 Run the two one at a time. Both drive real windows with synthetic
@@ -530,7 +568,7 @@ of kinds, and picking one adds that relationship to the new mote.
 
 ### Live updates
 
-Nothing in MonOSS pushes: the graph window, the CLI and the MCP server
+Nothing in MonOSS pushes: Monarch, the CLI and the MCP server
 all write the same file and none of them announces it. So Monastery
 **polls**, every few seconds, and only while its window has focus -- an
 edit made anywhere else appears on the next tick without a refresh. A
@@ -540,7 +578,7 @@ inputs out from under someone typing into them.
 ### Ports
 
 The third window means a third port. pywebview pins its server to 42001
-unless told otherwise (the graph window), Mora asks for 42002, and
+unless told otherwise (Monarch), Mora asks for 42002, and
 Monastery asks for **42003**, each falling back to an ephemeral port if
 theirs is taken. This is not tidiness: the process that loses that race
 still points its window at the winner's address, so it comes up showing

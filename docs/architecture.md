@@ -51,7 +51,7 @@ Called kinds and not roles, which is what this was: `core/roles.py` answers a di
 
 Two forms, one answer: `kinds_in(motes, relationships)` for a caller holding an already-fetched subgraph (each kind's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Kinds are not exclusive -- a species can also be a folder, and a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
 
-`ui/api.py::focus()` and `library_snapshot()` return this as one `kinds` map (mote id -> kind names; motes of no particular kind are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six kinds hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a kind is now a change to the table, not to a payload.
+`monarch/api.py::focus()` and `library_snapshot()` return this as one `kinds` map (mote id -> kind names; motes of no particular kind are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six kinds hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a kind is now a change to the table, not to a payload.
 
 Adapters must not answer "is this a species" for themselves. That is how a subtlety ends up true in one surface and false in another.
 
@@ -291,8 +291,8 @@ for the design and what follows it.
 
 # The Observatory
 
-`ui/` is the desktop app, and like `cli/` and `mcp_server/` it is an
-adapter over `core/` -- `ui/api.py` adds shaping for the JS bridge and no
+`monarch/` is the desktop app, and like `cli/` and `mcp_server/` it is an
+adapter over `core/` -- `monarch/api.py` adds shaping for the JS bridge and no
 logic of its own. Everything the engine gained is reachable from it:
 `why` and the dependency queries as a per-property panel in the
 inspector, a scenario picker beside the solver picker, unit and
@@ -316,7 +316,7 @@ See `docs/ui-setup.md` for the interaction reference.
 # MCP server
 
 `mcp_server/` is a third adapter over `core/`, alongside `cli/` and
-`ui/`: it exposes the same repository functions as tools an MCP client
+`monarch/`: it exposes the same repository functions as tools an MCP client
 can call (`run_mcp.py`), over stdio by default or streamable HTTP with
 `--http`. It adds no logic of its own -- every tool is a thin
 translation between an MCP call and the function the CLI or UI already
@@ -342,7 +342,7 @@ The package is deliberately not named `mcp/`: `run_mcp.py` puts the
 project root on `sys.path`, so a top-level package by that name would
 shadow the installed `mcp` SDK.
 
-Where `ui/api.py` holds one long-lived connection for the open garden,
+Where `monarch/api.py` holds one long-lived connection for the open garden,
 every tool here opens and closes its own, and takes the garden as an
 optional argument (defaulting to `default`, like the CLI). The server is
 a separate process from the GUI, so holding a connection open for its
@@ -362,7 +362,7 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `ui/`, `mora/`, `monastery/` and
+`core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/` and
 `mcp_server/` are five adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
@@ -375,7 +375,7 @@ The charter:
 
 * **core** -- complete. Every capability lives here, and an adapter that
   holds logic of its own is a bug (see Calendar export, moved out of
-  `ui/api.py` for exactly this reason).
+  `monarch/api.py` for exactly this reason).
 * **CLI** -- everything scriptable. If it can be done without a window
   and without a human approving a result, it has a command.
 * **UI** -- everything interactive. Anything a person would reach for
@@ -422,7 +422,7 @@ hand. See `docs/google-calendar.md` for setup and details.
 
 The export loop itself is `core/google_calendar.py::export_events()`, not
 the UI's: an adapter holding business logic is an adapter no other
-surface can reuse and no test can reach without a GUI. What `ui/api.py`
+surface can reuse and no test can reach without a GUI. What `monarch/api.py`
 still supplies is the two things only the app knows -- `record_event_id`
 (how to write a new event id back, through its connection lock) and
 `still_exporting` (whether the user has switched gardens while a network
@@ -495,8 +495,8 @@ above) is the intended way to keep a large library navigable, and the
 "Reuse from library…" picker filters by that same folder/species
 grouping alongside free-text search.
 
-This first pass covers `core/` and the UI (`ui/api.py`,
-`ui/frontend/`) only; CLI and MCP exposure are deferred to a follow-up.
+This first pass covers `core/` and the UI (`monarch/api.py`,
+`monarch/frontend/`) only; CLI and MCP exposure are deferred to a follow-up.
 
 # Notes
 
@@ -564,13 +564,13 @@ window and `monoss modoc render` cannot come to disagree about what a
 note means. Only the source pane's syntax highlighting runs in
 JavaScript, colour being presentation rather than meaning.
 
-The graph window reaches it through `ui/api.py::open_mora`, which spawns
+Monarch reaches it through `monarch/api.py::open_mora`, which spawns
 `run_mora.py` detached under `sys.executable` -- a sibling process, not a
 child window, so neither app's lifetime is tied to the other's. That
 makes two processes on one garden file the normal case rather than the
 exception, which is why `mora/api.py` sets `busy_timeout` on its
 connection for the same reason `mcp_server/server.py` does. `core/db.py`
-is deliberately left alone, so the CLI and the graph window keep the
+is deliberately left alone, so the CLI and Monarch keep the
 behavior they have.
 
 Two apps at once also means the two must not want the same HTTP port or
@@ -669,7 +669,7 @@ invite. Neither knows about the other.
 
 Monastery is a third process on the same terms as Mora, which means the
 same two collisions to avoid: `monastery/app.py::choose_port` asks for
-42003 (42001 is the graph window's, 42002 Mora's) and falls back to an
+42003 (42001 is Monarch's, 42002 Mora's) and falls back to an
 ephemeral port, and `.webview_data_monastery/` is its own WebKit
 storage. And since nothing in MonOSS pushes -- no adapter announces its
 writes -- the window **polls** while focused rather than waiting to be

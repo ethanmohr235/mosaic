@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression smoke test for Mora, the .modoc editor window.
 
-Not named test_*.py, for the same reason scripts/ui_smoke_test.py isn't:
+Not named test_*.py, for the same reason scripts/monarch_smoke_test.py isn't:
 it spawns a real pywebview window against a real WebKit/GTK display,
 which the pytest suite deliberately assumes nothing about. Run it by
 hand after touching mora/:
@@ -50,7 +50,7 @@ GARDEN = "smoke"
 # whenever private_mode is off). The whole run happens with it occupied,
 # because that is the real condition -- Mora is opened from a running
 # MonOSS -- and because it is the condition that broke: Mora asked for
-# the same port, lost, and loaded the graph window's page instead.
+# the same port, lost, and loaded Monarch's page instead.
 GRAPH_WINDOW_PORT = 42001
 
 NOTE = r"""% a note about the migration
@@ -153,11 +153,11 @@ def run_checks(window):
     def mora_loads_its_own_frontend_not_the_graph_windows():
         url = js(window, "location.href")
         assert f":{GRAPH_WINDOW_PORT}/" not in url, \
-            f"Mora must not serve off the graph window's port, got {url}"
+            f"Mora must not serve off Monarch's port, got {url}"
         assert js(window, "!!document.getElementById('editor')") is True, \
             f"the page in this window is not Mora's ({url})"
         assert js(window, "!document.getElementById('graph')") is True, \
-            f"this window loaded the MonOSS graph, not Mora ({url})"
+            f"this window loaded the Monarch graph, not Mora ({url})"
         assert wait_until(
             lambda: js(window, "!!document.querySelector('#rendered h1')")
         ), "Mora's frontend loaded but never rendered the note"
@@ -410,11 +410,11 @@ def drive():
 
 
 def _occupy_graph_window_port():
-    """Stand in for a running MonOSS: hold 42001 and serve ui/frontend
+    """Stand in for a running MonOSS: hold 42001 and serve monarch/frontend
     off it, so a Mora that asks for the wrong port doesn't merely fail --
-    it loads the graph window's page, exactly as it did in the bug."""
+    it loads Monarch's page, exactly as it did in the bug."""
     handler = functools.partial(
-        http.server.SimpleHTTPRequestHandler, directory=str(PROJECT_ROOT / "ui" / "frontend")
+        http.server.SimpleHTTPRequestHandler, directory=str(PROJECT_ROOT / "monarch" / "frontend")
     )
     try:
         server = socketserver.TCPServer(("127.0.0.1", GRAPH_WINDOW_PORT), handler)

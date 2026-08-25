@@ -1,10 +1,11 @@
-// ui/frontend/graph.js
+// monarch/frontend/graph.js
 //
-// Canvas graph renderer for MonOSS. Replaces Cytoscape, which was dropped
-// for three reasons: its cose layout can't cluster motes by species, its
-// fit() on every selection was the jarring "snap back" the graph used to
-// do, and owning the mouse pipeline outright removes the gesture conflicts
-// that made ctrl+drag-to-connect so painful to land on top of a library.
+// Canvas graph renderer for Monarch, the MonOSS graph window. Replaces
+// Cytoscape, which was dropped for three reasons: its cose layout can't
+// cluster motes by species, its fit() on every selection was the jarring
+// "snap back" the graph used to do, and owning the mouse pipeline outright
+// removes the gesture conflicts that made ctrl+drag-to-connect so painful
+// to land on top of a library.
 //
 // Coordinates: nodes live in world space; the camera maps world -> screen
 // as `screen = center + camera.xy + world * scale`.
@@ -32,7 +33,7 @@ const KIND_LABEL = {
   portal: "Portal",
 };
 
-/** The mote ids of `kind`, out of the kinds map ui/api.py returns.
+/** The mote ids of `kind`, out of the kinds map monarch/api.py returns.
  *  Lives in graph.js because it loads first and both files need it. */
 function idsWithKind(kinds, kind) {
   return Object.keys(kinds || {}).filter((id) => (kinds[id] || []).includes(kind));
@@ -134,7 +135,7 @@ class MonossGraph {
     this.panTarget = null;
     this.spread = 320;
 
-    // Advanced view settings (ui/frontend/app.js persists these per
+    // Advanced view settings (monarch/frontend/app.js persists these per
     // garden). Defaults reproduce the layout and colours this graph had
     // before any of it was adjustable.
     this.forces = { ...DEFAULT_FORCES, relStrength: {} };

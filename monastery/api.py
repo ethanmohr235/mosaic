@@ -1,9 +1,9 @@
 # monastery/api.py
 """JS-facing bridge for Monastery, the calendar window.
 
-A fifth adapter over core/, alongside cli/, ui/, mora/ and mcp_server/ --
-not part of ui/ for the same reason Mora isn't: Monastery is its own
-window with its own concerns, and sharing ui/api.py would mean sharing a
+A fifth adapter over core/, alongside cli/, monarch/, mora/ and mcp_server/ --
+not part of monarch/ for the same reason Mora isn't: Monastery is its own
+window with its own concerns, and sharing monarch/api.py would mean sharing a
 garden connection between windows that open and close independently.
 
 It follows mora/api.py's shape deliberately: one long-lived connection
@@ -41,7 +41,7 @@ from monastery import payload as payload_repo
 logger = logging.getLogger(__name__)
 
 # How long a write waits out a lock held by another process before giving
-# up. Monastery is opened *from* the graph window (ui/api.py::
+# up. Monastery is opened *from* Monarch (monarch/api.py::
 # open_monastery) and may sit alongside Mora too, so several processes
 # holding the same garden file open at once is the normal case here, not
 # the exception -- the same reason mora/api.py and mcp_server/server.py
@@ -61,7 +61,7 @@ def _synchronized(method):
     """pywebview invokes exposed methods from a worker thread, and not
     the same one each time. The connection is opened check_same_thread=
     False, so serializing here is this class's job -- the same reason
-    ui/api.py and mora/api.py have this decorator."""
+    monarch/api.py and mora/api.py have this decorator."""
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         with self._lock:
@@ -76,7 +76,7 @@ def _coerce(raw):
     ignore. A date is not valid JSON and stays a string, which is what
     we want.
 
-    Byte-for-byte ui/api.py::_coerce, copied rather than imported -- no
+    Byte-for-byte monarch/api.py::_coerce, copied rather than imported -- no
     adapter imports another -- because "what does typing this into a
     property field mean" must not have two answers in two windows."""
     if not isinstance(raw, str):
@@ -117,7 +117,7 @@ class Api:
     def _best_effort_sync(self) -> None:
         """Same call, same reasoning, as mora/api.py::Api._best_effort_sync:
         run_monastery.py is its own launch path, not only ever opened from
-        the graph window, so a mote dated here must converge on its own
+        Monarch, so a mote dated here must converge on its own
         rather than depending on that other window's session having also
         been open to carry it. Never allowed to block opening, switching
         or closing this window."""

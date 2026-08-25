@@ -86,7 +86,7 @@ def test_mote_round_trip():
 
 
 def test_property_values_keep_their_json_types():
-    # ui/api.py coerces incoming strings through json.loads because GUI
+    # monarch/api.py coerces incoming strings through json.loads because GUI
     # text fields deliver everything as text. MCP arguments arrive already
     # typed, so no coercion happens here -- "21" must stay a string.
     mote = create_mote(
