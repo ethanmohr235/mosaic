@@ -316,25 +316,62 @@ e.g. `/usr/bin/python3 -m venv --system-site-packages .venv`.
 
 ## Desktop launcher
 
-A user-level launcher lives at `~/.local/share/applications/monoss.desktop`
-(not tracked in this repo — it's machine-specific, pointing at an absolute
-`.venv` path) so MonOSS shows up in the regular application menu instead of
-needing a terminal. Its icon is `assets/icon.svg`. Regenerate it with:
+Each window has its own user-level launcher (none tracked in this repo --
+they're machine-specific, pointing at an absolute `.venv` path) so it shows
+up in the regular application menu instead of needing a terminal:
+`~/.local/share/applications/monoss.desktop` for Monarch,
+`mora.desktop` for Mora, `monastery.desktop` for Monastery. In every case
+`StartupWMClass` has to match that window's own title (the string passed
+to `webview.create_window(...)` in its `app.py`), not the product name, or
+the desktop environment won't associate the launcher with the running
+window. Regenerate them with:
 
 ```
 cat > ~/.local/share/applications/monoss.desktop <<EOF
 [Desktop Entry]
 Type=Application
-Name=MonOSS
+Name=Monarch
 Comment=Personal knowledge-graph organizer
 Exec=$(pwd)/.venv/bin/python $(pwd)/run_monarch.py
 Icon=$(pwd)/assets/icon.svg
 Terminal=false
 Categories=Utility;
-StartupWMClass=MonOSS
+StartupWMClass=Monarch
 EOF
+
+cat > ~/.local/share/applications/mora.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Mora
+Comment=Note editor for a MonOSS garden
+Exec=$(pwd)/.venv/bin/python $(pwd)/run_mora.py
+Icon=$(pwd)/assets/icon-mora.svg
+Terminal=false
+Categories=Utility;
+StartupWMClass=Mora
+EOF
+
+cat > ~/.local/share/applications/monastery.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Monastery
+Comment=Calendar over a MonOSS garden's dated motes
+Exec=$(pwd)/.venv/bin/python $(pwd)/run_monastery.py
+Icon=$(pwd)/assets/icon-monastery.svg
+Terminal=false
+Categories=Utility;
+StartupWMClass=Monastery
+EOF
+
 update-desktop-database ~/.local/share/applications/
 ```
+
+Mora's and Monastery's icons (`assets/icon-mora.svg`, `assets/icon-monastery.svg`)
+are the same ringed-planet mark both windows already draw in their own
+topbar brand block (`mora/frontend/index.html`, `monastery/frontend/index.html`)
+-- the two are visually identical today because that mark is, not a
+mistake introduced here. Monarch's `assets/icon.svg` predates the amber
+accent theme and is still in blue; nothing here changes it.
 
 ## Regression testing
 
