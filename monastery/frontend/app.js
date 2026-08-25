@@ -1397,6 +1397,20 @@ function wire() {
   $("rail-toggle").onclick = () => { railOpen = !railOpen; draw(); };
   $("garden-btn").onclick = openGardenMenu;
 
+  $("refresh-btn").onclick = async () => {
+    const btn = $("refresh-btn");
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    try {
+      const result = await call(api.refresh());
+      await refresh();
+      toast(result.synced ? "Synced and refreshed." : "Refreshed.");
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("spinning");
+    }
+  };
+
   $("panel-close").onclick = closePanel;
   $("panel-delete").onclick = (event) => {
     lastPointer = { x: event.clientX, y: event.clientY };

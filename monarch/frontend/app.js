@@ -3057,6 +3057,22 @@ function setupSync() {
   });
 }
 
+function setupRefresh() {
+  $("refresh-btn").addEventListener("click", async () => {
+    const btn = $("refresh-btn");
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    try {
+      const result = await call(api.refresh());
+      await refocus(focusId, { pan: false });
+      showToast(result.synced ? "Synced and refreshed." : "Refreshed.");
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("spinning");
+    }
+  });
+}
+
 // ---- portal picker ----
 //
 // Reached from "New portal…" on the empty-canvas context menu. Modeled on
@@ -3969,6 +3985,7 @@ async function init() {
   setupMora();
   setupMonastery();
   setupSync();
+  setupRefresh();
   setupCalendarExport();
   setupContextMenu();
   setupKeyboard();

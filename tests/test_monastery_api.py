@@ -350,6 +350,20 @@ def test_opening_monastery_pushes_pending_local_changes(tmp_path):
     assert any((sync_dir / "synced" / "ops").glob("*.jsonl"))
 
 
+# ---- manual refresh ----
+
+def test_refresh_skips_sync_when_not_configured(api):
+    assert api.refresh() == {"synced": False}
+
+
+def test_refresh_syncs_when_configured(api, tmp_path):
+    set_sync_dir("test", str(tmp_path))
+    create_mote(api._conn, {"name": "Alice"})
+    result = api.refresh()
+    assert result["synced"] is True
+    assert result["push"]["pushed"] >= 1
+
+
 # ---- the window's own port ----
 #
 # Monarch takes pywebview's default 42001 and Mora takes 42002.

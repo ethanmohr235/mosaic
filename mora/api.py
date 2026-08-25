@@ -95,6 +95,21 @@ class Api:
         except Exception:
             logger.exception("garden sync failed for %r", self._garden)
 
+    # ---- sync ----
+
+    @_synchronized
+    def refresh(self) -> dict:
+        """Manual refresh button: sync (if configured) then let the
+        caller re-fetch the current view fresh from self._conn. Unlike
+        _best_effort_sync(), a real sync error is not swallowed --
+        surfaced to the user as a toast via call()'s existing rejection
+        handling. Unconfigured sync is not an error -- refresh is also
+        just "reload from disk" for a garden with no sync set up."""
+        if gardens_repo.get_sync_dir(self._garden) is None:
+            return {"synced": False}
+        result = sync_repo.run(self._conn, self._garden)
+        return {"synced": True, **result}
+
     @_synchronized
     def shutdown(self) -> None:
         self._best_effort_sync()

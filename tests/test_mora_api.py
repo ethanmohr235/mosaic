@@ -241,6 +241,20 @@ def test_opening_mora_on_an_unsynced_garden_does_nothing(api):
     assert api.current_garden() == "test"
 
 
+# ---- manual refresh ----
+
+def test_refresh_skips_sync_when_not_configured(api):
+    assert api.refresh() == {"synced": False}
+
+
+def test_refresh_syncs_when_configured(api, tmp_path):
+    set_sync_dir("test", str(tmp_path))
+    create_mote(api._conn, {"name": "Alice"})
+    result = api.refresh()
+    assert result["synced"] is True
+    assert result["push"]["pushed"] >= 1
+
+
 # ---- the window's own port ----
 #
 # pywebview pins its server to 42001 whenever private_mode is off and no

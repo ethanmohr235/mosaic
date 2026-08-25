@@ -108,6 +108,10 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 .topbar-trigger:hover { background: var(--panel); }
 .caret { font-size: 9px; color: var(--faint); }
 
+.icon-btn { font-size: 15px; line-height: 1; }
+.icon-btn.spinning { animation: icon-btn-spin 0.8s linear infinite; }
+@keyframes icon-btn-spin { to { transform: rotate(360deg); } }
+
 #nav { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 #nav button {
   border: 1px solid oklch(1 0 0 / 0.1); background: oklch(0.185 0 0);
