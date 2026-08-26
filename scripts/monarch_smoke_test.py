@@ -667,13 +667,13 @@ def run_checks(window):
                 const rows = document.querySelectorAll('#detail-properties .detail-row');
                 for (const r of rows) {
                     if (r.querySelector('.key').textContent === 'date') {
-                        const field = r.querySelector('.date-field');
+                        const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({found: false});
-                        const dateInput = field.querySelector('input[type=\"date\"]');
-                        const allDay = field.querySelector('input[type=\"checkbox\"]');
-                        const timeInput = field.querySelector('input[type=\"time\"]');
+                        field.querySelector('.interval-summary-btn').click();
+                        const allDay = field.querySelector('.interval-time-row input[type=\"checkbox\"]');
+                        const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
                         return JSON.stringify({
-                            found: true, date: dateInput.value, allDay: allDay.checked,
+                            found: true, value: field.value, allDay: allDay.checked,
                             timeHidden: timeInput.classList.contains('hidden'),
                         });
                     }
@@ -681,18 +681,18 @@ def run_checks(window):
                 return JSON.stringify({found: false});
             })()
         """))
-        assert info["found"], "an all-day date property should render a picker (.date-field)"
-        assert info["date"] == "2026-08-15", f"date input should show the stored date, got {info}"
+        assert info["found"], "an all-day date property should render the interval picker (.interval-field)"
+        assert info["value"] == "2026-08-15", f"the field should report the stored date, got {info}"
         assert info["allDay"] is True, f"a bare YYYY-MM-DD value should check All day, got {info}"
         assert info["timeHidden"] is True, f"the time input should be hidden while All day is checked, got {info}"
 
         # Uncheck All day and set a time -- should commit a full timed value.
         js(window, """
-            const field = document.querySelector('#detail-properties .date-field');
-            const allDay = field.querySelector('input[type=\"checkbox\"]');
+            const field = document.querySelector('#detail-properties .interval-field');
+            const allDay = field.querySelector('.interval-time-row input[type=\"checkbox\"]');
             allDay.checked = false;
             allDay.dispatchEvent(new Event('change', {bubbles: true}));
-            const timeInput = field.querySelector('input[type=\"time\"]');
+            const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
             timeInput.value = '14:30';
             timeInput.dispatchEvent(new Event('change', {bubbles: true}));
         """)
@@ -729,32 +729,29 @@ def run_checks(window):
                 const rows = document.querySelectorAll('#detail-properties .detail-row');
                 for (const r of rows) {
                     if (r.querySelector('.key').textContent === 'when') {
-                        const field = r.querySelector('.date-field');
+                        const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({found: false});
-                        return JSON.stringify({
-                            found: true,
-                            date: field.querySelector('input[type="date"]').value,
-                            time: field.querySelector('input[type="time"]').value,
-                        });
+                        return JSON.stringify({found: true, value: field.value});
                     }
                 }
                 return JSON.stringify({found: false});
             })()
         """))
         assert info["found"], \
-            "an interval under a non-`date` key should still render a picker"
-        assert info["date"] == "2026-08-15", f"the picker should show the start, got {info}"
-        assert info["time"] == "09:00", f"the picker should show the start time, got {info}"
+            "an interval under a non-`date` key should still render the picker"
+        assert info["value"].startswith("2026-08-15T09:00"), f"the picker should show the start, got {info}"
+        assert info["value"].endswith("/PT1H"), f"the picker should show the span, got {info}"
 
     check("detail panel: the picker follows the value's shape, not the key's name",
           the_picker_follows_the_shape_not_the_key_name)
 
     def editing_a_start_keeps_the_span():
-        """The panel edits only the start; how long it lasts rides along
-        untouched, so a nudge here cannot quietly shorten the thing."""
+        """Moving the start has to move the end with it -- the span is
+        what an edit here must preserve, not the end's own clock time."""
         js(window, """
-            const field = document.querySelector('#detail-properties .date-field');
-            const timeInput = field.querySelector('input[type="time"]');
+            const field = document.querySelector('#detail-properties .interval-field');
+            field.querySelector('.interval-summary-btn').click();
+            const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
             timeInput.value = '11:30';
             timeInput.dispatchEvent(new Event('change', {bubbles: true}));
         """)
@@ -768,10 +765,10 @@ def run_checks(window):
     check("detail panel: editing a start keeps the span",
           editing_a_start_keeps_the_span)
 
-    def a_repeating_interval_stays_fully_visible_as_text():
-        """The picker edits only the start, so a value carrying rule
-        lines gets a plain field instead -- all of it visible, all of it
-        editable, rather than a picker hiding half the value."""
+    def a_repeating_interval_gets_the_picker_with_an_editable_repeat_section():
+        """The interval picker decomposes a clean RRULE into the repeat
+        section's own controls, rather than falling back to plain text --
+        the whole point of reviving this editor."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({
@@ -791,23 +788,205 @@ def run_checks(window):
                 const rows = document.querySelectorAll('#detail-properties .detail-row');
                 for (const r of rows) {
                     if (r.querySelector('.key').textContent === 'when') {
-                        const field = r.querySelector('.date-field');
-                        const raw = r.querySelector('input, textarea');
+                        const field = r.querySelector('.interval-field');
+                        if (!field) return JSON.stringify({picker: false});
+                        field.querySelector('.interval-summary-btn').click();
+                        const weeklyPill = Array.from(field.querySelectorAll('.interval-freq-pills .pill'))
+                            .find((b) => b.dataset.freq === 'WEEKLY');
                         return JSON.stringify({
-                            picker: !!field, shows: raw ? raw.value : null,
+                            picker: true, value: field.value,
+                            weeklySelected: weeklyPill ? weeklyPill.classList.contains('on') : null,
                         });
                     }
                 }
                 return JSON.stringify({picker: null});
             })()
         """))
-        assert info["picker"] is False, \
-            f"a repeating interval must not get the start-only picker, got {info}"
-        assert "RRULE:FREQ=WEEKLY" in (info["shows"] or ""), \
-            f"the rule has to stay visible and editable, got {info}"
+        assert info["picker"] is True, \
+            f"a repeating interval should get the picker, with its rule shown and editable, got {info}"
+        assert info["weeklySelected"] is True, f"the repeat section should reflect the stored rule, got {info}"
+        assert "RRULE:FREQ=WEEKLY" in info["value"], f"the rule must still be present, got {info}"
 
-    check("detail panel: a repeating interval stays fully visible as text",
-          a_repeating_interval_stays_fully_visible_as_text)
+    check("detail panel: a repeating interval gets the picker, with an editable repeat section",
+          a_repeating_interval_gets_the_picker_with_an_editable_repeat_section)
+
+    def picking_weekly_and_toggling_weekdays_writes_a_real_rrule():
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'weekly task', due: '2026-08-17T09:00'});
+                window.__seed.weeklyId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"weekly mote setup failed: {result}"
+
+        js(window, """
+            const field = document.querySelector('#detail-properties .interval-field');
+            field.querySelector('.interval-summary-btn').click();
+            Array.from(field.querySelectorAll('.interval-freq-pills .pill'))
+                .find((b) => b.dataset.freq === 'WEEKLY').click();
+        """)
+        time.sleep(0.5)
+        js(window, """
+            const field = document.querySelector('#detail-properties .interval-field');
+            const wed = Array.from(field.querySelectorAll('.interval-weekday-pills .pill'))
+                .find((b) => b.textContent === 'W' && !b.classList.contains('on'));
+            if (wed) wed.click();
+        """)
+        time.sleep(0.5)
+        updated = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__seed.weeklyId)).properties.due; }
+        """))
+        assert "RRULE:FREQ=WEEKLY" in updated, f"picking Weekly should write a real RRULE, got {updated!r}"
+        assert "BYDAY=" in updated, f"a weekly rule should carry BYDAY=, got {updated!r}"
+
+    check("detail panel: picking Weekly and toggling weekday pills writes a real RRULE",
+          picking_weekly_and_toggling_weekdays_writes_a_real_rrule)
+
+    def an_until_rule_decomposes_and_survives_a_start_edit():
+        """UNTIL= is now a first-class part of the repeat section (the
+        "Ends: On date" control), not just COUNT -- so a value already
+        using it should decompose into that control (date-only, the time
+        and any UTC Z dropped), and an edit to the start should keep
+        repeating until that date rather than dropping the rule."""
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({
+                    name: 'until mote',
+                    deadline: '2026-08-15T09:00/PT1H\\nRRULE:FREQ=WEEKLY;UNTIL=20261231T090000Z',
+                });
+                window.__seed.untilId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"until-rule mote setup failed: {result}"
+
+        info = json.loads(js(window, """
+            (function() {
+                const field = document.querySelector('#detail-properties .interval-field');
+                field.querySelector('.interval-summary-btn').click();
+                const untilPill = Array.from(field.querySelectorAll('.interval-ends-pills .pill'))
+                    .find((b) => b.textContent === 'On date');
+                const untilInput = field.querySelector('.interval-stepper-row input[type=\"date\"]');
+                return JSON.stringify({
+                    untilSelected: untilPill ? untilPill.classList.contains('on') : null,
+                    untilValue: untilInput ? untilInput.value : null,
+                });
+            })()
+        """))
+        assert info["untilSelected"] is True, \
+            f"a value with UNTIL= should decompose into the 'On date' ends mode, got {info}"
+        assert info["untilValue"] == "2026-12-31", f"the date-only part of UNTIL should show, got {info}"
+
+        js(window, """
+            const field = document.querySelector('#detail-properties .interval-field');
+            const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
+            timeInput.value = '10:15';
+            timeInput.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        time.sleep(1.0)
+        updated = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__seed.untilId)).properties.deadline; }
+        """))
+        assert updated.startswith("2026-08-15T10:15:00"), f"the start should move, got {updated!r}"
+        assert "RRULE:FREQ=WEEKLY;UNTIL=20261231" in updated, (
+            f"the repeat-until-date should survive a start-only edit, got {updated!r}"
+        )
+
+    check("detail panel: an UNTIL= rule decomposes into the ends-on-date control and survives a start edit",
+          an_until_rule_decomposes_and_survives_a_start_edit)
+
+    def picking_an_until_date_in_the_ui_writes_a_real_rrule():
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'ends-on-date task', due: '2026-08-17T09:00'});
+                window.__seed.untilPickedId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"ends-on-date mote setup failed: {result}"
+
+        js(window, """
+            const field = document.querySelector('#detail-properties .interval-field');
+            field.querySelector('.interval-summary-btn').click();
+            Array.from(field.querySelectorAll('.interval-freq-pills .pill'))
+                .find((b) => b.dataset.freq === 'WEEKLY').click();
+        """)
+        time.sleep(0.5)
+        js(window, """
+            const field = document.querySelector('#detail-properties .interval-field');
+            Array.from(field.querySelectorAll('.interval-ends-pills .pill'))
+                .find((b) => b.textContent === 'On date').click();
+        """)
+        time.sleep(0.5)
+        js(window, """
+            const field = document.querySelector('#detail-properties .interval-field');
+            const untilInput = field.querySelector('.interval-stepper-row input[type=\"date\"]');
+            untilInput.value = '2026-12-11';
+            untilInput.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        time.sleep(0.5)
+        updated = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__seed.untilPickedId)).properties.due; }
+        """))
+        # BYDAY=MO is also present -- switching to Weekly auto-selects the
+        # start's own weekday (2026-08-17 is a Monday) -- so this checks
+        # for FREQ and UNTIL independently rather than one exact substring.
+        assert "FREQ=WEEKLY" in updated and "UNTIL=20261211" in updated, \
+            f"picking an ends-on date should write a real UNTIL=, got {updated!r}"
+        assert "COUNT=" not in updated, f"UNTIL and COUNT are mutually exclusive, got {updated!r}"
+
+    check("detail panel: picking an ends-on date in the repeat section writes a real RRULE UNTIL=",
+          picking_an_until_date_in_the_ui_writes_a_real_rrule)
+
+    def a_rule_with_an_unsupported_param_still_falls_back_to_raw_text():
+        """BYMONTHDAY isn't something the structured editor's controls
+        can express, so it has to stay the raw-text fallback -- the
+        safety net UNTIL used to exercise before it became a supported
+        control, still needed for whatever this picker doesn't cover."""
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({
+                    name: 'monthday mote',
+                    when: '2026-08-15T09:00/PT1H\\nRRULE:FREQ=MONTHLY;BYMONTHDAY=15',
+                });
+                window.__seed.monthdayId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"BYMONTHDAY mote setup failed: {result}"
+
+        info = json.loads(js(window, """
+            (function() {
+                const field = document.querySelector('#detail-properties .interval-field');
+                field.querySelector('.interval-summary-btn').click();
+                const raw = field.querySelector(
+                    '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
+                return JSON.stringify({
+                    fallbackShown: !!raw,
+                    shows: raw ? raw.value : null,
+                    chipsHidden: field.querySelector('.interval-freq-pills').classList.contains('hidden'),
+                });
+            })()
+        """))
+        assert info["fallbackShown"] is True, f"an unsupported param must fall back to raw text, got {info}"
+        assert "BYMONTHDAY=15" in (info["shows"] or ""), f"the rule has to stay visible and editable, got {info}"
+        assert info["chipsHidden"] is True, "the frequency chips should be hidden while the raw fallback is shown"
+
+    check("detail panel: a rule with an unsupported param (BYMONTHDAY) still falls back to raw text",
+          a_rule_with_an_unsupported_param_still_falls_back_to_raw_text)
 
     def detail_panel_is_resizable():
         result = js_async(window, """

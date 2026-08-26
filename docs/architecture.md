@@ -448,7 +448,15 @@ Durations use days/hours/minutes/seconds only: years and months have no
 fixed length, so an event lasting "one month" has no single answer.
 
 The one thing this costs: hand-typing a separate `duration` beside a date
-no longer does anything. An interval picker is the mitigation.
+no longer does anything. An interval picker is the mitigation -- Monarch's
+detail panel (`monarch/frontend/app.js::intervalField`) composes and reads
+the notation above through a calendar grid and a repeat control (frequency,
+interval, weekdays, and an end that is either a count or a date, matching
+`FREQ`/`INTERVAL`/`BYDAY`/`COUNT`/`UNTIL`), rather than requiring anyone
+hand-type `RRULE:FREQ=WEEKLY`. It writes only what it can fully represent: a
+span or rule outside what its controls cover (a `BYMONTHDAY=`, a multi-day
+timed span) is shown and edited as raw text instead of being silently
+narrowed to fit.
 
 MonOSS reaches no network. There was one exception -- a manual, one-way
 export of dated motes to Google Calendar -- and it was removed once

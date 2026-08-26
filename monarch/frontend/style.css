@@ -572,21 +572,132 @@ main { flex: 1; min-height: 0; display: flex; }
 .detail-row .note-summary { color: var(--muted); font-style: italic; cursor: default; }
 .detail-row .sparkline { flex-shrink: 0; align-self: center; opacity: 0.85; }
 
-/* ---- date/recurrence pickers (app.js::dateField/recurrenceField) ---- */
+/* ---- a reusable toggle pill (first used by Momentum's status/day
+   controls; adopted here for the interval picker's frequency and
+   weekday toggles). ---- */
+.pill {
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 999px;
+  padding: 4px 10px; font-size: 10.5px; color: var(--muted); cursor: pointer;
+}
+.pill:hover { background: var(--raised); color: var(--fg-bright); }
+.pill.on { background: var(--accent); color: var(--panel-bg); font-weight: 600; }
 
-.picker-field {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-  flex: 1; min-width: 0;
-}
-.picker-field input[type="date"], .picker-field input[type="time"], .picker-field select {
-  flex: 1 1 auto; min-width: 92px; font-size: 12.5px; padding: 6px 8px;
-}
 .picker-checkbox {
   display: flex; align-items: center; gap: 4px;
   font-size: 11.5px; color: var(--muted); white-space: nowrap; flex-shrink: 0;
 }
 .picker-checkbox input[type="checkbox"] { margin: 0; }
-.picker-mode-toggle { flex-shrink: 0; white-space: nowrap; }
+
+/* ---- interval picker (app.js::intervalField) ----
+   A collapsed summary button that expands into a calendar grid, time/
+   end-time, and repeat controls. Monarch's Observatory design
+   (docs/ui-setup.md). */
+
+.interval-field { flex: 1; min-width: 0; }
+
+.interval-summary-btn {
+  display: block; width: 100%; text-align: left;
+  background: var(--raised); border: 1px solid var(--border-soft);
+  border-radius: 6px; padding: 6px 8px; font-size: 12.5px; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.interval-summary-btn:hover { border-color: var(--accent); }
+
+.interval-panel {
+  margin-top: 8px; background: var(--panel-bg); border: 1px solid var(--border-soft);
+  border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+}
+
+.interval-divider { border-top: 1px solid var(--border-soft); margin: 2px 0; }
+.interval-row-label { font-size: 11px; color: var(--muted); min-width: 44px; flex-shrink: 0; }
+
+.interval-cal-header { display: flex; align-items: center; justify-content: space-between; }
+.interval-cal-month { font-size: 12.5px; color: var(--fg-bright); font-weight: 500; }
+.interval-cal-nav {
+  background: transparent; border: none; color: var(--muted); font-size: 14px;
+  cursor: pointer; padding: 2px 8px; border-radius: 6px;
+}
+.interval-cal-nav:hover { background: var(--raised); color: var(--fg); }
+
+.interval-cal-weekdays, .interval-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.interval-cal-weekdays span { text-align: center; font-size: 9.5px; letter-spacing: 0.05em; color: var(--faint); }
+.interval-cal-day {
+  height: 24px; background: transparent; border: 1px solid transparent; border-radius: 6px;
+  color: var(--fg); font-size: 11.5px; cursor: pointer; padding: 0; font-variant-numeric: tabular-nums;
+}
+.interval-cal-day:hover { background: var(--raised); }
+.interval-cal-day.out { color: var(--faint); }
+.interval-cal-day.today { border-color: var(--border-soft); }
+.interval-cal-day.selected { background: var(--accent); color: var(--panel-bg); font-weight: 600; border-color: transparent; }
+
+.interval-jump-chips { display: flex; gap: 5px; }
+.interval-jump-chip {
+  flex: 1; background: transparent; border: 1px solid var(--border-soft); border-radius: 999px;
+  padding: 4px 0; font-size: 10.5px; color: var(--muted); cursor: pointer;
+}
+.interval-jump-chip:hover { border-color: var(--accent); color: var(--fg-bright); }
+
+.interval-time-row, .interval-end-row { display: flex; align-items: center; gap: 8px; }
+.interval-time-row input[type="time"], .interval-end-row input[type="time"] {
+  flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px;
+}
+.interval-end-ghost {
+  flex: 1; background: transparent; border: 1px dashed var(--border); border-radius: 8px;
+  padding: 5px 8px; font-size: 11.5px; color: var(--muted); cursor: pointer;
+}
+.interval-end-ghost:hover { border-color: var(--accent); color: var(--fg-bright); }
+.interval-end-duration { font-size: 10.5px; color: var(--faint); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.interval-end-clear {
+  background: transparent; border: none; color: var(--faint); font-size: 14px;
+  cursor: pointer; padding: 0 4px; flex-shrink: 0;
+}
+.interval-end-clear:hover { color: var(--fg-bright); }
+
+.interval-repeat-row { display: flex; align-items: center; gap: 8px; }
+.interval-freq-pills {
+  flex: 1; display: flex; gap: 2px; background: var(--panel);
+  border: 1px solid var(--border-soft); border-radius: 8px; padding: 2px;
+}
+.interval-freq-pills .pill { flex: 1; text-align: center; border-radius: 6px; border: none; padding: 4px 0; }
+.interval-repeat-detail { display: flex; flex-direction: column; gap: 8px; }
+.interval-stepper-row, .interval-weekday-row { display: flex; align-items: center; gap: 8px; }
+.interval-ends-pills { display: flex; gap: 4px; }
+.interval-stepper-row input[type="date"] { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
+.interval-stepper {
+  display: flex; align-items: center; gap: 2px; background: var(--panel);
+  border: 1px solid var(--border-soft); border-radius: 8px; padding: 2px;
+}
+.interval-stepper button {
+  width: 22px; height: 20px; background: transparent; border: none; color: var(--muted);
+  font-size: 13px; cursor: pointer; border-radius: 5px; padding: 0;
+}
+.interval-stepper button:hover { background: var(--raised); color: var(--fg-bright); }
+.interval-stepper span { min-width: 22px; text-align: center; font-size: 11.5px; color: var(--fg-bright); font-variant-numeric: tabular-nums; }
+.interval-stepper .interval-ends-value { min-width: 52px; font-size: 10.5px; }
+.interval-unit { font-size: 11.5px; color: var(--muted); flex-shrink: 0; }
+.interval-weekday-pills { flex: 1; display: flex; gap: 3px; }
+.interval-weekday-pills .pill { flex: 1; height: 24px; padding: 0; text-align: center; }
+
+.interval-fallback-note { font-size: 11px; color: var(--muted); }
+.interval-fallback-reset {
+  align-self: flex-start; background: transparent; border: 1px solid var(--border-soft);
+  border-radius: 8px; padding: 4px 9px; font-size: 11px; color: var(--muted); cursor: pointer;
+}
+.interval-fallback-reset:hover { border-color: var(--accent); color: var(--fg-bright); }
+
+.interval-summary-text { font-size: 12px; color: var(--fg); line-height: 1.4; }
+.interval-raw-value { font-family: var(--mono); font-size: 9.5px; color: var(--faint); word-break: break-all; }
+.interval-footer-btns { display: flex; gap: 6px; margin-top: 2px; }
+.interval-clear-btn {
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 8px;
+  padding: 5px 10px; font-size: 11.5px; color: var(--danger); cursor: pointer;
+}
+.interval-clear-btn:hover { border-color: var(--danger); }
+.interval-done-btn {
+  margin-left: auto; background: var(--accent); border: none; border-radius: 8px;
+  padding: 5px 14px; font-size: 11.5px; color: var(--panel-bg); font-weight: 600; cursor: pointer;
+}
+.interval-done-btn:hover { background: var(--accent-bright); }
 
 .reserved-badge {
   display: inline-block; width: 6px; height: 6px; border-radius: 50%;
