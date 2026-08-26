@@ -1,0 +1,1004 @@
+// momentum/frontend/app.js
+//
+// Wiring between momentum/api.py and the board. Everything about what a
+// garden's tasks *are* -- which property means status, which means an
+// estimate, where a task sits in time, which day has room -- comes back
+// from Python already decided (core/task_candidates.py and
+// core/calendar.py read, momentum/payload.py shapes). This file draws
+// that answer, takes edits, and owns exactly two things Python has no
+// opinion about: which tab is showing, and which key the person picked
+// for each role.
+//
+// That second one is remembered in localStorage, the same way Monastery
+// remembers which bindings you switched off, and sent back on every
+// call -- so a poll can never quietly re-guess a key you corrected.
+
+let api;
+let tab = "board";           // "board" | "days" | "focus"
+let keyChoice = null;             // {status, priority, estimate, bindings} once known
+let data = null;             // the last answer for the current tab
+let anchor = null;           // Date; any day of the week shown in Days
+let selectedId = null;
+let panel = null;            // the last focus() answer
+let activeId = null;         // which mote the timer is running against
+let railOpen = true;
+let toastTimer = null;
+let pollTimer = null;
+let tickTimer = null;
+let refreshSeq = 0;
+let dragId = null;
+let addingColumn = null;     // which column's inline "+ add mote" input is open
+let sessionMinutes = 25;
+let remaining = 25 * 60;
+let running = false;
+let startedAt = null;        // when the current session began, for the log
+
+const POLL_MS = 4000;
+const STORE_KEY = "momentum.keys";
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const UNKNOWN_COLOR = "oklch(0.62 0 0)";
+const DONE_WORDS = new Set(["done", "complete", "completed", "shipped", "harvested"]);
+
+const $ = (id) => document.getElementById(id);
+
+// ---- colour -------------------------------------------------------
+//
+// Byte-for-byte the hash monarch/frontend/graph.js uses, the same copy
+// Monastery and Mora carry. Four windows disagreeing about what colour
+// "Meeting" is would be worse than any of them being arbitrary.
+
+function hashString(text) {
+  let h = 1779033703 ^ text.length;
+  for (let i = 0; i < text.length; i++) {
+    h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  h = Math.imul(h ^ (h >>> 16), 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 3266489917);
+  return (h ^= h >>> 16) >>> 0;
+}
+
+function hueFor(seed) {
+  return hashString(seed) % 360;
+}
+
+function colorOf(entry) {
+  if (!entry) return UNKNOWN_COLOR;
+  if ((entry.kinds || []).includes("species")) return `oklch(0.80 0.13 ${hueFor(entry.id || "")})`;
+  if (!entry.speciesId) return UNKNOWN_COLOR;
+  return `oklch(0.72 0.11 ${hueFor(entry.speciesId)})`;
+}
+
+/** What a mote *is*: the kinds core says it is, else its species, else
+ *  plain "mote". The same order monarch/frontend/app.js::kindLabel uses. */
+function kindOf(entry) {
+  if (!entry) return "mote";
+  const kinds = entry.kinds || [];
+  if (kinds.length) return kinds.map((k) => k.replace(/_/g, " ")).join(" · ");
+  return entry.speciesName || "mote";
+}
+
+// ---- dates ---------------------------------------------------------
+//
+// All local, all naive: every date a garden stores is naive local time
+// (core/calendar.py says why), so nothing here touches UTC.
+
+const pad = (n) => String(n).padStart(2, "0");
+const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const mondayOf = (d) => addDays(d, -((d.getDay() + 6) % 7));
+const parseKey = (k) => {
+  const p = String(k).split("-");
+  return new Date(+p[0], +p[1] - 1, +p[2]);
+};
+const isoLocal = (d) => `${keyOf(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+const todayKey = () => keyOf(new Date());
+
+function clock(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  return `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
+}
+
+/** Minutes as a board reads them: `45m`, `4h`, `1.5h`. The same shape
+ *  core/task_candidates.py::format_estimate produces, because a total
+ *  computed here and one computed there must not look different. */
+function humanMinutes(minutes) {
+  if (!minutes) return "";
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  return `${Number(hours.toFixed(1))}h`;
+}
+
+// ---- DOM helpers ---------------------------------------------------
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function clear(node) {
+  node.replaceChildren();
+  return node;
+}
+
+function button(className, text) {
+  const node = el("button", className, text);
+  node.type = "button";
+  return node;
+}
+
+function toast(message, isError, action) {
+  const node = clear($("toast"));
+  node.append(el("span", null, message));
+  if (action) {
+    const undo = button("toast-action", action.label);
+    undo.onclick = () => { node.classList.add("hidden"); action.run(); };
+    node.append(undo);
+  }
+  node.classList.toggle("error", !!isError);
+  node.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.add("hidden"), action ? 8000 : 4200);
+}
+
+/** Every api call goes through here: a bridge error is a toast, never a
+ *  silently half-drawn board. */
+async function call(promise, failure) {
+  try {
+    return await promise;
+  } catch (error) {
+    toast(failure || String(error && error.message ? error.message : error), true);
+    return null;
+  }
+}
+
+// ---- the key preference --------------------------------------------
+//
+// Which property means status/priority/estimate is the person's answer,
+// not the garden's, so it lives here rather than in a mote. `false` is
+// how "switched off" is sent -- distinct from `null`, which means "you
+// decide" and lets Python guess again (momentum/api.py::_resolve_keys).
+
+function loadKeys() {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function saveKeys() {
+  try {
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(keyChoice));
+  } catch (error) {
+    /* a window that cannot remember still works; it just re-guesses. */
+  }
+}
+
+/** The arguments every view call takes. Null on the very first call of
+ *  a session, so Python picks defaults; the person's answer after that. */
+function keyArgs() {
+  if (!keyChoice) return [null, null, null, null];
+  return [
+    keyChoice.status === null ? false : keyChoice.status,
+    keyChoice.priority === null ? false : keyChoice.priority,
+    keyChoice.estimate === null ? false : keyChoice.estimate,
+    keyChoice.bindings,
+  ];
+}
+
+function adoptKeys(answer) {
+  if (!answer || !answer.keys) return;
+  keyChoice = answer.keys;
+  saveKeys();
+}
+
+function setKey(role, value) {
+  if (!keyChoice) return;
+  keyChoice[role] = keyChoice[role] === value ? null : value;
+  saveKeys();
+  refresh();
+}
+
+function toggleBinding(key) {
+  if (!keyChoice) return;
+  const active = new Set(keyChoice.bindings || []);
+  if (active.has(key)) active.delete(key); else active.add(key);
+  keyChoice.bindings = [...active];
+  saveKeys();
+  refresh();
+}
+
+// ---- loading -------------------------------------------------------
+
+function visibleRange() {
+  const start = mondayOf(anchor);
+  return [start, addDays(start, 7)];
+}
+
+async function refresh() {
+  const seq = ++refreshSeq;
+  const args = keyArgs();
+  let answer;
+  if (tab === "board") {
+    answer = await call(api.board(...args), "Could not read the board.");
+  } else if (tab === "days") {
+    const [start, end] = visibleRange();
+    answer = await call(
+      api.days(isoLocal(start), isoLocal(end), ...args), "Could not read the week.",
+    );
+  } else {
+    answer = await call(api.focus_tab(...args), "Could not read the focus view.");
+  }
+  // A poll that lands after the user has already switched tabs is stale
+  // by definition, and drawing it would flash the wrong view.
+  if (answer === null || seq !== refreshSeq) return;
+  data = answer;
+  adoptKeys(answer);
+  render();
+}
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(refresh, POLL_MS);
+}
+
+function stopPolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+// ---- rendering: shared ---------------------------------------------
+
+function isDone(card) {
+  return DONE_WORDS.has(String(card.status || "").toLowerCase());
+}
+
+/** One card, in whichever of the three views asked for it. Compact
+ *  drops the type row and the progress bar, which is what makes a day
+ *  column readable at seven-across. */
+function cardNode(card, compact) {
+  const node = el("div", "card" + (compact ? " compact" : ""));
+  const color = colorOf(card);
+  node.style.borderLeftColor = color;
+  node.draggable = true;
+  node.dataset.id = card.id;
+  if (card.id === selectedId) node.classList.add("selected");
+  if (isDone(card)) node.classList.add("done");
+
+  if (!compact) {
+    const top = el("div", "card-top");
+    const dot = el("span", "dot");
+    dot.style.background = color;
+    const type = el("span", "type", kindOf(card));
+    type.style.color = color;
+    top.append(dot, type, el("div", "spacer"));
+    top.append(dayChip(card));
+    node.append(top);
+  }
+
+  node.append(el("div", "card-name", card.name));
+
+  const foot = el("div", "card-foot");
+  if (compact) {
+    const dot = el("span", "dot");
+    dot.style.cssText = `width:5px;height:5px;border-radius:50%;background:${color};flex-shrink:0`;
+    foot.append(dot);
+  }
+  foot.append(el("span", "owner", ownerLabel(card)));
+  foot.append(el("div", "spacer"));
+  if (card.blocked) foot.append(el("span", "flag", "blocked"));
+  if (!compact && card.subtasks.length) {
+    foot.append(el("span", "subs", `${card.subtasksDone}/${card.subtasks.length}`));
+  }
+  if (card.estimate) foot.append(el("span", "est", card.estimate));
+  node.append(foot);
+
+  if (!compact && card.subtasks.length) {
+    const bar = el("div", "bar");
+    const fill = el("i");
+    fill.style.width = `${Math.round((card.subtasksDone / card.subtasks.length) * 100)}%`;
+    fill.style.background = color;
+    bar.append(fill);
+    node.append(bar);
+  }
+
+  node.addEventListener("dragstart", () => { dragId = card.id; node.classList.add("dragging"); });
+  node.addEventListener("dragend", () => {
+    dragId = null;
+    node.classList.remove("dragging");
+    document.querySelectorAll(".over").forEach((n) => n.classList.remove("over"));
+  });
+  node.addEventListener("click", () => select(card.id === selectedId ? null : card.id));
+  return node;
+}
+
+function ownerLabel(card) {
+  if (card.owners && card.owners.length) {
+    return card.owners.map((o) => o.name).join(", ");
+  }
+  return card.priority ? card.priority : "";
+}
+
+function dayChip(card) {
+  const placement = card.scheduled;
+  if (!placement) return el("span", "card-day none", "undated");
+  const when = parseKey(placement.day);
+  const label = `${DOW[(when.getDay() + 6) % 7]} ${when.getDate()}`;
+  const chip = el("span", "card-day" + (placement.day === todayKey() ? " today" : ""), label);
+  chip.title = `${placement.binding} = ${placement.start.replace("T", " ")}`;
+  return chip;
+}
+
+/** Marks a drop target while a card is over it. Shared by every column
+ *  and day so the highlight cannot get out of step between them. */
+function dropTarget(node, onDrop) {
+  node.addEventListener("dragover", (event) => {
+    if (!dragId) return;
+    event.preventDefault();
+    node.classList.add("over");
+  });
+  node.addEventListener("dragleave", () => node.classList.remove("over"));
+  node.addEventListener("drop", (event) => {
+    event.preventDefault();
+    node.classList.remove("over");
+    const id = dragId;
+    dragId = null;
+    if (id) onDrop(id);
+  });
+}
+
+// ---- rendering: the rail -------------------------------------------
+
+function keyRow(label, count, on, onClick) {
+  const row = button("key-row" + (on ? " on" : ""));
+  row.append(el("span", "tick", on ? "✓" : ""));
+  row.append(el("span", "name", label));
+  if (count !== null) row.append(el("span", "n", String(count)));
+  row.onclick = onClick;
+  return row;
+}
+
+function renderRail() {
+  const candidates = data && data.candidates;
+  const enumKeys = (candidates && candidates.enum) || [];
+  const estimates = (candidates && candidates.estimate) || [];
+  const bindings = (candidates && candidates.bindings) || [];
+
+  const status = clear($("status-rows"));
+  const priority = clear($("priority-rows"));
+  if (!enumKeys.length) {
+    status.append(el("div", "empty", "no label-shaped properties yet"));
+    priority.append(el("div", "empty", "no label-shaped properties yet"));
+  }
+  enumKeys.forEach((c) => {
+    const hint = c.values.slice(0, 4).join(", ");
+    const row = keyRow(c.key, c.count, keyChoice && keyChoice.status === c.key, () => setKey("status", c.key));
+    row.title = hint ? `values: ${hint}` : "";
+    status.append(row);
+    const prow = keyRow(c.key, c.count, keyChoice && keyChoice.priority === c.key, () => setKey("priority", c.key));
+    prow.title = row.title;
+    priority.append(prow);
+  });
+
+  const estimate = clear($("estimate-rows"));
+  if (!estimates.length) estimate.append(el("div", "empty", "no duration-shaped properties yet"));
+  estimates.forEach((c) => estimate.append(
+    keyRow(c.key, c.count, keyChoice && keyChoice.estimate === c.key, () => setKey("estimate", c.key)),
+  ));
+
+  const binding = clear($("binding-rows"));
+  if (!bindings.length) binding.append(el("div", "empty", "nothing is dated yet"));
+  bindings.forEach((b) => binding.append(
+    keyRow(b.key, b.count, b.active, () => toggleBinding(b.key)),
+  ));
+}
+
+// ---- rendering: the board ------------------------------------------
+
+function renderBoard() {
+  const host = clear($("columns"));
+  (data.columns || []).forEach((column) => {
+    const node = el("div", "column");
+    const head = el("div", "column-head");
+    const swatch = el("span", "swatch");
+    swatch.style.background = column.key === null
+      ? UNKNOWN_COLOR
+      : `oklch(0.74 0.1 ${hueFor(column.key)})`;
+    head.append(swatch, el("span", "label", column.label), el("span", "count", String(column.cards.length)));
+    head.append(el("div", "spacer"));
+    head.append(el("span", "load", humanMinutes(column.minutes)));
+    node.append(head);
+
+    const body = el("div", "column-body");
+    column.cards.forEach((card) => body.append(cardNode(card)));
+
+    if (addingColumn === column.key) {
+      const input = el("input", "new-input");
+      input.type = "text";
+      input.placeholder = "new mote name";
+      input.onkeydown = (event) => {
+        if (event.key === "Enter") createTask(input.value, column.key);
+        if (event.key === "Escape") { addingColumn = null; render(); }
+      };
+      body.append(input);
+      setTimeout(() => input.focus(), 0);
+    }
+
+    const add = button("dashed", "+ add mote");
+    add.onclick = () => { addingColumn = column.key; render(); };
+    body.append(add);
+
+    node.append(body);
+    // A column with no status cannot be dropped into: there is no value
+    // to write. Dragging *out* of it works, which is the useful half.
+    if (column.key !== null) {
+      dropTarget(node, (id) => moveTo(id, column.key));
+    }
+    host.append(node);
+  });
+}
+
+// ---- rendering: the week -------------------------------------------
+
+function renderDays() {
+  const pool = clear($("pool-cards"));
+  (data.pool || []).forEach((card) => pool.append(cardNode(card, true)));
+  $("pool-count").textContent = String((data.pool || []).length);
+  $("pool-note").textContent = (data.pool || []).length
+    ? "Drag a mote onto a day to schedule it into the earliest free slot."
+    : "Nothing undated. Drag a card back here to unschedule it.";
+
+  const host = clear($("week"));
+  (data.days || []).forEach((day) => {
+    const when = parseKey(day.day);
+    const isToday = day.day === todayKey();
+    const node = el("div", "day" + (isToday ? " today" : ""));
+
+    const head = el("div", "day-head");
+    const top = el("div", "day-top");
+    top.append(el("span", "dow", DOW[(when.getDay() + 6) % 7]));
+    top.append(el("span", "num", String(when.getDate())));
+    top.append(el("div", "spacer"));
+    top.append(el("span", "load" + (day.over ? " over" : ""), humanMinutes(day.minutes) || "—"));
+    head.append(top);
+
+    const bar = el("div", "bar");
+    const fill = el("i");
+    const capacity = data.capacityMinutes || 0;
+    fill.style.width = capacity ? `${Math.min(100, Math.round((day.minutes / capacity) * 100))}%` : "0%";
+    fill.style.background = day.over ? "oklch(0.62 0.13 25)" : (isToday ? "var(--accent)" : "oklch(0.45 0 0)");
+    bar.append(fill);
+    head.append(bar);
+    node.append(head);
+
+    const body = el("div", "day-body");
+    day.cards.forEach((card) => body.append(cardNode(card, true)));
+    node.append(body);
+
+    dropTarget(node, (id) => scheduleOn(id, day.day));
+    host.append(node);
+  });
+}
+
+// ---- rendering: focus ----------------------------------------------
+
+function activeCard() {
+  const queue = (data && data.queue) || [];
+  return queue.find((c) => c.id === activeId) || queue[0] || null;
+}
+
+function renderFocus() {
+  const queue = clear($("queue-cards"));
+  (data.queue || []).forEach((card) => {
+    const node = cardNode(card, true);
+    // In the queue a click picks what the timer is about, rather than
+    // opening the panel -- that is the one thing this list is for.
+    node.draggable = false;
+    node.onclick = () => { activeId = card.id; render(); };
+    if (card.id === (activeCard() || {}).id) node.classList.add("selected");
+    queue.append(node);
+  });
+  $("queue-note").classList.toggle("hidden", (data.queue || []).length > 0);
+
+  const active = activeCard();
+  const color = active ? colorOf(active) : UNKNOWN_COLOR;
+  $("active-dot").style.background = color;
+  $("active-kind").style.color = color;
+  $("active-kind").textContent = active ? kindOf(active) : "—";
+  $("active-name").textContent = active ? active.name : "Nothing scheduled for today";
+  $("active-card").style.borderLeftColor = color;
+  $("active-meta").textContent = active
+    ? [ownerLabel(active), active.estimate, (active.scheduled || {}).day].filter(Boolean).join(" · ")
+    : "";
+
+  const subs = clear($("active-subs"));
+  (active ? active.subtasks : []).forEach((sub, index) => {
+    subs.append(subRow(sub, index, active.id));
+  });
+  const total = active ? active.subtasks.length : 0;
+  const done = active ? active.subtasksDone : 0;
+  $("active-sub-label").textContent = total ? `${done}/${total} subtasks` : "no subtasks";
+  $("active-fill").style.width = total ? `${Math.round((done / total) * 100)}%` : "0%";
+  $("active-fill").style.background = color;
+
+  $("streak-days").textContent = String(data.streak || 0);
+  $("streak-unit").textContent = (data.streak === 1) ? "day unbroken" : "days unbroken";
+
+  const heat = clear($("heatmap"));
+  (data.heatmap || []).forEach((cell) => {
+    const node = el("div", "cell" + (cell.today ? " today" : ""));
+    const n = cell.sessions;
+    node.style.background = n >= 3 ? "var(--accent)"
+      : n === 2 ? "oklch(0.74 0.1 68 / 0.55)"
+      : n === 1 ? "oklch(0.74 0.1 68 / 0.25)" : "oklch(0.2 0 0)";
+    node.title = `${cell.day} — ${humanMinutes(cell.minutes) || "nothing"}`;
+    heat.append(node);
+  });
+
+  const today = todayKey();
+  const todayMinutes = (data.sessions || [])
+    .filter((s) => s.day === today)
+    .reduce((sum, s) => sum + s.minutes, 0);
+  $("streak-summary").textContent =
+    `${humanMinutes(todayMinutes) || "0m"} logged today · ${(data.sessions || []).length} sessions total`;
+
+  const log = clear($("sessions"));
+  if (!(data.sessions || []).length) log.append(el("div", "empty", "no sessions logged yet"));
+  (data.sessions || []).slice(0, 60).forEach((session) => {
+    const row = el("div", "session");
+    const when = session.start ? new Date(session.start) : null;
+    const isToday = session.day === today;
+    row.append(el("span", "time", when
+      ? (isToday ? `${pad(when.getHours())}:${pad(when.getMinutes())}`
+                 : `${MON_SHORT[when.getMonth()]} ${when.getDate()}`)
+      : "—"));
+    row.append(el("span", "name", session.subject ? session.subject.name : "untitled"));
+    row.append(el("span", "dur" + (isToday ? " today" : ""), `${Math.round(session.minutes)}m`));
+    log.append(row);
+  });
+}
+
+function subRow(sub, index, moteId) {
+  const row = el("div", "sub-row" + (sub.done ? " done" : ""));
+  row.append(el("span", "box", sub.done ? "✓" : ""));
+  row.append(el("span", "text", sub.text));
+  row.onclick = async (event) => {
+    event.stopPropagation();
+    await call(api.set_subtask(moteId, index, !sub.done), "Could not update that subtask.");
+    refresh();
+    if (selectedId === moteId) select(moteId);
+  };
+  return row;
+}
+
+// ---- rendering: the panel ------------------------------------------
+
+function renderPanel() {
+  const node = $("panel");
+  if (!panel) { node.classList.add("hidden"); return; }
+  node.classList.remove("hidden");
+
+  const color = colorOf(panel);
+  $("panel-dot").style.background = color;
+  $("panel-kind-text").style.color = color;
+  $("panel-kind-text").textContent = kindOf(panel);
+  $("panel-name").textContent = panel.name;
+  $("panel-id").textContent = panel.id;
+
+  // Status pills come from the board's own columns, so the panel offers
+  // exactly the statuses this garden uses -- not a list this file made up.
+  const statuses = clear($("panel-statuses"));
+  const available = boardStatuses();
+  $("panel-status-section").classList.toggle("hidden", !keyChoice || !keyChoice.status);
+  available.forEach((status) => {
+    const pill = button("pill" + (panel.status === status ? " on" : ""), status);
+    pill.onclick = () => setStatus(panel.id, panel.status === status ? null : status);
+    statuses.append(pill);
+  });
+
+  const sched = clear($("panel-sched"));
+  if (panel.scheduled) {
+    const row = el("div", "sched-row");
+    row.append(el("span", "k", panel.scheduled.binding));
+    row.append(el("span", "eq", "="));
+    row.append(el("span", "v", panel.scheduled.start.replace("T", " ")));
+    row.append(el("div", "spacer"));
+    const clearBtn = button("close-button", "×");
+    clearBtn.title = "Unschedule";
+    clearBtn.onclick = () => unschedule(panel.id);
+    row.append(clearBtn);
+    sched.append(row);
+  } else {
+    sched.append(el("div", "sched-row none", "not scheduled"));
+  }
+
+  const props = clear($("panel-props"));
+  const entries = Object.entries(panel.properties || {});
+  if (!entries.length) props.append(el("div", "empty", "no properties"));
+  entries.forEach(([key, value]) => {
+    const isTaskKey = (panel.taskKeys || []).includes(key);
+    const row = el("div", "prop-row" + (isTaskKey ? " task-key" : ""));
+    row.append(el("span", "k", key));
+    row.append(el("span", "v", typeof value === "object" ? JSON.stringify(value) : String(value)));
+    props.append(row);
+  });
+
+  const subs = clear($("panel-subs"));
+  if (!panel.subtasks.length) subs.append(el("div", "empty", "none yet"));
+  panel.subtasks.forEach((sub, index) => subs.append(subRow(sub, index, panel.id)));
+
+  const rels = clear($("panel-rels"));
+  if (!panel.relationships.length) rels.append(el("div", "empty", "none"));
+  panel.relationships.forEach((rel) => {
+    const row = button("rel-row");
+    row.append(el("span", "arrow", rel.outgoing ? "→" : "←"));
+    const dot = el("span", "dot");
+    dot.style.background = colorOf(rel.other);
+    row.append(dot);
+    row.append(el("span", "name", rel.other.name));
+    row.append(el("span", "type", rel.type.replace(/_/g, " ")));
+    row.onclick = () => select(rel.other.id);
+    rels.append(row);
+  });
+}
+
+function boardStatuses() {
+  // The board knows the garden's statuses; the other two tabs do not,
+  // so they fall back to whatever is already on screen plus the mote's
+  // own. Nothing invents a vocabulary -- see core/task_candidates.py.
+  if (data && data.columns) {
+    return data.columns.filter((c) => c.key !== null).map((c) => c.key);
+  }
+  const found = new Set();
+  const lists = [(data && data.pool) || [], (data && data.queue) || []];
+  ((data && data.days) || []).forEach((d) => lists.push(d.cards));
+  lists.flat().forEach((c) => { if (c.status) found.add(c.status); });
+  if (panel && panel.status) found.add(panel.status);
+  return [...found];
+}
+
+// ---- rendering: the chrome -----------------------------------------
+
+function render() {
+  if (!data) return;
+  $("board-view").classList.toggle("hidden", tab !== "board");
+  $("days-view").classList.toggle("hidden", tab !== "days");
+  $("focus-view").classList.toggle("hidden", tab !== "focus");
+  $("rail").classList.toggle("hidden", !railOpen);
+
+  if (tab === "board") renderBoard();
+  else if (tab === "days") renderDays();
+  else renderFocus();
+
+  renderRail();
+  renderPanel();
+  renderChrome();
+  renderTimer();
+}
+
+function renderChrome() {
+  const stats = data.stats || {};
+  if (tab === "days") {
+    const [start, end] = visibleRange();
+    const last = addDays(end, -1);
+    $("range-title").textContent =
+      `${start.getDate()} – ${last.getDate()} ${MON_SHORT[last.getMonth()]} ${last.getFullYear()}`;
+    const scheduled = (data.days || []).reduce((n, d) => n + d.cards.length, 0);
+    $("range-sub").textContent =
+      `${scheduled} scheduled · ${(data.pool || []).length} undated · capacity ${humanMinutes(data.capacityMinutes)}/day`;
+    $("hint").textContent = "drag a mote onto a day for the earliest free slot · drop it back to unschedule";
+    $("stat-scheduled").textContent = `${scheduled} scheduled this week`;
+  } else if (tab === "board") {
+    $("range-title").textContent = "Board";
+    $("range-sub").textContent = keyChoice && keyChoice.status
+      ? `by ${keyChoice.status} · ${stats.open || 0} open of ${stats.total || 0}`
+      : "no status key chosen — pick one in the sidebar";
+    $("hint").textContent = "drag cards between columns to set status";
+    $("stat-scheduled").textContent = `${(stats.total || 0) - (stats.undated || 0)} scheduled`;
+  } else {
+    $("range-title").textContent = "Focus";
+    const active = activeCard();
+    $("range-sub").textContent = active ? active.name : "nothing queued for today";
+    $("hint").textContent = "space starts or pauses the timer";
+    $("stat-scheduled").textContent = `${(data.queue || []).length} queued today`;
+  }
+
+  $("stat-open").textContent = `${stats.open || 0} open`;
+  $("stat-undated").textContent = `${stats.undated || 0} undated`;
+
+  const sessions = (data.sessions || []).filter((s) => s.day === todayKey());
+  if (tab === "focus") {
+    const minutes = sessions.reduce((sum, s) => sum + s.minutes, 0);
+    $("stat-focus").textContent = `${humanMinutes(minutes) || "0m"} focused today`;
+  }
+
+  [...$("tabs").children].forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+}
+
+function renderTimer() {
+  $("clock").textContent = clock(remaining);
+  $("chip-time").textContent = clock(remaining);
+  $("chip-time").classList.toggle("running", running);
+  $("chip-label").textContent = running ? "running" : (tab === "focus" ? "paused" : "focus");
+  $("phase").textContent = running ? "in session" : "ready";
+  $("phase").classList.toggle("running", running);
+
+  const total = sessionMinutes * 60;
+  const pct = Math.max(0, Math.min(100, ((total - remaining) / total) * 100));
+  $("ring").style.background = `conic-gradient(var(--accent) ${pct.toFixed(1)}%, oklch(0.225 0 0) 0)`;
+  $("run-btn").textContent = running ? "Pause" : (remaining === total ? `Begin ${sessionMinutes}m` : "Resume");
+}
+
+// ---- actions -------------------------------------------------------
+
+async function select(moteId) {
+  selectedId = moteId;
+  if (!moteId) { panel = null; render(); return; }
+  panel = await call(api.focus(moteId), "Could not read that mote.");
+  render();
+}
+
+async function moveTo(moteId, status) {
+  if (!keyChoice || !keyChoice.status) {
+    toast("Pick which property means status first — the sidebar lists the candidates.", true);
+    return;
+  }
+  const answer = await call(api.set_status(moteId, keyChoice.status, status), "Could not set that status.");
+  if (answer === null) return;
+  if (selectedId === moteId) panel = answer;
+  toast(`${answer.name} → ${status}`);
+  refresh();
+}
+
+async function scheduleOn(moteId, day) {
+  const answer = await call(api.schedule(moteId, day, ...keyArgs()), "Could not schedule that.");
+  if (answer === null) return;
+  if (selectedId === moteId) panel = answer;
+  const when = answer.start ? answer.start.replace("T", " ").slice(0, 16) : day;
+  if (answer.slotFull) {
+    toast(`${answer.name} → ${when} — that day is already full, so it went at the start.`);
+  } else {
+    toast(`${answer.name} → ${answer.binding} = ${when}`);
+  }
+  refresh();
+}
+
+async function unschedule(moteId) {
+  const answer = await call(api.unschedule(moteId, keyChoice ? keyChoice.bindings : null), "Could not unschedule that.");
+  if (answer === null) return;
+  if (selectedId === moteId) panel = answer;
+  toast(`${answer.name} — back in the pool.`);
+  refresh();
+}
+
+async function setStatus(moteId, status) {
+  if (!keyChoice || !keyChoice.status) return;
+  const answer = await call(api.set_status(moteId, keyChoice.status, status), "Could not set that status.");
+  if (answer === null) return;
+  panel = answer;
+  refresh();
+}
+
+async function createTask(name, status) {
+  const trimmed = String(name || "").trim();
+  addingColumn = null;
+  if (!trimmed) { render(); return; }
+  const answer = await call(
+    api.create_task(trimmed, keyChoice ? keyChoice.status : null, status), "Could not create that mote.",
+  );
+  if (answer === null) { render(); return; }
+  toast(`${answer.name} created.`);
+  selectedId = answer.id;
+  panel = answer;
+  refresh();
+}
+
+// ---- the timer -----------------------------------------------------
+//
+// A running countdown is this window's own state and nothing is written
+// until it stops -- the same preview/commit split core/simulation.py
+// keeps. `startedAt` is captured when a session begins so the log says
+// when the work happened, not when the timer happened to be stopped.
+
+function toggleTimer() {
+  if (tab !== "focus") setTab("focus");
+  running = !running;
+  if (running && startedAt === null) startedAt = new Date();
+  renderTimer();
+}
+
+function resetTimer() {
+  running = false;
+  remaining = sessionMinutes * 60;
+  startedAt = null;
+  renderTimer();
+}
+
+async function finishSession(auto) {
+  const elapsed = sessionMinutes * 60 - remaining;
+  const minutes = Math.round(elapsed / 60);
+  const active = activeCard();
+  const began = startedAt;
+  running = false;
+  remaining = sessionMinutes * 60;
+  startedAt = null;
+  renderTimer();
+
+  if (minutes < 1) {
+    if (!auto) toast("Nothing to log yet — that session is under a minute.");
+    return;
+  }
+  const answer = await call(
+    api.log_session(active ? active.id : null, minutes, began ? isoLocal(began) : null),
+    "Could not log that session.",
+  );
+  if (answer === null) return;
+  toast(`Session logged — ${minutes}m on ${active ? active.name : "nothing in particular"}.`);
+  refresh();
+}
+
+function tick() {
+  if (!running) return;
+  remaining -= 1;
+  if (remaining <= 0) { finishSession(true); return; }
+  renderTimer();
+}
+
+// ---- tabs ----------------------------------------------------------
+
+function setTab(next) {
+  if (tab === next) return;
+  tab = next;
+  addingColumn = null;
+  data = null;
+  render();
+  refresh();
+}
+
+function step(direction) {
+  if (tab !== "days") return;
+  anchor = addDays(anchor, 7 * direction);
+  refresh();
+}
+
+// ---- garden menu ---------------------------------------------------
+
+async function openGardenMenu() {
+  const menu = $("garden-menu");
+  if (!menu.classList.contains("hidden")) { closeGardenMenu(); return; }
+  const gardens = await call(api.list_gardens(), "Could not list gardens.");
+  if (gardens === null) return;
+  const current = $("garden-name").textContent;
+  clear(menu);
+  gardens.forEach((name) => {
+    const item = button(name === current ? "on" : null, name);
+    item.onclick = async () => {
+      closeGardenMenu();
+      const answer = await call(api.switch_garden(name), "Could not switch garden.");
+      if (answer === null) return;
+      $("garden-name").textContent = answer.garden;
+      // Another garden is another set of properties, so the keyChoice chosen
+      // for this one mean nothing there -- let Python guess afresh.
+      keyChoice = null;
+      selectedId = null;
+      panel = null;
+      refresh();
+    };
+    menu.append(item);
+  });
+  menu.classList.remove("hidden");
+  $("garden-btn").setAttribute("aria-expanded", "true");
+}
+
+function closeGardenMenu() {
+  $("garden-menu").classList.add("hidden");
+  $("garden-btn").setAttribute("aria-expanded", "false");
+}
+
+// ---- wiring --------------------------------------------------------
+
+function wire() {
+  [...$("tabs").children].forEach((b) => {
+    b.onclick = () => setTab(b.dataset.tab);
+  });
+
+  $("rail-toggle").onclick = () => {
+    railOpen = !railOpen;
+    $("rail-toggle").classList.toggle("on", railOpen);
+    render();
+  };
+
+  $("garden-btn").onclick = openGardenMenu;
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".topbar-menu")) closeGardenMenu();
+  });
+
+  $("refresh-btn").onclick = async () => {
+    const icon = $("refresh-btn");
+    icon.classList.add("spinning");
+    const answer = await call(api.refresh(), "Could not refresh.");
+    icon.classList.remove("spinning");
+    if (answer && answer.synced) toast("Synced.");
+    refresh();
+  };
+
+  $("chip-time").onclick = toggleTimer;
+  $("run-btn").onclick = toggleTimer;
+  $("reset-btn").onclick = resetTimer;
+  $("finish-btn").onclick = () => finishSession(false);
+
+  $("panel-close").onclick = () => select(null);
+  $("panel-focus").onclick = () => {
+    if (!panel) return;
+    activeId = panel.id;
+    setTab("focus");
+  };
+  $("panel-delete").onclick = async () => {
+    if (!panel) return;
+    const name = panel.name;
+    const id = panel.id;
+    const ok = await call(api.delete_mote(id), "Could not delete that mote.");
+    if (!ok) return;
+    select(null);
+    toast(`${name} deleted.`);
+    refresh();
+  };
+  $("panel-add-sub").onclick = async () => {
+    if (!panel) return;
+    const text = window.prompt("Subtask");
+    if (!text || !text.trim()) return;
+    const answer = await call(api.add_subtask(panel.id, text.trim()), "Could not add that subtask.");
+    if (answer === null) return;
+    panel = answer;
+    render();
+    refresh();
+  };
+
+  // The pool is a drop target too: dropping a scheduled card back into
+  // it is how you unschedule, which is the same gesture in reverse.
+  dropTarget($("pool"), (id) => unschedule(id));
+
+  window.addEventListener("keydown", (event) => {
+    const typing = event.target instanceof HTMLInputElement;
+    if (event.key === "Escape") {
+      if (addingColumn !== null) { addingColumn = null; render(); return; }
+      select(null);
+      return;
+    }
+    if (typing) return;
+    if (event.key === " " && tab === "focus") { event.preventDefault(); toggleTimer(); }
+    else if (event.key === "ArrowLeft") step(-1);
+    else if (event.key === "ArrowRight") step(1);
+    else if (event.key.toLowerCase() === "b") setTab("board");
+    else if (event.key.toLowerCase() === "d") setTab("days");
+    else if (event.key.toLowerCase() === "f") setTab("focus");
+    else if (event.key.toLowerCase() === "t" && tab === "days") { anchor = new Date(); refresh(); }
+  });
+
+  window.addEventListener("focus", () => { refresh(); startPolling(); });
+  window.addEventListener("blur", stopPolling);
+}
+
+async function init() {
+  api = window.pywebview.api;
+  anchor = new Date();
+  keyChoice = loadKeys();
+  remaining = sessionMinutes * 60;
+  wire();
+  $("garden-name").textContent = await api.current_garden();
+  await refresh();
+
+  const focus = await api.initial_focus();
+  if (focus) await select(focus);
+
+  tickTimer = setInterval(tick, 1000);
+  startPolling();
+}
+
+window.addEventListener("pywebviewready", init);

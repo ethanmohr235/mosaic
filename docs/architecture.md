@@ -390,6 +390,10 @@ The charter:
 * **Monastery** -- likewise, for motes that have a time (see The
   calendar below). A third window on the same terms, and for the same
   reason: a week is a shape a graph canvas cannot draw.
+* **Momentum** -- likewise again, for motes that are work to be done
+  (see Tasks below). A fourth window, for the same reason once more: a
+  board, a planned week and a running timer are shapes neither a graph
+  nor a calendar draws.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -676,7 +680,7 @@ Two exclusions are inherited rather than reinvented. Templates and
 scenario overrides are never placed, even when dated, because they hold
 replacement values rather than real data. And a mote is coloured by its
 species through the same hash the graph canvas uses, so it reads the same
-colour in all three windows.
+colour in all four windows.
 
 Monastery is a third process on the same terms as Mora, which means the
 same two collisions to avoid: `monastery/app.py::choose_port` asks for
@@ -685,3 +689,61 @@ ephemeral port, and `.webview_data_monastery/` is its own WebKit
 storage. And since nothing in MonOSS pushes -- no adapter announces its
 writes -- the window **polls** while focused rather than waiting to be
 told. See `docs/ui-setup.md`.
+
+## Tasks
+
+Momentum (`momentum/`) is a fourth window, over the same gardens, for
+the motes that represent work: a board by status, a planned week, and a
+timer that logs what the time went into.
+
+**It reserves no new property names.** This is the point worth stating
+plainly, because it is a deliberate reversal of how the calendar's
+`date`/`duration` began. `core/calendar.py` already showed the better
+shape -- a *binding* is any key whose value parses as a date,
+discovered per garden rather than declared -- and Momentum applies that
+idea to the two shapes a board needs and a date parser cannot see
+(`core/task_candidates.py`):
+
+* an **enum key** holds a short label out of a small repeating set, so
+  `status: doing` and `priority: high` are recognized by the shape of
+  the set rather than by any vocabulary. A garden whose statuses are
+  `icebox` and `shipped` is as recognizable as one saying `todo`/`done`,
+  and its columns say `icebox` and `shipped`.
+* an **estimate key** holds a duration (`5h`, `90m`, `1d`, or a bare
+  number of minutes).
+
+Candidates are ranked, never chosen: the window offers them in a
+sidebar and the person confirms, exactly as Monastery's sidebar offers
+bindings, and the answer is remembered by the window rather than
+written to the garden. A preferred *name* (`status`, `priority`,
+`estimate`) only breaks a tie among discovered candidates.
+
+**Scheduling is one write to an ordinary date property.** Dropping a
+task on a day asks `core/calendar.py::earliest_free_slot` for the first
+gap wide enough, read from the very occurrences Monastery draws, and
+writes that instant to the binding the mote already carries -- or, for
+an unscheduled one, to the key the garden already organizes itself by.
+So a task scheduled in Momentum *is* an event in Monastery, with no
+second store of "when I plan to do this" and no sync step between them.
+An estimate becomes the `duration` the calendar draws, unless the mote
+already declared one.
+
+**A logged session is an ordinary mote**: an instance of a `Work
+Session` species carrying `date` and `duration`, pointing at its task
+with the reserved `about` relationship that Mora's notes already use.
+Being ordinary is exactly why it appears in Monastery and Monarch
+without either window knowing Momentum exists. Only a *finished*
+session is written -- a running countdown is the window's own state,
+the same preview/commit split `core/simulation.py` keeps.
+
+Two things are deliberately left out of the board: logged sessions
+(work already done is not work to do, though it still occupies the time
+it took) and motes acting as a species (a species declares what a kind
+of thing *is*). There is no positive gate beyond those -- a garden's
+tasks are whatever its motes say they are, the same answer Monastery
+gives about which motes are dated.
+
+Momentum is a fourth process on the same terms as the other two:
+`momentum/app.py::choose_port` asks for 42004 and falls back to an
+ephemeral port, `.webview_data_momentum/` is its own WebKit storage,
+and the window polls while focused. See `docs/ui-setup.md`.

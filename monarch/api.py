@@ -143,6 +143,8 @@ MORA_SCRIPT = Path(__file__).resolve().parent.parent / "run_mora.py"
 # Monastery, the calendar window, on exactly the same terms.
 MONASTERY_SCRIPT = Path(__file__).resolve().parent.parent / "run_monastery.py"
 
+# Momentum, the task board and timer, on the same terms again.
+MOMENTUM_SCRIPT = Path(__file__).resolve().parent.parent / "run_momentum.py"
 
 
 def _popen_detached(args: list[str], *, quiet: bool = True) -> None:
@@ -614,6 +616,19 @@ class Api:
         `sys.executable` so it comes up in this virtualenv, holding its
         own connection to the same garden file."""
         command = [sys.executable, str(MONASTERY_SCRIPT), "--garden", self._current_garden]
+        if mote_id:
+            command += ["--focus", mote_id]
+        _popen_detached(command, quiet=False)
+        return {"garden": self._current_garden, "focus": mote_id}
+
+    @_synchronized
+    def open_momentum(self, mote_id: str | None = None) -> dict:
+        """Open Momentum, the task board and timer, on this garden --
+        optionally with one mote already selected. Everything open_mora
+        says applies here unchanged: fire-and-forget through the detached
+        launcher, under `sys.executable` so it comes up in this
+        virtualenv, holding its own connection to the same garden file."""
+        command = [sys.executable, str(MOMENTUM_SCRIPT), "--garden", self._current_garden]
         if mote_id:
             command += ["--focus", mote_id]
         _popen_detached(command, quiet=False)

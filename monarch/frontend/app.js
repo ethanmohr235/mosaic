@@ -862,6 +862,15 @@ function openMonastery(moteId) {
   );
 }
 
+function openMomentum(moteId) {
+  call(api.open_momentum(moteId || null));
+  showToast(
+    moteId
+      ? "Opening Momentum… statuses changed there appear here after a refocus."
+      : "Opening Momentum…",
+  );
+}
+
 function withSimOverlay(mote) {
   const overlay = {};
   for (const c of cumulativeSimChanges()) {
@@ -3631,6 +3640,13 @@ function setupMonastery() {
   });
 }
 
+function setupMomentum() {
+  $("open-momentum-btn").addEventListener("click", () => {
+    closeTopMenus();
+    openMomentum(null);
+  });
+}
+
 
 function setupRunsPanel() {
   $("toggle-runs-panel-btn").addEventListener("click", () => {
@@ -3874,6 +3890,7 @@ async function init() {
   setupRunsPanel();
   setupMora();
   setupMonastery();
+  setupMomentum();
   setupSync();
   setupRefresh();
   setupContextMenu();

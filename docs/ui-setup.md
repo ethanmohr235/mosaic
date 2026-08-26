@@ -1,10 +1,11 @@
 # Running the desktop UI
 
-Three native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Four native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
-(`run_monarch.py`); **Mora**, the note editor (`run_mora.py`); and
-**Monastery**, the calendar (`run_monastery.py`). They share one palette
-and one set of vendored fonts, so the three read as one product.
+(`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
+**Monastery**, the calendar (`run_monastery.py`); and **Momentum**, the
+task board and timer (`run_momentum.py`). They share one palette and one
+set of vendored fonts, so the four read as one product.
 
 ---
 
@@ -638,7 +639,7 @@ and that an edit from another process arrives on the next poll. It holds
 42001 and 42002 for the whole run, because a Monastery that asks for the
 wrong port must fail visibly rather than load another app's page.
 
-Run the smoke tests one at a time. All three drive real windows with
+Run the smoke tests one at a time. All four drive real windows with
 synthetic gestures, and the timing-sensitive checks flake when they
 compete.
 
@@ -649,3 +650,113 @@ compete.
 Prints PASS/FAIL per check and exits non-zero if anything failed. Never
 touches real data: `GARDENS_DIR` and the webview storage dir are both a
 fresh temp directory.
+
+---
+
+# Momentum -- tasks
+
+A fourth window, over the same gardens: `./run_momentum.py`, or
+`.venv/bin/python run_momentum.py`. Same stack and the same terms as the
+other two -- pywebview over a local HTML/CSS/JS frontend, its own
+process, its own garden connection, opening and closing independently.
+
+```
+./run_momentum.py                      # the default garden
+./run_momentum.py --garden reactor     # a specific garden
+./run_momentum.py --focus <mote id>    # open with one mote selected
+```
+
+Three tabs: **Board** (cards in columns by status), **Days** (the week,
+with an undated pool beside it) and **Focus** (a timer, today's queue,
+and the session log).
+
+### It reserves no property names
+
+Momentum has no "task" type, because MonOSS has no types -- and unlike
+the calendar's `date`/`duration`, it adds no reserved names either. It
+*discovers* which of a garden's own properties mean what, the same way
+Monastery discovers its date bindings:
+
+| Role | Recognized by |
+|---|---|
+| status, priority | a key holding a short label out of a small repeating set |
+| estimate | a key holding a duration -- `5h`, `90m`, `1d`, or bare minutes |
+| when | any key whose value parses as a date (Monastery's bindings) |
+
+The sidebar lists every candidate with a count and marks the one in use;
+clicking another switches to it. A garden that calls its status `stage`
+and its values `icebox`/`shipped` gets a board with `icebox` and
+`shipped` columns and needs no migration to get it. Your choice is
+remembered by the window (localStorage), never written to the garden --
+so it survives a restart without becoming data anyone else has to
+respect. Switching gardens forgets it, since another garden's properties
+are another question.
+
+A `1d` estimate means **eight hours** -- a day of work, not of clock.
+
+### Scheduling against the calendar
+
+Drag a card from the pool onto a day. Momentum asks
+`core/calendar.py` for the earliest gap that day with room for the
+task's estimate, reading the very occurrences Monastery draws, and writes
+that time to the date property the mote already uses -- or, for an
+unscheduled one, to the key the garden already organizes itself by.
+
+So the two windows are the same data seen twice. A task scheduled here is
+an event there, immediately, with nothing to sync. All-day motes (a `due`
+date) mark a day without blocking it, so a deadline never makes a day
+unschedulable. A day with no room left still accepts the task, at the
+start of the working day, and says so -- refusing to schedule something
+is not the window's decision to make.
+
+Drop a card back on the pool to unschedule it. The working day defaults
+to 09:00–17:00 and the capacity bar to 6h/day; a mote named `Momentum`
+carrying `work_start`, `work_end` or `capacity_hours` overrides them, and
+being an ordinary mote it is editable from any window.
+
+### The timer
+
+Pick something from today's queue, press Begin (or space). Nothing is
+written while it runs -- the countdown is the window's own state, the
+same preview/commit split simulation keeps. Finishing it (or **Log &
+finish**) writes one ordinary mote: an instance of a `Work Session`
+species carrying `date` and `duration`, pointing at the task with
+`about`. It logs the time actually elapsed, not the nominal length.
+
+Because that mote is ordinary, the session shows up in Monastery and
+Monarch without either knowing Momentum exists. The streak and heatmap
+are computed by reading those motes back, so deleting one anywhere is
+simply a session that no longer happened.
+
+### Keys
+
+| Key | Does |
+|---|---|
+| B / D / F | Board, Days, Focus |
+| Space | Start or pause the timer (Focus) |
+| ← / → | Previous or next week (Days) |
+| T | Back to this week (Days) |
+| Esc | Close the inline input, else the detail panel |
+
+### Ports
+
+A fourth window means a fourth port: `momentum/app.py` asks for
+**42004** (42001 Monarch, 42002 Mora, 42003 Monastery), falling back to
+an ephemeral one if taken -- the same collision the others guard against,
+for the same reason. `.webview_data_momentum/` is its own WebKit storage.
+
+### Smoke test
+
+`scripts/momentum_smoke_test.py`, the same instrument as the others. It
+drives a real window against a seeded throwaway garden -- seeded relative
+to *today*, since the week and the queue are both today's -- and checks
+that the columns are the garden's own statuses, that the sidebar offers
+every candidate key, that dragging a card rewrites the status property,
+that dropping one on a day lands it in the free slot *after* the
+standup, that an estimate becomes a duration, that the pool unschedules,
+and that the timer writes a session only when it finishes. It holds
+42001, 42002 and 42003 for the whole run.
+
+```
+.venv/bin/python scripts/momentum_smoke_test.py
+```

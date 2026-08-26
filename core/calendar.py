@@ -33,7 +33,7 @@ database.
 """
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from dateutil.rrule import rrulestr
 
@@ -50,6 +50,12 @@ DEFAULT_ALL_DAY_DAYS = interval_repo.DEFAULT_ALL_DAY_DAYS
 # ends up with the same event under three keys. This is a default, not a
 # reserved name -- nothing reads it specially.
 DEFAULT_BINDING = "date"
+
+# The day earliest_free_slot() schedules into when its caller names no
+# other. A default rather than a constant: whose working day this is is
+# the caller's answer, and a garden can say otherwise.
+DEFAULT_WORK_START = time(9, 0)
+DEFAULT_WORK_END = time(17, 0)
 
 # A rule with no UNTIL/COUNT is infinite, so an expansion is always
 # clipped to the window being drawn. This bounds the pathological case --
@@ -243,6 +249,64 @@ def undated_count(motes: list[Mote], *, exclude_ids: set[str] | None = None) -> 
             for value in mote.properties.values()
         )
     )
+
+
+def earliest_free_slot(
+    motes: list[Mote],
+    *,
+    day: date,
+    duration: timedelta,
+    bindings: list[str],
+    work_start: time = DEFAULT_WORK_START,
+    work_end: time = DEFAULT_WORK_END,
+    exclude_ids: set[str] | None = None,
+) -> datetime | None:
+    """The first moment on `day` with `duration` free after it, or None if
+    the day cannot fit it.
+
+    This is what Momentum means by dropping a task on a day: the person
+    chooses the day, and the earliest gap that is actually free chooses
+    the time. It reads the same occurrences the calendar draws, through
+    the same bindings, so "busy" means exactly what Monastery shows as
+    busy -- there is no second notion of a booked hour.
+
+    All-day placements are not busy. A task `due` on Thursday marks the
+    day rather than occupying it, and treating one as a booking would
+    make every day carrying a deadline unschedulable.
+
+    Pure like everything above it: motes in, a datetime out. The work
+    window is a parameter rather than a constant read from somewhere
+    because whose day this is belongs to the caller
+    (momentum/api.py reads it off the garden's settings mote).
+    """
+    window_start = datetime.combine(day, work_start)
+    window_end = datetime.combine(day, work_end)
+    if duration <= timedelta(0) or window_start + duration > window_end:
+        return None
+
+    busy = sorted(
+        (o.start, o.end)
+        for o in occurrences(
+            motes,
+            bindings=bindings,
+            window_start=window_start,
+            window_end=window_end,
+            exclude_ids=exclude_ids,
+        )
+        if not o.all_day
+    )
+
+    # Walk the day, keeping a cursor at the earliest still-free moment.
+    # Overlapping placements merge for free: the cursor only ever moves
+    # forward, so two meetings sharing an hour close one gap, not two.
+    cursor = window_start
+    for start, end in busy:
+        if start - cursor >= duration:
+            return cursor
+        cursor = max(cursor, end)
+        if cursor + duration > window_end:
+            return None
+    return cursor if cursor + duration <= window_end else None
 
 
 def is_calendar_value(value) -> bool:

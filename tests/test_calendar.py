@@ -4,7 +4,7 @@ Everything here is pure: motes in, occurrences out. No connection, no
 window. That is the point of the module living in core/ rather than in
 monastery/, and these tests are what it buys.
 """
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from core.calendar import (
     DEFAULT_TIMED_MINUTES,
@@ -12,6 +12,7 @@ from core.calendar import (
     binding_counts,
     default_bindings,
     detached_properties,
+    earliest_free_slot,
     is_recurring,
     moved_properties,
     occurrences,
@@ -453,3 +454,88 @@ def test_span_of_answers_what_every_placement_lasts():
     assert span_of(_mote({"when": "2026-08-24 09:00/PT20M"}), "when") == timedelta(minutes=20)
     assert span_of(_mote({"when": "2026-08-24 09:00"}), "when") == timedelta(minutes=DEFAULT_TIMED_MINUTES)
     assert span_of(_mote({"name": "Rina"}), "when") is None
+
+
+# ---- finding a free slot ----
+#
+# What Momentum means by dropping a task on a day. Reads the same
+# occurrences the calendar draws, so "busy" means one thing in this app
+# rather than two.
+
+def test_an_empty_day_offers_the_start_of_the_working_day():
+    assert earliest_free_slot(
+        [], day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["when"],
+    ) == datetime(2026, 8, 26, 9, 0)
+
+
+def test_a_slot_starts_when_the_meeting_before_it_ends():
+    motes = [_mote({"when": "2026-08-26 09:00/PT30M"})]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["when"],
+    ) == datetime(2026, 8, 26, 9, 30)
+
+
+def test_a_gap_between_meetings_is_used_when_it_is_wide_enough():
+    motes = [
+        _mote({"when": "2026-08-26 09:00/PT1H"}, id="a"),
+        _mote({"when": "2026-08-26 11:00/PT1H"}, id="b"),
+    ]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["when"],
+    ) == datetime(2026, 8, 26, 10, 0)
+
+
+def test_a_gap_too_narrow_is_skipped_for_the_next_one():
+    motes = [
+        _mote({"when": "2026-08-26 09:00/PT1H"}, id="a"),
+        _mote({"when": "2026-08-26 10:30/PT1H"}, id="b"),
+    ]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["when"],
+    ) == datetime(2026, 8, 26, 11, 30)
+
+
+def test_overlapping_meetings_close_one_gap_rather_than_two():
+    motes = [
+        _mote({"when": "2026-08-26 09:00/PT2H"}, id="a"),
+        _mote({"when": "2026-08-26 09:30/PT30M"}, id="b"),
+    ]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=30), bindings=["when"],
+    ) == datetime(2026, 8, 26, 11, 0)
+
+
+def test_an_all_day_mote_marks_a_day_without_occupying_it():
+    """A task due Thursday does not make Thursday unschedulable."""
+    motes = [_mote({"due": "2026-08-26"})]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["due"],
+    ) == datetime(2026, 8, 26, 9, 0)
+
+
+def test_a_day_with_no_room_left_answers_none():
+    motes = [_mote({"when": "2026-08-26 09:00/PT8H"})]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["when"],
+    ) is None
+
+
+def test_something_longer_than_the_working_day_never_fits():
+    assert earliest_free_slot(
+        [], day=date(2026, 8, 26), duration=timedelta(hours=9), bindings=["when"],
+    ) is None
+
+
+def test_the_working_window_is_the_callers_to_decide():
+    motes = [_mote({"when": "2026-08-26 09:00/PT1H"})]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["when"],
+        work_start=time(7, 0), work_end=time(19, 0),
+    ) == datetime(2026, 8, 26, 7, 0)
+
+
+def test_a_binding_that_is_switched_off_does_not_make_a_day_busy():
+    motes = [_mote({"when": "2026-08-26 09:00/PT2H"})]
+    assert earliest_free_slot(
+        motes, day=date(2026, 8, 26), duration=timedelta(minutes=60), bindings=["due"],
+    ) == datetime(2026, 8, 26, 9, 0)
