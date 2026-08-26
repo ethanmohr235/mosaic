@@ -36,10 +36,10 @@ def week(api):
     these."""
     conn = api._conn
     species = create_mote(conn, {"name": "Meeting"})
-    standup = create_mote(conn, {"name": "Standup", "when": "2026-08-24 09:15", "duration": 20})
+    standup = create_mote(conn, {"name": "Standup", "when": "2026-08-24 09:15/PT20M"})
     create_relationship(conn, standup, species, "instance_of")
     create_mote(conn, {"name": "Runbook rewrite", "due": "2026-08-28"})
-    create_mote(conn, {"name": "Read-only window", "starts": "2026-08-26", "ends": "2026-08-27"})
+    create_mote(conn, {"name": "Read-only window", "starts": "2026-08-26/2026-08-28"})
     create_mote(conn, {"name": "Rina Kovac", "role": "engineer"})
     return {"species": species, "standup": standup}
 
@@ -87,7 +87,7 @@ def test_an_occurrence_is_coloured_by_the_species_the_canvas_uses(api, week):
 
 def test_a_recurring_mote_expands_but_stays_one_mote(api):
     mote_id = create_mote(api._conn, {
-        "name": "Daily", "date": "2026-08-24T09:00:00", "recurrence": "FREQ=DAILY",
+        "name": "Daily", "date": "2026-08-24T09:00:00\nRRULE:FREQ=DAILY",
     })
     occurrences = _calendar(api)["occurrences"]
     assert len(occurrences) == 7
@@ -136,8 +136,12 @@ def test_focus_returns_relationships_with_their_direction(api, week):
 
 
 def test_focus_marks_which_properties_are_the_calendars_own(api, week):
+    """By *value*, not by key. There is no list of calendar property
+    names left to check against -- a key holding an interval is the
+    calendar's under whatever name the garden gave it, which is why
+    `when` is marked here and a reserved name is not what marks it."""
     panel = api.focus(week["standup"])
-    assert set(panel["calendarKeys"]) == {"duration"}, "`when` is a binding, not a reserved key"
+    assert set(panel["calendarKeys"]) == {"when"}
 
 
 def test_focus_on_a_missing_mote_returns_nothing(api):
@@ -166,7 +170,7 @@ def test_a_new_mote_shows_up_on_the_next_read(api, week):
 
 
 def test_updating_a_date_moves_the_mote(api, week):
-    api.update_mote(week["standup"], {"when": "2026-08-26 09:15"})
+    api.update_mote(week["standup"], {"when": "2026-08-26 09:15/PT20M"})
     standup = next(o for o in _calendar(api)["occurrences"] if o["name"] == "Standup")
     assert standup["start"].startswith("2026-08-26")
 
@@ -193,8 +197,8 @@ def test_delete_mote_removes_it(api, week):
 def series(api):
     """A weekly standup: four Mondays in the garden, one mote."""
     return create_mote(api._conn, {
-        "name": "Standup", "when": "2026-08-24 09:15", "duration": 20,
-        "recurrence": "FREQ=WEEKLY;BYDAY=MO;COUNT=4",
+        "name": "Standup",
+        "when": "2026-08-24 09:15/PT20M\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4",
     })
 
 
@@ -203,7 +207,7 @@ def test_a_move_writes_the_binding_that_placed_it(api, week):
         week["standup"], "when", "2026-08-24T09:15:00", "2026-08-26T11:00:00", "2026-08-26T11:20:00",
     )
     properties = get_mote(api._conn, week["standup"]).properties
-    assert properties["when"] == "2026-08-26 11:00"
+    assert properties["when"] == "2026-08-26 11:00/PT20M"
     assert "date" not in properties, "a drag edits what placed it, not a second key"
 
 
@@ -213,7 +217,8 @@ def test_moving_a_series_shifts_every_occurrence(api, series):
     )
     starts = [o["start"] for o in _calendar(api)["occurrences"]]
     assert starts == ["2026-08-25T09:15:00"], "the whole series moved to Tuesdays"
-    assert get_mote(api._conn, series).properties["recurrence"] == "FREQ=WEEKLY;BYDAY=TU;COUNT=4"
+    assert get_mote(api._conn, series).properties["when"] == \
+        "2026-08-25 09:15/PT20M\nRRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"
 
 
 def test_moving_one_occurrence_splits_it_off_as_its_own_mote(api, series, week):
@@ -224,27 +229,18 @@ def test_moving_one_occurrence_splits_it_off_as_its_own_mote(api, series, week):
         scope="occurrence",
     )
     assert panel["id"] != series, "the moved occurrence is a mote of its own now"
-    assert panel["properties"]["when"] == "2026-09-01 11:00"
-    assert panel["properties"]["duration"] == 20, "it keeps the span it was drawn with"
-    assert "recurrence" not in panel["properties"], "one event, not a second series"
+    assert panel["properties"]["when"] == "2026-09-01 11:00/PT20M", \
+        "it lands where it was dropped, keeping the span it was drawn with"
+    assert "RRULE" not in panel["properties"]["when"], "one event, not a second series"
     assert panel["speciesName"] == "Meeting", "and the colour it was drawn in"
-    assert "EXDATE:20260831T091500" in get_mote(api._conn, series).properties["recurrence"]
+    assert "EXDATE:20260831T091500" in get_mote(api._conn, series).properties["when"]
 
 
-def test_a_split_off_occurrence_never_claims_the_originals_google_event(api, series):
-    update_mote(api._conn, series, {"gcal_event_id": "already-exported"})
-    panel = api.place_occurrence(
-        series, "when", "2026-08-31T09:15:00", "2026-09-01T11:00:00", "2026-09-01T11:20:00",
-        scope="occurrence",
-    )
-    assert "gcal_event_id" not in panel["properties"]
-
-
-def test_a_resize_writes_the_span_the_mote_already_declares(api, week):
+def test_a_resize_writes_the_span_into_the_bindings_own_value(api, week):
     api.place_occurrence(
         week["standup"], "when", "2026-08-24T09:15:00", "2026-08-24T09:15:00", "2026-08-24T10:15:00",
     )
-    assert get_mote(api._conn, week["standup"]).properties["duration"] == 60
+    assert get_mote(api._conn, week["standup"]).properties["when"] == "2026-08-24 09:15/PT1H"
 
 
 def test_a_resize_of_a_ranged_mote_moves_its_end(api, week):
@@ -254,15 +250,15 @@ def test_a_resize_of_a_ranged_mote_moves_its_end(api, week):
     api.place_occurrence(
         mote_id, "starts", "2026-08-26T00:00:00", "2026-08-26T00:00:00", "2026-08-30T00:00:00",
     )
-    assert get_mote(api._conn, mote_id).properties["ends"] == "2026-08-29"
+    assert get_mote(api._conn, mote_id).properties["starts"] == "2026-08-26/2026-08-30"
 
 
-def test_a_move_that_keeps_its_length_does_not_invent_a_duration(api, week):
+def test_a_move_that_keeps_its_length_does_not_invent_a_span(api, week):
     """A mote that never declared how long it lasts should not acquire a
-    `duration` just because you dragged it an hour later."""
+    span just because you dragged it an hour later."""
     mote_id = create_mote(api._conn, {"name": "Sync", "when": "2026-08-25 14:00"})
     api.place_occurrence(mote_id, "when", "2026-08-25T14:00:00", "2026-08-25T15:00:00", "2026-08-25T16:00:00")
-    assert "duration" not in get_mote(api._conn, mote_id).properties
+    assert get_mote(api._conn, mote_id).properties["when"] == "2026-08-25 15:00"
 
 
 def test_dragging_the_top_edge_moves_the_start_and_keeps_the_end(api, week):
@@ -272,8 +268,7 @@ def test_dragging_the_top_edge_moves_the_start_and_keeps_the_end(api, week):
         week["standup"], "when", "2026-08-24T09:15:00", "2026-08-24T09:00:00", "2026-08-24T09:35:00",
     )
     properties = get_mote(api._conn, week["standup"]).properties
-    assert properties["when"] == "2026-08-24 09:00"
-    assert properties["duration"] == 35
+    assert properties["when"] == "2026-08-24 09:00/PT35M"
 
 
 def test_deleting_one_occurrence_leaves_the_series_standing(api, series):
@@ -299,14 +294,15 @@ def test_deleting_the_only_placement_of_a_plain_mote_deletes_it(api, week):
 def test_undo_puts_back_a_deleted_occurrence(api, series):
     answer = api.delete_occurrence(series, "when", "2026-08-31T09:15:00", scope="occurrence")
     api.undo_delete(answer["undo"])
-    assert get_mote(api._conn, series).properties["recurrence"] == "FREQ=WEEKLY;BYDAY=MO;COUNT=4"
+    assert get_mote(api._conn, series).properties["when"] == \
+        "2026-08-24 09:15/PT20M\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4"
 
 
 def test_undo_puts_back_a_deleted_mote_with_its_id_and_arrows(api, week):
     answer = api.delete_occurrence(week["standup"], "when", "2026-08-24T09:15:00")
     panel = api.undo_delete(answer["undo"])
     assert panel["id"] == week["standup"], "the same mote, not a lookalike"
-    assert panel["properties"]["when"] == "2026-08-24 09:15"
+    assert panel["properties"]["when"] == "2026-08-24 09:15/PT20M"
     assert [r["type"] for r in panel["relationships"]] == ["instance_of"]
 
 

@@ -18,8 +18,8 @@ provider-specific configuration this module has no business knowing;
 declaring DESCRIPTION/CONFIGURATION/CAPABILITIES on the provider class
 removed that reason, and with it the third place the same facts were
 written down."""
-from core.google_calendar import RESERVED_KEYS as _GCAL_RESERVED_PROPERTIES
 from core.folders import IN_FOLDER
+from core.links import URL_PROPERTY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
 from core.portals import PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY
@@ -30,7 +30,8 @@ from core.scenarios import OVERRIDES, VARIES
 from core.species import INSTANCE_OF, TEMPLATE_OF
 from core.units import UNITS_KEY
 
-RESERVED_PROPERTIES = _GCAL_RESERVED_PROPERTIES | {
+RESERVED_PROPERTIES = {
+    URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
     ROLES_KEY, PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY, MODOC_KEY,
 }
@@ -78,25 +79,37 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "\\mote/\\val/\\graph macros resolve live against the garden. The "
         "property is the canonical copy; .modoc files are import/export only. "
         "Written and read in Mora (run_mora.py); see docs/modoc.md.",
-    "date": "An ISO date ('2026-08-15') or datetime ('2026-08-15T14:00:00') "
-        "marking a mote as exportable to Google Calendar (paired with "
-        "duration/recurrence). Export itself is a UI-only action, not an "
-        "MCP tool.",
-    "duration": "Minutes for a timed `date` (one with a 'T'), or days for an "
-        "all-day `date`. Defaults to 60 or 1 if absent.",
-    "recurrence": "An RFC 5545 RRULE ('FREQ=WEEKLY;COUNT=5'), with or "
-        "without a leading 'RRULE:', for a recurring calendar event. May "
-        "carry further lines beneath the rule: an 'EXDATE:20260831T091500' "
-        "line excepts one occurrence out of the series, which is how the "
-        "calendar window deletes a single repetition without touching the "
-        "mote.",
-    "gcal_event_id": "Auto-set by the UI's calendar export after pushing "
-        "this mote as an event, so the next export updates it instead of "
-        "creating a duplicate. Not meant to be hand-authored.",
     "url": "A web address or local file path. core/links.py classifies it "
         "as a URL (has a scheme, or looks like a bare domain) or an "
         "explicit local path ('/', '~', './', '../', or a drive letter) "
         "for the UI's 'open' action.",
+}
+
+# Meaning carried by a value's *shape* rather than by its key's name.
+#
+# This is the other half of the reference above, and the more important
+# half to hand an LLM: there is no property name to look up for "when
+# something happens" any more. Anything shaped like an ISO 8601 interval
+# is one, under whatever key the garden likes, so a client writing a date
+# needs to know the notation rather than the name.
+VALUE_SHAPES: dict[str, str] = {
+    "interval": "When something happens, as one self-describing ISO 8601 "
+        "string, under ANY property key you like -- `date`, `when`, `due`, "
+        "`starts`, whatever the garden already says. There is no reserved "
+        "name for this and no separate duration or recurrence property; "
+        "the value carries its own span and rule.\n"
+        "  '2026-09-01'                        an all-day event, one day\n"
+        "  '2026-09-01/2026-09-03'             all-day, Sep 1 and 2 (the end is EXCLUSIVE)\n"
+        "  '2026-09-01T09:00'                  a timed event, default 60 minutes\n"
+        "  '2026-09-01T09:00/PT1H30M'          timed, 90 minutes\n"
+        "  '2026-09-01T09:00/2026-09-01T10:30' timed, explicit end\n"
+        "A repetition goes on the lines beneath, as RFC 5545:\n"
+        "  '2026-09-01T09:00/PT1H\\nRRULE:FREQ=WEEKLY;BYDAY=TU'\n"
+        "and an 'EXDATE:20260908T090000' line beneath that excepts one "
+        "occurrence out of the series. Durations use only days/hours/"
+        "minutes/seconds (P2D, PT1H30M) -- years and months have no fixed "
+        "length and are refused. A mote may carry several of these under "
+        "different keys; each places it separately.",
 }
 
 RELATIONSHIP_TYPE_MEANINGS: dict[str, str] = {

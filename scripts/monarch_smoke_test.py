@@ -705,85 +705,109 @@ def run_checks(window):
     check("detail panel: date property gets a picker and round-trips all-day/timed",
           date_property_gets_a_picker_and_round_trips)
 
-    def recurrence_property_gets_a_simple_picker():
+    def the_picker_follows_the_shape_not_the_key_name():
+        """`date` stopped being a name the engine reads when a start
+        became an ISO 8601 interval, so the picker is offered for any
+        property holding one -- here under `when`, which nothing has ever
+        reserved."""
         result = js_async(window, """
             async () => {
-                const recurring = await api.create_mote({
-                    name: 'recurring', date: '2026-08-15', recurrence: 'FREQ=WEEKLY',
+                const m = await api.create_mote({
+                    name: 'interval mote', when: '2026-08-15T09:00/PT1H',
                 });
-                window.__seed.recurringId = recurring.id;
+                window.__seed.intervalId = m.id;
                 await refreshMoteCache();
-                await refocus(recurring.id);
-                await openDetailPanel(recurring.id);
+                await refocus(m.id);
+                await openDetailPanel(m.id);
                 window.__result = 'ok';
             }
         """, wait=2.0)
-        assert result == '"ok"', f"recurrence mote setup failed: {result}"
-
-        freq = js(window, """
-            (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
-                for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'recurrence') {
-                        const select = r.querySelector('.recurrence-field select');
-                        return select ? select.value : null;
-                    }
-                }
-                return null;
-            })()
-        """)
-        assert freq == "WEEKLY", f"a simple rule should show its frequency in a <select>, got {freq!r}"
-
-        js(window, """
-            const select = document.querySelector('#detail-properties .recurrence-field select');
-            select.value = 'MONTHLY';
-            select.dispatchEvent(new Event('change', {bubbles: true}));
-        """)
-        time.sleep(1.0)
-        updated = json.loads(js_async(window, """
-            async () => { window.__result = (await api.get_mote(window.__seed.recurringId)).properties.recurrence; }
-        """))
-        assert updated == "FREQ=MONTHLY", f"changing frequency should commit a new simple rule, got {updated!r}"
-
-    check("detail panel: simple recurrence property gets a Frequency picker", recurrence_property_gets_a_simple_picker)
-
-    def complex_recurrence_stays_raw_and_round_trips():
-        result = js_async(window, """
-            async () => {
-                const complex = await api.create_mote({
-                    name: 'complex recurring', date: '2026-08-15', recurrence: 'FREQ=WEEKLY;BYDAY=TU,TH',
-                });
-                window.__seed.complexId = complex.id;
-                await refreshMoteCache();
-                await refocus(complex.id);
-                await openDetailPanel(complex.id);
-                window.__result = 'ok';
-            }
-        """, wait=2.0)
-        assert result == '"ok"', f"complex recurrence mote setup failed: {result}"
+        assert result == '"ok"', f"interval mote setup failed: {result}"
 
         info = json.loads(js(window, """
             (function() {
                 const rows = document.querySelectorAll('#detail-properties .detail-row');
                 for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'recurrence') {
-                        const field = r.querySelector('.recurrence-field');
-                        const select = field.querySelector('select');
-                        const raw = field.querySelector('input, textarea');
-                        const buttons = Array.from(field.querySelectorAll('button')).map(b => b.textContent);
-                        return JSON.stringify({hasSelect: !!select, rawValue: raw ? raw.value : null, buttons});
+                    if (r.querySelector('.key').textContent === 'when') {
+                        const field = r.querySelector('.date-field');
+                        if (!field) return JSON.stringify({found: false});
+                        return JSON.stringify({
+                            found: true,
+                            date: field.querySelector('input[type="date"]').value,
+                            time: field.querySelector('input[type="time"]').value,
+                        });
                     }
                 }
-                return JSON.stringify({hasSelect: null});
+                return JSON.stringify({found: false});
             })()
         """))
-        assert info["hasSelect"] is False, f"a rule with BYDAY should stay in raw mode, not the simple <select>, got {info}"
-        assert info["rawValue"] == "FREQ=WEEKLY;BYDAY=TU,TH", f"a complex rule should round-trip unchanged, got {info}"
-        assert "Use simple picker" not in info["buttons"], \
-            f"a rule the simple picker can't express shouldn't offer a lossy downgrade, got {info}"
+        assert info["found"], \
+            "an interval under a non-`date` key should still render a picker"
+        assert info["date"] == "2026-08-15", f"the picker should show the start, got {info}"
+        assert info["time"] == "09:00", f"the picker should show the start time, got {info}"
 
-    check("detail panel: a complex recurrence rule stays in raw mode with no simple-picker downgrade",
-          complex_recurrence_stays_raw_and_round_trips)
+    check("detail panel: the picker follows the value's shape, not the key's name",
+          the_picker_follows_the_shape_not_the_key_name)
+
+    def editing_a_start_keeps_the_span():
+        """The panel edits only the start; how long it lasts rides along
+        untouched, so a nudge here cannot quietly shorten the thing."""
+        js(window, """
+            const field = document.querySelector('#detail-properties .date-field');
+            const timeInput = field.querySelector('input[type="time"]');
+            timeInput.value = '11:30';
+            timeInput.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        time.sleep(1.0)
+        updated = json.loads(js_async(window, """
+            async () => { window.__result = (await api.get_mote(window.__seed.intervalId)).properties.when; }
+        """))
+        assert updated == "2026-08-15T11:30:00/PT1H", \
+            f"the span must survive an edit of the start, got {updated!r}"
+
+    check("detail panel: editing a start keeps the span",
+          editing_a_start_keeps_the_span)
+
+    def a_repeating_interval_stays_fully_visible_as_text():
+        """The picker edits only the start, so a value carrying rule
+        lines gets a plain field instead -- all of it visible, all of it
+        editable, rather than a picker hiding half the value."""
+        result = js_async(window, """
+            async () => {
+                const m = await api.create_mote({
+                    name: 'repeating mote', when: '2026-08-15T09:00/PT1H\\nRRULE:FREQ=WEEKLY',
+                });
+                window.__seed.repeatingId = m.id;
+                await refreshMoteCache();
+                await refocus(m.id);
+                await openDetailPanel(m.id);
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+        assert result == '"ok"', f"repeating mote setup failed: {result}"
+
+        info = json.loads(js(window, """
+            (function() {
+                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                for (const r of rows) {
+                    if (r.querySelector('.key').textContent === 'when') {
+                        const field = r.querySelector('.date-field');
+                        const raw = r.querySelector('input, textarea');
+                        return JSON.stringify({
+                            picker: !!field, shows: raw ? raw.value : null,
+                        });
+                    }
+                }
+                return JSON.stringify({picker: null});
+            })()
+        """))
+        assert info["picker"] is False, \
+            f"a repeating interval must not get the start-only picker, got {info}"
+        assert "RRULE:FREQ=WEEKLY" in (info["shows"] or ""), \
+            f"the rule has to stay visible and editable, got {info}"
+
+    check("detail panel: a repeating interval stays fully visible as text",
+          a_repeating_interval_stays_fully_visible_as_text)
 
     def detail_panel_is_resizable():
         result = js_async(window, """
@@ -1164,7 +1188,7 @@ def run_checks(window):
         result = js_async(window, """
             async () => {
                 const other = await api.create_mote({name: 'badge-other'});
-                const m = await api.create_mote({name: 'badge-checker', date: '2026-08-15'});
+                const m = await api.create_mote({name: 'badge-checker', url: 'example.com'});
                 await api.create_relationship(m.id, other.id, 'applies_to');
                 await api.create_relationship(m.id, other.id, 'knows');
                 window.__badgeIds = {m: m.id, other: other.id};
@@ -1186,8 +1210,10 @@ def run_checks(window):
                 return JSON.stringify(out);
             })()
         """))
-        assert badges.get("date") is True, f"a reserved property (date) should get a badge, got {badges}"
+        assert badges.get("url") is True, f"a reserved property (url) should get a badge, got {badges}"
         assert badges.get("name") is False, f"an ordinary property (name) should not get a badge, got {badges}"
+        assert badges.get("date") is not True, \
+            "`date` stopped being reserved when a start became a value shape"
 
         rel_badges = json.loads(js(window, """
             (function() {
@@ -1207,42 +1233,6 @@ def run_checks(window):
         )
 
     check("reserved property/relationship names get a badge, ordinary ones don't", reserved_names_get_a_badge)
-
-    def export_to_calendar_button_calls_the_api_and_reports_the_result():
-        # Stubbed -- the real path needs OAuth against a real Google
-        # account, which has no place in an automated, offline suite.
-        js(window, """
-            window.__gcalCalled = false;
-            window.__origExportToGoogleCalendar = api.export_to_google_calendar.bind(api);
-            api.export_to_google_calendar = () => {
-                window.__gcalCalled = true;
-                return Promise.resolve({created: 2, updated: 1, skipped: 0, total: 3});
-            };
-        """)
-        js(window, "document.getElementById('export-calendar-btn').click();")
-        time.sleep(1.0)
-
-        called = js(window, "window.__gcalCalled")
-        assert called is True, "clicking Export to Calendar should call api.export_to_google_calendar"
-
-        toast = js(window, "document.getElementById('toast').textContent")
-        assert "2 new" in toast and "1 updated" in toast, f"expected a result summary toast, got {toast!r}"
-
-        enabled = js(window, "!document.getElementById('export-calendar-btn').disabled")
-        assert enabled is True, "the button should re-enable once export finishes"
-
-        js(window, "api.export_to_google_calendar = window.__origExportToGoogleCalendar;")
-
-        # The mockup this topbar redesign was based on marked this item
-        # "coming soon" (its demo never built calendar export); the real,
-        # already-working export above must not have regressed into that
-        # stub -- guard that structurally, not just by eyeball.
-        in_file_menu = js(window, "document.getElementById('file-menu').contains(document.getElementById('export-calendar-btn'))")
-        assert in_file_menu is True, "Export to Calendar should be a real item in the File menu"
-        is_soon = js(window, "document.getElementById('export-calendar-btn').classList.contains('soon')")
-        assert is_soon is False, "Export to Calendar must stay a real action, not a 'soon' stub"
-
-    check("Export to Calendar button calls the API and reports the result", export_to_calendar_button_calls_the_api_and_reports_the_result)
 
     def opening_mora_from_the_graph_passes_the_right_mote():
         # Stubbed: the real call spawns a second pywebview process, which

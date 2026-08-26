@@ -772,17 +772,20 @@ def check_roles(garden: str | None = None) -> dict[str, Any]:
 def reserved_names() -> dict[str, Any]:
     """Everything the engine and UI interpret specially: reserved property
     keys and relationship types (with what each one means and expects),
-    the full equation expression language usable inside a rule's
+    the **value shapes** recognized under any key at all (`valueShapes` --
+    notably how to write when something happens, which has no reserved
+    name), the full equation expression language usable inside a rule's
     `equation` (targets/sources, property(), prev(x), t, sum/count,
     abs/min/max), and every built-in physical-property provider with its
-    operations, required inputs, and units. Call this before writing an
-    equation or a property-model mote by hand -- it's the complete
-    reference, not just a name check."""
+    operations, required inputs, and units. Call this before writing a
+    date, an equation or a property-model mote by hand -- it's the
+    complete reference, not just a name check."""
     return {
         "properties": sorted(reserved_repo.RESERVED_PROPERTIES),
         "relationshipTypes": sorted(reserved_repo.RESERVED_RELATIONSHIP_TYPES),
         "propertyMeanings": reserved_repo.PROPERTY_MEANINGS,
         "relationshipTypeMeanings": reserved_repo.RELATIONSHIP_TYPE_MEANINGS,
+        "valueShapes": reserved_repo.VALUE_SHAPES,
         "equationLanguage": reserved_repo.EQUATION_LANGUAGE,
         "propertyModelProviders": reserved_repo.PROPERTY_MODEL_PROVIDERS,
     }

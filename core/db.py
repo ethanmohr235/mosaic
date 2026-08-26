@@ -1,6 +1,7 @@
 import re
 import sqlite3
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -293,3 +294,163 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     """)
 
     conn.commit()
+    _migrate_intervals(conn)
+
+
+# Companion keys an interval absorbs. `duration` and `ends`/`end` say how
+# long; `recurrence` says how often. None of the three has a shape of its
+# own to be recognized by, which is exactly why they had to be reserved
+# names and exactly what folding them into the start's value fixes.
+_SPAN_KEYS = ("ends", "end")
+_ABSORBED_KEYS = ("duration", "recurrence", "ends", "end")
+
+
+def _migrate_intervals(conn: sqlite3.Connection) -> None:
+    """Fold `duration`/`ends`/`end`/`recurrence` into the value of the
+    property that holds the start, as an ISO 8601 interval.
+
+    Idempotent, like every migration above it: a garden with none of the
+    companion keys left is untouched, so this is a no-op on a fresh
+    garden and on one already migrated.
+
+    **The start's key name is preserved** -- `date` stays `date`, `when`
+    stays `when`. A garden's own vocabulary is the whole point of
+    bindings, and a migration that renamed everything to one key would
+    be undoing the thing it exists to serve.
+
+    Python rather than SQL because values are JSON-encoded in the TEXT
+    column and durations need formatting. That costs one pass over the
+    motes carrying a companion key, which is bounded by how much of a
+    garden is dated at all -- and this runs once, since afterwards there
+    are no companion keys left to find.
+    """
+    # Imported here rather than at module scope: core/db.py is the lowest
+    # layer and core/interval.py must not become something every import
+    # of it drags in. The cost is one lookup on a migration that no-ops.
+    import json
+
+    from core import interval as interval_repo
+
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT DISTINCT mote_id FROM mote_properties WHERE key IN (?, ?, ?, ?)",
+        _ABSORBED_KEYS,
+    )
+    candidates = [row["mote_id"] for row in cursor.fetchall()]
+    if not candidates:
+        return
+
+    for mote_id in candidates:
+        cursor.execute(
+            "SELECT key, value FROM mote_properties WHERE mote_id = ?", (mote_id,)
+        )
+        raw = {}
+        for row in cursor.fetchall():
+            try:
+                raw[row["key"]] = json.loads(row["value"])
+            except (json.JSONDecodeError, TypeError):
+                raw[row["key"]] = row["value"]
+
+        start_key = _start_key(raw, interval_repo)
+        if start_key is None:
+            # Companion keys with nothing to attach to. A mote with a
+            # property called `duration` and no start is describing
+            # something else entirely -- how long a course runs, how long
+            # a part lasts -- and must be left exactly alone.
+            continue
+
+        folded = _folded_value(raw, start_key, interval_repo)
+        if folded is None or folded == raw[start_key]:
+            continue
+        cursor.execute(
+            "UPDATE mote_properties SET value = ? WHERE mote_id = ? AND key = ?",
+            (json.dumps(folded), mote_id, start_key),
+        )
+        cursor.execute(
+            "DELETE FROM mote_properties WHERE mote_id = ? AND key IN (?, ?, ?, ?)",
+            (mote_id, *_ABSORBED_KEYS),
+        )
+
+    conn.commit()
+
+
+def _start_key(raw: dict, interval_repo) -> str | None:
+    """Which property holds this mote's start. `date` wins when present
+    because it is the conventional name; otherwise the first date-shaped
+    key in insertion order, which is the garden's own answer. `ends`/
+    `end` are never a start -- they qualify one.
+
+    A mote dated *two* ways shared one `duration` between them, since the
+    old reader took the span off the mote rather than off the binding.
+    Only one of them can keep it now, and it is this one; the other
+    placement falls back to the default span. That is a real change in a
+    rare case, and the honest one -- a span that silently belonged to two
+    different events is exactly the ambiguity intervals remove.
+    """
+    if interval_repo.parse(raw.get("date")) is not None:
+        return "date"
+    for key, value in raw.items():
+        if key in _ABSORBED_KEYS:
+            continue
+        if interval_repo.parse(value) is not None:
+            return key
+    return None
+
+
+def _folded_value(raw: dict, start_key: str, interval_repo) -> str | None:
+    """The start's value with its companions folded in, or None if there
+    was nothing to fold."""
+    original = raw[start_key]
+    found = interval_repo.parse(original)
+    if found is None:
+        return None
+
+    span = None
+    for key in _SPAN_KEYS:
+        ended = interval_repo.parse_datetime(raw.get(key))
+        if ended is None:
+            continue
+        end, end_all_day = ended
+        # An all-day `ends` is *inclusive* as people wrote it -- "away
+        # Aug 12 to Aug 14" means the 14th is an away day -- and ISO
+        # intervals are exclusive. core/calendar.py already made this
+        # conversion on every read; now it is made once, in storage.
+        if found.all_day and end_all_day:
+            end = end + timedelta(days=1)
+        if end > found.start:
+            span = end - found.start
+        break
+
+    if span is None:
+        duration = raw.get("duration")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+            span = timedelta(days=duration) if found.all_day else timedelta(minutes=duration)
+
+    if span is not None:
+        found = interval_repo.with_span(found, span)
+
+    rule = raw.get("recurrence")
+    if isinstance(rule, str) and rule.strip():
+        found = interval_repo.with_rule_lines(found, _rule_lines(rule))
+
+    if not found.rule_lines and span is None:
+        return None
+    # force_span when the old properties named one: `duration: 60` and a
+    # bare start mean the same thing today, but only because the default
+    # happens to be 60. What the mote said is what gets recorded.
+    return interval_repo.format_like(original, found, force_span=span is not None)
+
+
+def _rule_lines(raw: str) -> list[str]:
+    """A `recurrence` property as tagged RFC 5545 lines. A bare
+    `FREQ=...` gets `RRULE:` added, matching what core/calendar.py has
+    always done when handing one to dateutil."""
+    lines = []
+    for line in raw.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if not text.upper().startswith(("RRULE:", "EXDATE", "RDATE", "EXRULE")):
+            text = f"RRULE:{text}"
+        lines.append(text)
+    return lines

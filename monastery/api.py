@@ -175,10 +175,8 @@ class Api:
 
     def _excluded_ids(self) -> set[str]:
         """Templates and scenario overrides, which hold replacement or
-        starting values rather than real data. The same exclusion
-        core/google_calendar.py::exportable_motes applies, and for the
-        same reason: a dated template would draw as an event for
-        something that never happened."""
+        starting values rather than real data: a dated template would
+        draw as an event for something that never happened."""
         return species_repo.template_mote_ids(self._conn) | scenarios_repo.override_mote_ids(
             rel_repo.list_relationships(self._conn, type_=scenarios_repo.OVERRIDES)
         )
@@ -289,17 +287,16 @@ class Api:
         purpose, and an ordinary mote says the same thing without
         inventing a second kind of event.
         """
-        rule = calendar_repo.with_exception(mote.properties, occurrence_start, all_day)
-        if rule is not None:
-            motes_repo.update_mote(self._conn, mote.id, {"recurrence": rule})
+        excepted = calendar_repo.with_exception(mote, binding, occurrence_start)
+        if excepted:
+            motes_repo.update_mote(self._conn, mote.id, excepted)
+        # detached_properties() drops the rule itself -- a copy that kept
+        # it would go on recurring, and the rule now lives inside the
+        # binding's own value rather than in a property of its own.
         detached_id = motes_repo.copy_mote(
             self._conn, self._conn, mote.id,
             calendar_repo.detached_properties(mote, binding, new_start, new_end),
         )
-        # A copy that kept these would go on recurring, and would fight
-        # the original over one Google event.
-        for key in ("recurrence", "gcal_event_id"):
-            motes_repo.delete_property(self._conn, detached_id, key)
         # copy_mote() is properties only -- there is no general answer for
         # relationships -- but the species is the one a split-off
         # occurrence has to keep, because it is what colours it.
@@ -334,7 +331,7 @@ class Api:
         if target_end <= target:
             return self._panel(mote.id)
 
-        if scope == OCCURRENCE and calendar_repo.is_recurring(mote):
+        if scope == OCCURRENCE and calendar_repo.is_recurring(mote, binding):
             return self._panel(self._detach(mote, binding, start, all_day, target, target_end))
 
         moved = (
@@ -371,13 +368,14 @@ class Api:
         name = payload_repo.name_of(mote)
 
         if scope == OCCURRENCE:
-            rule = calendar_repo.with_exception(mote.properties, start, all_day)
-            if rule is not None:
-                motes_repo.update_mote(self._conn, mote.id, {"recurrence": rule})
+            excepted = calendar_repo.with_exception(mote, binding, start)
+            if excepted:
+                motes_repo.update_mote(self._conn, mote.id, excepted)
                 return {"name": name, "scope": OCCURRENCE, "undo": {
-                    "kind": "recurrence",
+                    "kind": "interval",
                     "moteId": mote.id,
-                    "recurrence": mote.properties.get("recurrence"),
+                    "binding": binding,
+                    "value": mote.properties.get(binding),
                 }}
 
         # Recorded before the delete, not after: relationships cascade
@@ -409,13 +407,13 @@ class Api:
         if not isinstance(token, dict):
             return None
 
-        if token.get("kind") == "recurrence":
-            mote_id = token.get("moteId")
-            previous = token.get("recurrence")
+        if token.get("kind") == "interval":
+            mote_id, binding = token.get("moteId"), token.get("binding")
+            previous = token.get("value")
             if previous is None:
-                motes_repo.delete_property(self._conn, mote_id, "recurrence")
+                motes_repo.delete_property(self._conn, mote_id, binding)
             else:
-                motes_repo.update_mote(self._conn, mote_id, {"recurrence": previous})
+                motes_repo.update_mote(self._conn, mote_id, {binding: previous})
             return self._panel(mote_id)
 
         if token.get("kind") != "mote":

@@ -418,7 +418,7 @@ def run_checks(window):
                 [column.left + 20, y + 48],
             ]};
         })()""")
-        wanted = f"{day(2).isoformat()}T10:15:00"
+        wanted = f"{day(2).isoformat()}T10:15:00/PT30M"
         assert wait_until(
             lambda: _properties(ids["standup"]).get("when") == wanted
         ), (f"a drag should rewrite the binding that placed it, got "
@@ -447,8 +447,8 @@ def run_checks(window):
                 [x, rect.bottom + 46],
             ]};
         })()""")
-        assert wait_until(lambda: _named("Vendor call").properties.get("duration") == 105), \
-            f"resizing should rewrite duration, got {_named('Vendor call').properties}"
+        assert wait_until(lambda: _named("Vendor call").properties.get("when", "").endswith("/PT1H45M")), \
+            f"resizing should rewrite the span inside the value, got {_named('Vendor call').properties}"
 
     check("dragging an event's edge changes its duration",
           dragging_an_edge_changes_the_duration)
@@ -492,11 +492,11 @@ def run_checks(window):
                 [target.left + target.width / 2, y],
             ]};
         })()""")
-        assert wait_until(lambda: _named("Read-only window").properties.get("starts")
-                          == day(3).isoformat()), \
+        assert wait_until(lambda: _named("Read-only window").properties.get("starts", "")
+                          .startswith(day(3).isoformat())), \
             f"the span did not move, got {_named('Read-only window').properties}"
-        assert _named("Read-only window").properties.get("ends") == day(5).isoformat(), \
-            "an explicit end has to travel with the start it belongs to"
+        assert _named("Read-only window").properties["starts"] == f"{day(3).isoformat()}/P3D", \
+            "the span travels inside the value, so there is no end left behind to disagree"
         # The write lands before the redraw does, and the next check
         # grabs a pin off the grid -- so wait for the grid, not just the
         # garden, or that grab gets a rectangle that has already moved.
@@ -522,10 +522,10 @@ def run_checks(window):
                 [target.left + target.width / 2, y],
             ]};
         })()""")
-        assert wait_until(lambda: _named("Read-only window").properties.get("ends")
-                          == day(6).isoformat()), \
+        assert wait_until(lambda: _named("Read-only window").properties.get("starts")
+                          == f"{day(3).isoformat()}/P4D"), \
             f"the end did not follow the edge, got {_named('Read-only window').properties}"
-        assert _named("Read-only window").properties.get("starts") == day(3).isoformat(), \
+        assert _named("Read-only window").properties["starts"].startswith(day(3).isoformat()), \
             "resizing must not move the start it was measured from"
 
     check("dragging an all-day pin's edge extends its span",
@@ -585,11 +585,12 @@ def run_checks(window):
         retro = next((m for m in all_motes() if m.properties.get("name") == "Retro"), None)
         assert retro is not None, "the created mote is not named Retro"
         assert "date" in retro.properties, \
-            f"a new mote must be dated with the reserved key, got {retro.properties}"
-        assert retro.properties["date"] == f"{day(1).isoformat()}T14:00:00", \
-            f"the mote landed somewhere the sweep did not draw: {retro.properties['date']}"
-        assert retro.properties["duration"] == 90, \
-            f"the drawn length should reach the mote, got {retro.properties.get('duration')!r}"
+            f"a new mote is written to the conventional key, got {retro.properties}"
+        assert retro.properties["date"] == f"{day(1).isoformat()}T14:00:00/PT1H30M", \
+            ("the draft must compose one interval carrying the drawn length, "
+             f"got {retro.properties['date']!r}")
+        assert "duration" not in retro.properties, \
+            "a span is part of the value now, never a second property"
 
     check("the draft popover creates a dated mote", the_draft_popover_creates_a_mote)
 
@@ -614,8 +615,9 @@ def run_checks(window):
 
         assert wait_until(lambda: _daily_syncs(window) == 4), \
             f"four occurrences should remain, got {_daily_syncs(window)}"
-        rule = _named("Daily sync").properties.get("recurrence", "")
-        assert "EXDATE" in rule, f"the exception should live in the rule, got {rule!r}"
+        placed = _named("Daily sync").properties.get("date", "")
+        assert "EXDATE" in placed, \
+            f"the exception should live in the value's own rule lines, got {placed!r}"
 
     check("deleting one occurrence excepts it from the series",
           deleting_one_occurrence_leaves_the_rest)
@@ -646,7 +648,8 @@ def run_checks(window):
         click(window, "#chooser-all")
 
         wanted = f"{day(0).isoformat()}T09:00:00"
-        assert wait_until(lambda: _named("Daily sync").properties.get("date") == wanted), \
+        assert wait_until(lambda: _named("Daily sync").properties.get("date", "")
+                          .startswith(wanted)), \
             f"the anchor should have moved with it, got {_named('Daily sync').properties}"
         assert wait_until(lambda: _daily_syncs(window) == 5), \
             "the series should still draw five times after moving"
@@ -702,8 +705,8 @@ def run_checks(window):
                 [to.left + to.width / 2, to.top + to.height / 2],
             ]};
         })()""")
-        assert wait_until(lambda: _named("Retro").properties.get("date")
-                          == f"{day(2).isoformat()}T14:00:00"), \
+        assert wait_until(lambda: _named("Retro").properties.get("date", "")
+                          .startswith(f"{day(2).isoformat()}T14:00:00")), \
             f"a chip should move by a day and keep its time, got {_named('Retro').properties}"
         click(window, "#modes button[data-view='week']")
         assert wait_until(lambda: count(window, ".day-col") == 7)

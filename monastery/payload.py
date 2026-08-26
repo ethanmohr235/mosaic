@@ -10,15 +10,14 @@ JSON-able dicts.
 
 Datetimes cross the bridge as ISO strings. JavaScript's Date parses them
 directly and nothing here needs a timezone: every property MonOSS stores
-is naive local time (core/google_calendar.py attaches an offset only at
-the moment it hands one to Google), so sending an offset would be
-inventing information the garden does not have.
+is naive local time, so sending an offset would be inventing
+information the garden does not have.
 """
 from dataclasses import dataclass
 
 from core import kinds as kinds_repo
 from core import species as species_repo
-from core.calendar import Occurrence, is_calendar_property
+from core.calendar import Occurrence, is_calendar_value
 from core.entities import Mote, Relationship
 
 NAME_KEY = "name"
@@ -140,17 +139,20 @@ def panel_payload(mote: Mote, directory: Directory) -> dict:
     """One mote as the detail panel shows it: its properties, and every
     relationship touching it with the direction it points.
 
-    `calendarKeys` marks which properties are the calendar's own
-    machinery (a date, a duration, a rule) rather than user data, so the
-    panel can show them apart without deciding for itself which those are
-    -- that answer is core/calendar.py's."""
+    `calendarKeys` marks which properties the calendar reads, so the
+    panel can show them apart without deciding for itself which those
+    are -- that answer is core/calendar.py's.
+
+    Asked about each **value**, not each key: there is no list of
+    calendar property names any more. A key holding an interval is the
+    calendar's under whatever name the garden gave it."""
     relationships = [
         r for r in directory.relationships if mote.id in (r.from_id, r.to_id)
     ]
     return {
         **directory.describe(mote.id),
         "properties": mote.properties,
-        "calendarKeys": [k for k in mote.properties if is_calendar_property(k)],
+        "calendarKeys": [k for k, v in mote.properties.items() if is_calendar_value(v)],
         "relationships": [_relationship(r, mote.id, directory) for r in relationships],
     }
 

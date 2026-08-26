@@ -1130,13 +1130,22 @@ function plainField(text, onCommit) {
  *  it. */
 function valueField(key, rawValue, onCommit) {
   const text = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue);
-  if (key === "date") {
-    const parsed = parseDateValue(text);
-    if (parsed) return dateField(parsed, onCommit);
-  }
   if (key === "modoc") return noteField(text);
-  if (key === "recurrence") return recurrenceField(text, onCommit);
   if (key === "provider") return providerField(text, onCommit);
+  // By shape, not by name: `date` stopped being a key the engine reads
+  // when a start became an ISO 8601 interval (core/interval.py), so any
+  // property holding one gets the picker -- `when`, `due`, `starts`, or
+  // whatever this garden calls it.
+  //
+  // Except when it repeats. This picker edits only the start, and a
+  // value whose RRULE/EXDATE lines were neither shown nor editable would
+  // be a value you could not fully see -- worse than plain text, which
+  // at least shows all of it. Editing a rule stays Monastery's job until
+  // the interval picker lands here.
+  if (text !== "" && !String(text).includes("\n")) {
+    const parsed = parseDateValue(text);
+    if (parsed && parsed.date) return dateField(parsed, onCommit);
+  }
   return plainField(text, onCommit);
 }
 
@@ -1181,22 +1190,36 @@ function providerField(text, onCommit) {
   return field;
 }
 
-/** Parses MonOSS's two `date` shapes (docs/google-calendar.md): a bare
- *  "YYYY-MM-DD" (all-day) or a full "YYYY-MM-DDTHH:MM[:SS]" (timed,
- *  local time, no offset). Returns null for anything else so callers can
- *  fall back to plain text rather than force a picker on an unparseable
- *  value. */
+/** Parses the *start* of an ISO 8601 interval (core/interval.py): a bare
+ *  "YYYY-MM-DD" (all-day) or "YYYY-MM-DDTHH:MM[:SS]" (timed, local, no
+ *  offset), optionally followed by "/<span>" and by rule lines beneath.
+ *  Returns null for anything else so callers can fall back to plain text
+ *  rather than force a picker on an unparseable value.
+ *
+ *  `tail` is everything after the start -- the span and any RRULE/EXDATE
+ *  lines -- carried through untouched so editing the start here cannot
+ *  quietly drop how long the thing lasts or how often it repeats. Editing
+ *  those is Monastery's job, and will be this panel's once the interval
+ *  picker lands. */
 function parseDateValue(text) {
-  if (text === "") return { date: "", time: "", allDay: true };
-  const timed = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?$/.exec(text);
-  if (timed) return { date: timed[1], time: timed[2], allDay: false };
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return { date: text, time: "", allDay: true };
+  if (text === "") return { date: "", time: "", allDay: true, tail: "" };
+  const head = String(text).split("\n")[0];
+  const tail = String(text).slice(head.length);
+  const slash = head.indexOf("/");
+  const start = slash === -1 ? head : head.slice(0, slash);
+  const span = slash === -1 ? "" : head.slice(slash);
+
+  const timed = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?$/.exec(start);
+  if (timed) return { date: timed[1], time: timed[2], allDay: false, tail: span + tail };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+    return { date: start, time: "", allDay: true, tail: span + tail };
+  }
   return null;
 }
 
 /** Native date/time inputs plus an "All day" toggle -- mirrors
  *  event_payload()'s own "T" in raw_date branch
- *  (core/google_calendar.py) so the two stay in sync. Defines its own
+ *  (core/calendar.py) so the two stay in sync. Defines its own
  *  `value` getter/setter so the revert-on-block call site in
  *  renderProperties() (`field.value = displayedText`) works unmodified,
  *  same as it does for a plain <input>. */
@@ -1223,8 +1246,10 @@ function dateField(parsed, onCommit) {
   // Seconds appended explicitly so the stored value always matches
   // MonOSS's existing "YYYY-MM-DDTHH:MM:SS" shape, regardless of what
   // precision the native time input happens to report.
+  let tail = parsed.tail || "";
   const compose = () => (
-    allDayCheckbox.checked ? dateInput.value : `${dateInput.value}T${timeInput.value || "00:00"}:00`
+    (allDayCheckbox.checked ? dateInput.value : `${dateInput.value}T${timeInput.value || "00:00"}:00`)
+    + tail
   );
   const commit = () => onCommit(compose());
 
@@ -1240,125 +1265,12 @@ function dateField(parsed, onCommit) {
   Object.defineProperty(wrap, "value", {
     get: compose,
     set(v) {
-      const next = parseDateValue(v) || { date: "", time: "", allDay: true };
+      const next = parseDateValue(v) || { date: "", time: "", allDay: true, tail: "" };
       dateInput.value = next.date;
       timeInput.value = next.time;
       allDayCheckbox.checked = next.allDay;
+      tail = next.tail || "";
       timeInput.classList.toggle("hidden", next.allDay);
-    },
-  });
-  return wrap;
-}
-
-const SIMPLE_RECURRENCE_FREQUENCIES = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"];
-
-/** Recognizes only "FREQ=<X>" or "FREQ=<X>;UNTIL=<YYYYMMDD>" (a leading
- *  "RRULE:" stripped the same way core/google_calendar.py's
- *  event_payload() does server-side) -- anything else (BYDAY, COUNT,
- *  INTERVAL, ...) returns null so the picker can tell "simple enough to
- *  edit structurally" from "must stay a raw rule". */
-function parseSimpleRecurrence(text) {
-  if (!text) return { freq: "", until: "" };
-  const rule = text.trim().replace(/^RRULE:/i, "");
-  const parts = {};
-  for (const piece of rule.split(";")) {
-    const [k, v] = piece.split("=");
-    if (!k || v === undefined) return null;
-    parts[k] = v;
-  }
-  const keys = Object.keys(parts);
-  if (keys.some((k) => k !== "FREQ" && k !== "UNTIL") || !SIMPLE_RECURRENCE_FREQUENCIES.includes(parts.FREQ)) {
-    return null;
-  }
-  let until = "";
-  if (parts.UNTIL) {
-    const m = /^(\d{4})(\d{2})(\d{2})/.exec(parts.UNTIL);
-    if (!m) return null;
-    until = `${m[1]}-${m[2]}-${m[3]}`;
-  }
-  return { freq: parts.FREQ, until };
-}
-
-function buildSimpleRecurrence(freq, until) {
-  if (!freq) return "";
-  return until ? `FREQ=${freq};UNTIL=${until.replace(/-/g, "")}` : `FREQ=${freq}`;
-}
-
-/** Structured Frequency+Until picker for the common case, with a raw-text
- *  fallback (today's plain field, via plainField) for anything
- *  parseSimpleRecurrence can't express -- so an existing BYDAY/COUNT/...
- *  rule is never silently offered a lossy downgrade. Same `value`
- *  getter/setter contract as dateField. */
-function recurrenceField(text, onCommit) {
-  let currentText = text;
-  let mode = parseSimpleRecurrence(currentText) !== null ? "simple" : "raw";
-  const wrap = document.createElement("div");
-  wrap.className = "picker-field recurrence-field";
-
-  function commit(next) {
-    currentText = next;
-    onCommit(next);
-  }
-
-  function renderSimple() {
-    wrap.innerHTML = "";
-    const parsed = parseSimpleRecurrence(currentText) || { freq: "", until: "" };
-
-    const select = document.createElement("select");
-    for (const [value, label] of [
-      ["", "Does not repeat"], ["DAILY", "Daily"], ["WEEKLY", "Weekly"],
-      ["MONTHLY", "Monthly"], ["YEARLY", "Yearly"],
-    ]) {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = label;
-      if (value === parsed.freq) opt.selected = true;
-      select.appendChild(opt);
-    }
-
-    const until = document.createElement("input");
-    until.type = "date";
-    until.title = "Repeat until (optional)";
-    until.value = parsed.until;
-    until.classList.toggle("hidden", !parsed.freq);
-
-    const compose = () => buildSimpleRecurrence(select.value, until.value);
-    select.addEventListener("change", () => {
-      until.classList.toggle("hidden", !select.value);
-      commit(compose());
-    });
-    until.addEventListener("change", () => commit(compose()));
-
-    const customBtn = document.createElement("button");
-    customBtn.type = "button";
-    customBtn.className = "linkish picker-mode-toggle";
-    customBtn.textContent = "Custom rule…";
-    customBtn.addEventListener("click", () => { mode = "raw"; renderRaw(); });
-
-    wrap.append(select, until, customBtn);
-  }
-
-  function renderRaw() {
-    wrap.innerHTML = "";
-    wrap.appendChild(plainField(currentText, commit));
-    if (parseSimpleRecurrence(currentText) !== null) {
-      const simpleBtn = document.createElement("button");
-      simpleBtn.type = "button";
-      simpleBtn.className = "linkish picker-mode-toggle";
-      simpleBtn.textContent = "Use simple picker";
-      simpleBtn.addEventListener("click", () => { mode = "simple"; renderSimple(); });
-      wrap.appendChild(simpleBtn);
-    }
-  }
-
-  mode === "simple" ? renderSimple() : renderRaw();
-
-  Object.defineProperty(wrap, "value", {
-    get: () => currentText,
-    set(v) {
-      currentText = v;
-      mode = parseSimpleRecurrence(v) !== null ? "simple" : "raw";
-      mode === "simple" ? renderSimple() : renderRaw();
     },
   });
   return wrap;
@@ -2663,7 +2575,7 @@ function setupContextMenu() {
 // with only one open at a time -- opening any one closes the rest, mutually
 // exclusive with the right-click context menu too. Most of their real
 // items are static markup pointing at ids that predate this section
-// (#run-sim-btn, #export-calendar-btn, ...) so the setup functions that
+// (#run-sim-btn, #check-roles-btn, ...) so the setup functions that
 // already own those elements' behavior need no changes, only a leading
 // closeTopMenus() so choosing an action closes the menu it came from.
 
@@ -3729,28 +3641,6 @@ function setupRunsPanel() {
   $("close-runs-panel").addEventListener("click", closeRunsPanel);
 }
 
-function setupCalendarExport() {
-  const button = $("export-calendar-btn");
-  button.addEventListener("click", async () => {
-    closeTopMenus();
-    button.disabled = true;
-    button.textContent = "Exporting…";
-    // Shown immediately, not just on completion: the very first export
-    // can block for a while on the user finishing sign-in in their
-    // browser, and without this the button just looks stuck.
-    showToast("Exporting to Google Calendar… complete sign-in in your browser if prompted.", 8000);
-    try {
-      const result = await call(api.export_to_google_calendar());
-      const parts = [`${result.created} new`, `${result.updated} updated`];
-      if (result.skipped) parts.push(`${result.skipped} skipped (invalid date)`);
-      if (result.deleted) parts.push(`${result.deleted} removed`);
-      showToast(`Exported ${result.total} mote${result.total === 1 ? "" : "s"} to Google Calendar: ${parts.join(", ")}.`, 6000);
-    } finally {
-      button.disabled = false;
-      button.textContent = "Export to Calendar";
-    }
-  });
-}
 
 /** True while a text input/textarea has focus -- Del/Backspace and arrow
  *  keys must not hijack normal text editing inside the detail panel or
@@ -3986,7 +3876,6 @@ async function init() {
   setupMonastery();
   setupSync();
   setupRefresh();
-  setupCalendarExport();
   setupContextMenu();
   setupKeyboard();
   applyControlPanelVisibility();

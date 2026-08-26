@@ -17,7 +17,6 @@ from core.db import get_connection, initialize_database
 from core import derivations as derivations_repo
 from core import gardens as gardens_repo
 from core import garden_io
-from core import google_calendar as gcal_repo
 from core import folders as folders_repo
 from core import graph as graph_repo
 from core import library as library_repo
@@ -143,6 +142,7 @@ MORA_SCRIPT = Path(__file__).resolve().parent.parent / "run_mora.py"
 
 # Monastery, the calendar window, on exactly the same terms.
 MONASTERY_SCRIPT = Path(__file__).resolve().parent.parent / "run_monastery.py"
+
 
 
 def _popen_detached(args: list[str], *, quiet: bool = True) -> None:
@@ -869,43 +869,6 @@ class Api:
         sparklines."""
         return simulation_repo.mote_history(self._conn, mote_id)
 
-    # ---- google calendar ----
-
-    def export_to_google_calendar(self) -> dict:
-        """Deliberately NOT @_synchronized: this does OAuth (may block on
-        the user completing a consent screen in their browser) and
-        network I/O, and holding the shared connection lock for that long
-        would freeze every other Api call for as long as it takes -- the
-        same mistake already made and fixed once for local-file opening
-        (see _open_with_os_default). Only the brief DB-touching calls
-        (list_motes, update_mote) are synchronized, individually.
-
-        The export itself is core's (gcal_repo.export_events); what this
-        supplies is the two things only the app knows -- how to write an
-        event id back through the lock, and whether the user has switched
-        gardens out from under a network call in flight."""
-        garden_at_start = self._current_garden
-        all_motes = self.list_motes()
-        # Lock held only for this brief read, same discipline as every
-        # other DB touch in this deliberately-not-@_synchronized method.
-        # Templates and scenario overrides both hold non-real values, so
-        # both are kept out of the export -- see exportable_motes().
-        with self._lock:
-            template_ids = species_repo.template_mote_ids(self._conn)
-            override_ids = scenarios_repo.override_mote_ids(
-                rel_repo.list_relationships(self._conn, type_=scenarios_repo.OVERRIDES)
-            )
-
-        summary = gcal_repo.export_events(
-            gcal_repo.exportable_motes(all_motes, template_ids | override_ids),
-            gcal_repo.get_credentials(),
-            record_event_id=lambda mote_id, event_id: self.update_mote(
-                mote_id, {"gcal_event_id": event_id}
-            ),
-            still_exporting=lambda: self._current_garden == garden_at_start,
-        )
-        return dataclasses.asdict(summary)
-
     # ---- reserved names ----
 
     @_synchronized
@@ -921,6 +884,7 @@ class Api:
             "relationshipTypes": sorted(reserved_repo.RESERVED_RELATIONSHIP_TYPES),
             "propertyMeanings": reserved_repo.PROPERTY_MEANINGS,
             "relationshipTypeMeanings": reserved_repo.RELATIONSHIP_TYPE_MEANINGS,
+            "valueShapes": reserved_repo.VALUE_SHAPES,
             "propertyModelProviders": reserved_repo.PROPERTY_MODEL_PROVIDERS,
         }
 

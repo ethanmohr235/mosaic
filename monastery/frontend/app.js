@@ -1181,6 +1181,18 @@ function fmtMinutes(m) {
   return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 }
 
+/** Minutes as an ISO 8601 duration -- `PT1H30M`, `PT45M`. The same
+ *  notation core/interval.py::format_duration writes, because a value
+ *  composed here and one composed there have to be the same string. */
+function isoDuration(minutes) {
+  const total = Math.max(1, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (hours && rest) return `PT${hours}H${rest}M`;
+  if (hours) return `PT${hours}H`;
+  return `PT${rest}M`;
+}
+
 function closeDraft() {
   draft = null;
   $("draft").classList.add("hidden");
@@ -1270,17 +1282,19 @@ function draftProperties() {
   const properties = {};
   if (name) properties.name = name;
 
+  // One property, carrying its own span: an ISO 8601 interval
+  // (core/interval.py). There is no separate `duration` to write, and so
+  // no way for the two halves to end up disagreeing.
   if (draft.allDay) {
-    properties.date = dateKey;
-    // Days, not minutes, for an all-day mote -- the same reading
-    // core/calendar.py::_duration_for gives it.
-    if (draft.days > 1) properties.duration = String(draft.days);
+    properties.date = draft.days > 1 ? `${dateKey}/P${draft.days}D` : dateKey;
   } else {
     const start = parseHm($("draft-start").value);
     const end = parseHm($("draft-end").value);
     if (start === null) return null;
-    properties.date = `${dateKey}T${fmtMinutes(start)}:00`;
-    if (end !== null && end > start) properties.duration = String(end - start);
+    const startText = `${dateKey}T${fmtMinutes(start)}:00`;
+    properties.date = (end !== null && end > start)
+      ? `${startText}/${isoDuration(end - start)}`
+      : startText;
   }
 
   draft.rows.forEach((row) => {

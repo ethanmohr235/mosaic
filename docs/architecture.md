@@ -65,7 +65,9 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies`, `in_folder` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `date`, `duration`, `recurrence`, `gcal_event_id`, `provider`, `configuration`, `units`, `portal_garden`, `portal_mote` and `modoc` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies`, `in_folder` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `portal_garden`, `portal_mote` and `modoc` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+
+A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below), and a task's status or estimate is likewise discovered from what the value looks like (`core/task_candidates.py`). The ten names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
 
 # Units
 
@@ -401,34 +403,56 @@ excludes should say so, here, in one line.
 `url` (`core/links.py`) makes a mote openable -- a web address or a local
 file path, launched via the OS's default handler. See `docs/ui-setup.md`.
 
-`date` and `duration` (`core/google_calendar.py`) mark a mote as something
-with a time: `date` is ISO 8601 (a bare date for an all-day event, a full
-datetime for a timed one), `duration` is a plain number (minutes for a
-timed event, days for an all-day one). `recurrence` is a raw RFC 5545
-RRULE string (e.g. `FREQ=WEEKLY;BYDAY=TU,TH`), passed straight through to
-Google rather than parsed or validated locally -- one Calendar event with
-a rule represents the whole series, so this needed no other change.
-Removing the property is itself exported: the next export explicitly
-clears recurrence on the existing event rather than leaving the old rule
-in place.
-`gcal_event_id` gets written back onto a mote the first time it's
-exported to Google Calendar, so re-running the export updates that event
-(the whole series, if recurring) instead of duplicating it. Every export
-also deletes any previously-created event whose mote is gone or no longer
-dated -- found by querying Calendar itself for everything tagged as
-MonOSS-managed (`extendedProperties.private` on each event), not a local
-record, so this stays correct even if events were edited or deleted by
-hand. See `docs/google-calendar.md` for setup and details.
+# Time
 
-The export loop itself is `core/google_calendar.py::export_events()`, not
-the UI's: an adapter holding business logic is an adapter no other
-surface can reuse and no test can reach without a GUI. What `monarch/api.py`
-still supplies is the two things only the app knows -- `record_event_id`
-(how to write a new event id back, through its connection lock) and
-`still_exporting` (whether the user has switched gardens while a network
-call was in flight, which must never write an id into the wrong garden).
-Exposing the export over CLI or MCP is now a question of whether it
-should be, rather than of rewriting it.
+**When something happens is one property, under any key you like, and no
+reserved name at all.** It is an ISO 8601 interval (`core/interval.py`),
+which carries its own span and its own repetition:
+
+```
+2026-09-01                        an all-day event, one day
+2026-09-01/2026-09-03             all-day, Sep 1 and 2 -- the end is EXCLUSIVE
+2026-09-01T09:00                  timed, the default 60 minutes
+2026-09-01T09:00/PT1H30M          timed, 90 minutes
+2026-09-01T09:00/2026-09-01T10:30 timed, an explicit end
+2026-09-01T09:00/PT1H
+RRULE:FREQ=WEEKLY;BYDAY=TU        ...repeating, with an EXDATE line beneath
+                                     excepting one occurrence
+```
+
+Any property whose value parses as one places the mote; `core/calendar.py`
+calls each such key a **binding**. A garden where meetings say `when`,
+tasks say `due` and events say `starts` needs no migration and no
+declaration -- it is answered by looking, exactly as a species is
+(`core/kinds.py`).
+
+This replaced three reserved names with none. `date`, `duration` and
+`recurrence` used to be separate properties, and only the first had a
+shape you could recognize -- a bare `30` is not distinguishable from any
+other number, so a span and a rule *had* to be found by name. Folding all
+three into one self-describing value is what removed the last reason for
+the calendar to know any name at all. `date` survives only as the key a
+*new* mote's start is written to (`core/calendar.py::DEFAULT_BINDING`), a
+default rather than a name anything reads.
+
+Gardens written the old way are folded on open
+(`core/db.py::_migrate_intervals`), idempotently, **keeping each garden's
+own key name** -- `date` stays `date`, `when` stays `when`. An all-day
+`ends` was inclusive as people wrote it and becomes an exclusive interval,
+which is the end `core/calendar.py` always computed internally anyway.
+Durations use days/hours/minutes/seconds only: years and months have no
+fixed length, so an event lasting "one month" has no single answer.
+
+The one thing this costs: hand-typing a separate `duration` beside a date
+no longer does anything. An interval picker is the mitigation.
+
+MonOSS reaches no network. There was one exception -- a manual, one-way
+export of dated motes to Google Calendar -- and it was removed once
+Monastery made it redundant, taking the `gcal_event_id` reserved name and
+the `google-auth`/`requests` dependencies with it. That export was also
+the only thing that ever required *writing* to one fixed key, which is
+why the calendar's read path could always be general while its write path
+could not. Removing it is what made the rest of this possible.
 
 # Portals
 
@@ -599,48 +623,42 @@ itself again -- the calendar needed no new object type, no new
 relationship, and no new reserved property.
 
 That generality is deliberately **read-side only** for *creation*.
-Creating a mote from the grid always writes the reserved `date` (plus
-`duration`), the key `core/google_calendar.py` already treats as
-canonical. Reading is general because a garden is; a *new* date has one
-right home, and having two would be how a garden ends up with the same
-event under three keys.
+Creating a mote from the grid always writes `date`, the conventional
+name. Reading is general because a garden is; a *new* date has one right
+home, and having two would be how a garden ends up with the same event
+under three keys.
 
 Editing goes the other way, and has to. A rectangle dragged across the
 grid rewrites **the binding that placed it** -- drag a task placed by
 `due` and `due` moves -- because an edit should change the thing you were
 shown. Writing `date` instead would leave `due` where it was and place
-the mote on the grid twice. The same principle picks the key a resize
-writes: whichever of `ends`/`duration` the mote already declares, never
-the other. All of it is computed by pure functions in
+the mote on the grid twice. A resize needs no such choice any more -- the
+span lives inside the same value, so a move and a resize are both one
+write to one key. All of it is computed by pure functions in
 `core/calendar.py`'s writing section (`moved_properties`,
 `resized_properties`, `detached_properties`), so what a drag *means*
 is tested without a window, and `monastery/api.py::place_occurrence`
 only writes down what it is handed. Move and resize are one bridge
 method because the top edge of an event is both at once.
 
-`recurrence` -- already reserved, already an RFC 5545 RRULE, and until
-now passed to Google without MonOSS ever interpreting it -- is expanded
-locally by `dateutil.rrule` (the one new dependency, approved for this)
-into one occurrence per repetition inside the visible range. Every
-occurrence carries the same mote, so clicking any of them opens that
-mote: the "one mote → one event → the whole series" model the export
-side already documents, now true on the read side too. A rule that
+`recurrence` -- an RFC 5545 RRULE -- is expanded by `dateutil.rrule`
+(the one new dependency, approved for this) into one occurrence per
+repetition inside the visible range. Every occurrence carries the same
+mote, so clicking any of them opens that mote: one mote → one event →
+the whole series. A rule that
 doesn't parse places the mote on its own date rather than hiding it --
 the same permissiveness `core/modoc_bind.py` gives a broken note, and
 for the same reason.
 
 Deleting one occurrence of a series needed no new reserved property
 either: RFC 5545 already says "except this one" with an `EXDATE` line,
-`dateutil` already reads a rule and its exceptions as one set, and
-Google already accepts them. So the exception lives in the same
-`recurrence` string, and `core/google_calendar.py` forwards each line
-(tagging a timed one with the event's `TZID`) so an occurrence deleted
-here stays deleted there.
+and `dateutil` already reads a rule and its exceptions as one set. So the
+exception lives on a line beneath the interval that placed it.
 
 Moving or resizing *one* occurrence of a series is the same mechanism
 read forwards: an `EXDATE` where it was, and an ordinary copy where it
-now is, carrying the original's species and dropping its `recurrence`
-and `gcal_event_id`. RFC 5545 would call that copy a `RECURRENCE-ID`
+now is, carrying the original's species and dropping its rule lines.
+RFC 5545 would call that copy a `RECURRENCE-ID`
 override; MonOSS has no such thing on purpose, and a plain mote says the
 same thing without a second kind of event. Because one mote *is* the
 whole series, the window asks which was meant rather than guessing --
@@ -656,16 +674,9 @@ reshapes.
 
 Two exclusions are inherited rather than reinvented. Templates and
 scenario overrides are never placed, even when dated, because they hold
-replacement values rather than real data -- the same set
-`exportable_motes()` skips. And a mote is coloured by its species
-through the same hash the graph canvas uses, so it reads the same colour
-in all three windows.
-
-**This does not replace Calendar export.** They answer different
-questions: Monastery is the live, editable view of the garden itself,
-and `core/google_calendar.py` still pushes dated motes out to Google for
-the things a local window cannot do -- a phone, a shared calendar, an
-invite. Neither knows about the other.
+replacement values rather than real data. And a mote is coloured by its
+species through the same hash the graph canvas uses, so it reads the same
+colour in all three windows.
 
 Monastery is a third process on the same terms as Mora, which means the
 same two collisions to avoid: `monastery/app.py::choose_port` asks for

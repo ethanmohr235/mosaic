@@ -170,3 +170,177 @@ def test_the_freedoms_migration_never_clobbers_an_existing_freedoms():
     cur.execute("SELECT value FROM mote_properties WHERE mote_id='species-1' AND key='freedoms'")
     assert cur.fetchone()["value"] == '"current"'
     conn.close()
+
+
+# ---- the interval migration ----
+#
+# `date` + `duration` + `ends`/`end` + `recurrence` fold into one ISO 8601
+# interval on the start's own key. What earns a test here is the part a
+# person would notice going wrong: a span silently changing length, a
+# key being renamed out from under a garden, or an unrelated property
+# called `duration` being eaten.
+
+def _dated(conn, mote_id, properties):
+    """A mote written the pre-interval way, straight into the table --
+    before the migration this file is testing has had a chance to run."""
+    import json
+
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO motes (id) VALUES (?)", (mote_id,))
+    for key, value in properties.items():
+        cur.execute(
+            "INSERT INTO mote_properties (mote_id, key, value) VALUES (?, ?, ?)",
+            (mote_id, key, json.dumps(value)),
+        )
+    conn.commit()
+    return cur
+
+
+def _properties(conn, mote_id):
+    import json
+
+    cur = conn.cursor()
+    cur.execute("SELECT key, value FROM mote_properties WHERE mote_id = ?", (mote_id,))
+    return {row["key"]: json.loads(row["value"]) for row in cur.fetchall()}
+
+
+def test_a_timed_duration_folds_into_the_starts_own_value():
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"name": "Standup", "date": "2026-09-01 09:00", "duration": 30})
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1") == {"name": "Standup", "date": "2026-09-01 09:00/PT30M"}
+    conn.close()
+
+
+def test_an_all_day_duration_folds_as_days():
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"date": "2026-09-01", "duration": 3})
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1")["date"] == "2026-09-01/P3D"
+    conn.close()
+
+
+def test_an_inclusive_all_day_end_becomes_an_exclusive_interval():
+    """"Away Sep 1 to Sep 3" meant the 3rd was an away day. ISO ends are
+    exclusive, which is what core/calendar.py always computed anyway."""
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"starts": "2026-09-01", "ends": "2026-09-03"})
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1")["starts"] == "2026-09-01/P3D"
+    conn.close()
+
+
+def test_a_recurrence_folds_in_as_a_tagged_rule_line():
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {
+        "when": "2026-09-01T09:00", "duration": 45, "recurrence": "FREQ=WEEKLY;BYDAY=TU",
+    })
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1")["when"] == \
+        "2026-09-01T09:00/PT45M\nRRULE:FREQ=WEEKLY;BYDAY=TU"
+    conn.close()
+
+
+def test_an_exception_line_survives_the_fold():
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {
+        "date": "2026-09-01T09:00",
+        "recurrence": "FREQ=DAILY\nEXDATE:20260903T090000",
+    })
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1")["date"] == \
+        "2026-09-01T09:00\nRRULE:FREQ=DAILY\nEXDATE:20260903T090000"
+    conn.close()
+
+
+def test_the_gardens_own_key_name_is_kept():
+    """A garden's own vocabulary is the whole point of bindings; a
+    migration that renamed everything to `date` would undo the thing it
+    exists to serve."""
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"due": "2026-09-01 14:00", "duration": 90})
+
+    db.initialize_database(conn)
+
+    properties = _properties(conn, "m1")
+    assert properties == {"due": "2026-09-01 14:00/PT1H30M"}
+    assert "date" not in properties
+    conn.close()
+
+
+def test_a_declared_span_is_written_even_when_it_equals_the_default():
+    """`duration: 60` and a bare start mean the same thing today, but
+    only because the default happens to be 60. What the mote said is
+    what gets recorded."""
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"date": "2026-09-01T09:00", "duration": 60})
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1")["date"] == "2026-09-01T09:00/PT1H"
+    conn.close()
+
+
+def test_a_duration_with_no_start_beside_it_is_left_alone():
+    """A mote with a property called `duration` and no date is describing
+    something else entirely -- how long a course runs, how long a part
+    lasts -- and must not be touched."""
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"name": "Course", "duration": 14})
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1") == {"name": "Course", "duration": 14}
+    conn.close()
+
+
+def test_the_interval_migration_is_idempotent():
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"date": "2026-09-01 09:00", "duration": 30})
+
+    db.initialize_database(conn)
+    once = _properties(conn, "m1")
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1") == once
+    conn.close()
+
+
+def test_a_garden_already_written_in_intervals_is_untouched():
+    create_garden("test")
+    conn = db.get_connection("test")
+    db.initialize_database(conn)
+    _dated(conn, "m1", {"date": "2026-09-01T09:00/PT90M"})
+
+    db.initialize_database(conn)
+
+    assert _properties(conn, "m1")["date"] == "2026-09-01T09:00/PT90M"
+    conn.close()

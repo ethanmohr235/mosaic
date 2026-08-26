@@ -226,15 +226,6 @@ schema change -- the property is still a
 normal, editable/deletable string like any other. There's no drag-and-
 drop yet; the path/URL has to be pasted in by hand.
 
-### Exporting dated motes to Google Calendar
-
-The File menu's "Export to Calendar" item pushes every mote with a `date`
-property in the current garden to Google Calendar (one-way, manual).
-Deleting a dated mote, or removing its `date`, deletes the corresponding
-event on the next export. See `docs/google-calendar.md` for the reserved
-properties involved, the one-time Google Cloud setup only you can do,
-and what happens on first export.
-
 ### Reserved names
 
 `docs/architecture.md` lists every property key and relationship type
@@ -407,11 +398,8 @@ layout and persisting, a custom species colour surviving a garden switch,
 colour-by-property-value giving different values different colours and no
 value grey, and "Reset every view setting" restoring every default),
 attractor mode (entering it, dragging an attractor so the species' motes
-follow, clicking a mote *not* opening the panel, and leaving), and the
-Export to Calendar item -- with
-`api.export_to_google_calendar` itself stubbed, since the real OAuth/
-network path needs a real Google account and has no place in an
-automated, offline suite) against a throwaway temp `GARDENS_DIR` and
+follow, clicking a mote *not* opening the panel, and leaving)) against a
+throwaway temp `GARDENS_DIR` and
 webview storage dir — never touches real data. Run it by hand after UI
 changes:
 
@@ -559,27 +547,40 @@ it found with a count, and toggling one off empties the grid of the motes
 it placed without touching them.
 
 This is a read-side heuristic only. Creating a mote from the calendar
-always writes the reserved `date` (plus `duration`), the same key
-Calendar export uses: reading is general because a garden is, but a new
+always writes `date`: reading is general because a garden is, but a new
 date has one right home.
+
+A value is an **ISO 8601 interval** and carries its own span and
+repetition -- there is no separate `duration` or `recurrence` property,
+and no reserved name involved anywhere:
 
 | Value | Placed as |
 |---|---|
-| `2026-08-24` | all-day |
-| `2026-08-24T09:15:00`, or `2026-08-24 09:15` | timed |
-| `ends` / `end` on the same mote | the occurrence's end, all-day ends being inclusive as people write them |
-| `duration` | minutes when timed, days when all-day -- exactly as `core/google_calendar.py` reads it |
-| `recurrence` | an RFC 5545 RRULE, expanded into one occurrence per repetition inside the visible range |
+| `2026-08-24` | all-day, one day |
+| `2026-08-24/2026-08-27` | all-day, the 24th to the 26th — **the end is exclusive** |
+| `2026-08-24T09:15`, or `2026-08-24 09:15` | timed, the default 60 minutes |
+| `2026-08-24T09:15/PT20M` | timed, 20 minutes |
+| `2026-08-24T09:15/2026-08-24T11:00` | timed, an explicit end |
+| an `RRULE:…` line beneath any of them | expanded into one occurrence per repetition inside the visible range |
+| an `EXDATE:…` line beneath that | one occurrence excepted out of the series |
+
+Durations are days, hours, minutes and seconds (`P2D`, `PT1H30M`) —
+years and months have no fixed length, so an event lasting "one month"
+has no single answer.
+
+Gardens written the old way — `date` plus a separate `duration`, `ends`
+or `recurrence` — are folded into this on open, keeping whatever key each
+mote already used. The one thing it costs: typing a bare `duration`
+beside a date no longer does anything on its own.
 
 A recurring mote is still **one mote**: every occurrence it draws opens
-the same detail panel, the same "one mote → one event → the whole series"
-model the Calendar export already documents. A rule that doesn't parse
+the same detail panel -- one mote → one event → the whole series. A rule
+that doesn't parse
 places the mote on its own date rather than hiding it -- the same
 permissiveness a broken note gets in Mora.
 
 Templates and scenario overrides are never placed, even when dated: they
-hold replacement values rather than real data, which is the exclusion
-`exportable_motes()` already makes for the export.
+hold replacement values rather than real data.
 
 ### The window
 
@@ -588,7 +589,7 @@ hold replacement values rather than real data, which is the exclusion
 | Week | a 24-hour grid; overlapping events are packed into side-by-side lanes, all-day ones pin to a row above it |
 | Month | six weeks of day cells, three chips each and a `+N more` that opens that week |
 | Bindings rail | the mini calendar, the date-binding toggles, and a species filter |
-| Detail panel | which property placed the mote, its properties (calendar-owned keys marked), and its relationships |
+| Detail panel | which property placed the mote, its properties (any holding an interval marked), and its relationships |
 
 | Control | Action |
 |---|---|
