@@ -1169,6 +1169,45 @@ function noteField(text) {
   return field;
 }
 
+/** The "add a property" row's value box (#detail-new-value) has no key
+ *  yet, so valueField's shape/key dispatch can't run on it -- there's
+ *  nothing typed to sniff. Right-click offers the same picker choice up
+ *  front instead (openValueTypeMenu, near the context menu). Swapping the
+ *  node rather than the value keeps its id, so the existing add/Enter
+ *  handlers keep reading $("detail-new-value").value unchanged -- an
+ *  interval field defines that getter too (intervalField, above). */
+function useIntervalForNewValue() {
+  const old = $("detail-new-value");
+  if (old.classList.contains("interval-field")) return;
+  const picker = intervalField(isoOf(new Date()), () => {}, focusId);
+  picker.id = "detail-new-value";
+  old.replaceWith(picker);
+  picker.querySelector(".interval-summary-btn").click();
+}
+
+/** Back to a plain text box, called once a property is actually added --
+ *  the picker was only ever for shaping this one value, not a standing
+ *  choice for the row. */
+function resetNewValueField() {
+  const old = $("detail-new-value");
+  if (old.tagName === "INPUT") { old.value = ""; return; }
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = "detail-new-value";
+  input.placeholder = "value";
+  wireNewValueRightClick(input);
+  old.replaceWith(input);
+}
+
+function wireNewValueRightClick(el) {
+  el.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    openValueTypeMenu(e.clientX, e.clientY, (typeId) => {
+      if (typeId === "interval") useIntervalForNewValue();
+    });
+  });
+}
+
 /** A plain text box with the registered providers as completions. Text,
  *  not a <select>: `provider` is an ordinary property like any other and
  *  naming one MonOSS doesn't have yet has to stay possible -- the list
@@ -1214,10 +1253,6 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const FREQ_OPTS = [
-  { id: "NONE", label: "Once" }, { id: "DAILY", label: "Daily" }, { id: "WEEKLY", label: "Weekly" },
-  { id: "MONTHLY", label: "Monthly" }, { id: "YEARLY", label: "Yearly" },
-];
 const FREQ_UNIT = { DAILY: "day", WEEKLY: "week", MONTHLY: "month", YEARLY: "year" };
 const ISO_DURATION_RE = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/i;
 
@@ -1515,27 +1550,18 @@ function intervalField(rawValue, onCommit, moteId) {
   endRow.className = "interval-end-row";
 
   // ---- repeat ----
+  // Structured repeat authoring (frequency, weekdays, ends-on/-after)
+  // lives in Monastery now -- it's the calendar app, and it's the one
+  // that reads `recurring` off core/calendar.py's expansion. Monarch
+  // still has to round-trip an existing rule without dropping it, so a
+  // rule is shown and edited as raw RRULE text here rather than losing
+  // the picker's ability to represent one at all.
   const repeatRow = document.createElement("div");
   repeatRow.className = "interval-repeat-row";
   const repeatLabel = document.createElement("span");
   repeatLabel.className = "interval-row-label";
   repeatLabel.textContent = "Repeat";
-  const freqPills = document.createElement("div");
-  freqPills.className = "interval-freq-pills";
-  for (const f of FREQ_OPTS) {
-    const btn = document.createElement("button");
-    btn.type = "button"; btn.className = "pill"; btn.dataset.freq = f.id; btn.textContent = f.label;
-    btn.addEventListener("click", () => {
-      const byday = f.id === "WEEKLY" && !draft.rule.byday.length
-        ? [DAY_CODES[new Date(`${draft.date}T00:00`).getDay()]]
-        : draft.rule.byday;
-      draft.rule = { ...draft.rule, freq: f.id, byday };
-      renderRepeatDetail();
-      commit();
-    });
-    freqPills.appendChild(btn);
-  }
-  repeatRow.append(repeatLabel, freqPills);
+  repeatRow.append(repeatLabel);
 
   const repeatDetail = document.createElement("div");
   repeatDetail.className = "interval-repeat-detail";
@@ -1665,156 +1691,42 @@ function intervalField(rawValue, onCommit, moteId) {
     endRow.append(label, endInput, durationLabel, clear);
   }
 
+  /** No frequency pills or weekday/ends steppers here any more -- see the
+   *  comment above `repeatRow`. An existing rule is shown as raw RRULE
+   *  text (seeded from composeRuleLines when it's still `simple: true`,
+   *  so switching to text doesn't reformat a rule the user hasn't
+   *  touched), and a fresh one starts from a plain weekly template. */
   function renderRepeatDetail() {
-    for (const btn of freqPills.children) {
-      btn.classList.toggle("on", draft.rule.simple && btn.dataset.freq === draft.rule.freq);
-    }
     repeatDetail.innerHTML = "";
-    freqPills.classList.toggle("hidden", !draft.rule.simple);
-
-    if (!draft.rule.simple) {
-      const note = document.createElement("div");
-      note.className = "interval-fallback-note";
-      note.textContent = "Repeats in a way this picker can't fully edit — edit as text:";
-      const field = plainField(draft.rule.raw, (v) => {
-        draft.rule = { simple: false, raw: v };
-        commit();
-      });
-      const reset = document.createElement("button");
-      reset.type = "button"; reset.className = "interval-fallback-reset"; reset.textContent = "Replace with a simple repeat";
-      reset.addEventListener("click", () => {
-        draft.rule = { simple: true, freq: "NONE", interval: 1, byday: [], count: null, until: null, otherLines: [] };
+    const hasRule = !draft.rule.simple || draft.rule.freq !== "NONE" || (draft.rule.otherLines || []).length > 0;
+    if (!hasRule) {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button"; addBtn.className = "interval-end-ghost"; addBtn.textContent = "+ Add a repeat rule";
+      addBtn.addEventListener("click", () => {
+        draft.rule = { simple: false, raw: "RRULE:FREQ=WEEKLY" };
         renderRepeatDetail();
         commit();
       });
-      repeatDetail.append(note, field, reset);
+      repeatDetail.appendChild(addBtn);
       return;
     }
-    if (draft.rule.freq === "NONE") return;
 
-    const intervalRow = document.createElement("div");
-    intervalRow.className = "interval-stepper-row";
-    const intervalLabel = document.createElement("span");
-    intervalLabel.className = "interval-row-label";
-    intervalLabel.textContent = "Every";
-    const intervalStepper = document.createElement("div");
-    intervalStepper.className = "interval-stepper";
-    const intervalDec = document.createElement("button");
-    intervalDec.type = "button"; intervalDec.textContent = "−";
-    const intervalValue = document.createElement("span");
-    intervalValue.textContent = draft.rule.interval;
-    const intervalInc = document.createElement("button");
-    intervalInc.type = "button"; intervalInc.textContent = "+";
-    intervalDec.addEventListener("click", () => {
-      draft.rule = { ...draft.rule, interval: Math.max(1, draft.rule.interval - 1) };
-      renderRepeatDetail(); commit();
+    const note = document.createElement("div");
+    note.className = "interval-fallback-note";
+    note.textContent = "Structured repeat editing lives in Monastery now — edit the rule as text here:";
+    const seed = draft.rule.simple ? composeRuleLines(draft.rule).join("\n") : draft.rule.raw;
+    const field = plainField(seed, (v) => {
+      draft.rule = { simple: false, raw: v };
+      commit();
     });
-    intervalInc.addEventListener("click", () => {
-      draft.rule = { ...draft.rule, interval: Math.min(30, draft.rule.interval + 1) };
-      renderRepeatDetail(); commit();
+    const reset = document.createElement("button");
+    reset.type = "button"; reset.className = "interval-fallback-reset"; reset.textContent = "Remove repeat";
+    reset.addEventListener("click", () => {
+      draft.rule = { simple: true, freq: "NONE", interval: 1, byday: [], count: null, until: null, otherLines: draft.rule.otherLines || [] };
+      renderRepeatDetail();
+      commit();
     });
-    intervalStepper.append(intervalDec, intervalValue, intervalInc);
-    const intervalUnit = document.createElement("span");
-    intervalUnit.className = "interval-unit";
-    intervalUnit.textContent = FREQ_UNIT[draft.rule.freq] + (draft.rule.interval > 1 ? "s" : "");
-    intervalRow.append(intervalLabel, intervalStepper, intervalUnit);
-    repeatDetail.appendChild(intervalRow);
-
-    if (draft.rule.freq === "WEEKLY") {
-      const weekdayRow = document.createElement("div");
-      weekdayRow.className = "interval-weekday-row";
-      const wLabel = document.createElement("span");
-      wLabel.className = "interval-row-label";
-      wLabel.textContent = "On";
-      const pills = document.createElement("div");
-      pills.className = "interval-weekday-pills";
-      for (const c of DAY_CODES) {
-        const on = draft.rule.byday.includes(c);
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "pill" + (on ? " on" : "");
-        btn.textContent = DAY_MIN[c];
-        btn.addEventListener("click", () => {
-          const byday = on
-            ? draft.rule.byday.filter((x) => x !== c)
-            : DAY_CODES.filter((x) => draft.rule.byday.includes(x) || x === c);
-          draft.rule = { ...draft.rule, byday };
-          renderRepeatDetail(); commit();
-        });
-        pills.appendChild(btn);
-      }
-      weekdayRow.append(wLabel, pills);
-      repeatDetail.appendChild(weekdayRow);
-    }
-
-    // "Ends" is a 3-way choice -- never, after N times, or on a date --
-    // and RRULE only ever carries one of COUNT/UNTIL at a time, so
-    // picking a mode clears whichever of the two isn't its own.
-    const endMode = draft.rule.until ? "UNTIL" : draft.rule.count ? "COUNT" : "NEVER";
-    const endsRow = document.createElement("div");
-    endsRow.className = "interval-stepper-row";
-    const endsLabel = document.createElement("span");
-    endsLabel.className = "interval-row-label";
-    endsLabel.textContent = "Ends";
-    const endsPills = document.createElement("div");
-    endsPills.className = "interval-ends-pills";
-    for (const [id, label] of [["NEVER", "Never"], ["COUNT", "After"], ["UNTIL", "On date"]]) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "pill" + (endMode === id ? " on" : "");
-      btn.textContent = label;
-      btn.addEventListener("click", () => {
-        if (id === "NEVER") draft.rule = { ...draft.rule, count: null, until: null };
-        else if (id === "COUNT") draft.rule = { ...draft.rule, count: draft.rule.count || 1, until: null };
-        else draft.rule = { ...draft.rule, until: draft.rule.until || draft.date, count: null };
-        renderRepeatDetail(); commit();
-      });
-      endsPills.appendChild(btn);
-    }
-    endsRow.append(endsLabel, endsPills);
-    repeatDetail.appendChild(endsRow);
-
-    if (endMode === "COUNT") {
-      const countRow = document.createElement("div");
-      countRow.className = "interval-stepper-row";
-      const countLabelSpacer = document.createElement("span");
-      countLabelSpacer.className = "interval-row-label";
-      const countStepper = document.createElement("div");
-      countStepper.className = "interval-stepper";
-      const countDec = document.createElement("button");
-      countDec.type = "button"; countDec.textContent = "−";
-      const countValue = document.createElement("span");
-      countValue.className = "interval-ends-value";
-      countValue.textContent = `${draft.rule.count}×`;
-      const countInc = document.createElement("button");
-      countInc.type = "button"; countInc.textContent = "+";
-      countDec.addEventListener("click", () => {
-        draft.rule = { ...draft.rule, count: Math.max(1, draft.rule.count - 1) };
-        renderRepeatDetail(); commit();
-      });
-      countInc.addEventListener("click", () => {
-        draft.rule = { ...draft.rule, count: draft.rule.count + 1 };
-        renderRepeatDetail(); commit();
-      });
-      countStepper.append(countDec, countValue, countInc);
-      countRow.append(countLabelSpacer, countStepper);
-      repeatDetail.appendChild(countRow);
-    } else if (endMode === "UNTIL") {
-      const untilRow = document.createElement("div");
-      untilRow.className = "interval-stepper-row";
-      const untilLabelSpacer = document.createElement("span");
-      untilLabelSpacer.className = "interval-row-label";
-      const untilInput = document.createElement("input");
-      untilInput.type = "date";
-      untilInput.value = draft.rule.until;
-      untilInput.addEventListener("change", () => {
-        if (!untilInput.value) return;
-        draft.rule = { ...draft.rule, until: untilInput.value, count: null };
-        renderRepeatDetail(); commit();
-      });
-      untilRow.append(untilLabelSpacer, untilInput);
-      repeatDetail.appendChild(untilRow);
-    }
+    repeatDetail.append(note, field, reset);
   }
 
   function renderAll() {
@@ -1991,12 +1903,15 @@ function renderProperties(mote, history, baseMote) {
     maybeAddReservedBadge(keyEl, key, reservedProperties);
 
     const displayedText = typeof value === "string" ? value : JSON.stringify(value);
-    const field = valueField(key, value, async (next) => {
-      if (editBlocked()) { field.value = displayedText; return; }
+    let currentField;
+    const commitProperty = async (next) => {
+      if (editBlocked()) { currentField.value = displayedText; return; }
       await call(api.update_mote(mote.id, { [key]: next }));
       await refocus(focusId, { pan: false });
       await refreshMoteCache();
-    }, mote.id);
+    };
+    const field = valueField(key, value, commitProperty, mote.id);
+    currentField = field;
 
     const del = document.createElement("button");
     del.className = "del";
@@ -2008,6 +1923,26 @@ function renderProperties(mote, history, baseMote) {
       await refocus(focusId, { pan: false });
       await openDetailPanel(mote.id);
     });
+
+    // A property gets a picker by shape once it already holds a value
+    // that fits one (valueField, above); this is how to reach the same
+    // picker before that's true -- an empty box, or one holding plain
+    // text you mean to replace. modoc/provider keep their own dedicated
+    // editors and are left alone; an interval field already has the
+    // picker, so it doesn't need a second way in.
+    if (key !== "modoc" && key !== "provider" && !field.classList.contains("interval-field")) {
+      field.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        openValueTypeMenu(e.clientX, e.clientY, (typeId) => {
+          if (typeId !== "interval") return;
+          const seed = parseIntervalValue(displayedText) ? displayedText : isoOf(new Date());
+          const picker = intervalField(seed, commitProperty, mote.id);
+          currentField.replaceWith(picker);
+          currentField = picker;
+          picker.querySelector(".interval-summary-btn").click();
+        });
+      });
+    }
 
     // "url" is a reserved property name -- a mote holding one, whether a
     // web link or a local path, gets a one-click way to launch it via the
@@ -3060,6 +2995,41 @@ function addMenuItem(menu, label, onClick, { danger = false, disabled = false } 
   menu.appendChild(item);
 }
 
+/** Shared by openContextMenu and openValueTypeMenu: drops the menu at the
+ *  click point, then nudges it back onscreen if it would overflow. */
+function positionMenu(menu, clientX, clientY) {
+  menu.style.left = clientX + "px";
+  menu.style.top = clientY + "px";
+  menu.classList.remove("hidden");
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    menu.style.left = Math.max(8, window.innerWidth - rect.width - 8) + "px";
+  }
+  if (rect.bottom > window.innerHeight) {
+    menu.style.top = Math.max(8, window.innerHeight - rect.height - 8) + "px";
+  }
+}
+
+/** A property's value has no stored type -- valueField (above) picks an
+ *  editor by shape, which only works once a value already exists to sniff.
+ *  This is the other direction: right-click an empty or plain-text value
+ *  box to say up front what it should hold. One entry today (the interval
+ *  picker); a future property type -- a mote reference, a color -- is
+ *  another line here, not a redesign. */
+const VALUE_TYPE_PICKERS = [
+  { id: "interval", label: "Date & time…" },
+];
+
+function openValueTypeMenu(clientX, clientY, onChoose) {
+  closeTopMenus();
+  const menu = $("context-menu");
+  menu.innerHTML = "";
+  for (const t of VALUE_TYPE_PICKERS) {
+    addMenuItem(menu, t.label, () => onChoose(t.id));
+  }
+  positionMenu(menu, clientX, clientY);
+}
+
 async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
   closeTopMenus(); // mutual exclusion with the topbar dropdowns, both ways
   // graph.js may have just replaced the selection with the right-clicked
@@ -3110,16 +3080,7 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     addMenuItem(menu, pasteLabel, () => pasteAt(worldX, worldY), { disabled: !clipboard });
   }
 
-  menu.style.left = clientX + "px";
-  menu.style.top = clientY + "px";
-  menu.classList.remove("hidden");
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) {
-    menu.style.left = Math.max(8, window.innerWidth - rect.width - 8) + "px";
-  }
-  if (rect.bottom > window.innerHeight) {
-    menu.style.top = Math.max(8, window.innerHeight - rect.height - 8) + "px";
-  }
+  positionMenu(menu, clientX, clientY);
 }
 
 /** clipboard is an array, one entry per copied mote, each carrying an
@@ -3863,22 +3824,27 @@ function setupViewControls() {
   $("reset-view-btn").addEventListener("click", resetViewAndUnhideAll);
   $("close-panel").addEventListener("click", closeDetailPanel);
 
+  wireNewValueRightClick($("detail-new-value"));
+
   $("detail-add-property-btn").addEventListener("click", async () => {
     if (editBlocked()) return;
     const key = $("detail-new-key").value.trim();
     if (!key || !focusId) return;
     await call(api.update_mote(focusId, { [key]: $("detail-new-value").value }));
     $("detail-new-key").value = "";
-    $("detail-new-value").value = "";
+    resetNewValueField();
     await refocus(focusId, { pan: false });
     await openDetailPanel(focusId);
   });
 
   // Mirrors quick-add's own Enter-to-submit (setupQuickAdd) -- this is the
   // same "type key/value, press Enter" gesture, and only one of the two
-  // required a click on its button to actually do anything.
+  // required a click on its button to actually do anything. Matched by id
+  // rather than tagName so an Enter inside the interval picker's own time
+  // or repeat-count inputs (swapped in via useIntervalForNewValue) edits
+  // that control instead of submitting the row early.
   $("detail-add-property").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target.tagName === "INPUT") {
+    if (e.key === "Enter" && (e.target.id === "detail-new-key" || e.target === $("detail-new-value"))) {
       e.preventDefault();
       $("detail-add-property-btn").click();
     }

@@ -373,6 +373,52 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
   color: oklch(0.55 0 0); white-space: nowrap; align-self: stretch;
 }
 #draft-allday.on { background: var(--accent-soft); color: var(--accent-bright); }
+
+/* ---- repeat (RRULE) controls -- ported from Monarch's old interval
+   picker, which grew a full recurrence composer even though Monarch
+   never expands one. Monastery does (core/calendar.py, via dateutil),
+   so this is where a repeat rule gets authored. ---- */
+.draft-label { font-family: var(--mono); font-size: 10px; color: var(--faint); flex: 0 0 34px; }
+#draft-freq-pills {
+  flex: 1; display: flex; gap: 2px; background: var(--panel);
+  border: 1px solid oklch(1 0 0 / 0.1); border-radius: 8px; padding: 2px;
+}
+.freq-pill {
+  flex: 1; text-align: center; border-radius: 6px; border: none; padding: 4px 0;
+  background: transparent; font-family: var(--mono); font-size: 9.5px; color: var(--muted); cursor: pointer;
+}
+.freq-pill:hover { background: var(--raised); color: var(--fg-bright); }
+.freq-pill.on { background: var(--accent); color: oklch(0.15 0 0); font-weight: 600; }
+#draft-repeat-detail { display: flex; flex-direction: column; gap: 7px; margin-bottom: 7px; }
+#draft-repeat-detail:empty { margin-bottom: 0; }
+.repeat-stepper-row, .repeat-weekday-row { display: flex; align-items: center; gap: 8px; }
+.repeat-stepper-row input[type="date"] {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; padding: 5px 8px;
+  background: var(--panel); border: 1px solid oklch(1 0 0 / 0.1); border-radius: 8px; color: var(--fg-bright);
+}
+.repeat-unit { font-family: var(--mono); font-size: 10.5px; color: var(--faint); flex-shrink: 0; }
+.repeat-stepper {
+  display: flex; align-items: center; gap: 2px; background: var(--panel);
+  border: 1px solid oklch(1 0 0 / 0.1); border-radius: 8px; padding: 2px;
+}
+.repeat-stepper button {
+  width: 20px; height: 18px; background: transparent; border: none; color: var(--muted);
+  font-size: 12px; cursor: pointer; border-radius: 5px; padding: 0;
+}
+.repeat-stepper button:hover { background: var(--raised); color: var(--fg-bright); }
+.repeat-stepper span {
+  min-width: 34px; text-align: center; font-family: var(--mono); font-size: 10.5px; color: var(--fg-bright);
+}
+.repeat-weekday-pills { flex: 1; display: flex; gap: 3px; }
+.weekday-pill {
+  flex: 1; height: 22px; padding: 0; text-align: center; border-radius: 6px; border: none;
+  background: var(--panel); font-family: var(--mono); font-size: 9px; color: var(--muted); cursor: pointer;
+}
+.weekday-pill:hover { background: var(--raised); color: var(--fg-bright); }
+.weekday-pill.on { background: var(--accent); color: oklch(0.15 0 0); font-weight: 600; }
+.repeat-ends-pills { flex: 1; display: flex; gap: 3px; }
+.repeat-ends-pills .freq-pill { flex: 1; }
+
 .draft-row input.k { width: 88px; flex-shrink: 0; font-family: var(--sans); font-size: 12px; }
 .draft-row input.v { flex: 1; font-family: var(--sans); font-size: 12px; }
 .icon-button {

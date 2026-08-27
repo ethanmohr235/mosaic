@@ -572,16 +572,6 @@ main { flex: 1; min-height: 0; display: flex; }
 .detail-row .note-summary { color: var(--muted); font-style: italic; cursor: default; }
 .detail-row .sparkline { flex-shrink: 0; align-self: center; opacity: 0.85; }
 
-/* ---- a reusable toggle pill (first used by Momentum's status/day
-   controls; adopted here for the interval picker's frequency and
-   weekday toggles). ---- */
-.pill {
-  background: transparent; border: 1px solid var(--border-soft); border-radius: 999px;
-  padding: 4px 10px; font-size: 10.5px; color: var(--muted); cursor: pointer;
-}
-.pill:hover { background: var(--raised); color: var(--fg-bright); }
-.pill.on { background: var(--accent); color: var(--panel-bg); font-weight: 600; }
-
 .picker-checkbox {
   display: flex; align-items: center; gap: 4px;
   font-size: 11.5px; color: var(--muted); white-space: nowrap; flex-shrink: 0;
@@ -654,29 +644,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .interval-end-clear:hover { color: var(--fg-bright); }
 
 .interval-repeat-row { display: flex; align-items: center; gap: 8px; }
-.interval-freq-pills {
-  flex: 1; display: flex; gap: 2px; background: var(--panel);
-  border: 1px solid var(--border-soft); border-radius: 8px; padding: 2px;
-}
-.interval-freq-pills .pill { flex: 1; text-align: center; border-radius: 6px; border: none; padding: 4px 0; }
 .interval-repeat-detail { display: flex; flex-direction: column; gap: 8px; }
-.interval-stepper-row, .interval-weekday-row { display: flex; align-items: center; gap: 8px; }
-.interval-ends-pills { display: flex; gap: 4px; }
-.interval-stepper-row input[type="date"] { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
-.interval-stepper {
-  display: flex; align-items: center; gap: 2px; background: var(--panel);
-  border: 1px solid var(--border-soft); border-radius: 8px; padding: 2px;
-}
-.interval-stepper button {
-  width: 22px; height: 20px; background: transparent; border: none; color: var(--muted);
-  font-size: 13px; cursor: pointer; border-radius: 5px; padding: 0;
-}
-.interval-stepper button:hover { background: var(--raised); color: var(--fg-bright); }
-.interval-stepper span { min-width: 22px; text-align: center; font-size: 11.5px; color: var(--fg-bright); font-variant-numeric: tabular-nums; }
-.interval-stepper .interval-ends-value { min-width: 52px; font-size: 10.5px; }
-.interval-unit { font-size: 11.5px; color: var(--muted); flex-shrink: 0; }
-.interval-weekday-pills { flex: 1; display: flex; gap: 3px; }
-.interval-weekday-pills .pill { flex: 1; height: 24px; padding: 0; text-align: center; }
 
 .interval-fallback-note { font-size: 11px; color: var(--muted); }
 .interval-fallback-reset {

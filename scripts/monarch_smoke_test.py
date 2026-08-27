@@ -36,7 +36,7 @@ _TMP = Path(tempfile.mkdtemp(prefix="monoss-smoke-"))
 db.GARDENS_DIR = _TMP / "gardens"
 
 import webview  # noqa: E402  (import after GARDENS_DIR patched, matches app startup order)
-from mora.app import choose_port  # noqa: E402
+from window_launcher import choose_port  # noqa: E402
 from monarch.api import Api  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "monarch" / "frontend"
@@ -765,10 +765,11 @@ def run_checks(window):
     check("detail panel: editing a start keeps the span",
           editing_a_start_keeps_the_span)
 
-    def a_repeating_interval_gets_the_picker_with_an_editable_repeat_section():
-        """The interval picker decomposes a clean RRULE into the repeat
-        section's own controls, rather than falling back to plain text --
-        the whole point of reviving this editor."""
+    def a_repeating_interval_gets_the_picker_with_an_editable_repeat_rule():
+        """Structured repeat authoring (frequency/weekday/ends pills)
+        moved to Monastery -- Monarch's picker still has to round-trip an
+        existing RRULE without losing it, shown now as editable raw text
+        in the repeat section (see monarch/frontend/app.js::renderRepeatDetail)."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({
@@ -791,11 +792,11 @@ def run_checks(window):
                         const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({picker: false});
                         field.querySelector('.interval-summary-btn').click();
-                        const weeklyPill = Array.from(field.querySelectorAll('.interval-freq-pills .pill'))
-                            .find((b) => b.dataset.freq === 'WEEKLY');
+                        const raw = field.querySelector(
+                            '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
                         return JSON.stringify({
                             picker: true, value: field.value,
-                            weeklySelected: weeklyPill ? weeklyPill.classList.contains('on') : null,
+                            repeatText: raw ? raw.value : null,
                         });
                     }
                 }
@@ -804,13 +805,18 @@ def run_checks(window):
         """))
         assert info["picker"] is True, \
             f"a repeating interval should get the picker, with its rule shown and editable, got {info}"
-        assert info["weeklySelected"] is True, f"the repeat section should reflect the stored rule, got {info}"
+        assert "RRULE:FREQ=WEEKLY" in (info["repeatText"] or ""), \
+            f"the repeat section should show the stored rule as editable text, got {info}"
         assert "RRULE:FREQ=WEEKLY" in info["value"], f"the rule must still be present, got {info}"
 
-    check("detail panel: a repeating interval gets the picker, with an editable repeat section",
-          a_repeating_interval_gets_the_picker_with_an_editable_repeat_section)
+    check("detail panel: a repeating interval gets the picker, with an editable repeat rule",
+          a_repeating_interval_gets_the_picker_with_an_editable_repeat_rule)
 
-    def picking_weekly_and_toggling_weekdays_writes_a_real_rrule():
+    def adding_a_repeat_rule_and_editing_it_writes_a_real_rrule():
+        """No frequency/weekday pills in Monarch any more -- "+ Add a
+        repeat rule" seeds raw RRULE text (monastery/frontend/app.js now
+        owns structured authoring), and typing into that text is what
+        commits a real rule."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({name: 'weekly task', due: '2026-08-17T09:00'});
@@ -826,32 +832,31 @@ def run_checks(window):
         js(window, """
             const field = document.querySelector('#detail-properties .interval-field');
             field.querySelector('.interval-summary-btn').click();
-            Array.from(field.querySelectorAll('.interval-freq-pills .pill'))
-                .find((b) => b.dataset.freq === 'WEEKLY').click();
+            field.querySelector('.interval-repeat-detail .interval-end-ghost').click();
         """)
         time.sleep(0.5)
         js(window, """
             const field = document.querySelector('#detail-properties .interval-field');
-            const wed = Array.from(field.querySelectorAll('.interval-weekday-pills .pill'))
-                .find((b) => b.textContent === 'W' && !b.classList.contains('on'));
-            if (wed) wed.click();
+            const raw = field.querySelector(
+                '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
+            raw.value = 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR';
+            raw.dispatchEvent(new Event('change', {bubbles: true}));
         """)
         time.sleep(0.5)
         updated = json.loads(js_async(window, """
             async () => { window.__result = (await api.get_mote(window.__seed.weeklyId)).properties.due; }
         """))
-        assert "RRULE:FREQ=WEEKLY" in updated, f"picking Weekly should write a real RRULE, got {updated!r}"
-        assert "BYDAY=" in updated, f"a weekly rule should carry BYDAY=, got {updated!r}"
+        assert "RRULE:FREQ=WEEKLY" in updated, f"editing the repeat text should write a real RRULE, got {updated!r}"
+        assert "BYDAY=MO,WE,FR" in updated, f"typed BYDAY should be preserved, got {updated!r}"
 
-    check("detail panel: picking Weekly and toggling weekday pills writes a real RRULE",
-          picking_weekly_and_toggling_weekdays_writes_a_real_rrule)
+    check("detail panel: adding a repeat rule and editing it writes a real RRULE",
+          adding_a_repeat_rule_and_editing_it_writes_a_real_rrule)
 
-    def an_until_rule_decomposes_and_survives_a_start_edit():
-        """UNTIL= is now a first-class part of the repeat section (the
-        "Ends: On date" control), not just COUNT -- so a value already
-        using it should decompose into that control (date-only, the time
-        and any UTC Z dropped), and an edit to the start should keep
-        repeating until that date rather than dropping the rule."""
+    def an_until_rule_stays_editable_text_and_survives_a_start_edit():
+        """UNTIL= no longer decomposes into a structured "ends on date"
+        control here (that's Monastery's job now) -- it shows as
+        editable raw text, and an edit to the start must leave the rule
+        untouched rather than dropping it."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({
@@ -871,18 +876,13 @@ def run_checks(window):
             (function() {
                 const field = document.querySelector('#detail-properties .interval-field');
                 field.querySelector('.interval-summary-btn').click();
-                const untilPill = Array.from(field.querySelectorAll('.interval-ends-pills .pill'))
-                    .find((b) => b.textContent === 'On date');
-                const untilInput = field.querySelector('.interval-stepper-row input[type=\"date\"]');
-                return JSON.stringify({
-                    untilSelected: untilPill ? untilPill.classList.contains('on') : null,
-                    untilValue: untilInput ? untilInput.value : null,
-                });
+                const raw = field.querySelector(
+                    '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
+                return JSON.stringify({ repeatText: raw ? raw.value : null });
             })()
         """))
-        assert info["untilSelected"] is True, \
-            f"a value with UNTIL= should decompose into the 'On date' ends mode, got {info}"
-        assert info["untilValue"] == "2026-12-31", f"the date-only part of UNTIL should show, got {info}"
+        assert "UNTIL=20261231" in (info["repeatText"] or ""), \
+            f"an UNTIL= rule should stay visible as editable text, got {info}"
 
         js(window, """
             const field = document.querySelector('#detail-properties .interval-field');
@@ -899,60 +899,14 @@ def run_checks(window):
             f"the repeat-until-date should survive a start-only edit, got {updated!r}"
         )
 
-    check("detail panel: an UNTIL= rule decomposes into the ends-on-date control and survives a start edit",
-          an_until_rule_decomposes_and_survives_a_start_edit)
+    check("detail panel: an UNTIL= rule stays editable text and survives a start edit",
+          an_until_rule_stays_editable_text_and_survives_a_start_edit)
 
-    def picking_an_until_date_in_the_ui_writes_a_real_rrule():
-        result = js_async(window, """
-            async () => {
-                const m = await api.create_mote({name: 'ends-on-date task', due: '2026-08-17T09:00'});
-                window.__seed.untilPickedId = m.id;
-                await refreshMoteCache();
-                await refocus(m.id);
-                await openDetailPanel(m.id);
-                window.__result = 'ok';
-            }
-        """, wait=2.0)
-        assert result == '"ok"', f"ends-on-date mote setup failed: {result}"
-
-        js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
-            field.querySelector('.interval-summary-btn').click();
-            Array.from(field.querySelectorAll('.interval-freq-pills .pill'))
-                .find((b) => b.dataset.freq === 'WEEKLY').click();
-        """)
-        time.sleep(0.5)
-        js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
-            Array.from(field.querySelectorAll('.interval-ends-pills .pill'))
-                .find((b) => b.textContent === 'On date').click();
-        """)
-        time.sleep(0.5)
-        js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
-            const untilInput = field.querySelector('.interval-stepper-row input[type=\"date\"]');
-            untilInput.value = '2026-12-11';
-            untilInput.dispatchEvent(new Event('change', {bubbles: true}));
-        """)
-        time.sleep(0.5)
-        updated = json.loads(js_async(window, """
-            async () => { window.__result = (await api.get_mote(window.__seed.untilPickedId)).properties.due; }
-        """))
-        # BYDAY=MO is also present -- switching to Weekly auto-selects the
-        # start's own weekday (2026-08-17 is a Monday) -- so this checks
-        # for FREQ and UNTIL independently rather than one exact substring.
-        assert "FREQ=WEEKLY" in updated and "UNTIL=20261211" in updated, \
-            f"picking an ends-on date should write a real UNTIL=, got {updated!r}"
-        assert "COUNT=" not in updated, f"UNTIL and COUNT are mutually exclusive, got {updated!r}"
-
-    check("detail panel: picking an ends-on date in the repeat section writes a real RRULE UNTIL=",
-          picking_an_until_date_in_the_ui_writes_a_real_rrule)
-
-    def a_rule_with_an_unsupported_param_still_falls_back_to_raw_text():
-        """BYMONTHDAY isn't something the structured editor's controls
-        can express, so it has to stay the raw-text fallback -- the
-        safety net UNTIL used to exercise before it became a supported
-        control, still needed for whatever this picker doesn't cover."""
+    def a_rule_with_an_unsupported_param_still_shows_as_raw_text():
+        """BYMONTHDAY isn't part of the FREQ/INTERVAL/BYDAY/COUNT/UNTIL
+        subset decomposeRuleLines recognizes, so it has to round-trip as
+        raw, editable text rather than being silently dropped -- same
+        safety net every rule gets now, not a special case."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({
@@ -977,16 +931,14 @@ def run_checks(window):
                 return JSON.stringify({
                     fallbackShown: !!raw,
                     shows: raw ? raw.value : null,
-                    chipsHidden: field.querySelector('.interval-freq-pills').classList.contains('hidden'),
                 });
             })()
         """))
-        assert info["fallbackShown"] is True, f"an unsupported param must fall back to raw text, got {info}"
+        assert info["fallbackShown"] is True, f"an unsupported param must still show as editable text, got {info}"
         assert "BYMONTHDAY=15" in (info["shows"] or ""), f"the rule has to stay visible and editable, got {info}"
-        assert info["chipsHidden"] is True, "the frequency chips should be hidden while the raw fallback is shown"
 
-    check("detail panel: a rule with an unsupported param (BYMONTHDAY) still falls back to raw text",
-          a_rule_with_an_unsupported_param_still_falls_back_to_raw_text)
+    check("detail panel: a rule with an unsupported param (BYMONTHDAY) still shows as raw text",
+          a_rule_with_an_unsupported_param_still_shows_as_raw_text)
 
     def detail_panel_is_resizable():
         result = js_async(window, """
@@ -3521,7 +3473,7 @@ def main():
     # up when that happened; it quietly scored 76/81 against the wrong
     # page, which is the worse outcome. Same reasoning as
     # mora_smoke_test.py, and the same helper.
-    webview.start(http_server=True, http_port=choose_port(SMOKE_HTTP_PORT),
+    webview.start(http_server=True, http_port=choose_port("Monarch smoke test", SMOKE_HTTP_PORT),
                   private_mode=False, storage_path=str(_TMP / "webview_data"))
 
     failed = [r for r in results if not r[1]]

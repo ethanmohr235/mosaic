@@ -45,7 +45,8 @@ from core.gardens import create_garden  # noqa: E402
 from core.motes import create_mote, get_mote, list_motes  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
 from monastery.api import Api  # noqa: E402
-from monastery.app import choose_port  # noqa: E402
+from monastery.app import DEFAULT_HTTP_PORT  # noqa: E402
+from window_launcher import choose_port  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "monastery" / "frontend"
 GARDEN = "smoke"
@@ -594,6 +595,45 @@ def run_checks(window):
 
     check("the draft popover creates a dated mote", the_draft_popover_creates_a_mote)
 
+    def the_draft_popover_authors_a_real_repeat_rule():
+        """Structured repeat authoring (frequency/weekday/ends pills)
+        used to live in Monarch's interval picker even though Monarch
+        never expands one -- it moved here, the app that actually reads
+        `recurring` back off core/calendar.py's dateutil expansion."""
+        before = len(all_motes())
+        gesture(window, """(() => {
+            const column = document.querySelectorAll('.day-col')[3];
+            const rect = column.getBoundingClientRect();
+            return {node: column, points: [
+                [rect.left + 20, rect.top + 9 * 48],
+                [rect.left + 20, rect.top + 10 * 48],
+                [rect.left + 20, rect.top + 10.5 * 48],
+            ]};
+        })()""")
+        assert wait_until(lambda: not js(
+            window, "document.getElementById('draft').classList.contains('hidden')"
+        )), "sweeping an empty slot did not open the draft popover"
+
+        js(window, "document.getElementById('draft-name').value = 'Repeat Test';")
+        click(window, "#draft-freq-pills .freq-pill[data-freq='WEEKLY']")
+        assert wait_until(lambda: count(window, "#draft-repeat-detail .repeat-weekday-pills") == 1), \
+            "picking Weekly did not reveal the weekday row"
+        click(window, "#draft-repeat-detail .weekday-pill[data-day='FR']")
+        click(window, "#draft-repeat-detail .repeat-ends-pills .freq-pill[data-end='COUNT']")
+        js(window, "document.getElementById('draft-create').click();")
+        assert wait_until(lambda: len(all_motes()) == before + 1, timeout=8.0), \
+            "Create did not write a mote"
+
+        standup = next((m for m in all_motes() if m.properties.get("name") == "Repeat Test"), None)
+        assert standup is not None, "the created mote is not named Repeat Test"
+        value = standup.properties.get("date", "")
+        assert "RRULE:FREQ=WEEKLY" in value, f"picking Weekly should write a real RRULE, got {value!r}"
+        assert "BYDAY=" in value and "FR" in value.split("BYDAY=")[1], \
+            f"the weekday toggle should carry into BYDAY=, got {value!r}"
+        assert "COUNT=5" in value, f"the default 'ends after' count should be written, got {value!r}"
+
+    check("the draft popover authors a real repeat rule", the_draft_popover_authors_a_real_repeat_rule)
+
     def the_new_mote_appears_on_the_grid():
         assert wait_until(lambda: "Retro" in event_names(window)), \
             "the created mote did not appear on the calendar"
@@ -872,7 +912,7 @@ def main():
     # thing that broke.
     webview.start(
         http_server=True,
-        http_port=choose_port(),
+        http_port=choose_port("Monastery", DEFAULT_HTTP_PORT),
         private_mode=False,
         storage_path=str(_TMP / "webview_data"),
     )

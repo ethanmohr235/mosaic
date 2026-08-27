@@ -20,7 +20,7 @@ let bindings = null;         // null until the first answer; then string[]
 let hiddenSpecies = new Set();
 let selectedId = null;
 let panel = null;            // the last focus() answer
-let draft = null;            // {dateKey, start, end, allDay, days, speciesId, rows, left, top}
+let draft = null;            // {dateKey, start, end, allDay, days, speciesId, rows, rule, left, top}
 let railOpen = true;
 let toastTimer = null;
 let pollTimer = null;
@@ -44,6 +44,13 @@ const MONTHS = ["January", "February", "March", "April", "May", "June",
 const MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const UNKNOWN_COLOR = "oklch(0.62 0 0)";
+const DAY_CODES = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+const DAY_MIN = { MO: "M", TU: "T", WE: "W", TH: "T", FR: "F", SA: "S", SU: "S" };
+const FREQ_OPTS = [
+  { id: "NONE", label: "Once" }, { id: "DAILY", label: "Daily" }, { id: "WEEKLY", label: "Weekly" },
+  { id: "MONTHLY", label: "Monthly" }, { id: "YEARLY", label: "Yearly" },
+];
+const FREQ_UNIT = { DAILY: "day", WEEKLY: "week", MONTHLY: "month", YEARLY: "year" };
 
 const $ = (id) => document.getElementById(id);
 
@@ -1169,6 +1176,7 @@ function openDraftAt(point, dateKey, minutes, endMinutes, days) {
     end: start === null ? "" : fmtMinutes(end),
     speciesId: null,
     rows: [],
+    rule: { freq: "NONE", interval: 1, byday: [], count: null, until: null },
     left,
     top,
   };
@@ -1214,6 +1222,7 @@ function drawDraft() {
   $("draft-allday").classList.toggle("on", draft.allDay);
   $("draft-times").classList.toggle("hidden", draft.allDay);
   $("draft-duration").textContent = draftDuration();
+  drawRepeat();
 
   const species = clear($("draft-species"));
   const list = payload ? payload.species : [];
@@ -1253,6 +1262,127 @@ function drawDraft() {
     line.append(key, value, remove);
     rows.append(line);
   });
+}
+
+/** The repeat row's frequency pills plus, once one is chosen, the
+ *  interval/weekday/ends controls beneath it. Ported from Monarch's
+ *  interval picker, which used to own this: Monastery is the app that
+ *  actually reads a `recurring` mote back (core/calendar.py, via
+ *  dateutil), so it's the app that should author the rule too. Every
+ *  control just mutates draft.rule and redraws -- same pattern as the
+ *  species chips above. */
+function drawRepeat() {
+  const pills = clear($("draft-freq-pills"));
+  for (const f of FREQ_OPTS) {
+    const pill = button("freq-pill" + (draft.rule.freq === f.id ? " on" : ""), f.label);
+    pill.dataset.freq = f.id;
+    pill.onclick = () => {
+      const byday = f.id === "WEEKLY" && !draft.rule.byday.length
+        ? [DAY_CODES[(new Date(`${draft.dateKey}T00:00`).getDay() + 6) % 7]]
+        : draft.rule.byday;
+      draft.rule = { ...draft.rule, freq: f.id, byday };
+      drawDraft();
+    };
+    pills.append(pill);
+  }
+
+  const detail = clear($("draft-repeat-detail"));
+  if (draft.rule.freq === "NONE") return;
+
+  const intervalRow = el("div", "repeat-stepper-row");
+  intervalRow.append(el("span", "draft-label", "Every"));
+  const intervalStepper = el("div", "repeat-stepper");
+  const intervalDec = button(null, "−");
+  intervalDec.onclick = () => { draft.rule.interval = Math.max(1, draft.rule.interval - 1); drawDraft(); };
+  const intervalInc = button(null, "+");
+  intervalInc.onclick = () => { draft.rule.interval = Math.min(30, draft.rule.interval + 1); drawDraft(); };
+  intervalStepper.append(intervalDec, el("span", null, draft.rule.interval), intervalInc);
+  intervalRow.append(intervalStepper);
+  intervalRow.append(el("span", "repeat-unit", FREQ_UNIT[draft.rule.freq] + (draft.rule.interval > 1 ? "s" : "")));
+  detail.append(intervalRow);
+
+  if (draft.rule.freq === "WEEKLY") {
+    const weekdayRow = el("div", "repeat-weekday-row");
+    weekdayRow.append(el("span", "draft-label", "On"));
+    const weekdayPills = el("div", "repeat-weekday-pills");
+    for (const c of DAY_CODES) {
+      const on = draft.rule.byday.includes(c);
+      const p = button("weekday-pill" + (on ? " on" : ""), DAY_MIN[c]);
+      p.dataset.day = c;
+      p.onclick = () => {
+        draft.rule.byday = on
+          ? draft.rule.byday.filter((x) => x !== c)
+          : DAY_CODES.filter((x) => draft.rule.byday.includes(x) || x === c);
+        drawDraft();
+      };
+      weekdayPills.append(p);
+    }
+    weekdayRow.append(weekdayPills);
+    detail.append(weekdayRow);
+  }
+
+  // "Ends" is a 3-way choice -- never, after N times, or on a date --
+  // and RRULE only ever carries one of COUNT/UNTIL at a time, so
+  // picking a mode clears whichever of the two isn't its own.
+  const endMode = draft.rule.until ? "UNTIL" : draft.rule.count ? "COUNT" : "NEVER";
+  const endsRow = el("div", "repeat-stepper-row");
+  endsRow.append(el("span", "draft-label", "Ends"));
+  const endsPills = el("div", "repeat-ends-pills");
+  for (const [id, label] of [["NEVER", "Never"], ["COUNT", "After"], ["UNTIL", "On date"]]) {
+    const p = button("freq-pill" + (endMode === id ? " on" : ""), label);
+    p.dataset.end = id;
+    p.onclick = () => {
+      if (id === "NEVER") { draft.rule.count = null; draft.rule.until = null; }
+      else if (id === "COUNT") { draft.rule.count = draft.rule.count || 5; draft.rule.until = null; }
+      else { draft.rule.until = draft.rule.until || draft.dateKey; draft.rule.count = null; }
+      drawDraft();
+    };
+    endsPills.append(p);
+  }
+  endsRow.append(endsPills);
+  detail.append(endsRow);
+
+  if (endMode === "COUNT") {
+    const countRow = el("div", "repeat-stepper-row");
+    countRow.append(el("span", "draft-label", ""));
+    const countStepper = el("div", "repeat-stepper");
+    const countDec = button(null, "−");
+    countDec.onclick = () => { draft.rule.count = Math.max(1, draft.rule.count - 1); drawDraft(); };
+    const countInc = button(null, "+");
+    countInc.onclick = () => { draft.rule.count = draft.rule.count + 1; drawDraft(); };
+    countStepper.append(countDec, el("span", null, `${draft.rule.count}×`), countInc);
+    countRow.append(countStepper);
+    detail.append(countRow);
+  } else if (endMode === "UNTIL") {
+    const untilRow = el("div", "repeat-stepper-row");
+    untilRow.append(el("span", "draft-label", ""));
+    const untilInput = el("input");
+    untilInput.type = "date";
+    untilInput.value = draft.rule.until;
+    untilInput.onchange = () => {
+      if (!untilInput.value) return;
+      draft.rule.until = untilInput.value;
+      draft.rule.count = null;
+      drawDraft();
+    };
+    untilRow.append(untilInput);
+    detail.append(untilRow);
+  }
+}
+
+/** draft.rule as RRULE lines, the same grammar core/calendar.py's
+ *  dateutil expansion reads (core/interval.py owns it). Mirrors the
+ *  subset Monarch's old picker composed, minus the raw-text fallback --
+ *  a fresh draft here is always this shape, never an existing rule that
+ *  might use something wider. */
+function composeRepeatLines(rule) {
+  if (rule.freq === "NONE") return [];
+  const bits = [`FREQ=${rule.freq}`];
+  if (rule.interval > 1) bits.push(`INTERVAL=${rule.interval}`);
+  if (rule.freq === "WEEKLY" && rule.byday.length) bits.push(`BYDAY=${rule.byday.join(",")}`);
+  if (rule.until) bits.push(`UNTIL=${rule.until.replace(/-/g, "")}`);
+  else if (rule.count) bits.push(`COUNT=${rule.count}`);
+  return [`RRULE:${bits.join(";")}`];
 }
 
 function draftDuration() {
@@ -1296,6 +1426,9 @@ function draftProperties() {
       ? `${startText}/${isoDuration(end - start)}`
       : startText;
   }
+
+  const repeatLines = composeRepeatLines(draft.rule);
+  if (repeatLines.length) properties.date = [properties.date, ...repeatLines].join("\n");
 
   draft.rows.forEach((row) => {
     const key = row.key.trim();
