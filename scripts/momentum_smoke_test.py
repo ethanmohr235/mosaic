@@ -46,7 +46,8 @@ from core.gardens import create_garden  # noqa: E402
 from core.motes import create_mote, get_mote  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
 from momentum.api import Api  # noqa: E402
-from momentum.app import choose_port  # noqa: E402
+from momentum.app import DEFAULT_HTTP_PORT  # noqa: E402
+from window_launcher import choose_port  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "momentum" / "frontend"
 GARDEN = "smoke"
@@ -491,7 +492,7 @@ def main():
     # thing that broke.
     webview.start(
         http_server=True,
-        http_port=choose_port(),
+        http_port=choose_port("Momentum", DEFAULT_HTTP_PORT),
         private_mode=False,
         storage_path=str(_TMP / "webview_data"),
     )

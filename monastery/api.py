@@ -17,8 +17,6 @@ core/calendar.py's, and shaping the answer is monastery/payload.py's.
 What it adds is the two things only a window knows: which garden is
 open, and which bindings the person has turned off.
 """
-import functools
-import json
 import logging
 import sqlite3
 import threading
@@ -26,6 +24,8 @@ from datetime import datetime
 
 import webview
 
+from api_common import coerce_properties as _coerce_properties
+from api_common import synchronized as _synchronized
 from core import calendar as calendar_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo
@@ -55,40 +55,6 @@ _BUSY_TIMEOUT_MS = 5000
 # guessed on this side.
 SERIES = "series"
 OCCURRENCE = "occurrence"
-
-
-def _synchronized(method):
-    """pywebview invokes exposed methods from a worker thread, and not
-    the same one each time. The connection is opened check_same_thread=
-    False, so serializing here is this class's job -- the same reason
-    monarch/api.py and mora/api.py have this decorator."""
-    @functools.wraps(method)
-    def wrapper(self, *args, **kwargs):
-        with self._lock:
-            return method(self, *args, **kwargs)
-    return wrapper
-
-
-def _coerce(raw):
-    """A property value as the garden should store it: text-field input
-    interpreted as JSON where possible, so a duration typed as "90" is
-    stored as a number rather than a string core/calendar.py would
-    ignore. A date is not valid JSON and stays a string, which is what
-    we want.
-
-    Byte-for-byte monarch/api.py::_coerce, copied rather than imported -- no
-    adapter imports another -- because "what does typing this into a
-    property field mean" must not have two answers in two windows."""
-    if not isinstance(raw, str):
-        return raw
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-
-
-def _coerce_properties(raw_properties: dict) -> dict:
-    return {k: _coerce(v) for k, v in raw_properties.items()}
 
 
 class Api:

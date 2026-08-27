@@ -20,14 +20,14 @@ on a day asks core/calendar.py for the earliest gap, reading the same
 occurrences Monastery draws, so "busy" means one thing in this app
 rather than two.
 """
-import functools
-import json
 import logging
 import threading
 from datetime import date, datetime, time, timedelta
 
 import webview
 
+from api_common import coerce_properties as _coerce_properties
+from api_common import synchronized as _synchronized
 from core import calendar as calendar_repo
 from core import gardens as gardens_repo
 from core import interval as interval_repo
@@ -76,37 +76,6 @@ SESSION_SPECIES_NAME = "Work Session"
 # How far back the focus tab's heatmap and streak look.
 HEATMAP_DAYS = 14
 STREAK_LIMIT_DAYS = 90
-
-
-def _synchronized(method):
-    """pywebview invokes exposed methods from a worker thread, and not
-    the same one each time. The connection is opened check_same_thread=
-    False, so serializing here is this class's job -- the same reason
-    monarch/api.py, mora/api.py and monastery/api.py have this."""
-    @functools.wraps(method)
-    def wrapper(self, *args, **kwargs):
-        with self._lock:
-            return method(self, *args, **kwargs)
-    return wrapper
-
-
-def _coerce(raw):
-    """A property value as the garden should store it: text-field input
-    interpreted as JSON where possible.
-
-    Byte-for-byte monastery/api.py::_coerce, copied rather than imported
-    -- no adapter imports another -- because "what does typing this into
-    a property field mean" must not have two answers in two windows."""
-    if not isinstance(raw, str):
-        return raw
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-
-
-def _coerce_properties(raw_properties: dict) -> dict:
-    return {k: _coerce(v) for k, v in raw_properties.items()}
 
 
 def _parse_time(raw, fallback: time) -> time:

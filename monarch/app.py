@@ -5,73 +5,39 @@ Mora (mora/app.py) and Monastery (monastery/app.py) are its twins --
 same pywebview settings, same cache workaround, different frontend and
 different Api. Each is its own window on the same gardens rather than a
 pane inside this one, so any of them can be closed, moved to a second
-monitor, or opened alone.
+monitor, or opened alone. window_launcher.py carries the settings and
+workaround all four share.
 """
-import shutil
 from pathlib import Path
 
-import webview
-
 from monarch.api import Api
+from window_launcher import launch_window
 
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Its own storage directory, a sibling of Mora's and Monastery's and
 # never a parent of either. All three run at once by design, and
-# _clear_http_cache() below deletes what is under this path on startup --
-# a shared directory would mean deleting a running window's cache.
+# launch_window()'s cache-clearing deletes what is under this path on
+# startup -- a shared directory would mean deleting a running window's
+# cache.
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_monarch"
 
-
-def _clear_http_cache() -> None:
-    """Drop WebKit's HTTP cache before the window opens.
-
-    pywebview serves the frontend from a fixed port (42001 -- its
-    DEFAULT_HTTP_PORT, used whenever private_mode is off and no port is
-    given), so the origin is identical on every run and WebKit happily
-    reuses cached copies of
-    index.html/app.js/style.css from a previous launch -- meaning an edit
-    to the frontend silently doesn't appear. This was caught for real:
-    after adding the Run simulation button, the running app still rendered
-    the old disabled Automations button while the file on disk had the new
-    one. The automated smoke test never saw it because it uses a throwaway
-    storage_path each run.
-
-    Only `cache/` is removed. Sibling `localstorage/` holds each garden's
-    saved node positions and last-focused mote, which must survive. There
-    is nothing to gain from caching files served off local disk anyway.
-
-    Mora and Monastery are the other apps on these gardens and neither
-    may want this port: they run at the same time as this one (see
-    Api.open_mora/open_monastery), and the loser of that race does not
-    merely fail to bind -- it points its window at the winner's address
-    and loads the wrong app's page. See mora/app.py and monastery/app.py,
-    which ask for 42002 and 42003 and their own storage directories.
-    """
-    shutil.rmtree(WEBVIEW_STORAGE_DIR / "cache", ignore_errors=True)
+# pywebview's own DEFAULT_HTTP_PORT, used whenever private_mode is off
+# and no port is given. Mora and Monastery ask for 42002 and 42003 and
+# their own storage directories instead -- see window_launcher.py for
+# what happens to whichever of these apps loses a collision.
+DEFAULT_HTTP_PORT = 42001
 
 
 def launch(garden: str | None = None) -> None:
-    _clear_http_cache()
     api = Api(garden)
-    window = webview.create_window(
-        "Monarch",
-        url=str(FRONTEND_DIR / "index.html"),
-        js_api=api,
+    launch_window(
+        name="Monarch",
+        frontend_dir=FRONTEND_DIR,
+        storage_dir=WEBVIEW_STORAGE_DIR,
+        api=api,
+        default_port=DEFAULT_HTTP_PORT,
         width=1280,
         height=800,
         min_size=(900, 600),
     )
-    api._window = window
-    window.events.closed += api.shutdown
-    # http_server=True: serve the frontend over http://127.0.0.1 instead of
-    # file://. WebKit disables localStorage for file:// pages (no origin to
-    # partition storage by), which app.js relies on to remember the last-
-    # focused mote per garden and each node's layout position.
-    #
-    # private_mode=False so storage survives across app restarts. Without
-    # an explicit storage_path, pywebview falls back to WebKit's ambient
-    # default context (shared across whatever else on the system uses it)
-    # rather than a location dedicated to this app -- storage_path pins it
-    # to our own project directory instead, same spirit as gardens/.
-    webview.start(http_server=True, private_mode=False, storage_path=str(WEBVIEW_STORAGE_DIR))

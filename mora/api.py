@@ -17,12 +17,12 @@ core/modoc_bind.py's, and shaping the answer is mora/payload.py's. And
 it writes exactly two things: a note's source, and a simulation step the
 user explicitly applied. Everything else here reads.
 """
-import functools
 import logging
 import threading
 
 import webview
 
+from api_common import synchronized as _synchronized
 from core import gardens as gardens_repo
 from core import graph as graph_repo
 from core import modoc
@@ -44,18 +44,6 @@ _SEARCH_LIMIT = 12
 # mcp_server/server.py sets this. core/db.py stays untouched, so the
 # CLI and the main UI keep their current behavior exactly.
 _BUSY_TIMEOUT_MS = 5000
-
-
-def _synchronized(method):
-    """pywebview invokes exposed methods from a worker thread, and not
-    the same one each time. The connection is opened check_same_thread=
-    False, so serializing here is this class's job -- the same reason
-    monarch/api.py has this decorator."""
-    @functools.wraps(method)
-    def wrapper(self, *args, **kwargs):
-        with self._lock:
-            return method(self, *args, **kwargs)
-    return wrapper
 
 
 class Api:

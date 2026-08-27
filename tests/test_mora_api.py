@@ -15,7 +15,8 @@ from core.modoc import MODOC_KEY, read_source
 from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
 from mora.api import MAX_STEP, Api
-from mora.app import DEFAULT_HTTP_PORT, choose_port
+from mora.app import DEFAULT_HTTP_PORT
+from window_launcher import choose_port
 
 
 @pytest.fixture
@@ -294,7 +295,7 @@ def test_mora_does_not_ask_for_the_graph_windows_port():
 
 def test_the_preferred_port_is_used_when_it_is_free():
     port = _a_free_port()
-    assert choose_port(port) == port
+    assert choose_port("Mora", port) == port
 
 
 def test_a_taken_port_falls_back_instead_of_colliding():
@@ -304,7 +305,7 @@ def test_a_taken_port_falls_back_instead_of_colliding():
         held.bind(("127.0.0.1", 0))
         held.listen(1)
         taken = held.getsockname()[1]
-        chosen = choose_port(taken)
+        chosen = choose_port("Mora", taken)
         assert chosen != taken
         assert 1024 <= chosen <= 65535
 

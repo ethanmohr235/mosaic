@@ -1,6 +1,5 @@
 # monarch/api.py
 import dataclasses
-import functools
 import json
 import logging
 import os
@@ -13,6 +12,8 @@ from pathlib import Path
 
 import webview
 
+from api_common import coerce_properties as _coerce_properties
+from api_common import synchronized as _synchronized
 from core.db import get_connection, initialize_database
 from core import derivations as derivations_repo
 from core import gardens as gardens_repo
@@ -31,27 +32,6 @@ from core import simulation as simulation_repo
 from core import sync as sync_repo
 from core import solvers as solvers_repo
 from core import species as species_repo
-
-
-def _coerce(raw):
-    # Text-field input arrives as a string and gets interpreted as JSON
-    # where possible (so typing "21" produces an int). Copy/paste
-    # (app.js::copySelection/pasteAt) instead sends a mote's already-typed
-    # properties straight back through create_mote -- those aren't raw
-    # text to interpret, they're already the right type (an int, a bool,
-    # a list, ...), and json.loads() raises TypeError on anything that
-    # isn't str/bytes/bytearray. Only strings need coercing; anything
-    # else is passed through as-is.
-    if not isinstance(raw, str):
-        return raw
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-
-
-def _coerce_properties(raw_properties: dict) -> dict:
-    return {k: _coerce(v) for k, v in raw_properties.items()}
 
 
 def _classify(motes: list, rels: list) -> dict:
@@ -193,18 +173,6 @@ def _open_with_os_default(path: str) -> None:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _synchronized(method):
-    """pywebview invokes exposed methods from a worker thread, not
-    necessarily the same one each time. Api holds one long-lived sqlite3
-    connection (opened with check_same_thread=False), so calls onto it
-    must be serialized here rather than left to sqlite3 to police."""
-    @functools.wraps(method)
-    def wrapper(self, *args, **kwargs):
-        with self._lock:
-            return method(self, *args, **kwargs)
-    return wrapper
 
 
 class Api:

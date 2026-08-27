@@ -16,7 +16,8 @@ from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
 from core.species import set_species
 from momentum.api import Api
-from momentum.app import DEFAULT_HTTP_PORT, choose_port
+from momentum.app import DEFAULT_HTTP_PORT
+from window_launcher import choose_port
 
 WEEK_START = "2026-08-24T00:00:00"
 WEEK_END = "2026-08-31T00:00:00"
@@ -287,7 +288,7 @@ def test_momentum_does_not_ask_for_another_windows_port():
 
 def test_the_preferred_port_is_used_when_it_is_free():
     port = _a_free_port()
-    assert choose_port(port) == port
+    assert choose_port("Momentum", port) == port
 
 
 def test_a_taken_port_falls_back_instead_of_colliding():
@@ -297,7 +298,7 @@ def test_a_taken_port_falls_back_instead_of_colliding():
         held.bind(("127.0.0.1", 0))
         held.listen(1)
         taken = held.getsockname()[1]
-        chosen = choose_port(taken)
+        chosen = choose_port("Momentum", taken)
         assert chosen != taken
         assert 1024 <= chosen <= 65535
 
