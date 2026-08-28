@@ -213,5 +213,3 @@ disagree about typography and never about meaning.
 * No `\include` -- a note is one property.
 * No tables, figures-with-captions, references or footnotes.
 * `\graph` has two forms. A third waits until these two are used in anger.
-* A note cannot read across a portal, for the same reason a rule cannot
-  (`docs/architecture.md`, Portals).

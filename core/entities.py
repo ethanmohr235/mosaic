@@ -1,8 +1,8 @@
 # core/entities.py
 """The two things MonOSS stores: a mote, and a relationship between two
-motes. Everything else in the system -- species, folders, templates,
-rules, portals, property models -- is one of these two wearing a
-particular property or relationship type, never a third dataclass.
+motes. Everything else in the system -- species, templates, rules,
+property models -- is one of these two wearing a particular property or
+relationship type, never a third dataclass.
 
 Named `entities` rather than `models`, which in this codebase means a
 *physical property model* everywhere else (`uses_model`,

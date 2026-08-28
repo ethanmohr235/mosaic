@@ -3,7 +3,7 @@
 mutating primitives in core/motes.py and core/relationships.py each
 append one row here, right before their own conn.commit() -- so an op
 and the write it describes always land in the same transaction. Every
-other mutation in the codebase (species, folders, portals, the library,
+other mutation in the codebase (species, templates, property models,
 simulation's writes via update_mote) bottoms out in one of those 7, so
 this covers the whole system without touching any of them.
 """

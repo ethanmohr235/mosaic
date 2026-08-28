@@ -16,10 +16,8 @@
 const KIND = {
   SPECIES: "species",
   TEMPLATE: "template",
-  FOLDER: "folder",
   PROPERTY_MODEL: "property_model",
   RULE: "rule",
-  PORTAL: "portal",
 };
 
 // Human labels for the same, shown in the detail panel and search
@@ -27,10 +25,8 @@ const KIND = {
 const KIND_LABEL = {
   species: "Species",
   template: "Template",
-  folder: "Folder",
   property_model: "Property model",
   rule: "Rule",
-  portal: "Portal",
 };
 
 /** The mote ids of `kind`, out of the kinds map monarch/api.py returns.
@@ -118,11 +114,8 @@ class MonossGraph {
     this.relationships = [];
     this.speciesIds = new Set();
     this.speciesOf = new Map();   // mote id -> [species id]
-    this.folderIds = new Set();
-    this.groupOf = new Map();     // mote id -> [folder id]
     this.nodes = new Map();       // mote id -> {x, y, vx, vy, pinned}
     this.hiddenSpecies = new Set();
-    this.hiddenFolders = new Set();
     this.hiddenRelTypes = new Set();
     this.selectedIds = new Set();
     this.selectedRelIds = new Set();
@@ -178,7 +171,6 @@ class MonossGraph {
     // kind upstream doesn't change this payload's shape.
     this.kinds = payload.kinds || {};
     this.speciesIds = new Set(idsWithKind(this.kinds, KIND.SPECIES));
-    this.folderIds = new Set(idsWithKind(this.kinds, KIND.FOLDER));
     this._moteById = new Map(this.motes.map((m) => [m.id, m]));
     this._invalidateColors();
 
@@ -187,14 +179,10 @@ class MonossGraph {
     // species mote is always present; under a hop limit it may not be, and
     // those instances simply render uncoloured.
     this.speciesOf = new Map();
-    this.groupOf = new Map();
     for (const rel of this.relationships) {
       if (rel.type === "instance_of") {
         if (!this.speciesOf.has(rel.from_id)) this.speciesOf.set(rel.from_id, []);
         this.speciesOf.get(rel.from_id).push(rel.to_id);
-      } else if (rel.type === "in_folder") {
-        if (!this.groupOf.has(rel.from_id)) this.groupOf.set(rel.from_id, []);
-        this.groupOf.get(rel.from_id).push(rel.to_id);
       }
     }
 
@@ -581,11 +569,6 @@ class MonossGraph {
     this.alpha = Math.max(this.alpha, 0.4);
   }
 
-  setHiddenFolders(ids) {
-    this.hiddenFolders = new Set(ids);
-    this.alpha = Math.max(this.alpha, 0.4);
-  }
-
   setHiddenRelTypes(types) {
     this.hiddenRelTypes = new Set(types);
     this.alpha = Math.max(this.alpha, 0.4);
@@ -612,17 +595,6 @@ class MonossGraph {
         } else if (!species.some((s) => !this.hiddenSpecies.has(s))) {
           return false;
         }
-      }
-    }
-    if (this.hiddenFolders.size > 0) {
-      if (this.folderIds.has(moteId)) {
-        if (this.hiddenFolders.has(moteId)) return false;
-      } else {
-        // A mote in no folder is never hidden by folder filters -- unlike
-        // species there's no "__none__" bucket, since being ungrouped is
-        // the default/expected state, not something worth a legend row.
-        const folders = this.groupOf.get(moteId) || [];
-        if (folders.length > 0 && !folders.some((f) => !this.hiddenFolders.has(f))) return false;
       }
     }
     return true;
@@ -832,7 +804,6 @@ class MonossGraph {
     // DOM overlay never disagree about what color "relationship selected"
     // means.
     this._edgeSelected = style.getPropertyValue("--select-rel-edge").trim() || "oklch(0.72 0.13 235 / 0.95)";
-    this._portalRing = style.getPropertyValue("--portal-ring").trim() || "oklch(0.76 0.16 300 / 0.9)";
   }
 
   _draw() {
@@ -1027,20 +998,12 @@ class MonossGraph {
       if (this.speciesIds.has(id)) {
         // Species motes are diamonds -- a type is a different kind of
         // thing from an instance and shouldn't have to be read off a label.
-        // A mote that's somehow both a species and a folder draws as a
-        // diamond -- an arbitrary but rare tie-break, not worth its own
-        // precedence machinery.
         const r = radius * 1.35;
         ctx.moveTo(node.x, node.y - r);
         ctx.lineTo(node.x + r, node.y);
         ctx.lineTo(node.x, node.y + r);
         ctx.lineTo(node.x - r, node.y);
         ctx.closePath();
-      } else if (this.folderIds.has(id)) {
-        // Folders are squares -- a third, distinct kind of thing from
-        // both an ordinary mote and a species, purely for annotation.
-        const r = radius * 1.2;
-        ctx.rect(node.x - r, node.y - r, r * 2, r * 2);
       } else {
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       }
@@ -1057,18 +1020,6 @@ class MonossGraph {
         ctx.strokeStyle = "oklch(0.95 0 0 / 0.45)";
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + 3.5, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      if (mote.properties && mote.properties.portal_garden && mote.properties.portal_mote) {
-        // Marks a mote as a portal into another garden -- a ring rather
-        // than a third shape, following the same "extra stroke layered on
-        // the base circle/diamond" precedent selection/pinned/sim-preview
-        // already set. Sits inside the pinned ring's +3.5 so a pinned
-        // portal still shows both distinctly.
-        ctx.lineWidth = 1.6;
-        ctx.strokeStyle = this._portalRing;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius + 2, 0, Math.PI * 2);
         ctx.stroke();
       }
       if (this.simHighlightIds.has(id)) {

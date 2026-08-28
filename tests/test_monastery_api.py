@@ -325,6 +325,23 @@ def test_switch_garden_moves_the_connection(api, week):
     assert _calendar(api)["occurrences"] == []
 
 
+# ---- app switcher (⌘J) ----
+#
+# The command-building itself is api_common.open_app's own test (see
+# tests/test_api_common.py); what's worth checking here is only that
+# this app's method actually delegates to it with this app's garden.
+
+def test_open_app_delegates_to_api_common(api, monkeypatch):
+    import api_common
+
+    calls = []
+    monkeypatch.setattr(
+        api_common, "popen_detached", lambda args, **kwargs: calls.append(args)
+    )
+    assert api.open_app("mora") == {"app": "mora", "garden": "test", "focus": None}
+    assert calls[0][2:] == ["--garden", "test"]
+
+
 # ---- best-effort sync ----
 #
 # run_monastery.py is its own launch path, not only ever opened from the

@@ -227,10 +227,10 @@ def test_help_lists_every_command_group(run_repl, conn):
         assert group in out
 
 
-# ---- species / folders / portals / library ----
+# ---- species ----
 #
 # The charter (docs/architecture.md, "What belongs on which surface")
-# says the CLI gets everything scriptable. These existed only in the app
+# says the CLI gets everything scriptable. This existed only in the app
 # or only in MCP before.
 
 def test_species_template_and_new_instance(run_repl, conn):
@@ -269,22 +269,6 @@ def test_species_requires_its_arguments(run_repl, conn):
     assert "'species' is required" in run_repl(["species set id=abc"])
 
 
-def test_folder_set_members_and_of(run_repl, conn):
-    folder = create_mote(conn, {"name": "Thermodynamics"})
-    note = create_mote(conn, {"name": "Entropy"})
-
-    out = run_repl([
-        f"folder set id={note} folder={folder}",
-        "folder list",
-        f"folder members id={folder}",
-        f"folder of id={note}",
-    ])
-
-    assert "filed under" in out
-    assert out.count(folder) >= 2 and out.count(note) >= 1
-    assert list_relationships(conn)[0].type == "in_folder"
-
-
 def test_mote_search_finds_by_text_and_by_key_value(run_repl, conn):
     create_mote(conn, {"name": "Alice", "role": "engineer"})
     create_mote(conn, {"name": "Bob", "role": "doctor"})
@@ -294,38 +278,3 @@ def test_mote_search_finds_by_text_and_by_key_value(run_repl, conn):
     assert "Alice" in run_repl(["mote search role = engineer"])
 
 
-def test_library_save_list_and_use(run_repl, conn):
-    mote = create_mote(conn, {"name": "Standup", "duration": 15})
-
-    saved = run_repl([f"library save id={mote}"])
-    entry_id = saved.split("id=")[-1].split()[0]
-
-    listed = run_repl(["library list"])
-    assert "Standup" in listed and entry_id in listed
-
-    run_repl([f"library use id={entry_id} name=Monday"])
-    copies = [m for m in list_motes(conn) if m.properties.get("name") == "Monday"]
-    assert copies and copies[0].properties["duration"] == 15
-
-
-def test_portal_create_and_resolve(run_repl, conn):
-    create_garden("elsewhere")
-    from core.db import get_connection, initialize_database
-    other = get_connection("elsewhere")
-    try:
-        initialize_database(other)
-        target = create_mote(other, {"name": "Reactor"})
-    finally:
-        other.close()
-
-    created = run_repl([f"portal create garden=elsewhere mote={target}"])
-    assert "Portal created" in created
-    portal_id = created.split("id=")[-1].split()[0]
-
-    resolved = run_repl([f"portal resolve id={portal_id}"])
-    assert "Garden: elsewhere" in resolved
-    assert "Reactor" in resolved
-
-
-def test_portal_create_requires_a_target(run_repl, conn):
-    assert "'mote' is required" in run_repl(["portal create garden=elsewhere"])

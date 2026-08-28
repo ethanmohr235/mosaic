@@ -12,11 +12,9 @@ let allMotes = [];
 let quickAddSpeciesId = null;
 let speciesPickerTargetId = null;
 let speciesPickerMode = "instance";   // 'instance' (set species) | 'template' (be a template of)
-let folderPickerTargetId = null;
 let searchVisible = [];
 let searchHighlight = -1;
 const searchSpeciesFilter = new Set();
-const searchFolderFilter = new Set();
 const searchRelFilter = new Set();
 let multiSelectIds = null;             // non-null while the aggregate panel is open
 let clipboard = null;                  // array of {sourceId, properties, offset} from Copy
@@ -62,7 +60,6 @@ const $ = (id) => document.getElementById(id);
 function positionsKey(garden) { return `monoss:positions:${garden}`; }
 function lastFocusKey(garden) { return `monoss:lastFocus:${garden}`; }
 function hiddenSpeciesKey(garden) { return `monoss:hiddenSpecies:${garden}`; }
-function hiddenFoldersKey(garden) { return `monoss:hiddenFolders:${garden}`; }
 function hiddenRelKey(garden) { return `monoss:hiddenRels:${garden}`; }
 function viewSettingsKey(garden) { return `monoss:viewSettings:${garden}`; }
 
@@ -173,10 +170,9 @@ function moteById(id) {
  *  panel and in search results.
  *
  *  Every kind comes from core/kinds.py's table via the payload, so this
- *  no longer has its own partial idea of what exists -- it used to know
- *  Species, Folder and Rule (that last one by sniffing for an `equation`
- *  property itself) and had no idea what a portal, template or property
- *  model was, even while graph.js drew portals with their own ring. */
+ *  has no partial idea of what exists of its own -- it used to know only
+ *  Species and Rule (that last one by sniffing for an `equation` property
+ *  itself) and had no idea what a template or property model was. */
 function kindLabel(mote) {
   if (!mote) return "";
   const kinds = kindsOf(mote.id);
@@ -245,7 +241,6 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
   graph.select(select ? focusId : null, { pan });
   $("empty-state").classList.toggle("hidden", !!focusId);
   renderLegend();
-  renderFolderLegend();
   renderRelFilters();
   updateStatusbar();
   // Species and relationship types are what the settings panel is a list
@@ -254,7 +249,7 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
   return next;
 }
 
-async function loadGarden(garden, { focusId } = {}) {
+async function loadGarden(garden) {
   currentGarden = garden;
   $("garden-label").textContent = garden;
   closeSimBar();
@@ -264,20 +259,15 @@ async function loadGarden(garden, { focusId } = {}) {
   // nothing once a different one is open.
   if (attractorMode) exitAttractorMode();
   graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
-  graph.setHiddenFolders(readJSON(hiddenFoldersKey(garden), []));
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
   viewSettings = loadViewSettings(garden);
   graph.setViewSettings(viewSettings);
-  const stored = focusId || localStorage.getItem(lastFocusKey(garden)) || null;
+  const stored = localStorage.getItem(lastFocusKey(garden)) || null;
   await refreshMoteCache();
-  // An explicit focusId (a portal jump) means go straight there and
-  // select it, like clicking a search result would. Otherwise frame the
-  // whole garden on open rather than panning to the remembered mote --
-  // you want to see where you are before you go anywhere -- which is
-  // also why fitWhenSettled() below is skipped for a portal jump: it
-  // re-fits every tick for a couple of seconds and would fight the pan.
-  await refocus(stored, { pan: !!focusId, select: !!focusId });
-  if (!focusId) graph.fitWhenSettled();
+  // Frame the whole garden on open rather than panning to the remembered
+  // mote -- you want to see where you are before you go anywhere.
+  await refocus(stored, { pan: false, select: false });
+  graph.fitWhenSettled();
 }
 
 async function refreshMoteCache() {
@@ -351,48 +341,6 @@ function renderLegend() {
   }
 }
 
-function folderRows() {
-  const counts = new Map();
-  for (const mote of payload.motes) {
-    if (isKind(mote.id, KIND.FOLDER)) continue;
-    for (const id of folderIdsOf(mote.id)) counts.set(id, (counts.get(id) || 0) + 1);
-  }
-  const rows = idsWithKind(payload.kinds, KIND.FOLDER).map((id) => ({
-    id,
-    label: nodeLabel(moteById(id) || { id, properties: {} }),
-    count: counts.get(id) || 0,
-    color: "oklch(0.68 0.13 250)",
-    square: true,
-  }));
-  rows.sort((a, b) => a.label.localeCompare(b.label));
-  return rows;
-}
-
-function renderFolderLegend() {
-  const container = $("legend-folders");
-  const rows = folderRows();
-  $("folder-heading").classList.toggle("hidden", rows.length === 0);
-  container.innerHTML = "";
-  for (const row of rows) {
-    const el = document.createElement("div");
-    const hidden = graph.hiddenFolders.has(row.id);
-    el.className = "filter-row" + (hidden ? " off" : "");
-    el.title = hidden ? `Show ${row.label}` : `Hide ${row.label}`;
-    el.innerHTML =
-      `<span class="dot square" style="background:${row.color}"></span>` +
-      `<span class="name"></span><span class="count">${row.count}</span>`;
-    el.querySelector(".name").textContent = row.label;
-    el.addEventListener("click", () => {
-      const hiddenIds = new Set(graph.hiddenFolders);
-      hiddenIds.has(row.id) ? hiddenIds.delete(row.id) : hiddenIds.add(row.id);
-      graph.setHiddenFolders(hiddenIds);
-      localStorage.setItem(hiddenFoldersKey(currentGarden), JSON.stringify([...hiddenIds]));
-      renderFolderLegend();
-    });
-    container.appendChild(el);
-  }
-}
-
 function renderRelFilters() {
   const container = $("rel-filters");
   container.innerHTML = "";
@@ -429,13 +377,10 @@ function renderRelFilters() {
  *  layout via graph.resetView(). */
 function resetViewAndUnhideAll() {
   graph.setHiddenSpecies(new Set());
-  graph.setHiddenFolders(new Set());
   graph.setHiddenRelTypes(new Set());
   localStorage.removeItem(hiddenSpeciesKey(currentGarden));
-  localStorage.removeItem(hiddenFoldersKey(currentGarden));
   localStorage.removeItem(hiddenRelKey(currentGarden));
   renderLegend();
-  renderFolderLegend();
   renderRelFilters();
   graph.resetView();
 }
@@ -790,13 +735,11 @@ function setupViewSettings() {
 // ---- detail panel ----
 
 async function openDetailPanel(moteId) {
-  const [mote, rels, species, instances, folders, members, history] = await Promise.all([
+  const [mote, rels, species, instances, history] = await Promise.all([
     call(api.get_mote(moteId)),
     call(api.mote_relationships(moteId)),
     call(api.species_of(moteId)),
     call(api.instances_of(moteId)),
-    call(api.folders_of(moteId)),
-    call(api.folder_members(moteId)),
     call(api.mote_history(moteId)),
   ]);
   if (!mote) return;
@@ -823,7 +766,6 @@ async function openDetailPanel(moteId) {
   renderProperties(displayMote, history, mote);
   renderNoteSection(mote);
   renderSpeciesSection(mote, species, instances);
-  renderFolderSection(mote, folders, members);
   renderRelationships(moteId, rels);
   $("detail-panel").classList.remove("hidden");
   fitAllTextareas();
@@ -1823,16 +1765,6 @@ function openLink(url) {
   call(api.open_link(url));
 }
 
-/** Follows a portal mote: resolves+switches gardens in one backend call
- *  (Api.jump_to_portal), then rebuilds the graph on the target garden,
- *  landing panned/selected on the target mote itself rather than the
- *  target garden's own last-focused one. */
-async function jumpToPortal(moteId) {
-  const result = await call(api.jump_to_portal(moteId));
-  closeDetailPanel();
-  await loadGarden(result.garden, { focusId: result.mote_id });
-}
-
 /** A tiny inline trend line for one property's history -- hand-rolled
  *  canvas draw, no charting library, same spirit as graph.js's own
  *  from-scratch renderer. min/max-scaled so a flat run of identical
@@ -1956,8 +1888,8 @@ function renderProperties(mote, history, baseMote) {
       trailing.push(renderSparkline(values, simPreview ? "ticks" : "runs", color));
     }
     // "modoc" is a note (docs/modoc.md) -- same one-click-to-follow
-    // treatment url and portal_mote get below, since the row itself is
-    // deliberately only a summary.
+    // treatment "url" gets below, since the row itself is deliberately
+    // only a summary.
     if (key === "modoc" && typeof value === "string") {
       const open = document.createElement("button");
       open.className = "open-link";
@@ -1985,21 +1917,6 @@ function renderProperties(mote, history, baseMote) {
       open.title = "Open";
       open.addEventListener("click", () => openLink(value));
       trailing.push(open);
-    }
-    // "portal_garden"/"portal_mote" together mark this mote as a portal
-    // into another garden -- same one-click-to-follow treatment as url
-    // above, shown on the portal_mote row specifically since that's the
-    // half that actually identifies a destination.
-    if (
-      key === "portal_mote" && typeof value === "string" && value.trim() &&
-      typeof mote.properties.portal_garden === "string" && mote.properties.portal_garden.trim()
-    ) {
-      const jump = document.createElement("button");
-      jump.className = "open-link portal-jump";
-      jump.textContent = "↗";
-      jump.title = `Jump to ${mote.properties.portal_garden}`;
-      jump.addEventListener("click", () => jumpToPortal(mote.id));
-      trailing.push(jump);
     }
     row.append(keyEl, field, ...trailing, del);
     container.appendChild(row);
@@ -2245,49 +2162,10 @@ function renderSpeciesSection(mote, species, instances) {
     instances.length > 0 ? `${instances.length} instance${instances.length === 1 ? "" : "s"}` : "";
 }
 
-function renderFolderSection(mote, folders, members) {
-  const container = $("detail-folders");
-  container.innerHTML = "";
-  if (folders.length === 0) {
-    container.innerHTML = '<div class="empty-note">Not grouped into any folder</div>';
-  }
-  for (const folderMote of folders) {
-    const rel = payload.relationships.find(
-      (r) => r.type === "in_folder" && r.from_id === mote.id && r.to_id === folderMote.id
-    );
-    const row = document.createElement("div");
-    row.className = "rel-row";
-
-    const label = document.createElement("span");
-    label.className = "rel-other";
-    label.textContent = nodeLabel(folderMote);
-    label.addEventListener("click", () => selectMote(folderMote.id));
-
-    const del = document.createElement("button");
-    del.textContent = "×";
-    del.title = "Remove from this folder";
-    del.addEventListener("click", async () => {
-      if (editBlocked()) return;
-      if (rel) await call(api.delete_relationship(rel.id));
-      await refocus(focusId, { pan: false });
-      await openDetailPanel(mote.id);
-    });
-
-    row.append(label, del);
-    container.appendChild(row);
-  }
-
-  // The folder counterpart of the species section's instance count: a
-  // folder is a mote others point at, so what's worth stating on it is
-  // how many that is.
-  $("detail-member-count").textContent =
-    members.length > 0 ? `${members.length} member${members.length === 1 ? "" : "s"}` : "";
-}
-
 function renderRelationships(moteId, rels) {
   const container = $("detail-relationships");
   container.innerHTML = "";
-  const shown = rels.filter((r) => r.type !== "instance_of" && r.type !== "in_folder");
+  const shown = rels.filter((r) => r.type !== "instance_of");
   if (shown.length === 0) {
     container.innerHTML = '<div class="empty-note">None</div>';
   }
@@ -2573,18 +2451,15 @@ function openQuickAddAt(worldX, worldY, clientX, clientY) {
 }
 
 /** Arrow-key highlight + Enter-to-choose for a type-to-filter result list
- *  built from .search-result-row markup -- the species/folder/portal/
- *  library pickers below all show exactly the kind of list the main
- *  search palette does (openSearch/renderSearchResults), but unlike it
- *  never grew arrow keys or Enter, leaving the mouse as the only way to
- *  pick a result. Reads/writes the highlighted row straight from the DOM
- *  instead of keeping its own index, so each picker's render function
- *  needs nothing more than marking row 0 highlighted the way
- *  renderSearchResults already does. Re-dispatches the row's own
- *  mousedown on Enter rather than duplicating what each row's listener
- *  does -- and targets .label specifically, since the library picker's
- *  row (uniquely) puts its "choose" listener there rather than on the
- *  row itself, to keep it from firing when its Delete button is clicked. */
+ *  built from .search-result-row markup -- the species picker below shows
+ *  exactly the kind of list the main search palette does
+ *  (openSearch/renderSearchResults), but unlike it never grew arrow keys
+ *  or Enter, leaving the mouse as the only way to pick a result.
+ *  Reads/writes the highlighted row straight from the DOM instead of
+ *  keeping its own index, so each picker's render function needs nothing
+ *  more than marking row 0 highlighted the way renderSearchResults
+ *  already does. Re-dispatches the row's own mousedown on Enter rather
+ *  than duplicating what each row's listener does. */
 function setupPickerKeyNav(input, resultsContainer) {
   input.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
@@ -2690,70 +2565,6 @@ function setupSpeciesControls() {
   });
 }
 
-// ---- folder picker ----
-//
-// Mirrors the species picker above closely -- a folder is just a mote
-// other motes point at via `in_folder`, the same way a species is just a
-// mote pointed at via `instance_of`, so this needs no gate on "is this
-// mote already a folder" any more than the species picker gates on
-// "is this mote already a species."
-
-function hideFolderPicker() {
-  $("folder-picker-wrap").classList.add("hidden");
-  $("folder-picker-input").value = "";
-  folderPickerTargetId = null;
-}
-
-function renderFolderPickerResults(query) {
-  const container = $("folder-picker-results");
-  container.innerHTML = "";
-  const q = (query || "").toLowerCase();
-  const candidates = allMotes
-    .filter((m) => m.id !== folderPickerTargetId)
-    .filter((m) => !q || nodeLabel(m).toLowerCase().includes(q))
-    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
-    .slice(0, 40);
-
-  if (candidates.length === 0) {
-    container.innerHTML = '<div class="search-empty">No matches</div>';
-    return;
-  }
-  candidates.forEach((mote, i) => {
-    const row = document.createElement("div");
-    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
-    row.innerHTML = '<span class="label"></span>';
-    row.querySelector(".label").textContent = nodeLabel(mote);
-    row.addEventListener("mousedown", async (e) => {
-      e.preventDefault();
-      if (editBlocked()) return;
-      const targetId = folderPickerTargetId;
-      await call(api.set_folder(targetId, mote.id));
-      hideFolderPicker();
-      await refocus(targetId, { pan: false });
-      await openDetailPanel(targetId);
-    });
-    container.appendChild(row);
-  });
-}
-
-function setupFolderControls() {
-  $("set-folder-btn").addEventListener("click", () => {
-    if (editBlocked()) return;
-    if (!focusId) return;
-    folderPickerTargetId = focusId;
-    $("folder-picker-wrap").classList.remove("hidden");
-    renderFolderPickerResults("");
-    $("folder-picker-input").focus();
-  });
-  $("folder-picker-input").addEventListener("input", (e) =>
-    renderFolderPickerResults(e.target.value)
-  );
-  $("folder-picker-input").addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hideFolderPicker();
-  });
-  setupPickerKeyNav($("folder-picker-input"), $("folder-picker-results"));
-}
-
 // ---- search palette ----
 
 // Matches "key = value" (or "key=value"), e.g. "priority = high" --
@@ -2794,10 +2605,6 @@ function matchesQuery(mote, query) {
   return false;
 }
 
-/** motes/relationships-parametrized so both the main search palette
- *  (against the live payload/allMotes) and the library picker (against a
- *  one-off library_snapshot() read) share the exact same filtering
- *  instead of the picker reinventing a weaker version of it. */
 function relatedTargetIds(relationships, moteId, type) {
   return relationships.filter((r) => r.type === type && r.from_id === moteId).map((r) => r.to_id);
 }
@@ -2806,11 +2613,7 @@ function speciesIdsOf(moteId) {
   return relatedTargetIds(payload.relationships, moteId, "instance_of");
 }
 
-function folderIdsOf(moteId) {
-  return relatedTargetIds(payload.relationships, moteId, "in_folder");
-}
-
-function computeFilteredMotes(motes, relationships, query, { speciesFilter, folderFilter, relFilter } = {}) {
+function computeFilteredMotes(motes, relationships, query, { speciesFilter, relFilter } = {}) {
   return motes
     .filter((mote) => {
       if (speciesFilter && speciesFilter.size) {
@@ -2818,10 +2621,6 @@ function computeFilteredMotes(motes, relationships, query, { speciesFilter, fold
         const matches = ids.some((id) => speciesFilter.has(id)) ||
           (speciesFilter.has("__none__") && ids.length === 0);
         if (!matches) return false;
-      }
-      if (folderFilter && folderFilter.size) {
-        const ids = relatedTargetIds(relationships, mote.id, "in_folder");
-        if (!ids.some((id) => folderFilter.has(id))) return false;
       }
       if (relFilter && relFilter.size) {
         const touches = relationships.some(
@@ -2837,7 +2636,7 @@ function computeFilteredMotes(motes, relationships, query, { speciesFilter, fold
 
 function computeSearchResults(query) {
   return computeFilteredMotes(allMotes, payload.relationships, query, {
-    speciesFilter: searchSpeciesFilter, folderFilter: searchFolderFilter, relFilter: searchRelFilter,
+    speciesFilter: searchSpeciesFilter, relFilter: searchRelFilter,
   });
 }
 
@@ -2868,11 +2667,6 @@ function relTypeRows(relationships) {
 function renderSearchChips() {
   renderChipRow($("search-species-chips"), speciesRows(), searchSpeciesFilter, (id) => {
     searchSpeciesFilter.has(id) ? searchSpeciesFilter.delete(id) : searchSpeciesFilter.add(id);
-    renderSearchChips();
-    renderSearchResults($("search-input").value);
-  });
-  renderChipRow($("search-folder-chips"), folderRows(), searchFolderFilter, (id) => {
-    searchFolderFilter.has(id) ? searchFolderFilter.delete(id) : searchFolderFilter.add(id);
     renderSearchChips();
     renderSearchResults($("search-input").value);
   });
@@ -3056,26 +2850,12 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
       ? (allPinned ? `Unpin ${ids.length} motes` : `Pin ${ids.length} motes`)
       : (node && node.pinned ? "Unpin" : "Pin");
     addMenuItem(menu, pinLabel, () => togglePin(ids));
-    // Single-mote only -- a library entry is one mote's properties
-    // (core/library.py), not yet a group/subgraph.
-    if (ids.length === 1) {
-      addMenuItem(menu, "Save to library…", async () => {
-        await call(api.save_to_library(targetId));
-        showToast("Saved to library.");
-      });
-    }
     const sep = document.createElement("div");
     sep.className = "menu-sep";
     menu.appendChild(sep);
     addMenuItem(menu, "Delete", () => deleteSelection(), { danger: true });
   } else {
     addMenuItem(menu, "New mote here", () => openQuickAddAt(worldX, worldY, clientX, clientY));
-    // With only one garden there's nowhere to portal to, so the item is
-    // omitted entirely rather than shown disabled.
-    if ((await call(api.list_gardens())).length > 1) {
-      addMenuItem(menu, "New portal…", () => openPortalModalAt(worldX, worldY));
-    }
-    addMenuItem(menu, "Reuse from library…", () => openLibraryModalAt(worldX, worldY));
     const pasteLabel = clipboard && clipboard.length > 1 ? `Paste ${clipboard.length} motes` : "Paste";
     addMenuItem(menu, pasteLabel, () => pasteAt(worldX, worldY), { disabled: !clipboard });
   }
@@ -3350,11 +3130,6 @@ function setupTopMenus() {
     });
   }
 
-  $("garden-menu-open-library").addEventListener("click", async () => {
-    closeTopMenus();
-    const result = await call(api.open_library());
-    await loadGarden(result.garden);
-  });
   $("garden-menu-new").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
   $("garden-menu-manage").addEventListener("click", () => { closeTopMenus(); openGardensModal(); });
   $("file-new-garden").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
@@ -3577,235 +3352,6 @@ function setupRefresh() {
   });
 }
 
-// ---- portal picker ----
-//
-// Reached from "New portal…" on the empty-canvas context menu. Modeled on
-// the search palette (#search-overlay) for its result-list markup, but
-// each keystroke round-trips to Python and opens a real sqlite connection
-// against the *target* garden (Api.find_portal_target) rather than
-// filtering an already-cached array the way the in-garden search palette
-// does -- hence the debounce below, which that palette doesn't need.
-
-let portalPlaceAt = null;      // world coords from the context-menu click, for graph.placeAt
-let portalSearchTimer = null;
-
-function openPortalModalAt(worldX, worldY) {
-  portalPlaceAt = { x: worldX, y: worldY };
-  $("portal-overlay").classList.remove("hidden");
-  $("portal-search-input").value = "";
-  renderPortalResults([]);
-  renderPortalGardenOptions().then(refreshPortalResults);
-  $("portal-search-input").focus();
-}
-
-function closePortalModal() {
-  $("portal-overlay").classList.add("hidden");
-  portalPlaceAt = null;
-}
-
-async function renderPortalGardenOptions() {
-  const gardens = (await call(api.list_gardens())).filter((g) => g !== currentGarden);
-  const select = $("portal-garden-select");
-  select.innerHTML = "";
-  for (const g of gardens) {
-    const opt = document.createElement("option");
-    opt.value = g;
-    opt.textContent = g;
-    select.appendChild(opt);
-  }
-}
-
-async function refreshPortalResults() {
-  const garden = $("portal-garden-select").value;
-  if (!garden) { renderPortalResults([]); return; }
-  const results = await call(api.find_portal_target(garden, $("portal-search-input").value));
-  renderPortalResults(results);
-}
-
-function renderPortalResults(results) {
-  const container = $("portal-search-results");
-  container.innerHTML = "";
-  if (results.length === 0) {
-    container.innerHTML = '<div class="search-empty">No matches</div>';
-    return;
-  }
-  results.forEach((mote, i) => {
-    const row = document.createElement("div");
-    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
-    row.innerHTML = '<span class="label"></span>';
-    row.querySelector(".label").textContent = nodeLabel(mote);
-    row.addEventListener("mousedown", async (e) => {
-      e.preventDefault();
-      const garden = $("portal-garden-select").value;
-      const placeAt = portalPlaceAt;
-      closePortalModal();
-      // Snapshotted once here, not kept in sync afterward -- a portal
-      // has no live coupling to its target beyond the stored pointer.
-      // Ordering (select, then placeAt/savePositions) matches "New mote
-      // here"'s own create-mote-btn handler above.
-      const portal = await call(api.create_portal(garden, mote.id, { name: nodeLabel(mote) }));
-      await refreshMoteCache();
-      await selectMote(portal.id, { pan: !placeAt });
-      if (placeAt) {
-        graph.placeAt(portal.id, placeAt.x, placeAt.y);
-        savePositions();
-      }
-      showToast(`Portal to '${garden}' created.`);
-    });
-    container.appendChild(row);
-  });
-}
-
-function setupPortalModal() {
-  $("portal-overlay").addEventListener("mousedown", (e) => {
-    if (e.target === $("portal-overlay")) closePortalModal();
-  });
-  $("portal-garden-select").addEventListener("change", refreshPortalResults);
-  $("portal-search-input").addEventListener("input", () => {
-    clearTimeout(portalSearchTimer);
-    portalSearchTimer = setTimeout(refreshPortalResults, 150);
-  });
-  setupPickerKeyNav($("portal-search-input"), $("portal-search-results"));
-}
-
-// ---- library picker ----
-//
-// Reached from "Reuse from library…" on the empty-canvas context menu,
-// and "Save to library…" on a single mote's. Modeled on the portal
-// picker above for the modal shell, but filters like the main search
-// palette: librarySnapshot is a one-off whole-graph read of _library
-// (Api.library_snapshot()) fetched once per modal-open, then every
-// keystroke/chip-toggle filters it client-side via the same
-// computeFilteredMotes()/renderChipRow() the search palette uses --
-// no per-keystroke round trip, unlike the portal picker.
-
-let libraryPlaceAt = null;     // world coords from the context-menu click, for graph.placeAt
-let librarySnapshot = null;    // {motes, relationships, kinds}
-const librarySpeciesFilter = new Set();
-const libraryFolderFilter = new Set();
-const libraryRelFilter = new Set();
-
-async function openLibraryModalAt(worldX, worldY) {
-  libraryPlaceAt = { x: worldX, y: worldY };
-  librarySnapshot = await call(api.library_snapshot());
-  librarySpeciesFilter.clear();
-  libraryFolderFilter.clear();
-  libraryRelFilter.clear();
-  $("library-overlay").classList.remove("hidden");
-  $("library-search-input").value = "";
-  renderLibraryChips();
-  renderLibraryResults("");
-  $("library-search-input").focus();
-}
-
-function closeLibraryModal() {
-  $("library-overlay").classList.add("hidden");
-  libraryPlaceAt = null;
-  librarySnapshot = null;
-}
-
-/** Rows shaped like speciesRows()/folderRows(), but derived from
- *  librarySnapshot instead of the live payload -- the library is a
- *  different garden from whichever one is currently open. */
-function librarySpeciesRows() {
-  return idsWithKind(librarySnapshot.kinds, KIND.SPECIES).map((id) => ({
-    id,
-    label: nodeLabel(librarySnapshot.motes.find((m) => m.id === id) || { id, properties: {} }),
-    color: "oklch(0.68 0.16 320)",
-  }));
-}
-
-function libraryFolderRows() {
-  return idsWithKind(librarySnapshot.kinds, KIND.FOLDER).map((id) => ({
-    id,
-    label: nodeLabel(librarySnapshot.motes.find((m) => m.id === id) || { id, properties: {} }),
-    color: "oklch(0.68 0.13 250)",
-    square: true,
-  }));
-}
-
-function renderLibraryChips() {
-  renderChipRow($("library-species-chips"), librarySpeciesRows(), librarySpeciesFilter, (id) => {
-    librarySpeciesFilter.has(id) ? librarySpeciesFilter.delete(id) : librarySpeciesFilter.add(id);
-    renderLibraryChips();
-    renderLibraryResults($("library-search-input").value);
-  });
-  renderChipRow($("library-folder-chips"), libraryFolderRows(), libraryFolderFilter, (id) => {
-    libraryFolderFilter.has(id) ? libraryFolderFilter.delete(id) : libraryFolderFilter.add(id);
-    renderLibraryChips();
-    renderLibraryResults($("library-search-input").value);
-  });
-  renderChipRow($("library-rel-chips"), relTypeRows(librarySnapshot.relationships), libraryRelFilter, (type) => {
-    libraryRelFilter.has(type) ? libraryRelFilter.delete(type) : libraryRelFilter.add(type);
-    renderLibraryChips();
-    renderLibraryResults($("library-search-input").value);
-  });
-}
-
-function renderLibraryResults(query) {
-  const container = $("library-search-results");
-  container.innerHTML = "";
-  const results = computeFilteredMotes(librarySnapshot.motes, librarySnapshot.relationships, query, {
-    speciesFilter: librarySpeciesFilter, folderFilter: libraryFolderFilter, relFilter: libraryRelFilter,
-  });
-  if (results.length === 0) {
-    container.innerHTML = '<div class="search-empty">No matches</div>';
-    return;
-  }
-  results.forEach((entry, i) => {
-    const row = document.createElement("div");
-    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
-    row.innerHTML =
-      '<span class="label"></span><button type="button" class="danger delete-entry">Delete</button>';
-    row.querySelector(".label").textContent = nodeLabel(entry);
-    row.querySelector(".label").addEventListener("mousedown", async (e) => {
-      e.preventDefault();
-      const placeAt = libraryPlaceAt;
-      closeLibraryModal();
-      // Fresh independent copy every time -- reuse_from_library() never
-      // links the new mote back to the library entry, and never copies
-      // its relationships (organizational or otherwise) either --
-      // docs/architecture.md.
-      const mote = await call(api.reuse_from_library(entry.id, { name: nodeLabel(entry) }));
-      await refreshMoteCache();
-      await selectMote(mote.id, { pan: !placeAt });
-      if (placeAt) {
-        graph.placeAt(mote.id, placeAt.x, placeAt.y);
-        savePositions();
-      }
-      showToast("Added from library.");
-    });
-    row.querySelector(".delete-entry").addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!window.confirm(`Remove '${nodeLabel(entry)}' from the library?`)) return;
-      // Snapshotted before deleting, same reason deleteSelection() snapshots
-      // a mote's properties first -- there is nothing left to read back
-      // afterward if the user hits Undo.
-      const label = nodeLabel(entry);
-      const snapshot = { id: entry.id, properties: { ...entry.properties } };
-      await call(api.delete_library_entry(entry.id));
-      librarySnapshot = await call(api.library_snapshot());
-      renderLibraryChips();
-      renderLibraryResults($("library-search-input").value);
-      showUndoToast(`Removed '${label}' from the library.`, async () => {
-        await call(api.restore_library_entry(snapshot.properties, snapshot.id));
-        librarySnapshot = await call(api.library_snapshot());
-        renderLibraryChips();
-        renderLibraryResults($("library-search-input").value);
-        showToast("Restored to the library.");
-      });
-    });
-    container.appendChild(row);
-  });
-}
-
-function setupLibraryModal() {
-  $("library-overlay").addEventListener("mousedown", (e) => {
-    if (e.target === $("library-overlay")) closeLibraryModal();
-  });
-  $("library-search-input").addEventListener("input", (e) => renderLibraryResults(e.target.value));
-  setupPickerKeyNav($("library-search-input"), $("library-search-results"));
-}
 
 // ---- view controls ----
 
@@ -4235,6 +3781,144 @@ function setupMomentum() {
   });
 }
 
+// ---- app switcher (⌘J) ----
+//
+// Every sibling app but this one, in a fixed order -- so "Monastery is
+// ⌘2" holds regardless of what's typed into the filter box. See
+// api_common.py::APPS for the id each maps to on the Python side.
+const LAUNCHER_APPS = [
+  {
+    id: "monarch", name: "Monarch", kind: "graph",
+    desc: "Motes and relationships in a live force field.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="20" r="12" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></circle>
+      <ellipse cx="20" cy="20" rx="12" ry="4.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6" transform="rotate(-28 20 20)"></ellipse>
+      <circle cx="20" cy="20" r="4" fill="var(--accent)"></circle>
+    </svg>`,
+  },
+  {
+    id: "mora", name: "Mora", kind: "notes",
+    desc: "Write and link long-form .modoc notes.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="9" y="6" width="22" height="28" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="14" y="14" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
+      <rect x="14" y="20" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
+      <rect x="14" y="26" width="7" height="1.8" rx="0.9" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+  {
+    id: "monastery", name: "Monastery", kind: "calendar",
+    desc: "See and schedule a garden's dated motes.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="7" y="9" width="26" height="24" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="7" y="15" width="26" height="1.6" fill="var(--fg)" opacity="0.5"></rect>
+      <rect x="12" y="20" width="5" height="5" rx="1" fill="var(--fg)" opacity="0.55"></rect>
+      <rect x="21" y="20" width="5" height="5" rx="1" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+  {
+    id: "momentum", name: "Momentum", kind: "tasks",
+    desc: "Task board, week planner and focus timer.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
+      <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
+      <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+];
+const THIS_APP = "monarch";
+
+let launcherHighlight = 0;
+
+function launcherChoices() {
+  return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP);
+}
+
+function launcherFiltered(query) {
+  const q = query.trim().toLowerCase();
+  const choices = launcherChoices();
+  if (!q) return choices;
+  return choices.filter((a) => (a.name + " " + a.kind + " " + a.desc).toLowerCase().includes(q));
+}
+
+function renderLauncherResults(query) {
+  const choices = launcherChoices();
+  const list = launcherFiltered(query);
+  launcherHighlight = Math.min(launcherHighlight, Math.max(list.length - 1, 0));
+  const container = $("launcher-results");
+  container.innerHTML = "";
+  list.forEach((app, i) => {
+    const card = document.createElement("a");
+    card.href = "#";
+    card.className = "launcher-card" + (i === launcherHighlight ? " highlighted" : "");
+    card.innerHTML =
+      `<div class="launcher-icon">${app.icon}</div>` +
+      `<div class="launcher-text">` +
+      `<div class="launcher-name-row"><span class="launcher-name">${app.name}</span><span class="launcher-kind">${app.kind}</span></div>` +
+      `<div class="launcher-desc">${app.desc}</div>` +
+      `</div>` +
+      `<span class="launcher-key">⌘${choices.indexOf(app) + 1}</span>`;
+    card.addEventListener("mouseenter", () => { launcherHighlight = i; updateLauncherHighlight(); });
+    card.addEventListener("mousedown", (e) => { e.preventDefault(); launchApp(app.id); });
+    container.appendChild(card);
+  });
+  const empty = $("launcher-empty");
+  if (list.length === 0) {
+    empty.textContent = `no app matches "${query}"`;
+    empty.classList.remove("hidden");
+  } else {
+    empty.classList.add("hidden");
+  }
+}
+
+function updateLauncherHighlight() {
+  document.querySelectorAll("#launcher-results .launcher-card").forEach((card, i) => {
+    card.classList.toggle("highlighted", i === launcherHighlight);
+  });
+}
+
+function openLauncher() {
+  $("launcher-overlay").classList.remove("hidden");
+  $("launcher-input").value = "";
+  $("launcher-garden").textContent = "garden · " + currentGarden;
+  launcherHighlight = 0;
+  renderLauncherResults("");
+  $("launcher-input").focus();
+}
+
+function closeLauncher() { $("launcher-overlay").classList.add("hidden"); }
+
+function launcherIsOpen() { return !$("launcher-overlay").classList.contains("hidden"); }
+
+function launchApp(appId) {
+  closeLauncher();
+  const app = LAUNCHER_APPS.find((a) => a.id === appId);
+  call(api.open_app(appId));
+  showToast(`Opening ${app.name}…`);
+}
+
+function setupLauncher() {
+  $("switch-app-btn").addEventListener("click", openLauncher);
+  $("launcher-overlay").addEventListener("mousedown", (e) => {
+    if (e.target === $("launcher-overlay")) closeLauncher();
+  });
+  $("launcher-input").addEventListener("input", (e) => renderLauncherResults(e.target.value));
+  $("launcher-input").addEventListener("keydown", (e) => {
+    const list = launcherFiltered($("launcher-input").value);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (launcherHighlight < list.length - 1) launcherHighlight++;
+      updateLauncherHighlight();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (launcherHighlight > 0) launcherHighlight--;
+      updateLauncherHighlight();
+    } else if (e.key === "Enter" && list[launcherHighlight]) {
+      launchApp(list[launcherHighlight].id);
+    }
+  });
+}
+
 
 function setupRunsPanel() {
   $("toggle-runs-panel-btn").addEventListener("click", () => {
@@ -4310,6 +3994,20 @@ function setupKeyboard() {
       return;
     }
 
+    if ((e.key === "j" || e.key === "J") && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      openLauncher();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && /^[1-3]$/.test(e.key)) {
+      const app = launcherChoices()[Number(e.key) - 1];
+      if (app) {
+        e.preventDefault();
+        launchApp(app.id);
+      }
+      return;
+    }
+
     if ((e.key === "Delete" || e.key === "Backspace") && !isTypingInField()) {
       if (graph.selectedIds.size > 0) {
         e.preventDefault();
@@ -4359,11 +4057,9 @@ function setupKeyboard() {
 
     if (e.key !== "Escape") return;
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
+    if (launcherIsOpen()) { closeLauncher(); return; }
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
-    if (!$("portal-overlay").classList.contains("hidden")) { closePortalModal(); return; }
-    if (!$("library-overlay").classList.contains("hidden")) { closeLibraryModal(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
-    if (!$("folder-picker-wrap").classList.contains("hidden")) { hideFolderPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
@@ -4463,14 +4159,11 @@ async function init() {
   window.graph = graph;
 
   setupGardensModal();
-  setupPortalModal();
-  setupLibraryModal();
   setupSyncModal();
   setupTopMenus();
   setupDetailResize();
   setupQuickAdd();
   setupSpeciesControls();
-  setupFolderControls();
   setupSearch();
   setupViewControls();
   setupViewSettings();
@@ -4479,6 +4172,7 @@ async function init() {
   setupMora();
   setupMonastery();
   setupMomentum();
+  setupLauncher();
   setupSync();
   setupRefresh();
   setupContextMenu();

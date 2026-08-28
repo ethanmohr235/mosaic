@@ -23,20 +23,6 @@ def validate_garden_name(name: str) -> None:
         )
 
 
-def is_reserved_garden(name: str) -> bool:
-    """A leading underscore marks a garden as MonOSS's own rather than one
-    of the user's workspaces -- `_library` (core/library.py) is the only
-    one today, and named that way precisely so this is a rule rather than
-    a list of special cases to keep in sync.
-
-    Reserved gardens are real gardens: fully readable, writable and
-    openable by name. What the rule governs is discovery and creation --
-    they don't appear among your workspaces, and you can't create one by
-    hand. Kept here beside validate_garden_name() because it is the same
-    kind of statement about what a garden name means."""
-    return name.startswith("_")
-
-
 def garden_db_path(name: str) -> Path:
     validate_garden_name(name)
     return GARDENS_DIR / f"{name}.db"

@@ -30,9 +30,9 @@ register_provider("coolprop", CoolPropProvider)
 def model_ids_in(relationships: Iterable[Relationship]) -> set[str]:
     """Which motes a set of relationships makes into property models --
     the target of at least one uses_model. The same shape as
-    core/species.py::species_ids_in() and core/folders.py::folder_ids_in(),
-    so "which motes play role X" has one answer per role instead of one
-    per caller (the CLI used to work this out for itself, twice).
+    core/species.py::species_ids_in(), so "which motes play role X" has
+    one answer per role instead of one per caller (the CLI used to work
+    this out for itself, twice).
 
     Pure, like everything else in this module: it takes relationships
     rather than a connection, which is also what lets the caller decide

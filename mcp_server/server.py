@@ -24,16 +24,13 @@ from mcp.server.auth.provider import OAuthAuthorizationServerProvider
 from mcp.server.auth.settings import AuthSettings
 
 from core import derivations as derivations_repo
-from core import folders as folders_repo
 from core import garden_io
 from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
-from core import library as library_repo
 from core import graph as graph_repo
 from core import modoc as modoc_repo
 from core import modoc_bind as modoc_bind_repo
 from core import motes as motes_repo
-from core import portals as portals_repo
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import simulation as simulation_repo
@@ -107,7 +104,7 @@ def export_garden(garden: str | None = None) -> dict[str, Any]:
 # Syncthing/Dropbox/iCloud Drive keeps identical across devices) rather
 # than over the network itself -- see core/sync.py. sync_init points a
 # garden at one; the others read/write that garden's own change log
-# through it. None of this touches the reserved `_library` garden.
+# through it.
 
 
 def sync_init(sync_dir: str, garden: str | None = None, clone: bool = False) -> dict[str, Any]:
@@ -248,8 +245,7 @@ def create_relationship(
     """Connect two motes with a typed, directed relationship. The type is
     free-form (e.g. 'wrote', 'lives_in'), except for the reserved ones
     the engine interprets -- see reserved_names(), and prefer
-    set_species()/set_template()/set_folder() over creating those by
-    hand."""
+    set_species()/set_template() over creating those by hand."""
     with _connect(garden) as conn:
         rel_id = rel_repo.create_relationship(conn, from_id, to_id, type)
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
@@ -337,106 +333,6 @@ def create_instance(
     with _connect(garden) as conn:
         mote_id = species_repo.create_instance(conn, species_id, overrides or {})
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
-
-
-# ---- folders ----
-
-
-def list_folders(garden: str | None = None) -> list[dict[str, Any]]:
-    """Every mote currently acting as a folder -- the target of at least
-    one in_folder relationship. Folders are purely organizational: unlike
-    a species, a folder means nothing to the simulation engine."""
-    with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in folders_repo.list_folders(conn)]
-
-
-def folders_of(mote_id: str, garden: str | None = None) -> list[dict[str, Any]]:
-    """The folders this mote is filed under. A mote may be in more than
-    one."""
-    with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in folders_repo.folders_of(conn, mote_id)]
-
-
-def folder_members(folder_id: str, garden: str | None = None) -> list[dict[str, Any]]:
-    """Every mote filed under this folder."""
-    with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in folders_repo.folder_members(conn, folder_id)]
-
-
-def set_folder(mote_id: str, folder_id: str, garden: str | None = None) -> dict[str, Any]:
-    """File a mote under a folder. Additive -- it does not remove folders
-    the mote is already in. Any mote can act as a folder; nothing marks
-    one structurally, so this is the whole of "make that a folder"."""
-    with _connect(garden) as conn:
-        rel_id = folders_repo.set_folder(conn, mote_id, folder_id)
-        return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
-
-
-# ---- reusable motes (the library) ----
-
-
-def list_library() -> list[dict[str, Any]]:
-    """Every entry in the reusable-motes library -- standalone copies of
-    motes worth dropping into any garden later. The library is a reserved
-    garden (`_library`) rather than a separate store, but it is left out
-    of list_gardens(), so this is how you find what's in it."""
-    with _connect(library_repo.LIBRARY_GARDEN) as conn:
-        return [dataclasses.asdict(m) for m in motes_repo.list_motes(conn)]
-
-
-def save_to_library(mote_id: str, garden: str | None = None) -> dict[str, Any]:
-    """Snapshot a mote's properties into a new library entry. A copy, not
-    a link: editing either side afterwards never affects the other, and
-    the mote's relationships are not captured."""
-    with _connect(garden) as conn:
-        entry_id = library_repo.save_to_library(conn, mote_id)
-    with _connect(library_repo.LIBRARY_GARDEN) as library_conn:
-        return dataclasses.asdict(motes_repo.get_mote(library_conn, entry_id))
-
-
-def reuse_from_library(
-    library_mote_id: str, overrides: dict[str, Any] | None = None, garden: str | None = None
-) -> dict[str, Any]:
-    """Create a new mote in `garden` from a library entry, with
-    `overrides` applied on top -- the same seeding create_instance() does
-    from a species' template. Nothing links the new mote back to the
-    entry."""
-    with _connect(garden) as conn:
-        mote_id = library_repo.reuse_from_library(conn, library_mote_id, overrides or {})
-        return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
-
-
-# ---- portals ----
-
-
-def create_portal(
-    target_garden: str,
-    target_mote_id: str,
-    properties: dict[str, Any] | None = None,
-    garden: str | None = None,
-) -> dict[str, Any]:
-    """Create a portal mote in `garden` (default 'default') pointing at
-    target_mote_id in target_garden -- a one-way navigational reference,
-    not a relationship (relationships require both ends in the same
-    garden's motes table). Fails if target_garden doesn't exist or
-    target_mote_id isn't in it. `properties` are set on the new mote
-    alongside its pointer, same as create_instance's overrides."""
-    with _connect(garden) as conn:
-        mote_id = portals_repo.create_portal(conn, target_garden, target_mote_id, properties or {})
-        return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
-
-
-def resolve_portal(mote_id: str, garden: str | None = None) -> dict[str, Any]:
-    """Follow a portal mote's target and return the live mote it points
-    at, without switching anything -- MCP calls are stateless, so unlike
-    the app there's no "current garden" to switch. Raises if mote_id
-    isn't a portal, or if its target garden/mote no longer exists."""
-    with _connect(garden) as conn:
-        mote = motes_repo.get_mote(conn, mote_id)
-        if mote is None:
-            raise LookupError(f"No such mote: {mote_id!r}")
-        target_garden, target_mote = portals_repo.resolve_portal(mote.properties)
-        return {"garden": target_garden, "mote": dataclasses.asdict(target_mote)}
 
 
 # ---- graph ----
@@ -803,9 +699,6 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     delete_relationship,
     list_species, species_of, instances_of, set_species, set_template, template_for,
     create_instance,
-    list_folders, folders_of, folder_members, set_folder,
-    list_library, save_to_library, reuse_from_library,
-    create_portal, resolve_portal,
     neighborhood, whole_garden,
     preview_simulation, list_runs, get_run, run_changes, run_ticks, mote_history,
     why, impact, requires, producers, consumers,

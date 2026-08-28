@@ -276,6 +276,23 @@ def test_the_panel_marks_which_properties_this_window_is_reading(api, board):
     assert set(panel["taskKeys"]) == {"status", "priority", "estimate", "subtasks"}
 
 
+# ---- app switcher (⌘J) ----
+#
+# The command-building itself is api_common.open_app's own test (see
+# tests/test_api_common.py); what's worth checking here is only that
+# this app's method actually delegates to it with this app's garden.
+
+def test_open_app_delegates_to_api_common(api, monkeypatch):
+    import api_common
+
+    calls = []
+    monkeypatch.setattr(
+        api_common, "popen_detached", lambda args, **kwargs: calls.append(args)
+    )
+    assert api.open_app("monarch") == {"app": "monarch", "garden": "test-momentum", "focus": None}
+    assert calls[0][2:] == ["--garden", "test-momentum"]
+
+
 # ---- ports ----
 #
 # The same collision Monastery guards against: a fourth window asking

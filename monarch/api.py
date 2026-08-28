@@ -13,17 +13,15 @@ from pathlib import Path
 import webview
 
 from api_common import coerce_properties as _coerce_properties
+from api_common import open_app as _open_app
 from api_common import synchronized as _synchronized
 from core.db import get_connection, initialize_database
 from core import derivations as derivations_repo
 from core import gardens as gardens_repo
 from core import garden_io
-from core import folders as folders_repo
 from core import graph as graph_repo
-from core import library as library_repo
 from core import links as links_repo
 from core import motes as motes_repo
-from core import portals as portals_repo
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import kinds as kinds_repo
@@ -35,16 +33,11 @@ from core import species as species_repo
 
 
 def _classify(motes: list, rels: list) -> dict:
-    """What each returned mote *is* -- shared by focus() (the currently-
-    open garden) and library_snapshot() (a read of _library) so the two
-    don't drift.
+    """What each returned mote *is*, for focus()'s payload.
 
-    One `kinds` map rather than the species_ids/folder_ids arrays this
-    used to return: those were two of six kinds core recognizes
-    (core/kinds.py), and the frontend had no way to hear about the other
-    four, which is why a portal mote's detail panel said "Mote" while
-    the canvas drew it with a portal ring. Adding a kind is now a change
-    to the table, not to this payload's shape."""
+    One `kinds` map rather than a hardcoded array per kind: it's a
+    general index over whatever core/kinds.py recognizes, so adding a
+    kind is a change to that table, not to this payload's shape."""
     return {"kinds": kinds_repo.kinds_in(motes, rels)}
 
 
@@ -233,9 +226,6 @@ class Api:
 
     @_synchronized
     def list_gardens(self) -> list[str]:
-        # Reserved gardens (the reusable-motes library) are filtered by
-        # core, not here, so the switcher, the portal picker, `garden
-        # list` and the MCP tool all show the same set.
         return gardens_repo.list_gardens()
 
     @_synchronized
@@ -256,9 +246,7 @@ class Api:
     def delete_garden(self, name: str) -> dict:
         # Checked in this order deliberately: if it's the only garden left,
         # "switch away first" would be misleading advice -- there's nowhere
-        # to switch to. "Last garden" counts workspaces, not garden files:
-        # being left with only the reusable-motes library is being left
-        # with nowhere to work.
+        # to switch to.
         if len(gardens_repo.list_gardens()) <= 1:
             raise ValueError("Can't delete the last garden.")
         if name == self._current_garden:
@@ -379,137 +367,6 @@ class Api:
         result = sync_repo.run(self._conn, self._current_garden)
         return {"synced": True, **result}
 
-    # ---- portals ----
-
-    @_synchronized
-    def find_portal_target(self, garden: str, query: str) -> list[dict]:
-        """Search another garden's motes for a portal's target, via a
-        short-lived connection -- same pattern export_garden(garden_name)
-        uses so browsing candidates doesn't disturb the currently open
-        garden. Raises if `garden` doesn't exist rather than silently
-        creating it (get_connection()/initialize_database() would
-        otherwise happily create an empty garden file from a bad name)."""
-        if not gardens_repo.garden_exists(garden):
-            raise LookupError(f"No such garden: {garden!r}")
-        conn = get_connection(garden)
-        try:
-            initialize_database(conn)
-            return [dataclasses.asdict(m) for m in motes_repo.search_motes(conn, query)]
-        finally:
-            conn.close()
-
-    @_synchronized
-    def create_portal(
-        self, target_garden: str, target_mote_id: str, raw_properties: dict | None = None
-    ) -> dict:
-        mote_id = portals_repo.create_portal(
-            self._conn, target_garden, target_mote_id, _coerce_properties(raw_properties or {})
-        )
-        return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
-
-    @_synchronized
-    def jump_to_portal(self, mote_id: str) -> dict:
-        """Resolve mote_id's portal target and switch the live connection
-        to it in one call -- bundles resolve+switch (the same close/
-        reopen switch_garden() does) so the frontend doesn't orchestrate
-        a multi-round-trip sequence. Errors (deleted target garden/mote)
-        propagate up through call()'s existing toast path."""
-        mote = motes_repo.get_mote(self._conn, mote_id)
-        if mote is None:
-            raise LookupError(f"No such mote: {mote_id!r}")
-        garden, target_mote = portals_repo.resolve_portal(mote.properties)
-        self._conn.close()
-        self._conn = get_connection(garden)
-        initialize_database(self._conn)
-        self._current_garden = garden
-        return {"garden": garden, "mote_id": target_mote.id}
-
-    # ---- library ----
-
-    @_synchronized
-    def open_library(self) -> dict:
-        """Switch into _library as a real, viewable/editable garden --
-        lazily creating it if nothing's been saved to it yet, same
-        reasoning as core/library.py's own lazy-creation-on-first-save
-        (get_connection + initialize_database is enough; SQLite creates
-        the file, so this deliberately bypasses self.create_garden(),
-        which rejects the literal name _library for *user-initiated*
-        creation via "+ New garden…"). Bundles create-if-needed with the
-        same close/reopen dance switch_garden()/jump_to_portal() already
-        do, so the frontend's action is one call."""
-        self._conn.close()
-        self._conn = get_connection(library_repo.LIBRARY_GARDEN)
-        initialize_database(self._conn)
-        self._current_garden = library_repo.LIBRARY_GARDEN
-        return {"garden": self._current_garden}
-
-    @_synchronized
-    def save_to_library(self, mote_id: str) -> dict:
-        """Snapshot mote_id's properties into a new library entry.
-        Returns the new entry, fetched back via a short-lived connection
-        to the library garden -- same pattern library_snapshot() uses to
-        read it without disturbing self._conn."""
-        entry_id = library_repo.save_to_library(self._conn, mote_id)
-        conn = get_connection(library_repo.LIBRARY_GARDEN)
-        try:
-            initialize_database(conn)
-            return dataclasses.asdict(motes_repo.get_mote(conn, entry_id))
-        finally:
-            conn.close()
-
-    @_synchronized
-    def library_snapshot(self) -> dict:
-        """Whole-graph read of _library (motes + relationships +
-        species/folder classification) for the "Reuse from library…"
-        picker's client-side filtering -- fetched once per modal-open
-        instead of a per-keystroke round trip. Cross-garden idiom
-        matches find_portal_target()/save_to_library()."""
-        conn = get_connection(library_repo.LIBRARY_GARDEN)
-        try:
-            initialize_database(conn)
-            motes, rels = graph_repo.whole_garden(conn)
-            return {
-                "motes": [dataclasses.asdict(m) for m in motes],
-                "relationships": [dataclasses.asdict(r) for r in rels],
-                **_classify(motes, rels),
-            }
-        finally:
-            conn.close()
-
-    @_synchronized
-    def reuse_from_library(self, library_mote_id: str, raw_overrides: dict | None = None) -> dict:
-        mote_id = library_repo.reuse_from_library(
-            self._conn, library_mote_id, _coerce_properties(raw_overrides or {})
-        )
-        return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
-
-    @_synchronized
-    def delete_library_entry(self, library_mote_id: str) -> bool:
-        conn = get_connection(library_repo.LIBRARY_GARDEN)
-        try:
-            initialize_database(conn)
-            return motes_repo.delete_mote(conn, library_mote_id)
-        finally:
-            conn.close()
-
-    @_synchronized
-    def restore_library_entry(self, raw_properties: dict, id: str) -> dict:
-        """Undo counterpart to delete_library_entry() -- recreates a
-        just-removed entry with its original id and properties, the same
-        create-with-explicit-id pattern deleteSelection()'s own mote-undo
-        already uses via create_mote(). Properties arrive already typed
-        (the deleted entry's own dict, round-tripped through the undo
-        toast's closure) rather than raw form text, same as
-        copySelection/pasteAt -- _coerce_properties leaves non-strings
-        alone."""
-        conn = get_connection(library_repo.LIBRARY_GARDEN)
-        try:
-            initialize_database(conn)
-            mote_id = motes_repo.create_mote(conn, _coerce_properties(raw_properties), id=id)
-            return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
-        finally:
-            conn.close()
-
     # ---- motes ----
 
     @_synchronized
@@ -602,6 +459,18 @@ class Api:
         _popen_detached(command, quiet=False)
         return {"garden": self._current_garden, "focus": mote_id}
 
+    @_synchronized
+    def open_app(self, app_id: str, mote_id: str | None = None) -> dict:
+        """Launch any MonOSS app on this same garden from the ⌘J switcher
+        -- the app-agnostic counterpart to open_mora/open_monastery/
+        open_momentum above (which stay as they are, since Monarch's own
+        Tools menu already calls each by name). Monarch is the one app
+        that can already reach every sibling, so this is also how the
+        switcher opens a second Monarch window on itself, same as any
+        other app id -- see window_launcher.choose_port for why that's a
+        reasonable thing to do."""
+        return _open_app(app_id, self._current_garden, mote_id)
+
     # ---- relationships ----
 
     @_synchronized
@@ -660,21 +529,6 @@ class Api:
             self._conn, species_id, _coerce_properties(raw_overrides or {})
         )
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
-
-    # ---- folders ----
-
-    @_synchronized
-    def set_folder(self, mote_id: str, folder_id: str) -> dict:
-        rel_id = folders_repo.set_folder(self._conn, mote_id, folder_id)
-        return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
-
-    @_synchronized
-    def folders_of(self, mote_id: str) -> list[dict]:
-        return [dataclasses.asdict(m) for m in folders_repo.folders_of(self._conn, mote_id)]
-
-    @_synchronized
-    def folder_members(self, folder_id: str) -> list[dict]:
-        return [dataclasses.asdict(m) for m in folders_repo.folder_members(self._conn, folder_id)]
 
     # ---- simulation ----
 

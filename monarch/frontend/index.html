@@ -32,7 +32,6 @@
     <div id="garden-menu" class="menu hidden">
       <div id="garden-menu-list"></div>
       <div class="menu-sep"></div>
-      <button id="garden-menu-open-library" class="menu-item" type="button">Open library</button>
       <button id="garden-menu-new" class="menu-item" type="button">+ New garden…</button>
       <button id="garden-menu-manage" class="menu-item" type="button" title="Manage gardens">Manage gardens…</button>
     </div>
@@ -98,6 +97,7 @@
   <div class="spacer"></div>
 
   <button id="refresh-btn" class="topbar-trigger icon-btn" type="button" title="Refresh: sync and reload">⟳</button>
+  <button id="switch-app-btn" class="topbar-trigger icon-btn" type="button" title="Switch app (⌘J)">⊞</button>
   <button id="search-btn" type="button">
     <span class="search-glyph"></span>
     <span>Search motes…</span>
@@ -118,9 +118,6 @@
     <section id="control-panel">
       <div class="panel-heading">Species</div>
       <div id="legend"></div>
-
-      <div class="panel-heading" id="folder-heading">Folders</div>
-      <div id="legend-folders"></div>
 
       <div class="panel-heading" id="rel-heading">Relationships</div>
       <div id="rel-filters"></div>
@@ -260,15 +257,6 @@
         </div>
         <div id="detail-instance-count"></div>
 
-        <div class="panel-heading">Folders</div>
-        <div id="detail-folders"></div>
-        <button id="set-folder-btn" type="button" class="ghost">Add to folder…</button>
-        <div id="folder-picker-wrap" class="hidden">
-          <input type="text" id="folder-picker-input" placeholder="Search for a folder…" autocomplete="off">
-          <div id="folder-picker-results"></div>
-        </div>
-        <div id="detail-member-count"></div>
-
         <div class="panel-heading">Note</div>
         <button id="open-note-btn" type="button" class="ghost">Write a note…</button>
 
@@ -321,6 +309,8 @@
   <span class="hint"><kbd>ctrl+drag</kbd> connect</span>
   <span class="dot">·</span>
   <span class="hint"><kbd>scroll</kbd> zoom</span>
+  <span class="dot">·</span>
+  <span class="hint"><kbd>⌘J</kbd> switch app</span>
 </footer>
 
 <div id="context-menu" class="hidden menu"></div>
@@ -329,7 +319,6 @@
   <div id="search-modal">
     <input type="text" id="search-input" placeholder="Search motes and properties, or key = value…" autocomplete="off">
     <div id="search-species-chips" class="chip-row"></div>
-    <div id="search-folder-chips" class="chip-row"></div>
     <div id="search-rel-chips" class="chip-row"></div>
     <div id="search-results"></div>
     <div id="search-footer">
@@ -347,26 +336,6 @@
       <div class="spacer"></div>
       <button id="import-garden-btn" type="button" class="ghost">Import…</button>
     </div>
-  </div>
-</div>
-
-<div id="portal-overlay" class="hidden">
-  <div id="portal-modal">
-    <div class="panel-title">New portal</div>
-    <select id="portal-garden-select"></select>
-    <input type="text" id="portal-search-input" placeholder="Search motes in that garden…" autocomplete="off">
-    <div id="portal-search-results"></div>
-  </div>
-</div>
-
-<div id="library-overlay" class="hidden">
-  <div id="library-modal">
-    <div class="panel-title">Reuse from library</div>
-    <input type="text" id="library-search-input" placeholder="Search the library…" autocomplete="off">
-    <div id="library-species-chips" class="chip-row"></div>
-    <div id="library-folder-chips" class="chip-row"></div>
-    <div id="library-rel-chips" class="chip-row"></div>
-    <div id="library-search-results"></div>
   </div>
 </div>
 
@@ -398,6 +367,23 @@
         <div class="spacer"></div>
         <button id="sync-disable-btn" type="button" class="danger">Disable sync…</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="launcher-overlay" class="hidden">
+  <div id="launcher-modal">
+    <div id="launcher-input-row">
+      <span class="launcher-glyph"></span>
+      <input type="text" id="launcher-input" placeholder="Open an app…" autocomplete="off">
+      <kbd>esc</kbd>
+    </div>
+    <div id="launcher-results"></div>
+    <div id="launcher-empty" class="hidden"></div>
+    <div id="launcher-footer">
+      <span>↑↓ select</span><span>↵ open</span><span>⌘1–3 jump</span>
+      <div class="spacer"></div>
+      <span id="launcher-garden"></span>
     </div>
   </div>
 </div>

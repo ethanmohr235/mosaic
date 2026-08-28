@@ -16,7 +16,7 @@ Relationships should have the ability to modify the properties of motes programm
 
 # Gardens
 
-The user should be able to create multiple object graphs that are completely separate from each other. These are called gardens. The one deliberate exception is a **portal**: a mote may carry a reference into another garden so the graph can be navigated there, but nothing about the two gardens' data, simulation, or history otherwise mixes -- see Portals below. A second, different exception is the **library**: a reserved garden holding standalone copies of motes worth reusing elsewhere -- see Reusable motes below.
+The user should be able to create multiple object graphs that are completely separate from each other. These are called gardens.
 
 # Species
 
@@ -26,32 +26,24 @@ Species are flat for now -- a species being an instance of another species is no
 
 A species may have a **template**: a mote pointing at it via a `template_of` relationship, whose properties new instances start from. `template_of` is deliberately a different relationship type from `instance_of` -- a template holds placeholder values and belongs to no simulation, so it must not appear among a species' instances.
 
-# Folders
-
-A mote can act as a **folder** -- a purely organizational container that other motes are grouped into, for annotation only. Like a species, a folder is still just a mote; nothing marks it as special structurally. Membership is a relationship: a mote is grouped into a folder by having an `in_folder` relationship pointing at it (`core/folders.py`), the same `member --in_folder--> folder` shape as `instance --instance_of--> species`. Like every other reserved type, it reads as a sentence in the direction it points; it was briefly called `groups`, which read backwards, and was renamed while no garden had used one yet. A mote may belong to more than one folder, and folders are usable in any garden, not just the library (see Reusable motes below).
-
-Folders have no effect on simulation or storage beyond the relationship itself: a folder mote is never touched by `core/simulation.py` unless it's separately declared an `instance_of` a species, and nothing about Calendar export or garden export/import treats a folder or an `in_folder` relationship differently from ordinary data. The one concrete distinction is visual -- the UI renders a folder mote with its own shape (a square, distinct from a species' diamond and an ordinary mote's circle) and offers a "Folders" legend section with the same hide/show behavior species get. The detail panel treats folders as the parallel of species throughout: a "Folders" section listing the folders a mote belongs to, and, on a folder itself, a member count line matching the instance count a species gets.
-
 # Kinds
 
-Species, template, folder, property model, rule and portal are all the same idea: an ordinary mote that *is* one of these -- a **kind** -- because of what points at it (or, for a portal, because of the reserved properties it carries). Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
+Species, template, property model and rule are all the same idea: an ordinary mote that *is* one of these -- a **kind** -- because of what points at it. Nothing is stored on a mote to say so -- that is what "everything is a mote" costs, and the price is that "what is this?" has to be answered by looking.
 
 Called kinds and not roles, which is what this was: `core/roles.py` answers a different question -- what an assembly's parts are *called* (see Roles below). **A kind is what a mote is; a role is what something else calls it.** A kind is derived and never stored; a role is a declared property. The frontend was already using this word (`kindLabel`, `kindOf`), so the rename made existing names correct rather than inventing one.
 
-`core/kinds.py` is where it is answered, once. It is an index, not an implementation: each kind's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `folder_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()`, `portal_target()` -- and the `KINDS` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for kinds, and `docs/style.md` rules out the global mutable state a `register_kind()` would need.
+`core/kinds.py` is where it is answered, once. It is an index, not an implementation: each kind's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()` -- and the `KINDS` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for kinds, and `docs/style.md` rules out the global mutable state a `register_kind()` would need.
 
 | kind | recognized by |
 | --- | --- |
 | species | target of `instance_of` or `template_of` |
 | template | source of `template_of` |
-| folder | target of `in_folder` |
 | property model | target of `uses_model` |
 | rule | source of `applies_to` **and** carries an `equation` |
-| portal | carries `portal_garden` + `portal_mote` |
 
-Two forms, one answer: `kinds_in(motes, relationships)` for a caller holding an already-fetched subgraph (each kind's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Kinds are not exclusive -- a species can also be a folder, and a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
+Two forms, one answer: `kinds_in(motes, relationships)` for a caller holding an already-fetched subgraph (each kind's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Kinds are not exclusive -- a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
 
-`monarch/api.py::focus()` and `library_snapshot()` return this as one `kinds` map (mote id -> kind names; motes of no particular kind are omitted rather than carrying an empty list). That replaced the `species_ids`/`folder_ids` arrays, which were two of the six kinds hardcoded into the payload's shape -- the frontend had no way to hear about the other four, which is why a portal's detail panel said "Mote" while the canvas drew it with a portal ring. Adding a kind is now a change to the table, not to a payload.
+`monarch/api.py::focus()` returns this as one `kinds` map (mote id -> kind names; motes of no particular kind are omitted rather than carrying an empty list). That replaced the `species_ids` array, one kind hardcoded into the payload's shape -- the frontend had no way to hear about the others. Adding a kind is now a change to the table, not to a payload.
 
 Adapters must not answer "is this a species" for themselves. That is how a subtlety ends up true in one surface and false in another.
 
@@ -65,7 +57,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies`, `in_folder` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `portal_garden`, `portal_mote` and `modoc` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units` and `modoc` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below), and a task's status or estimate is likewise discovered from what the value looks like (`core/task_candidates.py`). The ten names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
 
@@ -355,8 +347,8 @@ that pragma is set in the adapter only, leaving the CLI and UI
 untouched. The GUI does not observe external changes until it refetches.
 
 The surface is reads plus graph edits: motes, relationships, species,
-templates and instances, folders, the reusable-motes library,
-neighborhood queries, and *previews* of simulation runs. Applying a
+templates and instances, neighborhood queries, and *previews* of
+simulation runs. Applying a
 simulation to the graph, deleting or restoring gardens, calendar export,
 and opening links are deliberately left out -- they either write results
 the user should approve in the app, or need a live window. See
@@ -369,9 +361,9 @@ the user should approve in the app, or need a live window. See
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
-folders and the library existed only in the app, property models only in
-the CLI, templates only in MCP, not by decision but by whichever surface
-happened to be open when each was built.
+property models existed only in the CLI, templates only in MCP, not by
+decision but by whichever surface happened to be open when each was
+built.
 
 The charter:
 
@@ -466,74 +458,6 @@ the only thing that ever required *writing* to one fixed key, which is
 why the calendar's read path could always be general while its write path
 could not. Removing it is what made the rest of this possible.
 
-# Portals
-
-`portal_garden` and `portal_mote` (`core/portals.py`) turn an ordinary
-mote into a one-way link into a specific mote in a different garden.
-Both are flat reserved properties, not a relationship --
-`relationships.to_id` has a foreign key into the *same* connection's
-`motes` table (`core/db.py`), so a cross-garden reference can't be one.
-Creating a portal does not modify anything in the target garden or
-create a reciprocal link back; following a portal is UI/MCP navigation,
-not a live coupling -- the portal mote's own `name` (if any) is a
-one-time snapshot of the target's label at creation time, not kept in
-sync afterward.
-
-Portals are navigation-only for v1: `targets()`/`sources()` and the
-`property()` builtin never see through one, and a rule's `equation`
-cannot read a value across a portal. There is currently no cross-garden
-mechanism anywhere in `core/simulation.py`; extending the solver to
-resolve properties across gardens would be a substantially larger,
-separate feature.
-
-# Reusable motes
-
-`core/library.py` lets a mote worth reusing (a person, a recurring
-meeting shape, a standard task) be saved once and dropped into any
-garden later. Unlike a portal, this is not a live reference: saving a
-mote copies its properties into a reserved garden, `_library`, exactly
-like any other garden underneath (same `gardens/<name>.db` file, same
-motes/relationships schema). Reusing a library entry copies its
-properties into a brand-new mote in the current garden -- a fresh,
-independent snapshot, the same way `core/species.py::create_instance()`
-seeds a new instance from a template. Nothing links the two afterward;
-editing either side never affects the other.
-
-Saving and reusing are both `core/motes.py::copy_mote()` -- a mote's
-properties into a new, independent mote, in the same garden or a
-different one. That primitive is also what `create_instance()` does from
-a species' template, so seeding a new mote from an existing one is one
-function rather than a read-then-create written out wherever it's needed.
-What `core/library.py` keeps is what actually belongs to the library:
-which garden it is, and bringing it into being lazily.
-
-Only a mote's properties are saved -- its relationships are never
-captured or restored. Saving a whole subgraph (a mote plus its
-relationships to other library entries) is a deferred, larger feature:
-it needs a way to decide where a subgraph's boundary is, and what to do
-with a relationship pointing at a mote outside it.
-
-`_library` never shows up as one of your everyday workspaces -- it is a
-**reserved garden** (`core/db.py::is_reserved_garden`: any name starting
-with an underscore), which `core/gardens.py` refuses to create by hand
-and leaves out of `list_gardens()` unless explicitly asked with
-`include_reserved=True`. That rule lives in core rather than in one
-adapter, so the UI's garden switcher, the portal picker's dropdown, the
-CLI's `garden list` and the MCP `list_gardens` tool all show the same
-set; previously only the UI filtered it, and the other two offered the
-library as an ordinary garden you could switch into or collide with.
-Reserved governs discovery and creation, not access: it's still a real,
-fully editable garden underneath, reachable directly via the garden
-menu's "Open library" action or by naming it explicitly. That
-makes it worth organizing like any other garden: creating folder motes
-inside it and grouping related library entries together (see Folders
-above) is the intended way to keep a large library navigable, and the
-"Reuse from library…" picker filters by that same folder/species
-grouping alongside free-text search.
-
-This first pass covers `core/` and the UI (`monarch/api.py`,
-`monarch/frontend/`) only; CLI and MCP exposure are deferred to a follow-up.
-
 # Notes
 
 `modoc` (`core/modoc.py`) holds a **.modoc note**: prose written *about*
@@ -546,8 +470,9 @@ does. See `docs/modoc.md` for the language.
 Storage is one reserved property on an ordinary mote, and that is the
 whole design. A note is not a new object type, and carrying one is
 deliberately **not** a kind (Kinds above): every entry in that table is a
-job a mote does in the graph's machinery -- a rule solves, a portal
-navigates -- and `modoc` changes nothing about how a mote is treated. It
+job a mote does in the graph's machinery -- a rule solves, a property
+model computes -- and `modoc` changes nothing about how a mote is
+treated. It
 is data, exactly like `url` and `date`, neither of which is a kind
 either. This was briefly got wrong, and the cost was immediate and
 visible: because a kind displaces the species in the detail panel's type

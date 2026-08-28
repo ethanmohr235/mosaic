@@ -25,6 +25,7 @@ from datetime import datetime
 import webview
 
 from api_common import coerce_properties as _coerce_properties
+from api_common import open_app as _open_app
 from api_common import synchronized as _synchronized
 from core import calendar as calendar_repo
 from core import gardens as gardens_repo
@@ -113,6 +114,15 @@ class Api:
     def shutdown(self) -> None:
         self._best_effort_sync()
         self._conn.close()
+
+    # ---- app switcher ----
+
+    @_synchronized
+    def open_app(self, app_id: str, mote_id: str | None = None) -> dict:
+        """Launch another MonOSS app on this same garden from the ⌘J
+        switcher -- see api_common.open_app for why this is a detached
+        process rather than a second window here."""
+        return _open_app(app_id, self._garden, mote_id)
 
     # ---- gardens ----
 

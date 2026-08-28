@@ -46,26 +46,18 @@ absolute path.
 
 ## Tools
 
-48 tools, grouped: gardens (`list_gardens`, `create_garden`,
+44 tools, grouped: gardens (`list_gardens`, `create_garden`,
 `export_garden`), motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
 `species_of`, `instances_of`, `set_species`, `set_template`,
-`template_for`, `create_instance`), folders (`list_folders`,
-`folders_of`, `folder_members`, `set_folder`), the reusable-motes
-library (`list_library`, `save_to_library`, `reuse_from_library`),
-portals (`create_portal`, `resolve_portal`), graph (`neighborhood`,
+`template_for`, `create_instance`), graph (`neighborhood`,
 `whole_garden`), simulation (`preview_simulation`, `list_runs`,
 `get_run`, `run_changes`, `run_ticks`, `mote_history`, `why`),
 dependencies (`impact`, `requires`, `producers`, `consumers`),
 `check_roles`, `list_scenarios`, notes (`resolve_modoc`), and
 `reserved_names`.
-
-Folders and the library used to exist only in the desktop app. They are
-graph edits like any other, which is what this surface is for — see "What
-belongs on which surface" in `docs/architecture.md` for the rule that put
-them here.
 
 The relationship-type parameter is `type` on every tool that takes one
 (`list_relationships`, `create_relationship`, `update_relationship`); it
@@ -73,11 +65,7 @@ was `relationship_type` on those three while core called it `type_`.
 
 Every tool takes an optional `garden`, defaulting to `default`.
 
-`list_gardens` returns the user's workspaces only — reserved gardens
-(any underscore-prefixed name; today just `_library`, the reusable-motes
-store) are MonOSS's own storage and are left out, and `create_garden`
-refuses to make one. Naming a reserved garden explicitly still works,
-since the restriction is on discovery and creation rather than access.
+`list_gardens` returns every garden.
 
 Property values keep whatever JSON type the client sends: `21` is stored
 as a number, `"21"` as a string. This is the one place the MCP adapter

@@ -4,12 +4,9 @@ import json
 import logging
 from pathlib import Path
 
-from core.folders import folder_members, folders_of, list_folders, set_folder
-from core.library import LIBRARY_GARDEN, reuse_from_library, save_to_library
 from core import modoc
 from core.modoc_bind import resolve as resolve_modoc
 from core.motes import create_mote, list_motes, get_mote, delete_mote, search_motes, update_mote
-from core.portals import create_portal, resolve_portal
 from core.species import (
     create_instance,
     instances_of,
@@ -159,38 +156,6 @@ def build_parser() -> argparse.ArgumentParser:
     instance_new = species_sub.add_parser("new", help="Create an instance, seeded from the template")
     instance_new.add_argument("--species", required=True, help="Species mote id")
     instance_new.add_argument("--properties", help="JSON overrides applied on top of the template")
-
-    # ------------------ FOLDER COMMANDS ------------------
-    folder_parser = subparsers.add_parser("folder", help="Organize motes into folders")
-    folder_sub = folder_parser.add_subparsers(dest="action")
-    folder_sub.add_parser("list", help="List every mote acting as a folder")
-    folder_of_parser = folder_sub.add_parser("of", help="Folders a mote is filed under")
-    folder_of_parser.add_argument("--id", required=True, help="Mote id")
-    members_parser = folder_sub.add_parser("members", help="Motes filed under a folder")
-    members_parser.add_argument("--id", required=True, help="Folder mote id")
-    folder_set = folder_sub.add_parser("set", help="File a mote under a folder")
-    folder_set.add_argument("--id", required=True, help="Mote id")
-    folder_set.add_argument("--folder", required=True, help="Folder mote id")
-
-    # ------------------ PORTAL COMMANDS ------------------
-    portal_parser = subparsers.add_parser("portal", help="One-way references into another garden")
-    portal_sub = portal_parser.add_subparsers(dest="action")
-    portal_create = portal_sub.add_parser("create", help="Create a portal mote")
-    portal_create.add_argument("--to-garden", required=True, help="Target garden name")
-    portal_create.add_argument("--to-mote", required=True, help="Target mote id in that garden")
-    portal_create.add_argument("--properties", help="JSON properties for the portal mote itself")
-    portal_resolve = portal_sub.add_parser("resolve", help="Show what a portal points at")
-    portal_resolve.add_argument("--id", required=True, help="Portal mote id")
-
-    # ------------------ LIBRARY COMMANDS ------------------
-    library_parser = subparsers.add_parser("library", help="Reusable motes, shared across gardens")
-    library_sub = library_parser.add_subparsers(dest="action")
-    library_sub.add_parser("list", help="List library entries")
-    library_save = library_sub.add_parser("save", help="Save a mote's properties to the library")
-    library_save.add_argument("--id", required=True, help="Mote id in the current garden")
-    library_use = library_sub.add_parser("use", help="Copy a library entry into this garden")
-    library_use.add_argument("--id", required=True, help="Library entry id")
-    library_use.add_argument("--properties", help="JSON overrides applied on top of the entry")
 
     # ------------------ RELATIONSHIP COMMANDS ------------------
     modoc_parser = subparsers.add_parser("modoc", help="Notes written about the graph")
@@ -463,69 +428,6 @@ def _handle_species(conn, args) -> None:
         print("Specify a species action: list, of, instances, set, template, new")
 
 
-def _handle_folder(conn, args) -> None:
-    if args.action == "list":
-        render.print_motes(list_folders(conn))
-
-    elif args.action == "of":
-        render.print_motes(folders_of(conn, args.id))
-
-    elif args.action == "members":
-        render.print_motes(folder_members(conn, args.id))
-
-    elif args.action == "set":
-        set_folder(conn, args.id, args.folder)
-        print(f"Mote {args.id} filed under {args.folder}")
-
-    else:
-        print("Specify a folder action: list, of, members, set")
-
-
-def _handle_portal(conn, args) -> None:
-    if args.action == "create":
-        properties = _parse_properties_json(getattr(args, "properties", None))
-        mote_id = create_portal(conn, args.to_garden, args.to_mote, properties)
-        print(f"Portal created with id={mote_id} -> {args.to_garden}/{args.to_mote}")
-
-    elif args.action == "resolve":
-        mote = get_mote(conn, args.id)
-        if mote is None:
-            print("No mote found.")
-            return
-        garden, target = resolve_portal(mote.properties)
-        print(f"Garden: {garden}")
-        print(f"[{target.id}] {target.properties}")
-
-    else:
-        print("Specify a portal action: create, resolve")
-
-
-def _handle_library(conn, args) -> None:
-    """The library is a reserved garden, so `library list` reads it
-    through its own short-lived connection rather than the one the rest
-    of this command is using -- same pattern core/library.py itself
-    follows for save/reuse."""
-    if args.action == "list":
-        library_conn = get_connection(LIBRARY_GARDEN)
-        try:
-            initialize_database(library_conn)
-            render.print_motes(list_motes(library_conn))
-        finally:
-            library_conn.close()
-
-    elif args.action == "save":
-        entry_id = save_to_library(conn, args.id)
-        print(f"Saved to library with id={entry_id}")
-
-    elif args.action == "use":
-        overrides = _parse_properties_json(getattr(args, "properties", None))
-        mote_id = reuse_from_library(conn, args.id, overrides)
-        print(f"Mote created with id={mote_id}")
-
-    else:
-        print("Specify a library action: list, save, use")
-
-
 def _handle_modoc(conn, args) -> None:
     if args.action == "export":
         path = Path(args.out) if args.out else Path(f"{args.id}.modoc")
@@ -793,12 +695,6 @@ def main() -> None:
                 _handle_sync(conn, garden, args)
             elif args.command == "species":
                 _handle_species(conn, args)
-            elif args.command == "folder":
-                _handle_folder(conn, args)
-            elif args.command == "portal":
-                _handle_portal(conn, args)
-            elif args.command == "library":
-                _handle_library(conn, args)
             elif args.command == "modoc":
                 _handle_modoc(conn, args)
             elif args.command == "model":

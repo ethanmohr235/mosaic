@@ -6,7 +6,7 @@
    reachable, and three copies of the token block is the price of three
    windows that look like one product. Keep the shared tokens below in
    step with mora/frontend/style.css and monastery/frontend/style.css;
-   the ones after them (graph, selection, portal) are Monarch's own.
+   the ones after them (graph, selection) are Monarch's own.
    Colours are OKLCH -- verified working in this WebKitGTK build in both
    CSS and canvas fillStyle, which is why graph.js can use the same
    notation. */
@@ -72,10 +72,6 @@
   --select-rel: oklch(0.72 0.13 235);
   --select-rel-soft: oklch(0.72 0.13 235 / 0.14);
   --select-rel-edge: oklch(0.72 0.13 235 / 0.95);
-  /* Portal-mote ring on the canvas -- a violet hue, deliberately distinct
-     from --accent (amber, selection/sim), --danger (red), and
-     --select-rel (blue, relationship selection). */
-  --portal-ring: oklch(0.76 0.16 300 / 0.9);
 }
 
 * { box-sizing: border-box; }
@@ -566,7 +562,6 @@ main { flex: 1; min-height: 0; display: flex; }
   padding: 0; width: 24px; height: 30px; flex-shrink: 0;
   background: transparent; color: var(--accent); border-color: var(--accent);
 }
-.detail-row .portal-jump { color: var(--portal-ring); border-color: var(--portal-ring); }
 /* A note's row is a summary, not an editor (app.js::noteField) -- it
    reads as inert so nobody types into it expecting the note to change. */
 .detail-row .note-summary { color: var(--muted); font-style: italic; cursor: default; }
@@ -696,11 +691,7 @@ main { flex: 1; min-height: 0; display: flex; }
 
 #detail-species-actions { display: flex; gap: 6px; margin-top: 8px; }
 #detail-species-actions button { font-size: 12px; padding: 6px 10px; }
-/* One shared treatment for the detail panel's small grey count lines --
-   a species' instance count and a folder's member count are the same
-   kind of statement about the same kind of role. */
-#detail-instance-count,
-#detail-member-count { color: var(--faint); font-size: 11.5px; margin-top: 8px; }
+#detail-instance-count { color: var(--faint); font-size: 11.5px; margin-top: 8px; }
 #species-picker-wrap { margin-top: 8px; }
 #species-picker-input { width: 100%; padding: 6px 8px; font-size: 12px; }
 #species-picker-results { margin-top: 4px; max-height: 190px; overflow-y: auto; }
@@ -770,6 +761,77 @@ main { flex: 1; min-height: 0; display: flex; }
   letter-spacing: 0.06em; display: flex; gap: 14px;
 }
 
+/* ---- app switcher (⌘J) ---- */
+
+#launcher-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
+}
+#launcher-modal {
+  width: 640px; max-width: 90vw; max-height: 72vh;
+  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
+  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#launcher-input-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 20px; border-bottom: 1px solid var(--border-soft);
+}
+.launcher-glyph {
+  width: 11px; height: 11px; border: 1.5px solid currentColor;
+  border-radius: 50%; position: relative; flex-shrink: 0; color: var(--muted);
+}
+.launcher-glyph::after {
+  content: ""; position: absolute; width: 5px; height: 1.5px;
+  background: currentColor; bottom: -3px; right: -4px; transform: rotate(45deg);
+}
+#launcher-input {
+  flex: 1; border: none; background: transparent;
+  padding: 0; font-size: 14.5px; font-family: var(--sans); color: var(--fg-bright);
+}
+#launcher-input-row kbd {
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  border: 1px solid var(--border-soft); border-radius: 5px; padding: 2px 6px;
+}
+#launcher-results {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  padding: 14px; overflow-y: auto; min-height: 0;
+}
+.launcher-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 13px; border-radius: 12px; border: 1px solid var(--border-soft);
+  background: var(--panel); color: inherit; cursor: pointer;
+  transition: background 0.13s ease, border-color 0.13s ease;
+}
+.launcher-card:hover, .launcher-card.highlighted {
+  background: var(--raised); border-color: var(--border);
+}
+.launcher-icon {
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+  background: var(--raised); border: 1px solid var(--border-soft);
+  display: flex; align-items: center; justify-content: center;
+}
+.launcher-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.launcher-name-row { display: flex; align-items: baseline; gap: 7px; }
+.launcher-name { font-family: var(--serif); font-size: 14.5px; color: var(--fg-bright); white-space: nowrap; }
+.launcher-kind {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--faint); white-space: nowrap;
+}
+.launcher-desc { font-size: 11.5px; line-height: 1.35; color: var(--muted); }
+.launcher-key {
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+  border: 1px solid var(--border-soft); border-radius: 5px; padding: 2px 6px; flex-shrink: 0;
+}
+#launcher-empty {
+  padding: 0 20px 18px; font-size: 12.5px; color: var(--faint); font-family: var(--mono);
+}
+#launcher-footer {
+  display: flex; align-items: center; gap: 14px;
+  padding: 9px 20px; border-top: 1px solid var(--border-soft); background: var(--panel-bg);
+  font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: 0.06em;
+}
+
 /* ---- gardens modal ---- */
 
 #gardens-overlay {
@@ -801,40 +863,6 @@ main { flex: 1; min-height: 0; display: flex; }
 .garden-row .star.on { color: var(--accent); }
 .garden-row .star:hover { color: var(--accent); border-color: transparent; }
 #gardens-modal-actions { display: flex; align-items: center; gap: 8px; }
-
-/* ---- portal picker ---- */
-
-#portal-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
-}
-#portal-modal {
-  width: 480px; max-width: 90vw; max-height: 72vh;
-  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
-  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  display: flex; flex-direction: column; overflow: hidden; padding: 20px;
-}
-#portal-garden-select { width: 100%; margin: 10px 0; }
-#portal-search-input { width: 100%; padding: 8px 10px; font-size: 13.5px; }
-#portal-search-results { flex: 1; overflow-y: auto; min-height: 0; margin-top: 8px; }
-
-/* ---- library picker ---- */
-
-#library-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
-}
-#library-modal {
-  width: 480px; max-width: 90vw; max-height: 72vh;
-  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
-  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  display: flex; flex-direction: column; overflow: hidden; padding: 20px;
-}
-#library-search-input { width: 100%; margin: 10px 0; padding: 8px 10px; font-size: 13.5px; }
-#library-search-results { flex: 1; overflow-y: auto; min-height: 0; }
-#library-search-results .delete-entry {
-  font-size: 12px; padding: 3px 8px; flex-shrink: 0; line-height: 1;
-}
 
 /* ---- sync modal ---- */
 

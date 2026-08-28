@@ -8,6 +8,10 @@ to get re-copied per app.
 """
 import functools
 import json
+import subprocess
+import sys
+import threading
+from pathlib import Path
 
 
 def synchronized(method):
@@ -41,3 +45,56 @@ def coerce(raw):
 
 def coerce_properties(raw_properties: dict) -> dict:
     return {k: coerce(v) for k, v in raw_properties.items()}
+
+
+# ---- launching a sibling app ----
+
+REPO_ROOT = Path(__file__).resolve().parent
+
+# app id -> (display name, its run_*.py, the flag that opens straight to
+# one mote -- None where that script takes no such flag). The single
+# source both the ⌘J switcher (below) and each app's own frontend read,
+# so a fifth app is one entry here rather than a fifth copy-pasted
+# open_<sibling>() per existing app.
+APPS = {
+    "monarch": ("Monarch", REPO_ROOT / "run_monarch.py", None),
+    "mora": ("Mora", REPO_ROOT / "run_mora.py", "--note"),
+    "monastery": ("Monastery", REPO_ROOT / "run_monastery.py", "--focus"),
+    "momentum": ("Momentum", REPO_ROOT / "run_momentum.py", "--focus"),
+}
+
+
+def popen_detached(args: list[str], *, quiet: bool = True) -> None:
+    """Launches args without waiting on it, but still reaps the child on a
+    background thread so it doesn't sit as a zombie for as long as MonOSS
+    keeps running -- this app is long-lived and every launch spawns one
+    of these.
+
+    `quiet` discards the child's output, which is right for an OS opener
+    (`gio open` chatters about nothing we can act on) and wrong for our
+    own apps: a discarded traceback is how a crashed sibling app came to
+    look like a mysteriously wrong window instead of an error."""
+    streams = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if quiet else {}
+    proc = subprocess.Popen(args, **streams)
+    threading.Thread(target=proc.wait, daemon=True).start()
+
+
+def open_app(app_id: str, garden: str, mote_id: str | None = None) -> dict:
+    """Launches another MonOSS app on this same garden, as its own
+    detached process rather than a second window here: each app holds
+    its own garden connection and outlives or predates this one freely.
+    The two processes then hold separate connections to the same garden
+    file -- neither observes the other's writes until it refetches, but
+    nothing is lost either way, since both write one property at a time.
+
+    `sys.executable` rather than a bare `python`: the app is running in
+    a specific virtualenv (docs/ui-setup.md), and the sibling has to come
+    up in that same one. `quiet=False` so a sibling that fails to start
+    says so on the terminal this app was launched from, rather than
+    failing silently."""
+    _name, script, focus_flag = APPS[app_id]
+    command = [sys.executable, str(script), "--garden", garden]
+    if mote_id and focus_flag:
+        command += [focus_flag, mote_id]
+    popen_detached(command, quiet=False)
+    return {"app": app_id, "garden": garden, "focus": mote_id}

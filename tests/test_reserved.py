@@ -12,15 +12,14 @@ def test_reserved_properties_match_the_documented_list():
     # Kept in sync by hand with docs/architecture.md's reserved-name list.
     assert RESERVED_PROPERTIES == {
         "equation", "freedoms", "url",
-        "provider", "configuration", "units", "roles",
-        "portal_garden", "portal_mote", "modoc",
+        "provider", "configuration", "units", "roles", "modoc",
     }
 
 
 def test_reserved_relationship_types_match_the_documented_list():
     assert RESERVED_RELATIONSHIP_TYPES == {
         "instance_of", "template_of", "applies_to", "uses_model",
-        "overrides", "varies", "in_folder", "about",
+        "overrides", "varies", "about",
     }
 
 

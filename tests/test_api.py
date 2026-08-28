@@ -108,27 +108,6 @@ def test_list_species_reports_every_species_in_the_garden(api):
     assert [m["id"] for m in api.list_species()] == [species["id"]]
 
 
-def test_focus_reports_the_folder_kind(api):
-    folder = api.create_mote({"name": "Thermodynamics"})
-    member = api.create_mote({"name": "Entropy"})
-    api.set_folder(member["id"], folder["id"])
-
-    result = api.focus(member["id"], None)
-    assert result["kinds"] == {folder["id"]: ["folder"]}
-
-
-def test_set_folder_creates_an_in_folder_relationship(api):
-    folder = api.create_mote({"name": "Thermodynamics"})
-    member = api.create_mote({"name": "Entropy"})
-    rel = api.set_folder(member["id"], folder["id"])
-    assert rel["type"] == "in_folder"
-    assert rel["from_id"] == member["id"]
-    assert rel["to_id"] == folder["id"]
-
-    assert [m["id"] for m in api.folders_of(member["id"])] == [folder["id"]]
-    assert [m["id"] for m in api.folder_members(folder["id"])] == [member["id"]]
-
-
 def test_delete_garden_blocks_the_last_garden(api):
     with pytest.raises(ValueError, match="last garden"):
         api.delete_garden("test")
@@ -163,144 +142,6 @@ def test_restore_garden_brings_a_deleted_garden_back(api):
 def test_restore_garden_missing_raises(api):
     with pytest.raises(LookupError):
         api.restore_garden("never-deleted")
-
-
-def test_list_gardens_hides_the_library_garden(api):
-    mote = api.create_mote({"name": "Task"})
-    api.save_to_library(mote["id"])
-    assert "_library" not in api.list_gardens()
-
-
-def test_create_garden_rejects_the_library_name(api):
-    with pytest.raises(ValueError, match="reserved"):
-        api.create_garden("_library")
-
-
-def test_open_library_lazily_creates_and_switches(api):
-    assert not garden_exists("_library")
-
-    result = api.open_library()
-
-    assert result == {"garden": "_library"}
-    assert api.current_garden() == "_library"
-
-
-def test_open_library_switches_into_an_existing_library(api):
-    mote = api.create_mote({"name": "Task"})
-    api.save_to_library(mote["id"])
-
-    result = api.open_library()
-
-    assert result == {"garden": "_library"}
-    assert api.current_garden() == "_library"
-    entries = api.list_motes()
-    assert any(m["properties"].get("name") == "Task" for m in entries)
-
-
-def test_library_snapshot_returns_motes_relationships_and_classification(api):
-    mote = api.create_mote({"name": "Task"})
-    api.save_to_library(mote["id"])
-
-    api.open_library()  # ensures _library exists before reading it back
-    api.switch_garden("test")
-
-    result = api.library_snapshot()
-    assert any(m["properties"].get("name") == "Task" for m in result["motes"])
-    assert result["relationships"] == []
-    assert result["kinds"] == {}
-
-
-def test_library_snapshot_reports_kinds_from_within_the_library(api):
-    api.open_library()
-    folder = api.create_mote({"name": "Thermodynamics"})
-    member = api.create_mote({"name": "Entropy"})
-    api.set_folder(member["id"], folder["id"])
-    api.switch_garden("test")
-
-    result = api.library_snapshot()
-    assert result["kinds"] == {folder["id"]: ["folder"]}
-
-
-def test_reuse_from_library_copies_an_entry_into_the_current_garden(api):
-    mote = api.create_mote({"name": "Standup", "duration": 15})
-    entry = api.save_to_library(mote["id"])
-
-    copy = api.reuse_from_library(entry["id"], {"name": "Monday standup"})
-
-    # A fresh, independent mote in the *current* garden -- not the entry,
-    # and not linked to it.
-    assert copy["id"] not in (mote["id"], entry["id"])
-    assert copy["properties"] == {"name": "Monday standup", "duration": 15}
-    assert api.get_mote(copy["id"]) is not None
-
-
-def test_reuse_from_library_coerces_overrides_like_any_other_ui_input(api):
-    mote = api.create_mote({"name": "Task"})
-    entry = api.save_to_library(mote["id"])
-
-    copy = api.reuse_from_library(entry["id"], {"priority": "3"})
-
-    assert copy["properties"]["priority"] == 3
-
-
-def test_delete_library_entry_leaves_the_current_garden_alone(api):
-    mote = api.create_mote({"name": "Task"})
-    entry = api.save_to_library(mote["id"])
-
-    assert api.delete_library_entry(entry["id"]) is True
-    assert api.library_snapshot()["motes"] == []
-    # The mote it was snapshotted from is untouched, and so is the
-    # connection this Api still holds open on "test".
-    assert api.current_garden() == "test"
-    assert api.get_mote(mote["id"]) is not None
-
-
-def test_find_portal_target_searches_another_garden(api):
-    create_garden("other")
-    other_api = Api("other")
-    other_api.create_mote({"name": "Reactor"})
-    other_api.create_mote({"name": "Pump"})
-    other_api.shutdown()
-
-    results = api.find_portal_target("other", "react")
-
-    assert [m["properties"]["name"] for m in results] == ["Reactor"]
-    assert api.current_garden() == "test"
-
-
-def test_find_portal_target_refuses_a_garden_that_does_not_exist(api):
-    # Not silently creating it: get_connection() would happily bring an
-    # empty garden into being from a typo.
-    with pytest.raises(LookupError):
-        api.find_portal_target("no-such-garden", "anything")
-    assert not garden_exists("no-such-garden")
-
-
-def test_create_portal_then_jump_switches_gardens(api):
-    create_garden("other")
-    other_api = Api("other")
-    target = other_api.create_mote({"name": "Reactor"})
-    other_api.shutdown()
-
-    portal = api.create_portal("other", target["id"], {"name": "Reactor"})
-    assert portal["properties"]["portal_garden"] == "other"
-    assert portal["properties"]["portal_mote"] == target["id"]
-
-    result = api.jump_to_portal(portal["id"])
-
-    assert result == {"garden": "other", "mote_id": target["id"]}
-    assert api.current_garden() == "other"
-    # The connection really moved: the target garden's mote is readable
-    # and the origin garden's portal mote is not.
-    assert api.get_mote(target["id"])["properties"]["name"] == "Reactor"
-    assert api.get_mote(portal["id"]) is None
-
-
-def test_jump_to_portal_rejects_a_mote_that_is_not_a_portal(api):
-    plain = api.create_mote({"name": "Plain"})
-    with pytest.raises(ValueError):
-        api.jump_to_portal(plain["id"])
-    assert api.current_garden() == "test"
 
 
 def test_default_garden_round_trips_and_clears(api):
@@ -642,6 +483,25 @@ def test_open_mora_follows_a_garden_switch(api, monkeypatch):
     assert launched[0][2:] == ["--garden", "elsewhere"]
 
 
+# ---- the ⌘J switcher ----
+#
+# open_mora/open_monastery/open_momentum above stay named the way
+# Monarch's own Tools menu calls them; open_app is the app-agnostic
+# counterpart the switcher uses instead. Its command-building is
+# api_common.open_app's own test (tests/test_api_common.py) -- what's
+# worth checking here is only that this method delegates to it.
+
+def test_open_app_delegates_to_api_common(api, monkeypatch):
+    import api_common
+
+    calls = []
+    monkeypatch.setattr(
+        api_common, "popen_detached", lambda args, **kwargs: calls.append(args)
+    )
+    assert api.open_app("mora") == {"app": "mora", "garden": "test", "focus": None}
+    assert calls[0][2:] == ["--garden", "test"]
+
+
 def test_reserved_names_returns_properties_and_relationship_types(api):
     result = api.reserved_names()
     assert "url" in result["properties"]
@@ -820,11 +680,11 @@ def test_reserved_names_returns_the_full_reference_not_just_names(api):
     the surface with a person behind it was the less informed one."""
     reserved = api.reserved_names()
 
-    assert "in_folder" in reserved["relationshipTypes"]
+    assert "instance_of" in reserved["relationshipTypes"]
     assert "provider" in reserved["properties"]
     # ...and now what they mean, for the detail panel's tooltips.
     assert "provider" in reserved["propertyMeanings"]
-    assert "in_folder" in reserved["relationshipTypeMeanings"]
+    assert "instance_of" in reserved["relationshipTypeMeanings"]
     # ...plus what each provider can compute, for the property-model note.
     assert set(reserved["propertyModelProviders"]) == {"ideal_gas", "coolprop"}
     ideal_gas = reserved["propertyModelProviders"]["ideal_gas"]

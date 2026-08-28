@@ -1,14 +1,11 @@
 import pytest
 
 from cli.main import (
-    _handle_folder,
     _handle_garden,
     _handle_incidence,
-    _handle_library,
     _handle_model,
     _handle_modoc,
     _handle_mote,
-    _handle_portal,
     _handle_roles,
     _handle_scenario,
     _handle_simulate,
@@ -18,7 +15,7 @@ from cli.main import (
     build_parser,
 )
 from core.gardens import garden_exists
-from core.motes import create_mote, get_mote, list_motes
+from core.motes import create_mote, get_mote
 from core.simulation import list_runs
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
@@ -227,7 +224,7 @@ def test_garden_restore_without_a_prior_delete_raises():
         _handle_garden(parse(["garden", "restore", "never-deleted"]))
 
 
-# ---- species / folders / portals / library / search ----
+# ---- species / search ----
 #
 # The charter (docs/architecture.md, "What belongs on which surface")
 # gives the CLI everything scriptable. These reached only the app or only
@@ -259,23 +256,6 @@ def test_species_list_and_of(conn, capsys):
     assert species in capsys.readouterr().out
 
 
-def test_folder_commands_file_and_read_back(conn, capsys):
-    folder = create_mote(conn, {"name": "Thermodynamics"})
-    note = create_mote(conn, {"name": "Entropy"})
-
-    _handle_folder(conn, parse(["folder", "set", "--id", note, "--folder", folder]))
-    assert "filed under" in capsys.readouterr().out
-
-    _handle_folder(conn, parse(["folder", "members", "--id", folder]))
-    assert note in capsys.readouterr().out
-
-    _handle_folder(conn, parse(["folder", "of", "--id", note]))
-    assert folder in capsys.readouterr().out
-
-    _handle_folder(conn, parse(["folder", "list"]))
-    assert folder in capsys.readouterr().out
-
-
 def test_mote_search_by_text_and_key_value(conn, capsys):
     create_mote(conn, {"name": "Alice", "role": "engineer"})
     create_mote(conn, {"name": "Bob", "role": "doctor"})
@@ -287,42 +267,6 @@ def test_mote_search_by_text_and_key_value(conn, capsys):
     _handle_mote(conn, parse(["mote", "search", "role = doctor"]))
     out = capsys.readouterr().out
     assert "Bob" in out and "Alice" not in out
-
-
-def test_library_save_list_and_use(conn, capsys):
-    mote = create_mote(conn, {"name": "Standup", "duration": 15})
-
-    _handle_library(conn, parse(["library", "save", "--id", mote]))
-    entry_id = capsys.readouterr().out.split("id=")[-1].strip()
-
-    _handle_library(conn, parse(["library", "list"]))
-    assert "Standup" in capsys.readouterr().out
-
-    _handle_library(conn, parse(["library", "use", "--id", entry_id, "--properties", '{"name":"Monday"}']))
-    capsys.readouterr()
-    copies = [m for m in list_motes(conn) if m.properties.get("name") == "Monday"]
-    assert copies and copies[0].properties["duration"] == 15
-
-
-def test_portal_create_and_resolve(conn, capsys):
-    from core.db import get_connection, initialize_database
-    from core.gardens import create_garden
-
-    create_garden("elsewhere")
-    other = get_connection("elsewhere")
-    try:
-        initialize_database(other)
-        target = create_mote(other, {"name": "Reactor"})
-    finally:
-        other.close()
-
-    _handle_portal(conn, parse(["portal", "create", "--to-garden", "elsewhere", "--to-mote", target]))
-    portal_id = capsys.readouterr().out.split("id=")[-1].split()[0]
-
-    _handle_portal(conn, parse(["portal", "resolve", "--id", portal_id]))
-    out = capsys.readouterr().out
-    assert "Garden: elsewhere" in out
-    assert "Reactor" in out
 
 
 # ---- modoc ----

@@ -172,13 +172,9 @@ def copy_mote(
     Properties only: relationships are not copied, because there is no
     general answer to what a relationship pointing outside the copied set
     should become. This is the same seeding core/species.py's
-    create_instance() does from a template, and what the reusable-motes
-    library does in both directions (core/library.py) -- one primitive
-    rather than each writing its own read-then-create.
+    create_instance() does from a template.
 
-    Nothing links the copy to the original afterward. A live cross-garden
-    reference is a portal (core/portals.py), which is a different thing
-    on purpose."""
+    Nothing links the copy to the original afterward."""
     mote = get_mote(source, mote_id)
     if mote is None:
         raise LookupError(f"No such mote: {mote_id!r}")

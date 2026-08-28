@@ -238,8 +238,8 @@ def print_models(conn: sqlite3.Connection, mote_id: str) -> None:
 
 def print_motes(motes: Iterable[Mote]) -> None:
     """The one way a list of motes is printed -- `mote list`, `mote
-    search`, `species instances`, `folder members`, `library list` are
-    all the same answer to different questions."""
+    search`, `species instances` are all the same answer to different
+    questions."""
     for mote in motes:
         print(f"[{mote.id}] {mote.properties}")
 

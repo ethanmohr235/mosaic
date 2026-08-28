@@ -1543,6 +1543,25 @@ function wire() {
   });
   $("rail-toggle").onclick = () => { railOpen = !railOpen; draw(); };
   $("garden-btn").onclick = openGardenMenu;
+  $("switch-app-btn").onclick = openLauncher;
+  $("launcher-overlay").addEventListener("mousedown", (event) => {
+    if (event.target === $("launcher-overlay")) closeLauncher();
+  });
+  $("launcher-input").addEventListener("input", (event) => renderLauncherResults(event.target.value));
+  $("launcher-input").addEventListener("keydown", (event) => {
+    const list = launcherFiltered($("launcher-input").value);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (launcherHighlight < list.length - 1) launcherHighlight++;
+      updateLauncherHighlight();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (launcherHighlight > 0) launcherHighlight--;
+      updateLauncherHighlight();
+    } else if (event.key === "Enter" && list[launcherHighlight]) {
+      launchApp(list[launcherHighlight].id);
+    }
+  });
 
   $("refresh-btn").onclick = async () => {
     const btn = $("refresh-btn");
@@ -1612,8 +1631,22 @@ function wire() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
+      event.preventDefault();
+      openLauncher();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && /^[1-3]$/.test(event.key)) {
+      const app = launcherChoices()[Number(event.key) - 1];
+      if (app) {
+        event.preventDefault();
+        launchApp(app.id);
+      }
+      return;
+    }
     if (event.key === "Escape") {
       closeGardenMenu();
+      closeLauncher();
       if (chooser) answerChooser(null);
       else if (draft) { closeDraft(); draw(); }
       else if (selectedId) closePanel();
@@ -1636,6 +1669,120 @@ function wire() {
 
   window.addEventListener("focus", () => { refresh(); startPolling(); });
   window.addEventListener("blur", stopPolling);
+}
+
+// ---- app switcher (⌘J) ----
+//
+// Every sibling app but this one, in a fixed order -- so "Momentum is
+// ⌘3" holds regardless of what's typed into the filter box. See
+// api_common.py::APPS for the id each maps to on the Python side.
+const LAUNCHER_APPS = [
+  {
+    id: "monarch", name: "Monarch", kind: "graph",
+    desc: "Motes and relationships in a live force field.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="20" r="12" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></circle>
+      <ellipse cx="20" cy="20" rx="12" ry="4.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6" transform="rotate(-28 20 20)"></ellipse>
+      <circle cx="20" cy="20" r="4" fill="var(--accent)"></circle>
+    </svg>`,
+  },
+  {
+    id: "mora", name: "Mora", kind: "notes",
+    desc: "Write and link long-form .modoc notes.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="9" y="6" width="22" height="28" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="14" y="14" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
+      <rect x="14" y="20" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
+      <rect x="14" y="26" width="7" height="1.8" rx="0.9" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+  {
+    id: "monastery", name: "Monastery", kind: "calendar",
+    desc: "See and schedule a garden's dated motes.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="7" y="9" width="26" height="24" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="7" y="15" width="26" height="1.6" fill="var(--fg)" opacity="0.5"></rect>
+      <rect x="12" y="20" width="5" height="5" rx="1" fill="var(--fg)" opacity="0.55"></rect>
+      <rect x="21" y="20" width="5" height="5" rx="1" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+  {
+    id: "momentum", name: "Momentum", kind: "tasks",
+    desc: "Task board, week planner and focus timer.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
+      <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
+      <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+];
+const THIS_APP = "monastery";
+
+let launcherHighlight = 0;
+
+function launcherChoices() {
+  return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP);
+}
+
+function launcherFiltered(query) {
+  const q = query.trim().toLowerCase();
+  const choices = launcherChoices();
+  if (!q) return choices;
+  return choices.filter((a) => (a.name + " " + a.kind + " " + a.desc).toLowerCase().includes(q));
+}
+
+function renderLauncherResults(query) {
+  const choices = launcherChoices();
+  const list = launcherFiltered(query);
+  launcherHighlight = Math.min(launcherHighlight, Math.max(list.length - 1, 0));
+  const container = $("launcher-results");
+  container.innerHTML = "";
+  list.forEach((app, i) => {
+    const card = document.createElement("a");
+    card.href = "#";
+    card.className = "launcher-card" + (i === launcherHighlight ? " highlighted" : "");
+    card.innerHTML =
+      `<div class="launcher-icon">${app.icon}</div>` +
+      `<div class="launcher-text">` +
+      `<div class="launcher-name-row"><span class="launcher-name">${app.name}</span><span class="launcher-kind">${app.kind}</span></div>` +
+      `<div class="launcher-desc">${app.desc}</div>` +
+      `</div>` +
+      `<span class="launcher-key">⌘${choices.indexOf(app) + 1}</span>`;
+    card.addEventListener("mouseenter", () => { launcherHighlight = i; updateLauncherHighlight(); });
+    card.addEventListener("mousedown", (e) => { e.preventDefault(); launchApp(app.id); });
+    container.appendChild(card);
+  });
+  const empty = $("launcher-empty");
+  if (list.length === 0) {
+    empty.textContent = `no app matches "${query}"`;
+    empty.classList.remove("hidden");
+  } else {
+    empty.classList.add("hidden");
+  }
+}
+
+function updateLauncherHighlight() {
+  document.querySelectorAll("#launcher-results .launcher-card").forEach((card, i) => {
+    card.classList.toggle("highlighted", i === launcherHighlight);
+  });
+}
+
+function openLauncher() {
+  $("launcher-overlay").classList.remove("hidden");
+  $("launcher-input").value = "";
+  $("launcher-garden").textContent = "garden · " + $("garden-name").textContent;
+  launcherHighlight = 0;
+  renderLauncherResults("");
+  $("launcher-input").focus();
+}
+
+function closeLauncher() { $("launcher-overlay").classList.add("hidden"); }
+
+async function launchApp(appId) {
+  closeLauncher();
+  const app = LAUNCHER_APPS.find((a) => a.id === appId);
+  await call(api.open_app(appId));
+  toast(`Opening ${app.name}…`);
 }
 
 async function init() {

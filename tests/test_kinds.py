@@ -10,8 +10,6 @@ else calls it.
 """
 from core.entities import Mote, Relationship
 from core.kinds import (
-    FOLDER,
-    PORTAL,
     PROPERTY_MODEL,
     KIND_LABELS,
     KIND_NAMES,
@@ -51,12 +49,6 @@ def test_a_species_with_only_a_template_still_counts():
     assert kinds["r-template"] == [TEMPLATE]
 
 
-def test_a_folder_is_the_target_of_in_folder():
-    motes = [mote("thermo"), mote("entropy")]
-    rels = [rel("entropy", "thermo", "in_folder")]
-    assert kinds_in(motes, rels) == {"thermo": [FOLDER]}
-
-
 def test_a_property_model_is_the_target_of_uses_model():
     motes = [mote("ideal-air"), mote("air")]
     rels = [rel("air", "ideal-air", "uses_model")]
@@ -82,30 +74,18 @@ def test_an_equation_alone_is_not_a_rule():
     assert kinds_of(lonely, []) == []
 
 
-def test_a_portal_is_recognized_from_its_properties_alone():
-    portal = mote("p", portal_garden="other", portal_mote="abc")
-    assert kinds_of(portal, []) == [PORTAL]
-
-
-def test_an_incomplete_portal_is_not_a_portal():
-    assert kinds_of(mote("p", portal_garden="other"), []) == []
-    assert kinds_of(mote("p", portal_garden="  ", portal_mote="abc"), []) == []
-
-
 # ---- combinations ----
 
 def test_a_mote_can_be_several_kinds_at_once():
-    """Roles aren't exclusive: organizing a species into a folder doesn't
-    stop it being a species."""
-    motes = [mote("resistor"), mote("r1"), mote("components")]
+    """Kinds aren't exclusive: a species being the target of a property
+    model's uses_model doesn't stop it being a species."""
+    motes = [mote("resistor"), mote("r1")]
     rels = [
-        rel("r1", "resistor", "instance_of"),        # resistor is a species
-        rel("resistor", "components", "in_folder"),  # ...filed under components
-        rel("datasheet", "resistor", "in_folder"),   # ...and itself a folder
+        rel("r1", "resistor", "instance_of"),  # resistor is a species
+        rel("r1", "resistor", "uses_model"),   # ...and also a property model
     ]
     kinds = kinds_in(motes, rels)
-    assert kinds["resistor"] == [SPECIES, FOLDER]
-    assert kinds["components"] == [FOLDER]
+    assert kinds["resistor"] == [SPECIES, PROPERTY_MODEL]
 
 
 def test_a_template_of_one_species_can_be_an_instance_of_another():

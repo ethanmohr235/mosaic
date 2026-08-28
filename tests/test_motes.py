@@ -216,8 +216,9 @@ def test_copy_mote_applies_overrides(conn):
 
 
 def test_copy_mote_across_gardens(conn):
-    """The reason this takes two connections: the library copies in and
-    out of a different garden entirely."""
+    """The reason this takes two connections: create_instance() seeds a
+    new mote's properties from a template that may live in a different
+    garden entirely."""
     from core.db import get_connection, initialize_database
     from core.gardens import create_garden
 

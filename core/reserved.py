@@ -18,11 +18,9 @@ provider-specific configuration this module has no business knowing;
 declaring DESCRIPTION/CONFIGURATION/CAPABILITIES on the provider class
 removed that reason, and with it the third place the same facts were
 written down."""
-from core.folders import IN_FOLDER
 from core.links import URL_PROPERTY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
-from core.portals import PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY
 from core.providers import describe_providers
 from core.roles import ROLES_KEY
 from core.rules import APPLIES_TO, EQUATION_KEY, FREEDOMS_KEY
@@ -33,10 +31,10 @@ from core.units import UNITS_KEY
 RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
-    ROLES_KEY, PORTAL_GARDEN_KEY, PORTAL_MOTE_KEY, MODOC_KEY,
+    ROLES_KEY, MODOC_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
-    INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, IN_FOLDER, ABOUT,
+    INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
     OVERRIDES, VARIES,
 }
 
@@ -69,12 +67,6 @@ PROPERTY_MEANINGS: dict[str, str] = {
     CONFIGURATION_KEY: "On a property-model mote: the JSON object the named "
         "`provider` needs to construct itself, e.g. {\"gas_constant\": "
         "287.05} for ideal_gas.",
-    PORTAL_GARDEN_KEY: "Together with portal_mote, marks a mote as a portal "
-        "-- a one-way navigational reference to a mote in a different "
-        "garden. Set by create_portal(); read by resolve_portal(). Names "
-        "the target garden.",
-    PORTAL_MOTE_KEY: "Together with portal_garden, marks a mote as a portal. "
-        "Names the target mote's id within that garden.",
     MODOC_KEY: "A .modoc note about this mote -- a small LaTeX subset whose "
         "\\mote/\\val/\\graph macros resolve live against the garden. The "
         "property is the canonical copy; .modoc files are import/export only. "
@@ -126,10 +118,6 @@ RELATIONSHIP_TYPE_MEANINGS: dict[str, str] = {
         "'rel' from the rule's own mote first, then follows that target's "
         "uses_model to find the provider/configuration to evaluate "
         "'operation' against.",
-    IN_FOLDER: "mote --in_folder--> folder. Purely organizational annotation -- "
-        "a folder is an ordinary mote with no other structural meaning, "
-        "never picked up by simulation unless separately declared an "
-        "instance_of a species. Set via set_folder().",
     OVERRIDES: "override mote --overrides--> target. The override holds "
         "replacement properties for that one mote, and is excluded from every "
         "run unless a scenario selects it -- the same exclusion a template "
