@@ -41,6 +41,12 @@
       <button type="button" data-tab="focus">Focus</button>
     </div>
 
+    <div id="nav" class="hidden">
+      <button id="prev" type="button" title="Previous week">‹</button>
+      <button id="today" type="button">Today</button>
+      <button id="next" type="button" title="Next week">›</button>
+    </div>
+
     <div id="range">
       <span id="range-title">…</span>
       <span id="range-sub"></span>
@@ -77,6 +83,18 @@
         <div class="rail-note">
           Nothing here is a reserved name. Momentum reads whichever property
           your garden already uses — pick the one that means each thing.
+        </div>
+      </div>
+      <div class="rail-section">
+        <div class="rail-head">Working hours</div>
+        <div id="hours-row" class="hours-row">
+          <label>Earliest <input type="time" id="work-start-input"></label>
+          <label>Latest <input type="time" id="work-end-input"></label>
+        </div>
+        <div class="rail-note">
+          Where auto-placement is allowed to land a task dropped on a day —
+          it never schedules earlier than this or later than this minus the
+          task's estimate.
         </div>
       </div>
     </aside>

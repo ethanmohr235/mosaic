@@ -240,9 +240,17 @@ def days_payload(
     candidates: dict,
     stats: dict,
     capacity_minutes: float,
+    work_start: str,
+    work_end: str,
 ) -> dict:
     """The week: seven days of scheduled cards and the undated pool they
-    are dragged out of."""
+    are dragged out of.
+
+    `work_start`/`work_end` are the earliest and latest time of day a
+    drop onto a day is allowed to land -- core/calendar.py's own
+    `earliest_free_slot` arguments, sent along so the rail can show and
+    edit the same window scheduling actually uses.
+    """
     return {
         "days": days,
         "pool": pool,
@@ -250,6 +258,8 @@ def days_payload(
         "candidates": candidates,
         "stats": stats,
         "capacityMinutes": capacity_minutes,
+        "workStart": work_start,
+        "workEnd": work_end,
     }
 
 

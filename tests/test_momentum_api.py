@@ -182,6 +182,34 @@ def test_a_full_day_still_schedules_and_says_so(api):
     assert answer["start"] == "2026-08-26T09:00:00"
 
 
+def test_working_hours_default_to_nine_to_five(api):
+    days = api.days(WEEK_START, WEEK_END)
+    assert days["workStart"] == "09:00"
+    assert days["workEnd"] == "17:00"
+
+
+def test_setting_working_hours_moves_where_a_task_lands(api):
+    """The rail's earliest/latest inputs, round-tripped: a garden that
+    narrows its day should see schedule() honor the new window rather
+    than the 9-5 default."""
+    answer = api.set_working_hours("10:00", "15:00")
+    assert answer == {"workStart": "10:00", "workEnd": "15:00"}
+
+    task = create_mote(api._conn, {"name": "Squeeze", "estimate": "1h"})
+    scheduled = api.schedule(task, "2026-08-26")
+    assert scheduled["start"] == "2026-08-26T10:00:00"
+
+    days = api.days(WEEK_START, WEEK_END)
+    assert days["workStart"] == "10:00"
+    assert days["workEnd"] == "15:00"
+
+
+def test_an_unparseable_working_hour_keeps_the_one_it_had(api):
+    api.set_working_hours("10:00", "15:00")
+    answer = api.set_working_hours("not-a-time", "16:00")
+    assert answer == {"workStart": "10:00", "workEnd": "16:00"}
+
+
 def test_unscheduling_puts_a_task_back_in_the_pool(api, board):
     api.schedule(board["backfill"], "2026-08-26")
     api.unschedule(board["backfill"])

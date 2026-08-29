@@ -120,28 +120,31 @@ def texts(window, selector):
 
 
 def drag(window, source_selector, target_selector):
-    """Drive one HTML5 drag-and-drop. Momentum uses the native drag API
-    rather than pointer events (unlike Monastery, which drags rectangles
-    it drew itself), so this dispatches the three events app.js actually
-    listens for -- dragstart on the card, dragover and drop on the
-    target -- with a DataTransfer where WebKit offers one.
+    """Drive one pointer-event drag. Momentum drags cards the same way
+    Monastery drags rectangles -- pointerdown on the card, pointermove
+    past the threshold, pointerup over the target -- rather than the
+    native HTML5 drag API, which app.js stopped using because WebKitGTK's
+    support for it is not reliable enough for a card to actually move.
 
-    The handlers only read `dragId`, which dragstart sets, so nothing
-    here has to carry a payload through the DataTransfer itself."""
+    `elementFromPoint` is what app.js itself asks at pointerup to find
+    the drop zone, so the synthetic pointerup is dispatched at the
+    target's own center rather than on the target node directly -- the
+    same distinction the real gesture draws between where the node is
+    and where the pointer physically ends up."""
     js(window, f"""
         (() => {{
           const source = document.querySelector({json.dumps(source_selector)});
           const target = document.querySelector({json.dumps(target_selector)});
           if (!source || !target) throw new Error('drag endpoints missing');
-          const make = (type) => {{
-            const init = {{bubbles: true, cancelable: true}};
-            try {{ return new DragEvent(type, {{...init, dataTransfer: new DataTransfer()}}); }}
-            catch (e) {{ return new Event(type, init); }}
-          }};
-          source.dispatchEvent(make('dragstart'));
-          target.dispatchEvent(make('dragover'));
-          target.dispatchEvent(make('drop'));
-          source.dispatchEvent(make('dragend'));
+          const sRect = source.getBoundingClientRect();
+          const tRect = target.getBoundingClientRect();
+          const make = (type, x, y) => new PointerEvent(type, {{
+            bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y,
+          }});
+          source.dispatchEvent(make('pointerdown', sRect.left + 4, sRect.top + 4));
+          const tx = tRect.left + tRect.width / 2, ty = tRect.top + tRect.height / 2;
+          window.dispatchEvent(make('pointermove', tx, ty));
+          window.dispatchEvent(make('pointerup', tx, ty));
         }})();
     """)
 
@@ -309,6 +312,40 @@ def run_checks(window):
         assert count(window, ".day.today") == 1, "today's column is not marked"
 
     check("the days view draws the current week", the_week_view_opens)
+
+    def the_nav_arrows_step_a_week_and_today_returns():
+        title_before = js(window, "document.getElementById('range-title').textContent")
+        click(window, "#next")
+        assert wait_until(lambda: js(window, "document.getElementById('range-title').textContent") != title_before), \
+            "the next-week arrow never changed the visible range"
+        assert count(window, ".day.today") == 0, "next week should not still mark today"
+        click(window, "#today")
+        assert wait_until(lambda: count(window, ".day.today") == 1), \
+            "the today button never brought the current week back"
+        assert js(window, "document.getElementById('range-title').textContent") == title_before, \
+            "today should return to the same range the view opened on"
+        click(window, "#prev")
+        assert wait_until(lambda: count(window, ".day.today") == 0), \
+            "the previous-week arrow never moved off today"
+        click(window, "#today")
+        assert wait_until(lambda: count(window, ".day.today") == 1)
+
+    check("the nav arrows step between weeks and today returns to the current one",
+          the_nav_arrows_step_a_week_and_today_returns)
+
+    def the_rail_shows_and_edits_working_hours():
+        assert js(window, "document.getElementById('work-start-input').value") == "09:00", \
+            "the rail should default to the garden's 9-5 window"
+        js(window, """
+            const input = document.getElementById('work-end-input');
+            input.value = '16:00';
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        assert wait_until(lambda: js(window, "workHours.end") == "16:00"), \
+            "editing the latest-time input never round-tripped through the bridge"
+
+    check("the rail's working-hours inputs read and write the garden's schedule window",
+          the_rail_shows_and_edits_working_hours)
 
     def the_pool_holds_what_is_undated():
         names = texts(window, "#pool-cards .card-name")

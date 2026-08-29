@@ -370,6 +370,8 @@ class Api:
             candidates=self._candidates(tasks, keys),
             stats=self._stats(cards, tasks, keys),
             capacity_minutes=settings["capacityMinutes"],
+            work_start=settings["workStart"].strftime("%H:%M"),
+            work_end=settings["workEnd"].strftime("%H:%M"),
         )
 
     # ---- the focus tab ----
@@ -513,6 +515,29 @@ class Api:
         return self._panel(mote_id)
 
     # ---- scheduling ----
+
+    @_synchronized
+    def set_working_hours(self, work_start: str, work_end: str) -> dict:
+        """The earliest and latest time of day `schedule()` is allowed to
+        land a task -- the same `work_start`/`work_end` _settings() reads
+        off the garden's "Momentum" mote, written back onto it (creating
+        it the first time a garden sets this). An invalid time for
+        either argument keeps that one as it was rather than raising: the
+        rail's inputs are free text, and a garden that types something
+        `time.fromisoformat` cannot read should not lose its other value
+        over it.
+        """
+        _, tasks, _, _, _ = self._garden_state()
+        settings = self._settings(tasks)
+        updates = {
+            "work_start": _parse_time(work_start, settings["workStart"]).strftime("%H:%M"),
+            "work_end": _parse_time(work_end, settings["workEnd"]).strftime("%H:%M"),
+        }
+        if settings["settingsId"]:
+            motes_repo.update_mote(self._conn, settings["settingsId"], updates)
+        else:
+            motes_repo.create_mote(self._conn, {"name": SETTINGS_NAME, **updates})
+        return {"workStart": updates["work_start"], "workEnd": updates["work_end"]}
 
     def _binding_to_write(self, mote: Mote, keys: payload_repo.Keys, motes: list[Mote]) -> str:
         """Which key a drop onto a day writes.

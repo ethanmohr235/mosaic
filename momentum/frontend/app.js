@@ -26,14 +26,18 @@ let toastTimer = null;
 let pollTimer = null;
 let tickTimer = null;
 let refreshSeq = 0;
-let dragId = null;
+let dragState = null;        // {id, node, x0, y0, moved} while a card is pressed
+let justDragged = false;     // true for one tick after a drop, so the trailing click is a no-op
+let dropZones = [];          // {node, onDrop} for wherever a dragged card can land, this render
 let addingColumn = null;     // which column's inline "+ add mote" input is open
 let sessionMinutes = 25;
+let workHours = { start: "09:00", end: "17:00" }; // last answer from the "days" tab; edited from the rail
 let remaining = 25 * 60;
 let running = false;
 let startedAt = null;        // when the current session began, for the log
 
 const POLL_MS = 4000;
+const DRAG_PX = 4;           // how far a press moves before it counts as a drag, not a click
 const STORE_KEY = "momentum.keys";
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -222,6 +226,9 @@ function visibleRange() {
 }
 
 async function refresh() {
+  // Nothing is re-rendered while a card is being dragged: it would
+  // replace the very node the pointer is holding onto. See dragging.
+  if (dragState) return;
   const seq = ++refreshSeq;
   const args = keyArgs();
   let answer;
@@ -240,6 +247,7 @@ async function refresh() {
   if (answer === null || seq !== refreshSeq) return;
   data = answer;
   adoptKeys(answer);
+  if (answer.workStart) workHours = { start: answer.workStart, end: answer.workEnd };
   render();
 }
 
@@ -262,11 +270,10 @@ function isDone(card) {
 /** One card, in whichever of the three views asked for it. Compact
  *  drops the type row and the progress bar, which is what makes a day
  *  column readable at seven-across. */
-function cardNode(card, compact) {
+function cardNode(card, compact, draggable = true) {
   const node = el("div", "card" + (compact ? " compact" : ""));
   const color = colorOf(card);
   node.style.borderLeftColor = color;
-  node.draggable = true;
   node.dataset.id = card.id;
   if (card.id === selectedId) node.classList.add("selected");
   if (isDone(card)) node.classList.add("done");
@@ -308,13 +315,11 @@ function cardNode(card, compact) {
     node.append(bar);
   }
 
-  node.addEventListener("dragstart", () => { dragId = card.id; node.classList.add("dragging"); });
-  node.addEventListener("dragend", () => {
-    dragId = null;
-    node.classList.remove("dragging");
-    document.querySelectorAll(".over").forEach((n) => n.classList.remove("over"));
+  if (draggable) node.addEventListener("pointerdown", (event) => beginCardDrag(event, card.id, node));
+  node.addEventListener("click", () => {
+    if (justDragged) return;
+    select(card.id === selectedId ? null : card.id);
   });
-  node.addEventListener("click", () => select(card.id === selectedId ? null : card.id));
   return node;
 }
 
@@ -335,22 +340,78 @@ function dayChip(card) {
   return chip;
 }
 
-/** Marks a drop target while a card is over it. Shared by every column
- *  and day so the highlight cannot get out of step between them. */
+/** Registers `node` as somewhere a dragged card can be released. Reset
+ *  at the top of every render() (see below), so a target from the view
+ *  before last cannot outlive the DOM node it pointed at. */
 function dropTarget(node, onDrop) {
-  node.addEventListener("dragover", (event) => {
-    if (!dragId) return;
-    event.preventDefault();
-    node.classList.add("over");
-  });
-  node.addEventListener("dragleave", () => node.classList.remove("over"));
-  node.addEventListener("drop", (event) => {
-    event.preventDefault();
-    node.classList.remove("over");
-    const id = dragId;
-    dragId = null;
-    if (id) onDrop(id);
-  });
+  dropZones.push({ node, onDrop });
+}
+
+// ---- dragging -------------------------------------------------------
+//
+// Pointer events rather than HTML5 drag-and-drop -- the same choice
+// monastery/frontend/app.js makes for its own calendar, and for the same
+// reason: native drag-and-drop inside pywebview's WebKitGTK view is
+// unreliable enough that a card here simply would not move. One pointer
+// layer covers the board's columns, the week's days and the pool alike,
+// since all three only ever care which zone the pointer came up over.
+
+function beginCardDrag(event, id, node) {
+  if (event.button !== 0) return;
+  dragState = { id, node, x0: event.clientX, y0: event.clientY, moved: false };
+  window.addEventListener("pointermove", onCardDragMove);
+  window.addEventListener("pointerup", onCardDragUp);
+}
+
+function onCardDragMove(event) {
+  if (!dragState) return;
+  if (!dragState.moved) {
+    // Below the threshold this is still a click: a board where a
+    // one-pixel wobble picks up a card is a board you cannot select
+    // anything on.
+    if (Math.abs(event.clientX - dragState.x0) < DRAG_PX
+        && Math.abs(event.clientY - dragState.y0) < DRAG_PX) return;
+    dragState.moved = true;
+    dragState.node.classList.add("dragging");
+    document.body.classList.add("dragging-on");
+  }
+  event.preventDefault();
+  highlightZoneAt(event.clientX, event.clientY);
+}
+
+function onCardDragUp(event) {
+  window.removeEventListener("pointermove", onCardDragMove);
+  window.removeEventListener("pointerup", onCardDragUp);
+  const state = dragState;
+  dragState = null;
+  clearZoneHighlight();
+  if (!state) return;
+  state.node.classList.remove("dragging");
+  document.body.classList.remove("dragging-on");
+  if (!state.moved) return;
+  // A click still follows this pointerup, and without this it would
+  // count as one too -- reopening or deselecting what the drag just
+  // dropped.
+  justDragged = true;
+  setTimeout(() => { justDragged = false; }, 0);
+  const zone = zoneAt(event.clientX, event.clientY);
+  if (zone) zone.onDrop(state.id);
+}
+
+function zoneAt(x, y) {
+  const under = document.elementFromPoint(x, y);
+  if (!under) return null;
+  return dropZones.find((z) => z.node.contains(under));
+}
+
+function highlightZoneAt(x, y) {
+  clearZoneHighlight();
+  const zone = zoneAt(x, y);
+  if (zone) zone.node.classList.add("over");
+}
+
+function clearZoneHighlight() {
+  dropZones.forEach((z) => z.node.classList.remove("over"));
 }
 
 // ---- rendering: the rail -------------------------------------------
@@ -397,6 +458,11 @@ function renderRail() {
   bindings.forEach((b) => binding.append(
     keyRow(b.key, b.count, b.active, () => toggleBinding(b.key)),
   ));
+
+  // Only overwritten when nothing is focused: a poll landing mid-edit
+  // must not undo what the person is still typing.
+  if (document.activeElement !== $("work-start-input")) $("work-start-input").value = workHours.start;
+  if (document.activeElement !== $("work-end-input")) $("work-end-input").value = workHours.end;
 }
 
 // ---- rendering: the board ------------------------------------------
@@ -484,6 +550,10 @@ function renderDays() {
     dropTarget(node, (id) => scheduleOn(id, day.day));
     host.append(node);
   });
+
+  // The pool is a drop target too: dropping a scheduled card back into
+  // it is how you unschedule, which is the same gesture in reverse.
+  dropTarget($("pool"), (id) => unschedule(id));
 }
 
 // ---- rendering: focus ----------------------------------------------
@@ -496,10 +566,10 @@ function activeCard() {
 function renderFocus() {
   const queue = clear($("queue-cards"));
   (data.queue || []).forEach((card) => {
-    const node = cardNode(card, true);
     // In the queue a click picks what the timer is about, rather than
-    // opening the panel -- that is the one thing this list is for.
-    node.draggable = false;
+    // opening the panel -- that is the one thing this list is for -- so
+    // it is not a drag source either.
+    const node = cardNode(card, true, false);
     node.onclick = () => { activeId = card.id; render(); };
     if (card.id === (activeCard() || {}).id) node.classList.add("selected");
     queue.append(node);
@@ -667,10 +737,16 @@ function boardStatuses() {
 
 function render() {
   if (!data) return;
+  // Every drop target is registered fresh by whichever tab draws below,
+  // so a zone from the view before last can never outlive its node.
+  dropZones = [];
   $("board-view").classList.toggle("hidden", tab !== "board");
   $("days-view").classList.toggle("hidden", tab !== "days");
   $("focus-view").classList.toggle("hidden", tab !== "focus");
   $("rail").classList.toggle("hidden", !railOpen);
+  // Only the week has a range to step through -- the board and focus
+  // tabs have nothing for prev/next/today to mean.
+  $("nav").classList.toggle("hidden", tab !== "days");
 
   if (tab === "board") renderBoard();
   else if (tab === "days") renderDays();
@@ -766,6 +842,16 @@ async function scheduleOn(moteId, day) {
   } else {
     toast(`${answer.name} → ${answer.binding} = ${when}`);
   }
+  refresh();
+}
+
+async function saveWorkingHours() {
+  const start = $("work-start-input").value || workHours.start;
+  const end = $("work-end-input").value || workHours.end;
+  const answer = await call(api.set_working_hours(start, end), "Could not save working hours.");
+  if (answer === null) return;
+  workHours = answer;
+  toast(`Working hours: ${answer.workStart}–${answer.workEnd}`);
   refresh();
 }
 
@@ -914,6 +1000,13 @@ function wire() {
     render();
   };
 
+  $("work-start-input").onchange = saveWorkingHours;
+  $("work-end-input").onchange = saveWorkingHours;
+
+  $("prev").onclick = () => step(-1);
+  $("next").onclick = () => step(1);
+  $("today").onclick = () => { anchor = new Date(); refresh(); };
+
   $("garden-btn").onclick = openGardenMenu;
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".topbar-menu")) closeGardenMenu();
@@ -928,11 +1021,19 @@ function wire() {
     const list = launcherFiltered($("launcher-input").value);
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      if (launcherHighlight < list.length - 1) launcherHighlight++;
+      if (launcherHighlight + LAUNCHER_COLUMNS < list.length) launcherHighlight += LAUNCHER_COLUMNS;
       updateLauncherHighlight();
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      if (launcherHighlight > 0) launcherHighlight--;
+      if (launcherHighlight - LAUNCHER_COLUMNS >= 0) launcherHighlight -= LAUNCHER_COLUMNS;
+      updateLauncherHighlight();
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS < LAUNCHER_COLUMNS - 1 && launcherHighlight + 1 < list.length) launcherHighlight++;
+      updateLauncherHighlight();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS > 0) launcherHighlight--;
       updateLauncherHighlight();
     } else if (event.key === "Enter" && list[launcherHighlight]) {
       launchApp(list[launcherHighlight].id);
@@ -979,10 +1080,6 @@ function wire() {
     render();
     refresh();
   };
-
-  // The pool is a drop target too: dropping a scheduled card back into
-  // it is how you unschedule, which is the same gesture in reverse.
-  dropTarget($("pool"), (id) => unschedule(id));
 
   window.addEventListener("keydown", (event) => {
     const typing = event.target instanceof HTMLInputElement;
@@ -1067,6 +1164,7 @@ const LAUNCHER_APPS = [
 const THIS_APP = "momentum";
 
 let launcherHighlight = 0;
+const LAUNCHER_COLUMNS = 2; // matches #launcher-results grid-template-columns
 
 function launcherChoices() {
   return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP);
