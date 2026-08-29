@@ -65,26 +65,6 @@
     <div class="topbar-menu">
       <button id="tools-btn" class="topbar-trigger" type="button" data-menu="tools" aria-haspopup="menu" aria-expanded="false">Tools</button>
       <div id="tools-menu" class="menu hidden">
-        <div class="menu-row">
-          <span>Steps</span>
-          <input type="number" id="sim-steps-input" min="1" max="500" value="10" title="Steps to simulate">
-        </div>
-        <div class="menu-row">
-          <span>Solver</span>
-          <select id="sim-solver-select" title="Solver backend for equations the substitution loop can't resolve alone"></select>
-        </div>
-        <div class="menu-row">
-          <span>Scenario</span>
-          <select id="sim-scenario-select" title="Solve as a scenario would have the garden. A scenario run is never written to the graph"></select>
-        </div>
-        <button id="run-sim-btn" class="menu-item accent" type="button">Simulate…</button>
-        <button id="exit-sim-btn" class="menu-item hidden" type="button">Exit simulation</button>
-        <button id="toggle-runs-panel-btn" class="menu-item" type="button">Run history…</button>
-        <button id="check-roles-btn" class="menu-item" type="button">Check roles…</button>
-        <div class="menu-sep"></div>
-        <button id="open-mora-btn" class="menu-item" type="button" title="Open Mora, the .modoc note editor, on this garden">Notes (Mora)…</button>
-        <button id="open-monastery-btn" class="menu-item" type="button" title="Open Monastery, the calendar, on this garden">Calendar (Monastery)…</button>
-        <button id="open-momentum-btn" class="menu-item" type="button" title="Open Momentum, the task board and timer, on this garden">Tasks (Momentum)…</button>
         <button id="open-sync-btn" class="menu-item" type="button">Sync…</button>
         <div class="menu-sep"></div>
         <button class="menu-item soon" type="button" data-soon="Automations">Automations<span class="menu-badge">soon</span></button>
@@ -201,6 +181,33 @@
         </div>
       </section>
       <button id="quick-add-btn" type="button" title="New mote">+</button>
+    </div>
+
+    <div id="simulate-wrap">
+      <section id="sim-settings-panel" class="hidden">
+        <div class="panel-title">Simulation settings</div>
+        <button id="close-sim-settings" type="button" title="Close">×</button>
+        <div class="menu-row">
+          <span>Steps</span>
+          <input type="number" id="sim-steps-input" min="1" max="500" value="10" title="Steps to simulate">
+        </div>
+        <div class="menu-row">
+          <span>Solver</span>
+          <select id="sim-solver-select" title="Solver backend for equations the substitution loop can't resolve alone"></select>
+        </div>
+        <div class="menu-row">
+          <span>Scenario</span>
+          <select id="sim-scenario-select" title="Solve as a scenario would have the garden. A scenario run is never written to the graph"></select>
+        </div>
+        <div class="panel-divider"></div>
+        <button id="toggle-runs-panel-btn" type="button" class="linkish">Run history…</button>
+        <button id="check-roles-btn" type="button" class="linkish">Check roles…</button>
+      </section>
+      <div id="simulate-controls">
+        <button id="open-sim-settings-btn" type="button" class="icon-btn" title="Simulation settings">⚙</button>
+        <button id="run-sim-btn" class="primary" type="button">Simulate</button>
+        <button id="exit-sim-btn" class="hidden ghost" type="button">Exit simulation</button>
+      </div>
     </div>
 
     <div id="sim-bar" class="hidden">

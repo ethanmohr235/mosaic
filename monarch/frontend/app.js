@@ -799,24 +799,6 @@ function openMora(moteId) {
   );
 }
 
-function openMonastery(moteId) {
-  call(api.open_monastery(moteId || null));
-  showToast(
-    moteId
-      ? "Opening Monastery… dates changed there appear here after a refocus."
-      : "Opening Monastery…",
-  );
-}
-
-function openMomentum(moteId) {
-  call(api.open_momentum(moteId || null));
-  showToast(
-    moteId
-      ? "Opening Momentum… statuses changed there appear here after a refocus."
-      : "Opening Momentum…",
-  );
-}
-
 function withSimOverlay(mote) {
   const overlay = {};
   for (const c of cumulativeSimChanges()) {
@@ -2951,9 +2933,9 @@ function setupContextMenu() {
 // with only one open at a time -- opening any one closes the rest, mutually
 // exclusive with the right-click context menu too. Most of their real
 // items are static markup pointing at ids that predate this section
-// (#run-sim-btn, #check-roles-btn, ...) so the setup functions that
-// already own those elements' behavior need no changes, only a leading
-// closeTopMenus() so choosing an action closes the menu it came from.
+// so the setup functions that already own those elements' behavior need
+// no changes, only a leading closeTopMenus() so choosing an action closes
+// the menu it came from.
 
 function closeTopMenus() {
   for (const name of ["garden", "file", "view", "tools"]) {
@@ -2970,7 +2952,6 @@ function openTopMenu(name) {
   hideContextMenu();
   if (name === "garden") renderGardenMenu();
   else if (name === "view") refreshViewMenu();
-  else if (name === "tools") refreshToolsMenu();
   $(`${name}-menu`).classList.remove("hidden");
   const btn = $(`${name}-btn`);
   btn.classList.add("open");
@@ -3012,17 +2993,29 @@ function refreshViewMenu() {
   $("view-toggle-panel").textContent = hidden ? "Show controls" : "Hide controls";
 }
 
-/** Computed at open time rather than kept in sync continuously -- simpler
- *  than threading a menu refresh into every place simPreview changes,
- *  and the menu is closed the rest of the time anyway. */
-function refreshToolsMenu() {
+/** Simulate/Exit simulation are permanently on screen now (bottom-right),
+ *  not menu items recomputed on open, so this runs directly from the two
+ *  places simPreview actually changes: openSimBar() and closeSimBar(). */
+function updateSimButtons() {
   $("run-sim-btn").classList.toggle("hidden", !!simPreview);
   $("exit-sim-btn").classList.toggle("hidden", !simPreview);
+}
+
+function openSimSettingsPanel() {
+  $("sim-settings-panel").classList.remove("hidden");
   // A scenario is built from ordinary motes and relationships, so one
-  // can appear without leaving the app. Reloading the list when the menu
+  // can appear without leaving the app. Reloading the list when the panel
   // opens is exactly when it matters and costs nothing the rest of the
   // time.
   refreshScenarioPicker();
+}
+
+function closeSimSettingsPanel() {
+  $("sim-settings-panel").classList.add("hidden");
+}
+
+function toggleSimSettingsPanel() {
+  $("sim-settings-panel").classList.contains("hidden") ? openSimSettingsPanel() : closeSimSettingsPanel();
 }
 
 /** #control-panel (species legend, relationship filters, depth, reset
@@ -3144,7 +3137,7 @@ function setupTopMenus() {
   });
   $("view-reset-view").addEventListener("click", () => { closeTopMenus(); resetViewAndUnhideAll(); });
   $("view-toggle-panel").addEventListener("click", () => { closeTopMenus(); toggleControlPanel(); });
-  $("exit-sim-btn").addEventListener("click", () => { closeTopMenus(); discardSimPreview(); });
+  $("exit-sim-btn").addEventListener("click", () => { discardSimPreview(); });
 }
 
 // ---- gardens modal ----
@@ -3428,8 +3421,10 @@ function setupSimulation() {
 
   refreshScenarioPicker();
 
+  $("open-sim-settings-btn").addEventListener("click", toggleSimSettingsPanel);
+  $("close-sim-settings").addEventListener("click", closeSimSettingsPanel);
+
   $("check-roles-btn").addEventListener("click", async () => {
-    closeTopMenus();
     const report = await call(api.check_roles());
     const lines = [...report.problems, ...report.once_scoped];
     if (report.motes_checked === 0 && lines.length === 0) {
@@ -3445,7 +3440,6 @@ function setupSimulation() {
   });
 
   button.addEventListener("click", async () => {
-    closeTopMenus();
     const steps = Math.max(1, parseInt(stepsInput.value, 10) || 1);
     const solver = solverSelect.value || "linear";
     // "" means the garden as it stands. A scenario is never committed,
@@ -3467,10 +3461,8 @@ function setupSimulation() {
     } finally {
       // openSimBar() already disabled it (and keeps it disabled) on success;
       // this only matters for the "nothing to simulate" early return above.
-      // The ellipsis is part of the label (it opens the sim bar rather
-      // than running to completion), so restoring it has to keep it.
       button.disabled = !!simPreview;
-      button.textContent = "Simulate…";
+      button.textContent = "Simulate";
     }
   });
 
@@ -3544,6 +3536,7 @@ function openSimBar(result) {
   graph.setSimActive(true);
   $("sim-bar").classList.remove("hidden");
   renderSimBar();
+  updateSimButtons();
   if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
     openDetailPanel(focusId);
   }
@@ -3557,13 +3550,14 @@ function closeSimBar() {
   simStep = 0;
   graph.setSimActive(false);
   graph.setSimHighlight([]);
+  updateSimButtons();
   if (selectedRunId !== null) {
     selectedRunId = null;
     renderRunsPanel();
   }
 }
 
-/** Shared by the sim bar's own Discard button and the Tools menu's "Exit
+/** Shared by the sim bar's own Discard button and the "Exit
  *  simulation" item -- two entry points to the same action. */
 async function discardSimPreview() {
   closeSimBar();
@@ -3762,27 +3756,6 @@ async function enterRunScrub(runId) {
   openSimBar({ ...result, mode: "history", run_id: runId, failed_at: null, error: null });
   selectedRunId = runId;
   renderRunsPanel();
-}
-
-function setupMora() {
-  $("open-mora-btn").addEventListener("click", () => {
-    closeTopMenus();
-    openMora(null);
-  });
-}
-
-function setupMonastery() {
-  $("open-monastery-btn").addEventListener("click", () => {
-    closeTopMenus();
-    openMonastery(null);
-  });
-}
-
-function setupMomentum() {
-  $("open-momentum-btn").addEventListener("click", () => {
-    closeTopMenus();
-    openMomentum(null);
-  });
 }
 
 // ---- app switcher (⌘J) ----
@@ -4076,6 +4049,7 @@ function setupKeyboard() {
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
+    if (!$("sim-settings-panel").classList.contains("hidden")) { closeSimSettingsPanel(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
     // Leaving attractor mode is a smaller step than closing the panel it
     // lives in, so it comes first -- one Esc puts the graph back to
@@ -4182,9 +4156,6 @@ async function init() {
   setupViewSettings();
   setupSimulation();
   setupRunsPanel();
-  setupMora();
-  setupMonastery();
-  setupMomentum();
   setupLauncher();
   setupSync();
   setupRefresh();
