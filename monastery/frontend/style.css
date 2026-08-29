@@ -512,7 +512,7 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 
 #launcher-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-  z-index: 50; display: flex; justify-content: center; padding-top: 9vh;
+  z-index: 50; display: flex; justify-content: center; align-items: flex-start; padding-top: 9vh;
 }
 #launcher-modal {
   width: 640px; max-width: 90vw; max-height: 72vh;
@@ -548,6 +548,7 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
   display: flex; align-items: center; gap: 12px;
   padding: 12px 13px; border-radius: 12px; border: 1px solid var(--border-soft);
   background: var(--panel); color: inherit; cursor: pointer;
+  text-decoration: none;
   transition: background 0.13s ease, border-color 0.13s ease;
 }
 .launcher-card:hover, .launcher-card.highlighted {
