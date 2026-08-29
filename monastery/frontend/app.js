@@ -492,19 +492,39 @@ function minutesAt(event, col) {
 }
 
 /** Side-by-side columns for overlapping events: the first lane whose
- *  last event has already ended, else a new one. Local because it is a
- *  fact about the rectangles, not about the motes. */
+ *  last event has already ended, else a new one. Lanes are assigned per
+ *  cluster of mutually-touching events, so a stack of two doesn't narrow
+ *  unrelated events later in the same day. Local because it is a fact
+ *  about the rectangles, not about the motes. */
 function lanes(list) {
   const sorted = list.slice().sort((a, b) => a._start - b._start || b._end - a._end);
-  const laneEnds = [];
+
+  const clusters = [];
+  let cluster = [];
+  let clusterEnd = -Infinity;
   sorted.forEach((o) => {
-    let lane = laneEnds.findIndex((end) => end <= o._start);
-    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-    laneEnds[lane] = o._end;
-    o._lane = lane;
+    if (cluster.length && o._start >= clusterEnd) {
+      clusters.push(cluster);
+      cluster = [];
+      clusterEnd = -Infinity;
+    }
+    cluster.push(o);
+    clusterEnd = Math.max(clusterEnd, o._end);
   });
-  const count = Math.max(1, laneEnds.length);
-  sorted.forEach((o) => { o._laneCount = count; });
+  if (cluster.length) clusters.push(cluster);
+
+  clusters.forEach((group) => {
+    const laneEnds = [];
+    group.forEach((o) => {
+      let lane = laneEnds.findIndex((end) => end <= o._start);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+      laneEnds[lane] = o._end;
+      o._lane = lane;
+    });
+    const count = Math.max(1, laneEnds.length);
+    group.forEach((o) => { o._laneCount = count; });
+  });
+
   return sorted;
 }
 
