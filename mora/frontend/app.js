@@ -530,9 +530,46 @@ async function save() {
 let notesVisible = [];
 let notesHighlight = -1;
 
-function renderNotesResults(query) {
+/** A note matches by title if the query is in its name; otherwise it
+ *  matches by content if the query turns up in its rendered text, in
+ *  which case the row grows a snippet of the text around the hit so a
+ *  content-only match still tells the reader why the note is here. */
+function matchNotes(query) {
   const q = query.trim().toLowerCase();
-  notesVisible = q ? notes.filter((n) => n.name.toLowerCase().includes(q)) : notes;
+  if (!q) return notes.map((note) => ({ note, snippet: null }));
+  const titleHits = [];
+  const contentHits = [];
+  for (const note of notes) {
+    if (note.name.toLowerCase().includes(q)) {
+      titleHits.push({ note, snippet: null });
+      continue;
+    }
+    const text = note.text || "";
+    const idx = text.toLowerCase().indexOf(q);
+    if (idx !== -1) contentHits.push({ note, snippet: snippetAround(text, idx, q.length) });
+  }
+  return [...titleHits, ...contentHits];
+}
+
+/** A window of plain text around a match, collapsed to one line and
+ *  ellipsized at either edge that was cut, with the hit itself marked so
+ *  the row's CSS can pick it out from the rest of the snippet. */
+function snippetAround(text, index, length) {
+  const radius = 42;
+  const start = Math.max(0, index - radius);
+  const end = Math.min(text.length, index + length + radius);
+  const before = text.slice(start, index).replace(/\s+/g, " ");
+  const hit = text.slice(index, index + length);
+  const after = text.slice(index + length, end).replace(/\s+/g, " ");
+  return {
+    before: (start > 0 ? "…" : "") + before,
+    hit,
+    after: after + (end < text.length ? "…" : ""),
+  };
+}
+
+function renderNotesResults(query) {
+  notesVisible = matchNotes(query);
   notesHighlight = notesVisible.length ? 0 : -1;
 
   const container = clear($("notes-search-results"));
@@ -540,11 +577,22 @@ function renderNotesResults(query) {
     container.append(el("div", "notes-empty", notes.length ? "No matches" : "No notes in this garden yet."));
     return;
   }
-  notesVisible.forEach((note, i) => {
+  notesVisible.forEach(({ note, snippet }, i) => {
     const row = el("div", "note-result-row" + (i === notesHighlight ? " highlighted" : ""));
     const dot = el("span", "dot");
     dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${colorOf(note)}`;
-    row.append(dot, el("span", "name", note.name));
+    const text = el("div", "result-text");
+    text.append(el("span", "name", note.name));
+    if (snippet) {
+      const line = el("span", "snippet");
+      line.append(
+        document.createTextNode(snippet.before),
+        el("mark", null, snippet.hit),
+        document.createTextNode(snippet.after),
+      );
+      text.append(line);
+    }
+    row.append(dot, text);
     row.addEventListener("mousedown", (e) => { e.preventDefault(); selectNoteResult(note.id); });
     container.append(row);
   });
@@ -778,7 +826,7 @@ function wire() {
     } else if (event.key === "Enter") {
       event.preventDefault();
       const chosen = notesVisible[notesHighlight];
-      if (chosen) selectNoteResult(chosen.id);
+      if (chosen) selectNoteResult(chosen.note.id);
     } else if (event.key === "Escape") {
       closeNotesWindow();
     }

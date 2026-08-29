@@ -453,6 +453,35 @@ def _words(text: str) -> int:
     return len([w for w in text.split() if any(c.isalnum() for c in w)])
 
 
+def plain_text(document: Document) -> str:
+    """The note's prose, flattened to one searchable string -- what a
+    reader sees, not what they typed. Backs Mora's notes search (⌘P): a
+    query matches a `\\textbf{plan}` or a `\\mote{id}{Atlas}`'s label the
+    same way it matches ordinary text, and never matches a `\\val`
+    expression or a graph spec, neither of which is prose. Block
+    boundaries become newlines so a snippet built from an index into this
+    string never straddles two unrelated blocks."""
+    lines = []
+    for block in document.blocks:
+        if isinstance(block, (Heading, Paragraph)):
+            lines.append(_inline_text(block.content))
+        elif isinstance(block, ItemList):
+            lines.extend(_inline_text(item) for item in block.items)
+        elif isinstance(block, Equation):
+            lines.append(block.text)
+    return "\n".join(line for line in lines if line)
+
+
+def _inline_text(nodes: list[Inline]) -> str:
+    parts = []
+    for node in nodes:
+        if isinstance(node, (Text, Styled)):
+            parts.append(node.text)
+        elif isinstance(node, Link):
+            parts.append(node.label or node.ref)
+    return " ".join(p for p in parts if p).strip()
+
+
 # --- math ------------------------------------------------------------
 
 MATH_SYMBOLS = {

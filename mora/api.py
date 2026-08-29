@@ -147,7 +147,14 @@ class Api:
         kind displaces the species in the main app's type label."""
         motes, relationships = graph_repo.whole_garden(self._conn)
         directory = payload_repo.Directory.of(motes, relationships)
-        notes = [directory.describe(m.id) for m in motes if modoc.has_modoc(m.properties)]
+        notes = []
+        for m in motes:
+            if not modoc.has_modoc(m.properties):
+                continue
+            entry = directory.describe(m.id)
+            source = m.properties.get(modoc.MODOC_KEY) or ""
+            entry["text"] = modoc.plain_text(modoc.parse(source))
+            notes.append(entry)
         return sorted(notes, key=lambda n: n["name"].casefold())
 
     @_synchronized
