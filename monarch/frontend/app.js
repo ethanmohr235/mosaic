@@ -325,14 +325,16 @@ function renderLegend() {
     const el = document.createElement("div");
     const hidden = graph.hiddenSpecies.has(row.id);
     el.className = "filter-row" + (hidden ? " off" : "");
-    el.title = hidden ? `Show ${row.label}` : `Hide ${row.label}`;
+    el.title = (hidden ? `Show ${row.label}` : `Hide ${row.label}`) + " (shift-click to isolate)";
     el.innerHTML =
       `<span class="dot${row.diamond ? " diamond" : ""}${hollow ? " hollow" : ""}" style="background:${row.color}"></span>` +
       `<span class="name"></span><span class="count">${row.count}</span>`;
     el.querySelector(".name").textContent = row.label;
-    el.addEventListener("click", () => {
-      const hiddenIds = new Set(graph.hiddenSpecies);
-      hiddenIds.has(row.id) ? hiddenIds.delete(row.id) : hiddenIds.add(row.id);
+    el.addEventListener("click", (ev) => {
+      const hiddenIds = ev.shiftKey
+        ? new Set(rows.filter((r) => r.id !== row.id).map((r) => r.id))
+        : new Set(graph.hiddenSpecies);
+      if (!ev.shiftKey) hiddenIds.has(row.id) ? hiddenIds.delete(row.id) : hiddenIds.add(row.id);
       graph.setHiddenSpecies(hiddenIds);
       localStorage.setItem(hiddenSpeciesKey(currentGarden), JSON.stringify([...hiddenIds]));
       renderLegend();
@@ -354,13 +356,15 @@ function renderRelFilters() {
     const el = document.createElement("div");
     const hidden = graph.hiddenRelTypes.has(type);
     el.className = "filter-row" + (hidden ? " off" : "");
-    el.title = hidden ? `Show ${type}` : `Hide ${type}`;
+    el.title = (hidden ? `Show ${type}` : `Hide ${type}`) + " (shift-click to isolate)";
     el.innerHTML = '<span class="name"></span><span class="count"></span>';
     el.querySelector(".name").textContent = type;
     el.querySelector(".count").textContent = counts.get(type);
-    el.addEventListener("click", () => {
-      const hiddenTypes = new Set(graph.hiddenRelTypes);
-      hiddenTypes.has(type) ? hiddenTypes.delete(type) : hiddenTypes.add(type);
+    el.addEventListener("click", (ev) => {
+      const hiddenTypes = ev.shiftKey
+        ? new Set(types.filter((t) => t !== type))
+        : new Set(graph.hiddenRelTypes);
+      if (!ev.shiftKey) hiddenTypes.has(type) ? hiddenTypes.delete(type) : hiddenTypes.add(type);
       graph.setHiddenRelTypes(hiddenTypes);
       localStorage.setItem(hiddenRelKey(currentGarden), JSON.stringify([...hiddenTypes]));
       renderRelFilters();
@@ -3829,6 +3833,7 @@ const LAUNCHER_APPS = [
 const THIS_APP = "monarch";
 
 let launcherHighlight = 0;
+const LAUNCHER_COLUMNS = 2; // matches #launcher-results grid-template-columns
 
 function launcherChoices() {
   return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP);
@@ -3907,11 +3912,19 @@ function setupLauncher() {
     const list = launcherFiltered($("launcher-input").value);
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (launcherHighlight < list.length - 1) launcherHighlight++;
+      if (launcherHighlight + LAUNCHER_COLUMNS < list.length) launcherHighlight += LAUNCHER_COLUMNS;
       updateLauncherHighlight();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (launcherHighlight > 0) launcherHighlight--;
+      if (launcherHighlight - LAUNCHER_COLUMNS >= 0) launcherHighlight -= LAUNCHER_COLUMNS;
+      updateLauncherHighlight();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS < LAUNCHER_COLUMNS - 1 && launcherHighlight + 1 < list.length) launcherHighlight++;
+      updateLauncherHighlight();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS > 0) launcherHighlight--;
       updateLauncherHighlight();
     } else if (e.key === "Enter" && list[launcherHighlight]) {
       launchApp(list[launcherHighlight].id);

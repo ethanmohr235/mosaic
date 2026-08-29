@@ -1552,11 +1552,19 @@ function wire() {
     const list = launcherFiltered($("launcher-input").value);
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      if (launcherHighlight < list.length - 1) launcherHighlight++;
+      if (launcherHighlight + LAUNCHER_COLUMNS < list.length) launcherHighlight += LAUNCHER_COLUMNS;
       updateLauncherHighlight();
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      if (launcherHighlight > 0) launcherHighlight--;
+      if (launcherHighlight - LAUNCHER_COLUMNS >= 0) launcherHighlight -= LAUNCHER_COLUMNS;
+      updateLauncherHighlight();
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS < LAUNCHER_COLUMNS - 1 && launcherHighlight + 1 < list.length) launcherHighlight++;
+      updateLauncherHighlight();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS > 0) launcherHighlight--;
       updateLauncherHighlight();
     } else if (event.key === "Enter" && list[launcherHighlight]) {
       launchApp(list[launcherHighlight].id);
@@ -1719,6 +1727,7 @@ const LAUNCHER_APPS = [
 const THIS_APP = "monastery";
 
 let launcherHighlight = 0;
+const LAUNCHER_COLUMNS = 2; // matches #launcher-results grid-template-columns
 
 function launcherChoices() {
   return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP);
