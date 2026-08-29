@@ -28,16 +28,17 @@
   <div class="rule"></div>
 
   <div class="topbar-menu">
-    <button id="note-btn" class="topbar-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
-      <span id="note-crumb">notes /</span>
-      <span id="note-title">…</span>
+    <button id="garden-btn" class="topbar-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+      <span id="garden-name">…</span>
       <span class="caret">⌄</span>
     </button>
-    <div id="note-menu" class="menu hidden" role="menu">
-      <div id="note-menu-list"></div>
-      <div class="menu-sep"></div>
-      <button id="note-menu-new" class="menu-item" type="button">+ New note…</button>
-    </div>
+    <div id="garden-menu" class="menu hidden" role="menu"></div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div id="note-label">
+    <span id="note-title">…</span>
   </div>
 
   <span id="dirty" class="pill">synced</span>
@@ -50,6 +51,7 @@
     <button type="button" data-mode="preview">Read</button>
   </div>
 
+  <button id="notes-btn" class="topbar-trigger icon-btn" type="button" title="Notes (⌘P)">▤</button>
   <button id="refresh-btn" class="topbar-trigger icon-btn" type="button" title="Refresh: sync and reload">⟳</button>
   <button id="switch-app-btn" class="topbar-trigger icon-btn" type="button" title="Switch app (⌘J)">⊞</button>
   <button id="data-toggle" class="on" type="button">Data</button>
@@ -122,6 +124,18 @@
   </div>
   <button id="apply" type="button" disabled>Apply t+0…</button>
 </footer>
+
+<div id="notes-overlay" class="hidden">
+  <div id="notes-modal">
+    <input type="text" id="notes-search-input" placeholder="Search notes…" autocomplete="off">
+    <div id="notes-search-results"></div>
+    <div id="notes-modal-footer">
+      <span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>
+      <div class="spacer"></div>
+      <button id="notes-new-btn" type="button" class="ghost">+ New note…</button>
+    </div>
+  </div>
+</div>
 
 <div id="launcher-overlay" class="hidden">
   <div id="launcher-modal">

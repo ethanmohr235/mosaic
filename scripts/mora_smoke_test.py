@@ -369,8 +369,11 @@ def run_checks(window):
 
     def new_note_opens_a_fresh_page_and_shows_up_in_the_switcher():
         js(window, "window.prompt = () => 'Field notes';")
-        click(window, "#note-btn")
-        click(window, "#note-menu-new")
+        click(window, "#notes-btn")
+        assert wait_until(
+            lambda: not js(window, "document.getElementById('notes-overlay').classList.contains('hidden')")
+        ), "the notes window did not open"
+        click(window, "#notes-new-btn")
         assert wait_until(lambda: text_of(window, "#note-title") == "Field notes"), \
             f"the new note never became current, got {text_of(window, '#note-title')!r}"
         assert js(window, "document.getElementById('editor').value") == "", \
@@ -378,13 +381,30 @@ def run_checks(window):
         found = search_motes(_conn(), "Field notes")
         assert any(m.properties.get("modoc") == "" for m in found), \
             "the new mote was not written with an empty modoc property"
-        click(window, "#note-btn")
-        assert wait_until(lambda: "Field notes" in text_of(window, "#note-menu-list")), \
-            "the new note did not appear in its own switcher"
-        click(window, "#note-btn")  # close the menu again
+        click(window, "#notes-btn")
+        assert wait_until(lambda: "Field notes" in text_of(window, "#notes-search-results")), \
+            "the new note did not appear in the notes window"
+        js(window, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
+        assert wait_until(
+            lambda: js(window, "document.getElementById('notes-overlay').classList.contains('hidden')")
+        ), "Escape did not close the notes window"
 
-    check("+ New note… opens a fresh page and lists it in the switcher",
+    check("+ New note… opens a fresh page and lists it in the notes window",
           new_note_opens_a_fresh_page_and_shows_up_in_the_switcher)
+
+    def the_garden_switcher_lists_the_current_garden():
+        assert text_of(window, "#brand-sub") == "MonOSS", \
+            f"the brand subheading should be static, got {text_of(window, '#brand-sub')!r}"
+        assert text_of(window, "#garden-name") == GARDEN, \
+            f"the garden switcher should show the current garden, got {text_of(window, '#garden-name')!r}"
+        click(window, "#garden-btn")
+        assert wait_until(
+            lambda: GARDEN in text_of(window, "#garden-menu")
+        ), "the garden switcher did not list the current garden"
+        click(window, "#garden-btn")  # close it again
+
+    check("the garden switcher shows the current garden, not the brand subheading",
+          the_garden_switcher_lists_the_current_garden)
 
     def no_uncaught_errors():
         errors = js(window, "JSON.stringify(window.__moraErrors || [])")

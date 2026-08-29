@@ -525,49 +525,63 @@ async function save() {
   notes = await api.list_notes();
 }
 
-/** Open/close is synchronous and is the single source of truth for
- *  whether the menu is showing; refreshNoteMenu() below only fills in
- *  its content and runs after an await. Keeping those separate means a
- *  slow list_notes() that lands after the menu was already closed (e.g.
- *  by "+ New note…", which closes the menu the moment it's clicked)
- *  can't reopen it out from under the user with a stale list. */
-function openNoteMenu() {
-  const menu = $("note-menu");
-  if (!menu.classList.contains("hidden")) { closeNoteMenu(); return; }
-  menu.classList.remove("hidden");
-  $("note-btn").setAttribute("aria-expanded", "true");
-  refreshNoteMenu();
-}
+// ---- notes search/list window (⌘P) ---------------------------------
 
-async function refreshNoteMenu() {
-  notes = await api.list_notes();
-  const list = clear($("note-menu-list"));
-  if (!notes.length) {
-    list.append(el("div", "menu-empty", "No notes in this garden yet."));
+let notesVisible = [];
+let notesHighlight = -1;
+
+function renderNotesResults(query) {
+  const q = query.trim().toLowerCase();
+  notesVisible = q ? notes.filter((n) => n.name.toLowerCase().includes(q)) : notes;
+  notesHighlight = notesVisible.length ? 0 : -1;
+
+  const container = clear($("notes-search-results"));
+  if (!notesVisible.length) {
+    container.append(el("div", "notes-empty", notes.length ? "No matches" : "No notes in this garden yet."));
+    return;
   }
-  notes.forEach((note) => {
-    const row = el("button", "menu-item");
-    row.type = "button";
+  notesVisible.forEach((note, i) => {
+    const row = el("div", "note-result-row" + (i === notesHighlight ? " highlighted" : ""));
     const dot = el("span", "dot");
-    dot.style.cssText = `width:6px;height:6px;border-radius:50%;background:${colorOf(note)}`;
-    row.append(dot, el("span", null, note.name));
-    row.onclick = () => { closeNoteMenu(); loadNote(note.id); };
-    list.append(row);
+    dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${colorOf(note)}`;
+    row.append(dot, el("span", "name", note.name));
+    row.addEventListener("mousedown", (e) => { e.preventDefault(); selectNoteResult(note.id); });
+    container.append(row);
   });
 }
 
-function closeNoteMenu() {
-  $("note-menu").classList.add("hidden");
-  $("note-btn").setAttribute("aria-expanded", "false");
+function updateNotesHighlight() {
+  document.querySelectorAll("#notes-search-results .note-result-row").forEach((row, i) => {
+    row.classList.toggle("highlighted", i === notesHighlight);
+  });
+  const active = document.querySelectorAll("#notes-search-results .note-result-row")[notesHighlight];
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
-/** A note started on the spot, from the note switcher's "+ New note…"
+async function openNotesWindow() {
+  $("notes-overlay").classList.remove("hidden");
+  $("notes-search-input").value = "";
+  notes = await api.list_notes();
+  renderNotesResults("");
+  $("notes-search-input").focus();
+}
+
+function closeNotesWindow() {
+  $("notes-overlay").classList.add("hidden");
+}
+
+function selectNoteResult(id) {
+  closeNotesWindow();
+  loadNote(id);
+}
+
+/** A note started on the spot, from the notes window's "+ New note…"
  *  row -- the same entry point Monastery's grid gives a new mote, minus
  *  the date it has no equivalent of here. Name is optional: an empty
  *  answer still opens a fresh page, with name_of()'s id-prefix fallback
  *  standing in until it's given one. */
 async function createNote() {
-  closeNoteMenu();
+  closeNotesWindow();
   const name = window.prompt("New note name:", "");
   if (name === null) return;
   try {
@@ -576,6 +590,38 @@ async function createNote() {
   } catch (e) {
     toast(String(e), true);
   }
+}
+
+// ---- garden menu ----
+
+async function openGardenMenu() {
+  const menu = $("garden-menu");
+  if (!menu.classList.contains("hidden")) { closeGardenMenu(); return; }
+  const gardens = await api.list_gardens();
+  const current = $("garden-name").textContent;
+  clear(menu);
+  if (!gardens.length) menu.append(el("div", "menu-empty", "No gardens."));
+  gardens.forEach((name) => {
+    const item = el("button", "menu-item", name);
+    item.type = "button";
+    if (name === current) item.classList.add("on");
+    item.onclick = async () => {
+      closeGardenMenu();
+      const answer = await api.switch_garden(name);
+      $("garden-name").textContent = answer.garden;
+      closeNotesWindow();
+      closePicker();
+      await loadNote(null);
+    };
+    menu.append(item);
+  });
+  menu.classList.remove("hidden");
+  $("garden-btn").setAttribute("aria-expanded", "true");
+}
+
+function closeGardenMenu() {
+  $("garden-menu").classList.add("hidden");
+  $("garden-btn").setAttribute("aria-expanded", "false");
 }
 
 // ---- the @ picker --------------------------------------------------
@@ -713,8 +759,30 @@ function wire() {
     button.onclick = () => setMode(button.dataset.mode);
   });
 
-  $("note-btn").onclick = openNoteMenu;
-  $("note-menu-new").onclick = createNote;
+  $("garden-btn").onclick = openGardenMenu;
+  $("notes-btn").onclick = openNotesWindow;
+  $("notes-new-btn").onclick = createNote;
+  $("notes-overlay").addEventListener("mousedown", (event) => {
+    if (event.target === $("notes-overlay")) closeNotesWindow();
+  });
+  $("notes-search-input").addEventListener("input", (event) => renderNotesResults(event.target.value));
+  $("notes-search-input").addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (notesHighlight < notesVisible.length - 1) notesHighlight++;
+      updateNotesHighlight();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (notesHighlight > 0) notesHighlight--;
+      updateNotesHighlight();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const chosen = notesVisible[notesHighlight];
+      if (chosen) selectNoteResult(chosen.id);
+    } else if (event.key === "Escape") {
+      closeNotesWindow();
+    }
+  });
   $("panel-back").onclick = () => { focusId = null; drawPanel(payload.anchor.id); };
   $("problems-btn").onclick = () => {
     dataOpen = true;
@@ -727,10 +795,10 @@ function wire() {
   $("apply").onclick = applyStep;
 
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".topbar-menu")) closeNoteMenu();
+    if (!event.target.closest(".topbar-menu")) closeGardenMenu();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { closeNoteMenu(); closePicker(); closeLauncher(); }
+    if (event.key === "Escape") { closeGardenMenu(); closeNotesWindow(); closePicker(); closeLauncher(); }
     // Window-level rather than scoped to the editor (as this used to be):
     // Save has its own persistent topbar button and dirty-state pill, so
     // Ctrl/Cmd+S reads as "save the note" from anywhere in the window, not
@@ -738,6 +806,10 @@ function wire() {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       save();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      openNotesWindow();
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "j") {
       event.preventDefault();
@@ -803,6 +875,7 @@ const LAUNCHER_APPS = [
 const THIS_APP = "mora";
 
 let launcherHighlight = 0;
+const LAUNCHER_COLUMNS = 2; // matches #launcher-results grid-template-columns
 
 function launcherChoices() {
   return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP);
@@ -854,7 +927,7 @@ function updateLauncherHighlight() {
 function openLauncher() {
   $("launcher-overlay").classList.remove("hidden");
   $("launcher-input").value = "";
-  $("launcher-garden").textContent = "garden · " + $("brand-sub").textContent;
+  $("launcher-garden").textContent = "garden · " + $("garden-name").textContent;
   launcherHighlight = 0;
   renderLauncherResults("");
   $("launcher-input").focus();
@@ -884,11 +957,19 @@ function setupLauncher() {
     const list = launcherFiltered($("launcher-input").value);
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (launcherHighlight < list.length - 1) launcherHighlight++;
+      if (launcherHighlight + LAUNCHER_COLUMNS < list.length) launcherHighlight += LAUNCHER_COLUMNS;
       updateLauncherHighlight();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (launcherHighlight > 0) launcherHighlight--;
+      if (launcherHighlight - LAUNCHER_COLUMNS >= 0) launcherHighlight -= LAUNCHER_COLUMNS;
+      updateLauncherHighlight();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS < LAUNCHER_COLUMNS - 1 && launcherHighlight + 1 < list.length) launcherHighlight++;
+      updateLauncherHighlight();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      if (launcherHighlight % LAUNCHER_COLUMNS > 0) launcherHighlight--;
       updateLauncherHighlight();
     } else if (e.key === "Enter" && list[launcherHighlight]) {
       launchApp(list[launcherHighlight].id);
@@ -900,7 +981,7 @@ async function init() {
   api = window.pywebview.api;
   wire();
   applyLayout();
-  $("brand-sub").textContent = await api.current_garden();
+  $("garden-name").textContent = await api.current_garden();
   await loadNote(null);
 }
 
