@@ -2,7 +2,7 @@
 """The Monolith window. mora/app.py's twin, and deliberately so -- same
 pywebview settings, same cache workaround, different frontend and
 different Api. window_launcher.py carries the settings and workaround
-all five apps share.
+all six apps share.
 
 Wider than the others by default: this one draws a table, and a table
 that has to be scrolled sideways on first open is a table that has
@@ -17,7 +17,7 @@ FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Its own storage directory, next to but never inside the other windows'
-# -- launch_window()'s cache-clearing deletes it on startup, and all five
+# -- launch_window()'s cache-clearing deletes it on startup, and all six
 # apps are meant to run at once.
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_monolith"
 

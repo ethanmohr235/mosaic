@@ -25,25 +25,16 @@ let reservedProperties = new Set();    // property keys recognized by convention
 let reservedRelTypes = new Set();      // relationship types recognized by convention
 let reservedMeanings = {};             // reserved name -> what it means, for tooltips
 let propertyModelProviders = {};       // provider name -> description + capabilities
-let simPreview = null;                 // the last preview_simulation() payload, while the sim bar is showing
-let simStep = 0;                       // 0 = real/unprojected; k>0 = cumulative state through steps[k-1]
-let simPlaying = false;
-let simPlayTimer = null;
 let openMenuName = null;               // 'garden' | 'file' | 'view' | 'tools' | null -- which topbar dropdown is open
-let allRuns = [];                      // cached list_runs() result, while the runs panel is open
-let selectedRunId = null;              // the run currently entered in history-scrub mode (simPreview.mode === 'history'), if any
 let viewSettings = null;               // this garden's advanced view settings (forces/colors/attractors)
 let activeViewFilterId = null;         // id of the Monolith saved view currently filtering the graph, or null
-let attractorMode = false;             // arranging species attractors -- read-only, like a sim preview
+let attractorMode = false;             // arranging species attractors -- read-only
 let closeOpenIntervalPanel = null;     // closes whichever interval picker (app.js::intervalField) is currently popped open, if any
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
 const DETAIL_WIDTH_MIN = 280;
 const DETAIL_WIDTH_MAX = 640;
-const SIM_STEPS_KEY = "monoss:simSteps";
-const SIM_SOLVER_KEY = "monoss:simSolver";
-const SIM_ERROR_TOAST_MS = 12000;
 const CONTROL_PANEL_KEY = "monoss:controlPanel";
 
 window.addEventListener("error", (e) => {
@@ -109,32 +100,21 @@ function showUndoToast(message, perform, durationMs = 6000) {
   showToast._timer = setTimeout(() => { toast.classList.add("hidden"); lastUndo = null; }, durationMs);
 }
 
-/** True (after showing a toast) whenever a simulation preview is open --
- *  gates every mutating action while previewing. Not just while scrubbed
- *  to a projected step: committing always re-solves from the *current* DB
- *  state, so an edit made mid-preview (even at the real/step-0 view) would
- *  silently diverge from what the preview actually showed. */
-function simBlocked() {
-  if (!simPreview) return false;
-  showToast(
-    simPreview.mode === "history"
-      ? "Viewing a past run — exit to edit."
-      : "Previewing a simulation — commit or discard to edit.",
-    2600,
-  );
-  return true;
-}
-
-/** The read-only modes, as a single gate in front of every mutation.
- *  simBlocked() covers a simulation preview or history scrub; arranging
- *  attractors is read-only for the same reason -- what's on screen is a
- *  layout tool, not the editable graph. */
+/** The one read-only mode, as a single gate in front of every mutation.
+ *  Arranging attractors is read-only because what's on screen is a
+ *  layout tool, not the editable graph.
+ *
+ *  This used to also gate a simulation preview, back when previewing
+ *  happened in this window; simulation now lives in Motion, which holds
+ *  its own connection and never leaves this graph in a projected state.
+ *  Kept as a gate rather than inlined into its one caller: it is the
+ *  place a second read-only mode goes. */
 function editBlocked() {
   if (attractorMode) {
     showToast("Arranging attractors — click Done arranging to edit.", 2600);
     return true;
   }
-  return simBlocked();
+  return false;
 }
 
 async function runUndo() {
@@ -260,9 +240,7 @@ async function refocus(moteId, { pan = true, select = true } = {}) {
 async function loadGarden(garden) {
   currentGarden = garden;
   $("garden-label").textContent = garden;
-  closeSimBar();
   closeDetailPanel();
-  closeRunsPanel();
   // Attractors are per garden, so an arrangement in progress means
   // nothing once a different one is open.
   if (attractorMode) exitAttractorMode();
@@ -483,9 +461,9 @@ async function applyViewFilter(viewId, { persist = true } = {}) {
 // been changed is written: a garden nobody has adjusted has no key at all
 // and renders on graph.js's own defaults.
 //
-// The panel is docked rather than modal for the same reason the sim bar
-// is: every control here is judged by what it does to the graph, so the
-// graph has to stay visible while you drag a slider.
+// The panel is docked rather than modal because every control here is
+// judged by what it does to the graph, so the graph has to stay visible
+// while you drag a slider.
 
 const FORCE_SLIDERS = [
   { key: "repulsion", label: "Repulsion", min: 200, max: 6000, step: 50, decimals: 0,
@@ -542,7 +520,6 @@ function viewSettingsOpen() {
 }
 
 function openViewSettings() {
-  closeRunsPanel();   // same corner; only one of them can have it
   $("view-settings-panel").classList.remove("hidden");
   renderViewSettings();
 }
@@ -753,15 +730,11 @@ function renderLayoutSettings() {
   $("reset-attractors-btn").disabled = Object.keys(viewSettings.attractors).length === 0;
 }
 
-/** A read-only mode, gated the same way a simulation preview is (see
- *  editBlocked): the graph is there to be rearranged, not edited, so
- *  every canvas gesture except panning and zooming is off while it's on
- *  and every mutation elsewhere toasts instead. */
+/** A read-only mode (see editBlocked): the graph is there to be
+ *  rearranged, not edited, so every canvas gesture except panning and
+ *  zooming is off while it's on and every mutation elsewhere toasts
+ *  instead. */
 function enterAttractorMode() {
-  if (simPreview) {
-    showToast("Exit the simulation view first.", 2600);
-    return;
-  }
   attractorMode = true;
   graph.setAttractorMode(true);
   closeDetailPanel();
@@ -824,12 +797,11 @@ function setupViewSettings() {
 // ---- detail panel ----
 
 async function openDetailPanel(moteId) {
-  const [mote, rels, species, instances, history] = await Promise.all([
+  const [mote, rels, species, instances] = await Promise.all([
     call(api.get_mote(moteId)),
     call(api.mote_relationships(moteId)),
     call(api.species_of(moteId)),
     call(api.instances_of(moteId)),
-    call(api.mote_history(moteId)),
   ]);
   if (!mote) return;
 
@@ -838,21 +810,13 @@ async function openDetailPanel(moteId) {
   $("detail-relationship").classList.add("hidden");
   $("detail-relationship-multi").classList.add("hidden");
   $("detail-single").classList.remove("hidden");
-  $("detail-sim-banner").classList.toggle("hidden", !simPreview);
-
-  // While scrubbed past the real/step-0 view, show the mote as the preview
-  // projects it rather than its actual DB properties -- this is the
-  // inspector's own read of "inspect the new values directly," alongside
-  // the canvas highlight ring. Species/relationships aren't touched by
-  // simulation, so only properties need the overlay.
-  const displayMote = simStep > 0 ? withSimOverlay(mote) : mote;
 
   $("detail-dot").style.background = graph.colorFor(moteId);
-  $("detail-type-label").textContent = kindLabel(displayMote);
-  $("detail-title").textContent = nodeLabel(displayMote);
+  $("detail-type-label").textContent = kindLabel(mote);
+  $("detail-title").textContent = nodeLabel(mote);
   $("detail-id").textContent = mote.id;
 
-  renderProperties(displayMote, history, mote);
+  renderProperties(mote);
   renderNoteSection(mote);
   renderSpeciesSection(mote, species, instances);
   renderRelationships(moteId, rels);
@@ -882,14 +846,6 @@ function openMora(moteId) {
       ? "Opening Mora… notes saved there appear here after a refocus."
       : "Opening Mora…",
   );
-}
-
-function withSimOverlay(mote) {
-  const overlay = {};
-  for (const c of cumulativeSimChanges()) {
-    if (c.mote_id === mote.id) overlay[c.key] = c.new_value;
-  }
-  return { ...mote, properties: { ...mote.properties, ...overlay } };
 }
 
 /** Shown instead of the single-mote panel once a box-select (or shift-add)
@@ -1861,58 +1817,7 @@ function openLink(url) {
   call(api.open_link(url));
 }
 
-/** A tiny inline trend line for one property's history -- hand-rolled
- *  canvas draw, no charting library, same spirit as graph.js's own
- *  from-scratch renderer. min/max-scaled so a flat run of identical
- *  values still draws as a flat (not division-by-zero) line. */
-function renderSparkline(values, unitLabel = "runs", color = "oklch(0.74 0.10 68)") {
-  const canvas = document.createElement("canvas");
-  canvas.className = "sparkline";
-  canvas.width = 52;
-  canvas.height = 18;
-  canvas.title = `${values[0]} → ${values[values.length - 1]} (${values.length} ${unitLabel})`;
-
-  const ctx = canvas.getContext("2d");
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const w = canvas.width, h = canvas.height, pad = 2;
-
-  ctx.beginPath();
-  values.forEach((v, i) => {
-    const x = pad + (i / (values.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((v - min) / range) * (h - pad * 2);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.3;
-  ctx.stroke();
-
-  return canvas;
-}
-
-/** While a simulation (preview or entered-run history) is open, a
- *  property's sparkline should trace that property's own trajectory
- *  across this simulation's ticks rather than the garden's committed
- *  run history -- the two are read from different places entirely, so
- *  this walks simPreview.steps directly instead of going through
- *  cumulativeSimChanges (which only folds up to the current scrub
- *  position). Returns null if the property never moves, matching the
- *  "nothing to show" gate used for garden history. */
-function simTrajectoryFor(moteId, key, baseValue) {
-  if (typeof baseValue !== "number") return null;
-  const values = [baseValue];
-  let current = baseValue;
-  for (const step of simPreview.steps) {
-    for (const c of step.changes) {
-      if (c.mote_id === moteId && c.key === key) current = c.new_value;
-    }
-    values.push(current);
-  }
-  return values.some((v) => v !== values[0]) ? values : null;
-}
-
-function renderProperties(mote, history, baseMote) {
+function renderProperties(mote) {
   const container = $("detail-properties");
   container.innerHTML = "";
   const entries = Object.entries(mote.properties);
@@ -1976,13 +1881,6 @@ function renderProperties(mote, history, baseMote) {
     // web link or a local path, gets a one-click way to launch it via the
     // OS's default handler instead of only being able to read/edit it.
     const trailing = [];
-    const values = simPreview
-      ? simTrajectoryFor(mote.id, key, (baseMote || mote).properties[key])
-      : history && history[key];
-    if (values && values.length > 1) {
-      const color = simPreview && simPreview.mode === "history" ? "oklch(0.62 0.19 300)" : undefined;
-      trailing.push(renderSparkline(values, simPreview ? "ticks" : "runs", color));
-    }
     // "modoc" is a note (docs/modoc.md) -- same one-click-to-follow
     // treatment "url" gets below, since the row itself is deliberately
     // only a summary.
@@ -1993,18 +1891,6 @@ function renderProperties(mote, history, baseMote) {
       open.title = "Open in Mora";
       open.addEventListener("click", () => openMora(mote.id));
       trailing.push(open);
-    }
-    // Any numeric property may be something the solver determined, or
-    // something other values depend on. Which of the two it is is
-    // exactly what the panel answers, so the button is offered for both
-    // rather than guessing from whether a value looks solved.
-    if (typeof value === "number") {
-      const explain = document.createElement("button");
-      explain.className = "explain";
-      explain.textContent = "?";
-      explain.title = `Why ${key}, and what depends on it`;
-      explain.addEventListener("click", () => toggleExplain(row, explain, mote.id, key));
-      trailing.push(explain);
     }
     if (key === "url" && typeof value === "string" && value.trim()) {
       const open = document.createElement("button");
@@ -2030,192 +1916,6 @@ function renderProperties(mote, history, baseMote) {
       }
     }
   }
-}
-
-/* The scenario picker lists every mote that varies something, plus the
- * garden itself. Refreshed whenever the graph changes rather than only
- * at startup, because a scenario is built out of ordinary motes and
- * relationships -- the user can create one without leaving the app. */
-async function refreshScenarioPicker() {
-  const select = $("sim-scenario-select");
-  if (!select) return;
-  const previous = select.value;
-  // Nothing awaits this -- it is fired from the menu-open handler -- so a
-  // failure has to end here rather than surface as an unhandled rejection.
-  let scenarios;
-  try {
-    scenarios = await api.list_scenarios();
-  } catch {
-    return;
-  }
-
-  // Built as DOM rather than interpolated into innerHTML: a scenario's
-  // name is an ordinary mote property, so it is user data, and
-  // textContent cannot be made to mean markup.
-  select.replaceChildren();
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "Garden as it stands";
-  select.appendChild(none);
-  for (const scenario of scenarios) {
-    const option = document.createElement("option");
-    option.value = scenario.id;
-    const motes = `${scenario.target_count} mote${scenario.target_count === 1 ? "" : "s"}`;
-    option.textContent = `${scenario.name} (${motes})`;
-    select.appendChild(option);
-  }
-  if (scenarios.some((s) => s.id === previous)) select.value = previous;
-}
-
-/* Explanation and dependencies for one property, opened inline under its
- * row. Two questions with two different sources: `why` reads the run log
- * (so it needs a run to have happened), while `dependencies` reads the
- * rules themselves and answers before anything is solved. Showing them
- * together is the point -- "this is how it was found" next to "this is
- * what it rests on and what rests on it". */
-async function toggleExplain(row, button, moteId, key) {
-  const existing = row.nextElementSibling;
-  if (existing && existing.classList.contains("explain-block")) {
-    existing.remove();
-    button.classList.remove("open");
-    return;
-  }
-  button.classList.add("open");
-
-  const block = document.createElement("div");
-  block.className = "explain-block";
-  block.textContent = "Loading…";
-  row.after(block);
-
-  try {
-    const [explanation, deps] = await Promise.all([
-      call(api.why(moteId, key)),
-      call(api.dependencies(moteId, key)),
-    ]);
-    block.replaceChildren(...explanationNodes(explanation), ...dependencyNodes(deps));
-  } catch {
-    // call() has already toasted the reason; leaving "Loading…" sitting
-    // there forever would be the only thing worse than saying so.
-    block.replaceChildren(explainLine("Could not load.", "explain-note"));
-  }
-}
-
-function explainHeading(text) {
-  const el = document.createElement("div");
-  el.className = "explain-heading";
-  el.textContent = text;
-  return el;
-}
-
-function explainLine(text, className) {
-  const el = document.createElement("div");
-  if (className) el.className = className;
-  el.textContent = text;
-  return el;
-}
-
-function moteLabel(moteId) {
-  const mote = moteById(moteId);
-  return mote ? nodeLabel(mote) : moteId.slice(0, 8);
-}
-
-function variableLabel(moteId, key) {
-  return `${moteLabel(moteId)}.${key}`;
-}
-
-/* One derivation and, recursively, the derived values it read. Stops
- * wherever the run didn't determine something -- a stored property, a
- * property-model call -- which is exactly the set of things needing no
- * explanation. */
-function explanationNodes(explanation, depth = 0) {
-  const nodes = [];
-  if (depth === 0) nodes.push(explainHeading("How it was found"));
-
-  if (!explanation || !explanation.method) {
-    nodes.push(explainLine(
-      (explanation && explanation.note) || "Not determined by any run.", "explain-note"
-    ));
-    return nodes;
-  }
-
-  for (const equation of explanation.equations) {
-    nodes.push(explainLine(`${equation.rule_name} on ${moteLabel(equation.anchor_mote_id)}`));
-    nodes.push(explainLine(equation.equation, "explain-equation"));
-  }
-  if (explanation.also_determined.length > 0) {
-    nodes.push(explainLine(
-      "Found together with " +
-      explanation.also_determined.map((v) => variableLabel(v.mote_id, v.key)).join(", "),
-      "explain-note"
-    ));
-  }
-  for (const input of explanation.inputs) {
-    const line = explainLine(
-      `${input.kind} · ${variableLabel(input.mote_id, input.key)} = ${formatNumber(input.value)}`
-    );
-    nodes.push(line);
-    if (input.derivation) {
-      const nested = document.createElement("div");
-      nested.className = "explain-nested";
-      nested.append(...explanationNodes(input.derivation, depth + 1));
-      nodes.push(nested);
-    }
-  }
-  if (depth === 0) {
-    nodes.push(explainLine("Values in base SI units — what the solver worked in.", "explain-note"));
-  }
-  return nodes;
-}
-
-function dependencyNodes(deps) {
-  const nodes = [];
-
-  nodes.push(explainHeading("What it needs"));
-  if (!deps.free) {
-    nodes.push(explainLine(
-      "Not among this mote's freedoms, so nothing can determine it.", "explain-note"
-    ));
-  } else if (!deps.determinable) {
-    nodes.push(explainLine("Free, but no equation constrains it.", "explain-note"));
-  } else {
-    nodes.push(explainLine(`Determined by ${deps.producers.join(", ")}`));
-    const chips = document.createElement("div");
-    for (const need of deps.needs) {
-      const chip = document.createElement("span");
-      chip.className = `explain-chip${need.status === "missing" ? " missing" : ""}`;
-      chip.textContent = `${need.status} ${variableLabel(need.mote_id, need.key)}`;
-      chips.appendChild(chip);
-    }
-    if (deps.needs.length === 0) chips.appendChild(explainLine("Nothing.", "explain-note"));
-    nodes.push(chips);
-  }
-
-  nodes.push(explainHeading("What it could move"));
-  if (deps.impact.length === 0) {
-    nodes.push(explainLine("Nothing depends on it.", "explain-note"));
-  } else {
-    const chips = document.createElement("div");
-    for (const effect of deps.impact) {
-      const chip = document.createElement("span");
-      chip.className = "explain-chip explain-link";
-      chip.textContent = variableLabel(effect.mote_id, effect.key);
-      chip.title = `${effect.distance} step(s) away, via ${effect.through.join(", ")}`;
-      chip.addEventListener("click", () => selectMote(effect.mote_id));
-      chips.appendChild(chip);
-    }
-    nodes.push(chips);
-  }
-  return nodes;
-}
-
-/* Six significant figures, with the padding zeros toPrecision leaves
- * behind trimmed off -- and the bare decimal point that trimming can
- * expose (2.0000001 -> "2.00000" -> "2.") trimmed with them. */
-function formatNumber(value) {
-  if (typeof value !== "number") return String(value);
-  if (Number.isInteger(value)) return String(value);
-  const text = value.toPrecision(6);
-  return text.includes("e") ? text : text.replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function renderSpeciesSection(mote, species, instances) {
@@ -3113,31 +2813,6 @@ function refreshViewMenu() {
   $("view-toggle-panel").textContent = hidden ? "Show controls" : "Hide controls";
 }
 
-/** Simulate/Exit simulation are permanently on screen now (bottom-right),
- *  not menu items recomputed on open, so this runs directly from the two
- *  places simPreview actually changes: openSimBar() and closeSimBar(). */
-function updateSimButtons() {
-  $("run-sim-btn").classList.toggle("hidden", !!simPreview);
-  $("exit-sim-btn").classList.toggle("hidden", !simPreview);
-}
-
-function openSimSettingsPanel() {
-  $("sim-settings-panel").classList.remove("hidden");
-  // A scenario is built from ordinary motes and relationships, so one
-  // can appear without leaving the app. Reloading the list when the panel
-  // opens is exactly when it matters and costs nothing the rest of the
-  // time.
-  refreshScenarioPicker();
-}
-
-function closeSimSettingsPanel() {
-  $("sim-settings-panel").classList.add("hidden");
-}
-
-function toggleSimSettingsPanel() {
-  $("sim-settings-panel").classList.contains("hidden") ? openSimSettingsPanel() : closeSimSettingsPanel();
-}
-
 /** #control-panel (species legend, relationship filters, depth, reset
  *  view) has always been permanently visible; this is the first way to
  *  reclaim the screen space it docks over (top-right, the same corner
@@ -3257,7 +2932,6 @@ function setupTopMenus() {
   });
   $("view-reset-view").addEventListener("click", () => { closeTopMenus(); resetViewAndUnhideAll(); });
   $("view-toggle-panel").addEventListener("click", () => { closeTopMenus(); toggleControlPanel(); });
-  $("exit-sim-btn").addEventListener("click", () => { discardSimPreview(); });
 }
 
 // ---- gardens modal ----
@@ -3521,366 +3195,6 @@ function setupViewControls() {
   $("delete-relationship-selection-btn").addEventListener("click", deleteRelationshipSelection);
 }
 
-function setupSimulation() {
-  const button = $("run-sim-btn");
-  const stepsInput = $("sim-steps-input");
-  const solverSelect = $("sim-solver-select");
-
-  const storedSteps = localStorage.getItem(SIM_STEPS_KEY);
-  if (storedSteps) stepsInput.value = storedSteps;
-  stepsInput.addEventListener("change", () => {
-    localStorage.setItem(SIM_STEPS_KEY, stepsInput.value);
-  });
-
-  (async () => {
-    const solvers = await call(api.list_solvers());
-    solverSelect.innerHTML = solvers.map((name) => `<option value="${name}">${name}</option>`).join("");
-    const storedSolver = localStorage.getItem(SIM_SOLVER_KEY);
-    if (storedSolver && solvers.includes(storedSolver)) solverSelect.value = storedSolver;
-  })();
-  solverSelect.addEventListener("change", () => {
-    localStorage.setItem(SIM_SOLVER_KEY, solverSelect.value);
-  });
-
-  refreshScenarioPicker();
-
-  $("open-sim-settings-btn").addEventListener("click", toggleSimSettingsPanel);
-  $("close-sim-settings").addEventListener("click", closeSimSettingsPanel);
-
-  $("check-roles-btn").addEventListener("click", async () => {
-    const report = await call(api.check_roles());
-    const lines = [...report.problems, ...report.once_scoped];
-    if (report.motes_checked === 0 && lines.length === 0) {
-      showToast("No motes declare roles.");
-    } else if (report.problems.length === 0) {
-      showToast(
-        `Roles OK — ${report.motes_checked} assembly(s) wired correctly.` +
-        (report.once_scoped.length ? ` ${report.once_scoped.length} rule(s) asserted about one mote.` : "")
-      );
-    } else {
-      showToast(`${report.problems.length} role problem(s): ${report.problems[0]}`, SIM_ERROR_TOAST_MS);
-    }
-  });
-
-  button.addEventListener("click", async () => {
-    const steps = Math.max(1, parseInt(stepsInput.value, 10) || 1);
-    const solver = solverSelect.value || "linear";
-    // "" means the garden as it stands. A scenario is never committed,
-    // so it travels with the preview the same way the solver does and
-    // decides whether Commit is offered at all.
-    const scenario = $("sim-scenario-select").value || null;
-    button.disabled = true;
-    button.textContent = "Running…";
-    try {
-      const result = await call(api.preview_simulation(steps, solver, null, scenario));
-      if (result.steps.length === 0) {
-        showToast(result.error ? `Simulation failed: ${result.error}` : "Nothing to simulate.", SIM_ERROR_TOAST_MS);
-        return;
-      }
-      // The solver that produced this preview travels with it, so
-      // Commit/Save (below) re-solve with the same backend even if the
-      // dropdown is changed while the sim bar is still open.
-      openSimBar({ ...result, mode: "preview", solver, scenario });
-    } finally {
-      // openSimBar() already disabled it (and keeps it disabled) on success;
-      // this only matters for the "nothing to simulate" early return above.
-      button.disabled = !!simPreview;
-      button.textContent = "Simulate";
-    }
-  });
-
-  $("sim-step-slider").addEventListener("input", () => {
-    stopSimPlay();
-    setSimStep(parseInt($("sim-step-slider").value, 10));
-  });
-  $("sim-prev-btn").addEventListener("click", () => { stopSimPlay(); setSimStep(simStep - 1); });
-  $("sim-next-btn").addEventListener("click", () => { stopSimPlay(); setSimStep(simStep + 1); });
-  $("sim-play-btn").addEventListener("click", () => {
-    if (simPlaying) stopSimPlay(); else startSimPlay();
-  });
-
-  $("sim-discard-btn").addEventListener("click", discardSimPreview);
-
-  $("sim-commit-btn").addEventListener("click", async () => {
-    if (!simPreview || simPreview.mode !== "preview" || simStep === 0) return;
-    const btn = $("sim-commit-btn");
-    btn.disabled = true;
-    try {
-      const result = await call(api.commit_simulation(simStep, simPreview.solver));
-      const committed = result.steps[result.steps.length - 1];
-      const committedStep = simStep;
-      closeSimBar();
-      showToast(committed ? committed.summary : `Committed tick ${committedStep}.`, 3500);
-      await refreshMoteCache();
-      if (!$("runs-panel").classList.contains("hidden")) await refreshRuns();
-      await refocus(focusId, { pan: false });
-      if (!$("detail-panel").classList.contains("hidden") && focusId) {
-        await openDetailPanel(focusId);
-      }
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  $("sim-save-btn").addEventListener("click", async () => {
-    if (!simPreview || simPreview.mode !== "preview") return;
-    const btn = $("sim-save-btn");
-    btn.disabled = true;
-    try {
-      const result = await call(api.save_simulation(
-        simPreview.steps.length, simPreview.solver, null, simPreview.scenario || null));
-      closeSimBar();
-      showToast(
-        result.run_id ? "Simulation saved for later review." : "Nothing to save.",
-        3000,
-      );
-      if (!$("runs-panel").classList.contains("hidden")) await refreshRuns();
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
-
-/** Shared by both scrub modes -- `result.mode` is 'preview' (a fresh,
- *  nondestructive preview_simulation() call) or 'history' (an already-
- *  logged run's own ticks, from enterRunScrub()). Either way nothing is
- *  written here, so opening this is purely a display action. Starts at
- *  step 0 (the real state before anything in `result.steps` happened)
- *  rather than jumping to where the run ended up -- the whole graph
- *  stays visible and interactive, so the natural thing is to let the
- *  user step or play forward through it. */
-function openSimBar(result) {
-  simPreview = result;
-  simStep = 0;
-  const slider = $("sim-step-slider");
-  slider.max = String(result.steps.length);
-  slider.value = "0";
-  $("run-sim-btn").disabled = true;
-  graph.setSimActive(true);
-  $("sim-bar").classList.remove("hidden");
-  renderSimBar();
-  updateSimButtons();
-  if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
-    openDetailPanel(focusId);
-  }
-}
-
-function closeSimBar() {
-  stopSimPlay();
-  $("sim-bar").classList.add("hidden");
-  $("run-sim-btn").disabled = false;
-  simPreview = null;
-  simStep = 0;
-  graph.setSimActive(false);
-  graph.setSimHighlight([]);
-  updateSimButtons();
-  if (selectedRunId !== null) {
-    selectedRunId = null;
-    renderRunsPanel();
-  }
-}
-
-/** Shared by the sim bar's own Discard button and the "Exit
- *  simulation" item -- two entry points to the same action. */
-async function discardSimPreview() {
-  closeSimBar();
-  if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
-    await openDetailPanel(focusId);
-  }
-}
-
-function setSimStep(idx) {
-  if (!simPreview) return;
-  simStep = Math.max(0, Math.min(idx, simPreview.steps.length));
-  $("sim-step-slider").value = String(simStep);
-  renderSimBar();
-  if (focusId && !$("detail-panel").classList.contains("hidden") && multiSelectIds === null) {
-    openDetailPanel(focusId);
-  }
-}
-
-function startSimPlay() {
-  if (!simPreview) return;
-  simPlaying = true;
-  $("sim-play-btn").textContent = "Pause";
-  simPlayTimer = setInterval(() => {
-    const next = simStep + 1;
-    if (!simPreview || next > simPreview.steps.length) { stopSimPlay(); return; }
-    setSimStep(next);
-  }, 900);
-}
-
-function stopSimPlay() {
-  clearInterval(simPlayTimer);
-  simPlaying = false;
-  $("sim-play-btn").textContent = "Play";
-}
-
-/** Every property touched from step 0 through simStep (exclusive of
- *  simStep 0 itself, which is the real/unprojected view), with the value
- *  it had entering the whole run and its value as of the currently
- *  scrubbed step -- not just that one step's own delta, so scrubbing
- *  shows the state of the garden at that point in time, not a single
- *  frame's diff. Feeds both the inspector's projected values and the
- *  graph's changed-mote ring. */
-function cumulativeSimChanges() {
-  if (!simPreview || simStep === 0) return [];
-  const byKey = new Map();
-  for (let i = 0; i < simStep; i++) {
-    for (const c of simPreview.steps[i].changes) {
-      const key = `${c.mote_id}|${c.key}`;
-      const existing = byKey.get(key);
-      if (existing) existing.new_value = c.new_value;
-      else byKey.set(key, { ...c });
-    }
-  }
-  return [...byKey.values()].sort((a, b) =>
-    a.mote_id.localeCompare(b.mote_id) || a.key.localeCompare(b.key));
-}
-
-/* Dimensional warnings and unsatisfied constraints, shown together but
- * labelled apart: one is a statement about the model, the other about the
- * answer. Neither stops a run, so neither belongs in the error area. */
-function renderSimAdvisories() {
-  const el = $("sim-bar-advisory");
-  el.replaceChildren();
-
-  const lines = [];
-  if (simPreview.scenario) {
-    const mote = moteById(simPreview.scenario);
-    const name = mote ? nodeLabel(mote) : "a scenario";
-    lines.push(`Scenario · ${name} — nothing here will be written to the graph.`);
-  }
-  for (const warning of simPreview.dimension_warnings || []) {
-    lines.push(`Units · ${warning}`);
-  }
-  for (const violation of simPreview.constraint_violations || []) {
-    lines.push(`Constraint · ${violation}`);
-  }
-
-  el.classList.toggle("hidden", lines.length === 0);
-  for (const line of lines) {
-    const row = document.createElement("div");
-    row.className = "advisory-line";
-    row.textContent = line;
-    el.appendChild(row);
-  }
-}
-
-function renderSimBar() {
-  const isHistory = simPreview.mode === "history";
-  const projected = simStep > 0;
-  $("sim-bar").classList.toggle("projected", projected && !isHistory);
-  $("sim-bar").classList.toggle("history", isHistory);
-  $("sim-badge").classList.toggle("projected", projected && !isHistory);
-  $("sim-badge").classList.toggle("history", isHistory);
-
-  if (isHistory) {
-    $("sim-badge-label").textContent = projected
-      ? `Tick ${simStep} of ${simPreview.steps.length}`
-      : "Before this run";
-  } else {
-    $("sim-badge-label").textContent = projected
-      ? `Projected · tick ${simStep} of ${simPreview.steps.length}`
-      : "Real";
-  }
-
-  const step = projected ? simPreview.steps[simStep - 1] : null;
-  $("sim-caption").textContent = step
-    ? step.summary
-    : isHistory ? "State entering this run" : "Current state of the garden";
-
-  const errorEl = $("sim-bar-error");
-  if (simPreview.failed_at !== null) {
-    errorEl.textContent = `Run stopped at step ${simPreview.failed_at + 1}: ${simPreview.error}`;
-    errorEl.classList.remove("hidden");
-  } else {
-    errorEl.classList.add("hidden");
-  }
-
-  renderSimAdvisories();
-
-  $("sim-step-count").textContent = `${simStep}/${simPreview.steps.length}`;
-  $("sim-prev-btn").disabled = simStep <= 0;
-  $("sim-next-btn").disabled = simStep >= simPreview.steps.length;
-  // A scenario run answers what *would* happen, so there is nothing to
-  // commit: the engine refuses it outright. Save still applies -- that
-  // is how a hypothetical is kept for comparison.
-  const scenarioRun = !!simPreview.scenario;
-  $("sim-commit-btn").classList.toggle("hidden", isHistory || scenarioRun);
-  $("sim-commit-btn").disabled = simStep === 0;
-  $("sim-save-btn").classList.toggle("hidden", isHistory);
-  $("sim-discard-btn").textContent = isHistory ? "Exit" : "Discard";
-
-  graph.setSimHighlight(new Set(cumulativeSimChanges().map((c) => c.mote_id)));
-}
-
-// ---- run history ----
-
-async function refreshRuns() {
-  allRuns = await call(api.list_runs());
-  renderRunsPanel();
-}
-
-function renderRunsPanel() {
-  const container = $("runs-list");
-  container.innerHTML = "";
-  $("runs-empty").classList.toggle("hidden", allRuns.length > 0);
-
-  for (const run of allRuns) {
-    const row = document.createElement("div");
-    row.className = "run-row" + (run.run_id === selectedRunId ? " highlighted" : "");
-    row.innerHTML =
-      `<span class="dot ${run.status}"></span>` +
-      '<span class="label"><span class="number"></span><span class="applied"></span><span class="time"></span></span>' +
-      '<span class="meta"></span>';
-    row.querySelector(".number").textContent = `Run #${run.run_number}`;
-    row.querySelector(".applied").textContent = run.committed ? "applied" : "saved";
-    row.querySelector(".time").textContent = new Date(run.ran_at).toLocaleString();
-    const meta = row.querySelector(".meta");
-    if (run.status === "ok") {
-      meta.textContent = `${run.change_count} change${run.change_count === 1 ? "" : "s"}`;
-    } else {
-      meta.textContent = "failed";
-      meta.classList.add("error");
-      meta.title = run.detail || "";
-    }
-    row.addEventListener("mousedown", (e) => { e.preventDefault(); enterRunScrub(run.run_id); });
-    container.appendChild(row);
-  }
-}
-
-function openRunsPanel() {
-  closeViewSettings();   // same corner as the view settings panel
-  $("runs-panel").classList.remove("hidden");
-  refreshRuns();
-}
-
-function closeRunsPanel() {
-  $("runs-panel").classList.add("hidden");
-}
-
-/** "Entering" a run drops into the same scrub bar a live preview uses,
- *  but walking only *this run's own ticks* -- unrelated to any other
- *  run in the garden's history. A steady-state run has exactly one tick
- *  (before/after); a run committed or saved from an N-step time-series
- *  has N, each logged individually (core/simulation.py's run_ticks())
- *  specifically so this is possible. */
-async function enterRunScrub(runId) {
-  if (simPreview && simPreview.mode === "preview") {
-    showToast("Commit or discard the current preview first.", 2600);
-    return;
-  }
-  const result = await call(api.run_ticks(runId));
-  if (result.steps.length === 0) {
-    showToast("Nothing to show for this run.", 2600);
-    return;
-  }
-  openSimBar({ ...result, mode: "history", run_id: runId, failed_at: null, error: null });
-  selectedRunId = runId;
-  renderRunsPanel();
-}
-
 // ---- app switcher (⌘J) ----
 //
 // Every sibling app but this one, in a fixed order -- so "Monastery is
@@ -3933,6 +3247,16 @@ const LAUNCHER_APPS = [
       <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
       <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
       <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
+    </svg>`,
+  },
+  {
+    id: "motion", name: "Motion", kind: "simulation",
+    desc: "Run the garden's rules and scrub the result tick by tick.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="20" r="10.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55"></circle>
+      <ellipse cx="20" cy="20" rx="10.5" ry="4" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55" transform="rotate(-28 20 20)"></ellipse>
+      <circle cx="20" cy="20" r="3.2" fill="var(--accent)"></circle>
+      <circle cx="29.4" cy="15.3" r="2" fill="var(--accent)"></circle>
     </svg>`,
   },
 ];
@@ -4039,16 +3363,6 @@ function setupLauncher() {
 }
 
 
-function setupRunsPanel() {
-  $("toggle-runs-panel-btn").addEventListener("click", () => {
-    closeTopMenus();
-    if ($("runs-panel").classList.contains("hidden")) openRunsPanel();
-    else closeRunsPanel();
-  });
-  $("close-runs-panel").addEventListener("click", closeRunsPanel);
-}
-
-
 /** True while a text input/textarea has focus -- Del/Backspace and arrow
  *  keys must not hijack normal text editing inside the detail panel or
  *  quick-add's property fields. */
@@ -4118,7 +3432,7 @@ function setupKeyboard() {
       openLauncher();
       return;
     }
-    if ((e.metaKey || e.ctrlKey) && /^[1-4]$/.test(e.key)) {
+    if ((e.metaKey || e.ctrlKey) && /^[1-5]$/.test(e.key)) {
       const app = launcherChoices()[Number(e.key) - 1];
       if (app) {
         e.preventDefault();
@@ -4183,21 +3497,12 @@ function setupKeyboard() {
     if (closeOpenIntervalPanel) { closeOpenIntervalPanel(); return; }
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
-    if (!$("sim-settings-panel").classList.contains("hidden")) { closeSimSettingsPanel(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
     // Leaving attractor mode is a smaller step than closing the panel it
     // lives in, so it comes first -- one Esc puts the graph back to
     // editable, a second puts the panel away.
     if (attractorMode) { exitAttractorMode(); return; }
-    // Runs history and advanced view settings share a corner and are
-    // mutually exclusive (see openRunsPanel/openViewSettings), so at most
-    // one of these two ever fires.
-    if (!$("runs-panel").classList.contains("hidden")) { closeRunsPanel(); return; }
     if (viewSettingsOpen()) { closeViewSettings(); return; }
-    // The sim bar is non-blocking (the rest of the UI stays usable while
-    // it's open), so it sits behind every other panel in the Esc chain --
-    // dismissed only once nothing more local is open.
-    if (simPreview) { closeSimBar(); return; }
     // Nothing else was open -- Esc's last job is to deselect.
     graph.select(null);
   });
@@ -4288,8 +3593,6 @@ async function init() {
   setupSearch();
   setupViewControls();
   setupViewSettings();
-  setupSimulation();
-  setupRunsPanel();
   setupLauncher();
   setupSync();
   setupRefresh();

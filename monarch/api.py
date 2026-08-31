@@ -17,7 +17,6 @@ from api_common import open_app as _open_app
 from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core.db import get_connection, initialize_database
-from core import derivations as derivations_repo
 from core import gardens as gardens_repo
 from core import garden_io
 from core import graph as graph_repo
@@ -28,10 +27,7 @@ from core.query import Index, Query
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import kinds as kinds_repo
-from core import scenarios as scenarios_repo
-from core import simulation as simulation_repo
 from core import sync as sync_repo
-from core import solvers as solvers_repo
 from core import species as species_repo
 
 
@@ -42,73 +38,6 @@ def _classify(motes: list, rels: list) -> dict:
     general index over whatever core/kinds.py recognizes, so adding a
     kind is a change to that table, not to this payload's shape."""
     return {"kinds": kinds_repo.kinds_in(motes, rels)}
-
-
-def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
-    """Shapes a simulation_repo.TimeSeriesResult for the JS bridge. The
-    steps themselves go through core's own step_payloads(), shared with
-    the MCP adapter; only the run-level fields around them are this
-    bridge's business. (StepResult.values/unsolved are keyed by
-    (mote_id, key) tuples, which don't survive JSON -- that is why
-    step_payloads exists and why unsolved counts stay prose-only inside
-    each step's summary.)
-
-    `constraint_violations` is flat and already labelled with its step
-    (see TimeSeriesResult), because the sim bar shows one advisory line
-    for the run rather than a per-tick badge -- a limit broken at any
-    tick is worth seeing whichever tick you happen to be scrubbed to."""
-    return {
-        "steps": simulation_repo.step_payloads(result.steps),
-        "failed_at": result.failed_at,
-        "error": result.error,
-        "run_id": result.run_id,
-        "dimension_warnings": result.dimension_warnings,
-        "constraint_violations": result.constraint_violations,
-    }
-
-
-def _explanation_payload(explanation) -> dict:
-    """Shapes a core/derivations.py Explanation for the JS bridge.
-
-    Recursive, mirroring the structure itself: an input this run derived
-    carries its own explanation, and one it did not carries None, which
-    is where the panel stops expanding. `also_determined` is flattened
-    from tuples into dicts, since tuples reach JS as arrays and a value's
-    address is easier to read as named fields."""
-    if explanation is None:
-        return None
-    return {
-        "mote_id": explanation.mote_id,
-        "key": explanation.key,
-        "value": explanation.value,
-        "step": explanation.step,
-        "method": explanation.method,
-        "detail": explanation.detail,
-        "note": explanation.note,
-        "equations": [
-            {
-                "rule_mote_id": e.rule_mote_id,
-                "rule_name": e.rule_name,
-                "anchor_mote_id": e.anchor_mote_id,
-                "equation": e.equation,
-            }
-            for e in explanation.equations
-        ],
-        "also_determined": [
-            {"mote_id": mote_id, "key": key}
-            for mote_id, key in explanation.also_determined
-        ],
-        "inputs": [
-            {
-                "kind": i.kind,
-                "mote_id": i.mote_id,
-                "key": i.key,
-                "value": i.value,
-                "derivation": _explanation_payload(i.derivation),
-            }
-            for i in explanation.inputs
-        ],
-    }
 
 
 # Mora, the .modoc note editor (docs/modoc.md), launched as its own
@@ -532,182 +461,6 @@ class Api:
             self._conn, species_id, _coerce_properties(raw_overrides or {})
         )
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
-
-    # ---- simulation ----
-
-    @_synchronized
-    def list_solvers(self) -> list[str]:
-        """Every registered solver backend name (see core/solvers.py),
-        for the Tools menu's solver picker -- no DB access, but kept
-        @_synchronized like every other Api method for consistency."""
-        return solvers_repo.list_solvers()
-
-    @_synchronized
-    def preview_simulation(
-        self, step_count: int, solver: str = "linear",
-        solver_configuration: dict | None = None, scenario: str | None = None,
-    ) -> dict:
-        """Runs step_count steps entirely in memory -- nothing is written
-        to this garden. The frontend scrubs through the returned steps
-        client-side; committing a chosen step is a separate call. `solver`
-        picks the backend for whatever the substitution loop can't
-        resolve alone -- see core/solvers.py -- and defaults to today's
-        exact, non-iterative behavior.
-
-        `scenario` names a mote gathering overrides (see list_scenarios):
-        the garden is previewed as that scenario would have it. A preview
-        writes nothing either way -- the difference is which question is
-        being asked, not whether the answer is kept."""
-        result = simulation_repo.run_time_series(
-            self._conn, step_count, commit=False, solver=solver,
-            solver_configuration=solver_configuration, scenario=scenario,
-        )
-        return _time_series_payload(result)
-
-    @_synchronized
-    def commit_simulation(
-        self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None
-    ) -> dict:
-        """Re-runs step_count steps (deterministic given the same garden
-        and rules) and this time writes the final cumulative result,
-        logging one entry the same way a single run_simulation() always
-        has. Never trusts step values echoed back from a prior preview
-        call -- the only numbers that ever reach the database are ones
-        this recomputes itself."""
-        result = simulation_repo.run_time_series(
-            self._conn, step_count, commit=True, solver=solver, solver_configuration=solver_configuration
-        )
-        return _time_series_payload(result)
-
-    @_synchronized
-    def save_simulation(
-        self, step_count: int, solver: str = "linear",
-        solver_configuration: dict | None = None, scenario: str | None = None,
-    ) -> dict:
-        """Like commit_simulation, but never writes the graph -- logs
-        every computed tick for later review (e.g. comparing a few
-        hypothetical parameter sets) without any of them becoming the
-        garden's canonical state. Always re-runs the full step_count
-        (unlike commit, which only re-runs up to whichever tick was
-        scrubbed to), since there's no "committed position" for a save.
-
-        This is the only way a scenario run can be kept: committing one
-        is refused by the engine, since a scenario answers what *would*
-        happen and that is not the garden's state."""
-        result = simulation_repo.run_time_series(
-            self._conn, step_count, commit=False, save=True,
-            solver=solver, solver_configuration=solver_configuration, scenario=scenario,
-        )
-        return _time_series_payload(result)
-
-    @_synchronized
-    def list_runs(self, limit: int | None = None) -> list[dict]:
-        """Every logged run (run_simulation or a committed run_time_series),
-        most recent first -- backs the runs panel's list."""
-        return [dataclasses.asdict(r) for r in simulation_repo.list_runs(self._conn, limit=limit)]
-
-    @_synchronized
-    def get_run(self, run_id: str) -> dict | None:
-        run = simulation_repo.get_run(self._conn, run_id)
-        return dataclasses.asdict(run) if run is not None else None
-
-    @_synchronized
-    def run_changes(self, run_id: str) -> list[dict]:
-        """A logged run's net old->new changes -- backs the runs panel's
-        list view. For the tick-by-tick breakdown, see run_ticks."""
-        return [dataclasses.asdict(c) for c in simulation_repo.run_changes(self._conn, run_id)]
-
-    @_synchronized
-    def run_ticks(self, run_id: str) -> dict:
-        """A run's own internal ticks, shaped like _time_series_payload's
-        steps so the frontend's existing scrub-bar rendering needs
-        nothing new to "enter" a run -- unrelated to any other run in
-        the garden's history."""
-        return {"steps": simulation_repo.step_payloads(simulation_repo.run_ticks(self._conn, run_id))}
-
-    # ---- explanation and dependencies ----
-
-    @_synchronized
-    def why(self, mote_id: str, key: str, run_id: str | None = None) -> dict:
-        """How a solved value was determined: the equations that produced
-        it, the known values they read, and -- recursively -- how each of
-        those was itself determined (see core/derivations.py).
-
-        Reads the run log, so it needs a run to have happened; a
-        discarded preview leaves nothing to read. Values come back in
-        base SI units, which is what the solver worked in, so the numbers
-        beside an equation multiply out -- unlike the inspector, which
-        shows each mote's own declared unit."""
-        explanation = derivations_repo.explain(self._conn, mote_id, key, run_id=run_id)
-        return _explanation_payload(explanation)
-
-    @_synchronized
-    def dependencies(self, mote_id: str, key: str) -> dict:
-        """Everything the dependency index knows about one value, in one
-        call -- what could move if it changed, what determining it needs,
-        and which equations produce or read it.
-
-        Fetched together because the panel shows them together, and the
-        index is rebuilt per call anyway (see core/incidence.py): three
-        round trips would each rebuild it."""
-        index = simulation_repo.incidence_index(self._conn)
-        target = (mote_id, key)
-        requirement = index.requires(target)
-        return {
-            "free": index.is_free(target),
-            "determinable": requirement.determinable,
-            "impact": [
-                {
-                    "mote_id": effect.variable[0],
-                    "key": effect.variable[1],
-                    "distance": effect.distance,
-                    "through": sorted({t.rule_name for t in effect.through}),
-                }
-                for effect in index.impact(target)
-            ],
-            "needs": [
-                {"mote_id": n.variable[0], "key": n.variable[1], "status": n.status}
-                for n in requirement.needs
-            ],
-            "producers": sorted({t.rule_name for t in requirement.producers}),
-            "consumers": sorted({t.rule_name for t in index.consumers(target)}),
-        }
-
-    # ---- roles and scenarios ----
-
-    @_synchronized
-    def check_roles(self) -> dict:
-        """How every assembly is wired to its declared parts, plus which
-        rules are asserted about a single mote rather than a species (see
-        core/simulation.py's check_roles)."""
-        report = simulation_repo.check_roles(self._conn)
-        return {
-            "motes_checked": report.motes_checked,
-            "problems": report.problems,
-            "once_scoped": report.once_scoped,
-        }
-
-    @_synchronized
-    def list_scenarios(self) -> list[dict]:
-        """Named perturbations of the garden, for the simulation
-        scenario picker. Each is a mote with `varies` relationships to
-        override motes, which shadow one mote's properties each."""
-        return [
-            {
-                "id": scenario.mote_id,
-                "name": scenario.name,
-                "override_count": len(scenario.overrides),
-                "target_count": len(scenario.target_ids),
-            }
-            for scenario in scenarios_repo.list_scenarios(self._conn)
-        ]
-
-    @_synchronized
-    def mote_history(self, mote_id: str) -> dict[str, list[float]]:
-        """Every value a mote's properties have taken across the
-        garden's committed run history -- backs the inspector's
-        sparklines."""
-        return simulation_repo.mote_history(self._conn, mote_id)
 
     # ---- reserved names ----
 

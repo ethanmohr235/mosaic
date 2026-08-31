@@ -169,13 +169,6 @@
       </div>
     </section>
 
-    <section id="runs-panel" class="hidden">
-      <div class="panel-title">Run history</div>
-      <button id="close-runs-panel" type="button" title="Close">×</button>
-      <div id="runs-list"></div>
-      <div id="runs-empty" class="hidden">No simulation runs logged yet.</div>
-    </section>
-
     <div id="quick-add-wrap">
       <section id="quick-add" class="hidden">
         <div class="panel-title">New mote</div>
@@ -190,60 +183,11 @@
       <button id="quick-add-btn" type="button" title="New mote">+</button>
     </div>
 
-    <div id="simulate-wrap">
-      <section id="sim-settings-panel" class="hidden">
-        <div class="panel-title">Simulation settings</div>
-        <button id="close-sim-settings" type="button" title="Close">×</button>
-        <div class="menu-row">
-          <span>Steps</span>
-          <input type="number" id="sim-steps-input" min="1" max="500" value="10" title="Steps to simulate">
-        </div>
-        <div class="menu-row">
-          <span>Solver</span>
-          <select id="sim-solver-select" title="Solver backend for equations the substitution loop can't resolve alone"></select>
-        </div>
-        <div class="menu-row">
-          <span>Scenario</span>
-          <select id="sim-scenario-select" title="Solve as a scenario would have the garden. A scenario run is never written to the graph"></select>
-        </div>
-        <div class="panel-divider"></div>
-        <button id="toggle-runs-panel-btn" type="button" class="linkish">Run history…</button>
-        <button id="check-roles-btn" type="button" class="linkish">Check roles…</button>
-      </section>
-      <div id="simulate-controls">
-        <button id="open-sim-settings-btn" type="button" class="icon-btn" title="Simulation settings">⚙</button>
-        <button id="run-sim-btn" class="primary" type="button">Simulate</button>
-        <button id="exit-sim-btn" class="hidden ghost" type="button">Exit simulation</button>
-      </div>
-    </div>
-
-    <div id="sim-bar" class="hidden">
-      <div id="sim-bar-top">
-        <span id="sim-badge"><span id="sim-badge-dot"></span><span id="sim-badge-label"></span></span>
-        <div id="sim-caption"></div>
-      </div>
-      <div id="sim-bar-error" class="hidden"></div>
-      <div id="sim-bar-advisory" class="hidden"></div>
-      <div id="sim-bar-controls">
-        <button id="sim-prev-btn" type="button">‹ prev</button>
-        <button id="sim-play-btn" type="button">Play</button>
-        <button id="sim-next-btn" type="button">next ›</button>
-        <input type="range" id="sim-step-slider" min="0" step="1" value="0">
-        <span id="sim-step-count"></span>
-      </div>
-      <div id="sim-bar-actions">
-        <button id="sim-discard-btn" type="button" class="ghost">Discard</button>
-        <button id="sim-save-btn" type="button" class="ghost" title="Log the whole simulation for later review, without writing it to the graph">Save simulation</button>
-        <button id="sim-commit-btn" type="button" class="primary">Commit this tick to real graph →</button>
-      </div>
-    </div>
-
     <aside id="detail-panel" class="hidden">
       <div id="detail-resize-handle" title="Drag to resize"></div>
       <button id="close-panel" type="button" title="Close">×</button>
 
       <div id="detail-single">
-        <div id="detail-sim-banner" class="hidden">Previewing a simulation — read-only until you commit or discard.</div>
         <div id="detail-type">
           <span id="detail-dot"></span><span id="detail-type-label"></span>
         </div>
@@ -395,7 +339,7 @@
     <div id="launcher-results"></div>
     <div id="launcher-empty" class="hidden"></div>
     <div id="launcher-footer">
-      <span>↑↓ select</span><span>↵ open</span><span>⌘1–4 jump</span>
+      <span>↑↓ select</span><span>↵ open</span><span>⌘1–5 jump</span>
       <div class="spacer"></div>
       <span id="launcher-garden"></span>
     </div>

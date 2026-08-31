@@ -164,8 +164,6 @@ class MonossGraph {
     this.selectedRelIds = new Set();
     this.hoverId = null;
     this.connectSourceId = null;
-    this.simActive = false;        // a preview or history scrub is open -- draws the dashed viewport border
-    this.simHighlightIds = new Set(); // motes with a property changed as of the scrubbed tick
     this.camera = { x: 0, y: 0, scale: INITIAL_SCALE };
     this.alpha = 1;
     this.panTarget = null;
@@ -671,16 +669,6 @@ class MonossGraph {
     this.alpha = Math.max(this.alpha, 0.4);
   }
 
-  // ---- simulation preview / history scrub ----
-
-  setSimActive(active) {
-    this.simActive = active;
-  }
-
-  setSimHighlight(ids) {
-    this.simHighlightIds = ids instanceof Set ? ids : new Set(ids);
-  }
-
   isMoteVisible(moteId) {
     if (this.viewFilterIds && !this.viewFilterIds.has(moteId)) return false;
     if (this.hiddenSpecies.size > 0) {
@@ -933,11 +921,11 @@ class MonossGraph {
     if (this.attractorMode) this._drawAttractors(ctx, labelBg);
     ctx.restore();
 
-    // Both modes fence off the viewport the same way, in their own colour:
-    // amber for a simulation preview, the relationship blue for attractor
-    // mode. Either way it means "what you're looking at isn't the ordinary
-    // editable graph".
-    const border = this.attractorMode ? this._edgeSelected : this.simActive ? "oklch(0.74 0.10 68 / 0.5)" : null;
+    // Attractor mode fences off the viewport, in the relationship blue:
+    // it means "what you're looking at isn't the ordinary editable
+    // graph". Simulation used to fence it in amber for the same reason,
+    // and that moved to Motion with the rest of the sim surface.
+    const border = this.attractorMode ? this._edgeSelected : null;
     if (border) {
       ctx.save();
       ctx.strokeStyle = border;
@@ -1119,18 +1107,6 @@ class MonossGraph {
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + 3.5, 0, Math.PI * 2);
         ctx.stroke();
-      }
-      if (this.simHighlightIds.has(id)) {
-        // A scrubbed tick (a live preview or an entered history run
-        // alike) changed this mote's properties -- dashed so it reads as
-        // "not the live state" rather than the solid selection/pinned rings.
-        ctx.setLineDash([3, 3]);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "oklch(0.78 0.10 68 / 0.9)";
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius + (node.pinned ? 6.5 : 3.5), 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
       }
       ctx.globalAlpha = 1;
 

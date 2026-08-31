@@ -1,12 +1,13 @@
 # Running the desktop UI
 
-Five native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Six native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
 (`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
 **Monastery**, the calendar (`run_monastery.py`); **Momentum**, the
-task board and timer (`run_momentum.py`); and **Monolith**, the table
-(`run_monolith.py`). They share one palette and one
-set of vendored fonts, so the five read as one product.
+task board and timer (`run_momentum.py`); **Monolith**, the table
+(`run_monolith.py`); and **Motion**, the simulator (`run_motion.py`).
+They share one palette and one set of vendored fonts, so the six read as
+one product.
 
 ---
 
@@ -372,11 +373,7 @@ accent theme and is still in blue; nothing here changes it.
 actual GTK/WebKit window. `scripts/monarch_smoke_test.py` drives the real running
 app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
 layout position stability, search/browse/keyboard-nav, garden-switch
-isolation, species picking and templating, filters, depth, previewing
-and committing a time-based simulation from the non-blocking sim bar
-(including the changed-mote highlight ring, the inspector's read-only
-projected values, an edit being blocked mid-preview, scrubbing to and
-committing an earlier tick, and Discard writing nothing), live box-select, middle-drag pan, the context menu's
+isolation, species picking and templating, filters, depth, live box-select, middle-drag pan, the context menu's
 copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
 Esc/Del, arrow-key navigation, the gardens modal's list/switch/
 create/delete, undoing a delete via the toast button and Ctrl+Z, the
@@ -391,8 +388,7 @@ Create, that form closing on an outside click, the search palette's
 `key = value` exact-match query, the topbar's File/View/Tools/garden
 dropdowns opening one at a time, closing on Esc or an outside click, the
 garden dropdown listing/switching gardens, the View menu's Hide/Show
-controls toggle and its persistence, the Tools menu swapping Simulate…/
-Exit simulation with the real preview state, a "soon" stub toasting
+controls toggle and its persistence, a "soon" stub toasting
 instead of doing nothing, a hidden species' instances actually dropping
 out of the physics loop instead of just not being drawn, the advanced
 view settings panel (a per-relationship-type force slider reaching the
@@ -853,7 +849,8 @@ because everything else is an edit you can make back.
 ### Ports
 
 A fifth window means a fifth port: `monolith/app.py` asks for **42005**
-(42001 Monarch, 42002 Mora, 42003 Monastery, 42004 Momentum), falling
+(42001 Monarch, 42002 Mora, 42003 Monastery, 42004 Momentum, 42006
+Motion), falling
 back to an ephemeral one if taken -- the same collision the others guard
 against, for the same reason. `.webview_data_monolith/` is its own
 WebKit storage.
@@ -872,3 +869,102 @@ holds 42001-42004 for the whole run.
 ```
 .venv/bin/python scripts/monolith_smoke_test.py
 ```
+
+---
+
+# Motion -- the simulator
+
+A sixth window, over the same gardens: `./run_motion.py`, or
+`.venv/bin/python run_motion.py`. Same stack and the same terms as the
+other five.
+
+```
+./run_motion.py                        # the default garden
+./run_motion.py --garden reactor       # a specific garden
+./run_motion.py --focus <mote id>      # open with one mote selected
+```
+
+This is where simulation lives. It used to be Monarch's — a settings
+popover, a bottom scrub bar and a runs panel — and it is gone from there
+entirely: Monarch is a graph editor, and a window that has to be
+"committed or discarded" before you can edit anything is not one.
+
+### The three modes
+
+| Mode | What it is for |
+|---|---|
+| **Build** | placing motes, writing rules, drawing `applies_to` |
+| **Run** | one scenario, played and scrubbed tick by tick |
+| **Compare** | two scenarios side by side, with the delta shaded between their traces |
+
+The left rail holds scenarios and saved runs; the dock at the bottom is
+the timeline; the right panel is Rules or Inspector. Everything except
+the run itself is local — dragging the playhead never re-solves, because
+the whole run came back in one payload.
+
+### What a node is, and where it sits
+
+Nothing is declared. A mote carries no coordinates and no simulation
+role, so `motion/payload.py` derives four kinds from what core already
+answers:
+
+| Kind | What makes it one |
+|---|---|
+| **rule** | an `equation` plus an `applies_to` (`core/kinds.py`) |
+| **free** | it declares `freedoms` — the solver may determine something on it |
+| **varied** | the active scenario overrides it |
+| **fixed** | everything else |
+
+`varied` depends on which scenario is selected, so the same mote changes
+colour when you pick one. Template and override motes are never drawn:
+`core/simulation.py` leaves both out of a solve, so a node for one would
+be a node no run can move. Layout is yours — drag a node and it stays,
+per garden, in `localStorage`.
+
+### Ticks, not seconds
+
+The axis counts **ticks**, and a tick is one re-solve of the equation
+set. `core/simulation.py` has no timestep, no seconds and no
+integration, so the dock says `ticks` out loud rather than implying a
+clock it doesn't have. The solver list comes from
+`core/solver_registry.py` — today `linear` and `newton`.
+
+Two things the design this window was built from shows, and which are
+deliberately **not** here: a hardware-in-the-loop rail, and a menu of ODE
+integrators (RK45, BDF2, `dt` in milliseconds, a tolerance). Neither has
+a backend — there is no device layer at all — and a live-looking readout
+that is really a sine wave is worse than an absent one. Both attach at
+named seams when they exist: `motion/payload.py::tick_axis` for a real
+time axis, the solver registry for an integrator.
+
+### Committing
+
+`Commit tick N` re-runs N ticks and writes the result. It never trusts
+the numbers the preview handed the frontend — the only values that reach
+the database are ones Python recomputed. A scenario run can't be
+committed at all (a scenario answers what *would* happen); `Save` logs
+one for later review without touching the graph.
+
+A sixth window means a sixth port: `motion/app.py` asks for **42006**,
+falling back to an ephemeral one if taken. `.webview_data_motion/` is
+its own WebKit storage. A commit here is not seen by an open Monarch
+until it refetches — the same rule every adapter lives under.
+
+### Smoke test
+
+`scripts/motion_smoke_test.py`, the same instrument as the others. It
+drives a real window against a seeded throwaway garden and checks that
+Run really draws lanes, that stepping the dock really moves the numbers
+on the node cards, that a preview writes nothing and Commit writes
+exactly the tick scrubbed to, that picking a scenario re-runs and
+refuses to commit, that Compare draws two boards, and that editing an
+equation in the panel writes the rule mote. It holds 42001-42005 for the
+whole run.
+
+```
+.venv/bin/python scripts/motion_smoke_test.py
+```
+
+Run it alone — the pywebview window suites interfere with each other,
+and two at once produce failures that are about the display rather than
+the code.

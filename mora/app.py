@@ -2,7 +2,7 @@
 """The Mora window. monarch/app.py's twin, and deliberately so -- same
 pywebview settings, same cache workaround, different frontend and
 different Api. window_launcher.py carries the settings and workaround
-all five apps share.
+all six apps share.
 
 A separate window rather than a view inside the main app: Mora opens on
 its own garden connection and closes independently, and a note editor

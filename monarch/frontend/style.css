@@ -221,8 +221,8 @@ button.linkish:hover { color: var(--fg); border-color: transparent; }
   border-radius: 4px; padding: 1px 5px;
 }
 
-/* Non-clickable row inside a menu, for the sim step-count input now that
-   there's no dedicated #sim-controls topbar slot. */
+/* Non-clickable row inside a menu, for a labelled control rather than an
+   action. */
 .menu-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 6px 9px; font-size: 12.5px; color: var(--muted); cursor: default;
@@ -311,53 +311,11 @@ main { flex: 1; min-height: 0; display: flex; }
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
 }
 
-/* ---- runs panel ---- */
-
-#runs-panel {
-  position: absolute; top: 16px; left: 16px;
-  width: 260px; max-height: calc(100% - 32px);
-  background: oklch(0.165 0 0 / 0.94);
-  border: 1px solid var(--border-soft); border-radius: 12px;
-  padding: 13px 14px; z-index: 4;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
-  display: flex; flex-direction: column;
-}
-#close-runs-panel {
-  position: absolute; top: 10px; right: 10px;
-  background: none; border: none; color: var(--muted);
-  font-size: 16px; padding: 2px 6px;
-}
-#runs-list { overflow-y: auto; margin: 0 -13px; }
-.run-row {
-  display: flex; align-items: center; gap: 9px;
-  padding: 7px 13px; cursor: pointer; font-size: 12.5px;
-}
-.run-row:hover, .run-row.highlighted { background: var(--raised); }
-.run-row .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.run-row .dot.ok { background: oklch(0.72 0.15 145); }
-.run-row .dot.error { background: var(--danger); }
-.run-row .label { flex: 1; min-width: 0; }
-.run-row .label .number { color: var(--fg); }
-.run-row .label .applied {
-  margin-left: 6px; font-size: 10px; text-transform: uppercase;
-  letter-spacing: 0.03em; color: var(--faint);
-}
-.run-row .label .time { display: block; color: var(--faint); font-size: 10.5px; }
-.run-row .meta {
-  color: var(--faint); font-size: 11px; flex-shrink: 0;
-  max-width: 90px; text-align: right; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.run-row .meta.error { color: var(--danger); }
-#runs-empty { padding: 10px 2px; color: var(--faint); font-size: 12.5px; }
-
 /* ---- advanced view settings ---- */
 /*
- * Docked opposite the control panel rather than modal, for the same
- * reason the sim bar isn't modal: every control in here is judged by what
- * it does to the graph, so the graph has to stay visible while you drag a
- * slider. Shares #runs-panel's geometry and chrome -- and its corner,
- * which is why the two are mutually exclusive (see openViewSettings).
+ * Docked opposite the control panel rather than modal: every control in
+ * here is judged by what it does to the graph, so the graph has to stay
+ * visible while you drag a slider.
  */
 
 #view-settings-panel {
@@ -478,34 +436,6 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 #species-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 
-/* ---- simulate ---- */
-
-/* Mirrors #quick-add-wrap on the opposite corner: the popover comes
-   before the button row in markup and the wrap's flex-column layout
-   stacks it above, since the wrap itself is pinned to the bottom edge. */
-#simulate-wrap {
-  position: absolute; right: 16px; bottom: 16px; z-index: 5;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
-}
-#simulate-controls { display: flex; gap: 8px; }
-#open-sim-settings-btn {
-  width: 36px; height: 36px; border-radius: 50%; padding: 0;
-  font-size: 15px; line-height: 1;
-}
-#sim-settings-panel {
-  width: 240px; max-height: calc(100% - 32px); overflow-y: auto;
-  background: oklch(0.165 0 0 / 0.94);
-  border: 1px solid var(--border-soft); border-radius: 12px;
-  padding: 13px 14px; position: relative;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
-}
-#close-sim-settings {
-  position: absolute; top: 10px; right: 10px;
-  background: none; border: none; color: var(--muted);
-  font-size: 16px; padding: 2px 6px;
-}
-#sim-settings-panel .linkish { display: block; }
-#sim-settings-panel .linkish + .linkish { margin-top: 7px; }
 .chip {
   display: flex; align-items: center; gap: 6px;
   background: var(--panel); border: 1.5px solid var(--border-soft);
@@ -594,7 +524,6 @@ main { flex: 1; min-height: 0; display: flex; }
 /* A note's row is a summary, not an editor (app.js::noteField) -- it
    reads as inert so nobody types into it expecting the note to change. */
 .detail-row .note-summary { color: var(--muted); font-style: italic; cursor: default; }
-.detail-row .sparkline { flex-shrink: 0; align-self: center; opacity: 0.85; }
 
 .picker-checkbox {
   display: flex; align-items: center; gap: 4px;
@@ -919,65 +848,6 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 #sync-modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 
-/* ---- simulation ---- */
-/*
- * A non-blocking bottom bar rather than a modal: the graph stays fully
- * visible and interactive while previewing, changed motes get a dashed
- * accent ring drawn directly on the canvas (graph.js's setSimHighlight),
- * and the detail panel shows each mote's projected values in place, with
- * a banner marking them read-only. Modeled on the imported Claude Design
- * mockup (MonOSS Graph.dc.html).
- */
-
-#sim-bar {
-  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
-  z-index: 7; width: 560px; max-width: 92vw;
-  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
-  border-radius: 14px; padding: 14px 18px;
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 26px 60px rgba(0, 0, 0, 0.55);
-  display: flex; flex-direction: column; gap: 11px;
-}
-#sim-bar.projected { border-color: oklch(0.55 0.14 68 / 0.6); }
-#sim-bar.history { border-color: oklch(0.55 0.14 300 / 0.6); }
-
-#sim-bar-top { display: flex; align-items: center; gap: 10px; }
-#sim-badge {
-  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em;
-  text-transform: uppercase; color: var(--muted);
-}
-#sim-badge.projected { color: var(--accent); }
-#sim-badge.history { color: oklch(0.62 0.19 300); }
-#sim-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-#sim-caption {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; font-size: 12px; color: var(--muted); text-align: right;
-}
-#sim-bar-error {
-  color: var(--danger); font-size: 12px;
-  padding: 6px 9px; background: oklch(0.65 0.15 25 / 0.1); border-radius: 6px;
-}
-
-#sim-bar-controls { display: flex; align-items: center; gap: 10px; }
-#sim-bar-controls button { padding: 5px 10px; font-size: 12.5px; flex-shrink: 0; }
-#sim-play-btn { width: 56px; }
-#sim-step-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
-#sim-step-count {
-  flex-shrink: 0; width: 42px; text-align: right;
-  color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums;
-}
-
-#sim-bar-actions { display: flex; gap: 8px; }
-#sim-bar-actions button { flex: 1; }
-
-/* ---- detail panel: simulation read-only banner ---- */
-
-#detail-sim-banner {
-  background: var(--raised); border: 1px solid oklch(0.55 0.14 68 / 0.5);
-  border-radius: 7px; padding: 8px 10px; font-size: 11.5px;
-  color: var(--accent); margin-bottom: 16px;
-}
-
 /* ---- toast ---- */
 
 #toast {
@@ -996,44 +866,6 @@ main { flex: 1; min-height: 0; display: flex; }
   color: var(--faint); font-size: 11px; line-height: 1.45;
   margin: -2px 0 8px 96px;
 }
-
-/* ---- explanation & dependencies (app.js::toggleExplain) ---- */
-
-.detail-row .explain {
-  padding: 0; width: 24px; height: 30px; flex-shrink: 0;
-  background: transparent; color: var(--muted); border-color: var(--border);
-}
-.detail-row .explain.open { color: var(--accent); border-color: var(--accent); }
-
-.explain-block {
-  margin: -2px 0 10px 80px; padding: 8px 10px;
-  border-left: 2px solid var(--accent);
-  background: var(--raised);
-  font-size: 11.5px; line-height: 1.5; color: var(--muted);
-}
-.explain-block .explain-heading {
-  font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--faint); margin: 6px 0 2px;
-}
-.explain-block .explain-heading:first-child { margin-top: 0; }
-.explain-block .explain-equation {
-  font-family: var(--mono); font-size: 11px; color: var(--fg);
-  overflow-wrap: anywhere;
-}
-.explain-block .explain-nested { margin-left: 12px; border-left: 1px solid var(--border); padding-left: 8px; }
-.explain-block .explain-note { color: var(--faint); font-style: italic; }
-.explain-block .explain-chip {
-  display: inline-block; margin: 1px 4px 1px 0; padding: 1px 5px;
-  border: 1px solid var(--border); border-radius: 3px; font-size: 10.5px;
-}
-.explain-block .explain-chip.missing { color: var(--danger); border-color: var(--danger); }
-.explain-block .explain-link { cursor: pointer; text-decoration: underline dotted; }
-
-#sim-bar-advisory {
-  padding: 6px 10px; font-size: 11.5px; line-height: 1.5;
-  color: var(--muted); border-left: 2px solid var(--accent);
-}
-#sim-bar-advisory .advisory-line { overflow-wrap: anywhere; }
 
 /* ---- status bar ---- */
 /*

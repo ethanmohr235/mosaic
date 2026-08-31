@@ -49,7 +49,7 @@ TASK_RELATIONSHIPS = (ASSIGNED_TO, DEPENDS_ON, BLOCKED_BY)
 @dataclass(frozen=True)
 class Directory:
     """Everything the payloads need to say about a mote beyond its id:
-    its name, its species (which is what colours it, in all five
+    its name, its species (which is what colours it, in all six
     windows) and its kinds. Built once per request from one read of the
     garden. monastery/payload.py's, deliberately duplicated rather than
     imported -- no adapter imports another adapter, and each window

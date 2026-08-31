@@ -6,7 +6,7 @@ same pywebview settings, same cache workaround, different frontend and
 different Api. Each is its own window on the same gardens rather than a
 pane inside this one, so any of them can be closed, moved to a second
 monitor, or opened alone. window_launcher.py carries the settings and
-workaround all five share.
+workaround all six share.
 """
 from pathlib import Path
 

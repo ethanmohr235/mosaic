@@ -1758,7 +1758,7 @@ function wire() {
       openLauncher();
       return;
     }
-    if ((event.metaKey || event.ctrlKey) && /^[1-4]$/.test(event.key)) {
+    if ((event.metaKey || event.ctrlKey) && /^[1-5]$/.test(event.key)) {
       const app = launcherChoices()[Number(event.key) - 1];
       if (app) {
         event.preventDefault();
@@ -1845,6 +1845,16 @@ const LAUNCHER_APPS = [
       <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
       <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
       <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
+    </svg>`,
+  },
+  {
+    id: "motion", name: "Motion", kind: "simulation",
+    desc: "Run the garden's rules and scrub the result tick by tick.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="20" r="10.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55"></circle>
+      <ellipse cx="20" cy="20" rx="10.5" ry="4" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55" transform="rotate(-28 20 20)"></ellipse>
+      <circle cx="20" cy="20" r="3.2" fill="var(--accent)"></circle>
+      <circle cx="29.4" cy="15.3" r="2" fill="var(--accent)"></circle>
     </svg>`,
   },
 ];

@@ -2,15 +2,21 @@
 
 MonOSS can solve for unknown mote properties from equations you write yourself. The engine knows nothing about circuits, thermodynamics, or any other domain -- all of that lives in ordinary motes.
 
-Enter a number of steps and click **Simulate** to preview a time-based
-run: every step is solved in memory, nothing is written to the garden
-yet, and a bar at the bottom of the graph lets you step or play through
-the whole sequence -- the graph itself stays visible and interactive
-throughout, with changed motes getting a dashed ring on the canvas and
-their projected values readable straight from the inspector panel
-(which flags itself read-only while previewing). Choose **Commit this
-tick to real graph** to write the scrubbed tick for real, or **Discard**
-to throw the preview away. See "Time-based simulation" below.
+Simulation has its own window: **Motion** (`run_motion.py`, and
+`docs/ui-setup.md`). Press **Run** to preview a time-based run -- every
+tick is solved in memory and nothing is written to the garden yet -- and
+scrub the timeline to step or play through the sequence, with each
+node's value at that tick on its card and every value that moved traced
+as a lane in the dock. **Commit tick N** re-runs to that tick and writes
+it for real; **Save** logs the whole run for later review without
+touching the graph. A scenario run can never be committed, since it
+answers what *would* happen.
+
+> This used to live in Monarch, as a settings popover and a bottom scrub
+> bar. It moved out wholesale: Monarch is a graph editor, and simulation
+> is a subject that needs a window rather than a corner of one.
+
+See "Time-based simulation" below.
 Programmatically, a single steady-state solve is
 `core.simulation.run_simulation(conn)`; a time-based run is
 `core.simulation.run_time_series(conn, step_count, commit)` (see "Run
@@ -105,7 +111,7 @@ Solving runs in two stages:
 
 ## Solvers
 
-`run_simulation`/`run_time_series`/`preview_simulation` all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
+`run_simulation`/`run_time_series` (and Motion's `preview`/`commit`/`save`) all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
 
 - **`linear`** (the default). Exact, non-iterative least-squares solve of whatever's left after substitution. Fails with **could not be resolved** if any equation is genuinely nonlinear in its unknowns.
 - **`newton`**. Finds a root of the combined residual by Newton-Raphson with a numeric (finite-difference) Jacobian, so it can solve the cases `linear` can't -- an equation of state, a nonlinear structural relation, a `property()` call whose input is itself unknown. Being iterative, it needs a starting guess for each unknown (the mote's existing property value if there is one, otherwise `1.0`) and can fail to converge or find a different root than expected for a badly-conditioned or multi-rooted system. Configuration: `max_iterations` (default 50), `tolerance` (default `1e-9`), `epsilon` (the finite-difference step, default `1e-6`).
@@ -854,6 +860,8 @@ a rule that doesn't add up.
 ## Not built yet
 
 - **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration. A solver backend for this shape (`dx/dt` rather than `F(x) == 0`) could join `linear`/`newton` later without changing how a rule is written.
+
+  There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. Motion says so rather than implying a clock -- its timeline is labelled in ticks, and the payload carries the axis it is counted in (`motion/payload.py::tick_axis`) so that a real time axis is one place to add rather than a frontend assumption to unpick. An integrator would reach Motion's solver menu by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
 - **A unit for a solved property that never declared one.** The system checks and converts *declared* units; it never infers one. Nor is there per-literal unit syntax in an equation (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with.
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.

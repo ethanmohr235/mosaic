@@ -391,6 +391,12 @@ The charter:
   because a query across every mote and an edit applied to two hundred
   of them are shapes a graph, a page, a week and a board all lack: each
   of those shows a mote at a time, and this one shows the set.
+* **Motion** -- likewise a sixth time, for the garden as a system that
+  runs (see Simulation below, and `docs/simulation.md`). A sixth window,
+  because a scenario rail, a tick-by-tick timeline and a rule's own
+  bindings are shapes none of the other five draws -- and because
+  simulation had been a settings panel and a scrub bar bolted onto
+  Monarch, which is a graph editor and not a simulator.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -618,7 +624,7 @@ Two exclusions are inherited rather than reinvented. Templates and
 scenario overrides are never placed, even when dated, because they hold
 replacement values rather than real data. And a mote is coloured by its
 species through the same palette the graph canvas uses, so it reads the
-same colour in all five windows.
+same colour in all six windows.
 
 Monastery is a third process on the same terms as Mora, which means the
 same two collisions to avoid: `monastery/app.py::choose_port` asks for
@@ -688,7 +694,7 @@ and the window polls while focused. See `docs/ui-setup.md`.
 
 # Species colour
 
-A mote is coloured by its species, in all five windows, and the rule is
+A mote is coloured by its species, in all six windows, and the rule is
 one every window carries a copy of rather than one any of them decides.
 
 Hashing a hue out of the species id -- which is what this was -- gave
@@ -778,3 +784,45 @@ ephemeral port, `.webview_data_monolith/` is its own WebKit storage, and
 the draft query -- the one being edited before it is saved as a view --
 is the window's own state in `localStorage`, not the garden's. See
 `docs/ui-setup.md`.
+
+# Simulation
+
+Motion (`motion/`) is a sixth window: the garden as a system that runs.
+Scenarios, solvers, runs, provenance and rule authoring are one subject,
+and it is the one subject Monarch could not give a full window to -- it
+lived there as a settings popover, a bottom scrub bar and a runs panel,
+gating every edit in the graph behind "commit or discard first". Moving
+it out removed that gate from Monarch entirely (`editBlocked` now
+answers only for attractor mode) and gave simulation the room it needed.
+
+**Nothing about the engine moved.** `core/simulation.py` never imported
+from `monarch/`, so the split was two thin layers: the bridge methods
+(now `motion/api.py`) and the UI. `core/simulation.py::step_payloads`
+was already the shared shape for a run's steps, which is why a replayed
+run and a live preview reach Motion's timeline through one path.
+
+**What a node *is* is derived, like everything else.** A mote carries no
+coordinates and no declared role in a simulation, so `motion/payload.py`
+derives four node kinds from facts core already answers: `rule` (an
+equation plus an `applies_to`, from `core/kinds.py`), `free` (declares
+`freedoms`), `varied` (some scenario overrides it -- so this one is
+relative to the scenario in hand) and `fixed`. The obvious carve-up
+(pump, sensor, valve) would be domain modelling, and that belongs in the
+garden rather than in a viewer. Layout is the frontend's and lives in
+`localStorage` per garden: writing a dragged position back would make
+every pan a graph edit.
+
+**The timeline counts ticks, and says so.** A tick is one re-solve of the
+equation set; the engine has no `dt`, no seconds and no integration.
+Rather than let the dock imply otherwise, every run payload carries an
+`axis` from `motion/payload.py::tick_axis`, which is the single place
+that answers "what is step N called" -- the seam a real time axis
+attaches to later. The solver menu is read from
+`core/solver_registry.py` for the same reason: a future integrator
+appears in Motion by being registered, not by editing the window.
+
+Motion is a sixth process on the same terms as the other four:
+`motion/app.py::choose_port` asks for 42006 and falls back to an
+ephemeral port, and `.webview_data_motion/` is its own WebKit storage.
+A commit made here is not observed by an open Monarch until it refetches
+-- the same rule every adapter lives under. See `docs/ui-setup.md`.

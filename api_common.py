@@ -59,7 +59,7 @@ def species_ids(conn: sqlite3.Connection) -> list[str]:
     a hop limit sees a subset of what Monolith's table lists, and a
     palette claimed from a subset would give the same species two
     colours in two windows. The garden's whole species list is the one
-    answer all five can ask for. Sorted here rather than in each
+    answer all six can ask for. Sorted here rather than in each
     frontend: the claiming order decides who gets which entry when two
     ids want the same one.
 
@@ -76,7 +76,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 # app id -> (display name, its run_*.py, the flag that opens straight to
 # one mote -- None where that script takes no such flag). The single
 # source both the ⌘J switcher (below) and each app's own frontend read,
-# so a sixth app is one entry here rather than a sixth copy-pasted
+# so a seventh app is one entry here rather than a seventh copy-pasted
 # open_<sibling>() per existing app.
 APPS = {
     "monarch": ("Monarch", REPO_ROOT / "run_monarch.py", None),
@@ -84,6 +84,7 @@ APPS = {
     "monastery": ("Monastery", REPO_ROOT / "run_monastery.py", "--focus"),
     "momentum": ("Momentum", REPO_ROOT / "run_momentum.py", "--focus"),
     "monolith": ("Monolith", REPO_ROOT / "run_monolith.py", "--view"),
+    "motion": ("Motion", REPO_ROOT / "run_motion.py", "--focus"),
 }
 
 
