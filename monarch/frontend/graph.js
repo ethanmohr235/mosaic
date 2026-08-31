@@ -159,6 +159,7 @@ class MonossGraph {
     this.nodes = new Map();       // mote id -> {x, y, vx, vy, pinned}
     this.hiddenSpecies = new Set();
     this.hiddenRelTypes = new Set();
+    this.viewFilterIds = null;    // Set of mote ids a saved view matched, or null for "no filter"
     this.selectedIds = new Set();
     this.selectedRelIds = new Set();
     this.hoverId = null;
@@ -661,6 +662,15 @@ class MonossGraph {
     this.alpha = Math.max(this.alpha, 0.4);
   }
 
+  /** ids: an iterable of mote ids a saved view's query matched, or null
+   *  to lift the filter. Unlike hiddenSpecies/hiddenRelTypes this is a
+   *  positive allow-list rather than a deny-list -- a saved view names
+   *  what belongs on screen, not what to hide from it. */
+  setViewFilter(ids) {
+    this.viewFilterIds = ids === null ? null : new Set(ids);
+    this.alpha = Math.max(this.alpha, 0.4);
+  }
+
   // ---- simulation preview / history scrub ----
 
   setSimActive(active) {
@@ -672,6 +682,7 @@ class MonossGraph {
   }
 
   isMoteVisible(moteId) {
+    if (this.viewFilterIds && !this.viewFilterIds.has(moteId)) return false;
     if (this.hiddenSpecies.size > 0) {
       if (this.speciesIds.has(moteId)) {
         if (this.hiddenSpecies.has(moteId)) return false;

@@ -33,6 +33,7 @@ let openMenuName = null;               // 'garden' | 'file' | 'view' | 'tools' |
 let allRuns = [];                      // cached list_runs() result, while the runs panel is open
 let selectedRunId = null;              // the run currently entered in history-scrub mode (simPreview.mode === 'history'), if any
 let viewSettings = null;               // this garden's advanced view settings (forces/colors/attractors)
+let activeViewFilterId = null;         // id of the Monolith saved view currently filtering the graph, or null
 let attractorMode = false;             // arranging species attractors -- read-only, like a sim preview
 let closeOpenIntervalPanel = null;     // closes whichever interval picker (app.js::intervalField) is currently popped open, if any
 
@@ -62,6 +63,7 @@ function positionsKey(garden) { return `monoss:positions:${garden}`; }
 function lastFocusKey(garden) { return `monoss:lastFocus:${garden}`; }
 function hiddenSpeciesKey(garden) { return `monoss:hiddenSpecies:${garden}`; }
 function hiddenRelKey(garden) { return `monoss:hiddenRels:${garden}`; }
+function viewFilterKey(garden) { return `monoss:viewFilter:${garden}`; }
 function viewSettingsKey(garden) { return `monoss:viewSettings:${garden}`; }
 
 function readJSON(key, fallback) {
@@ -266,6 +268,7 @@ async function loadGarden(garden) {
   if (attractorMode) exitAttractorMode();
   graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
+  activeViewFilterId = localStorage.getItem(viewFilterKey(garden)) || null;
   viewSettings = loadViewSettings(garden);
   graph.setViewSettings(viewSettings);
   const stored = localStorage.getItem(lastFocusKey(garden)) || null;
@@ -278,6 +281,7 @@ async function loadGarden(garden) {
 
 async function refreshMoteCache() {
   allMotes = await call(api.list_motes());
+  await renderViewFilterRow();
 }
 
 function savePositions() {
@@ -393,6 +397,81 @@ function resetViewAndUnhideAll() {
   renderLegend();
   renderRelFilters();
   graph.resetView();
+  $("view-filter-select").value = "";
+  applyViewFilter(null);
+}
+
+// ---- saved view filter ----
+//
+// A saved view (monolith/api.py::save_view) is an ordinary mote carrying
+// a `query` property -- core/query.py's language, not this app's. Rather
+// than teach the frontend that language, evaluating one is a single
+// round trip to Api.view_filter_ids(), which asks core/query.py to name
+// the matching motes; this side only has to know a query mote when it
+// sees one (hasQuery, mirroring core/query.py::has_query) and turn the
+// answer into graph.js's allow-list.
+
+function hasQuery(properties) {
+  const q = properties && properties.query;
+  return typeof q === "string" || (typeof q === "object" && q !== null && !Array.isArray(q));
+}
+
+function savedViewRows() {
+  return allMotes
+    .filter((m) => hasQuery(m.properties))
+    .map((m) => ({ id: m.id, name: (m.properties && m.properties.name) || "Untitled view" }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Rebuilds the picker off the current whole-garden mote cache, then
+ *  re-applies whichever view is selected -- called after every
+ *  refreshMoteCache() so a view that stopped existing (or whose query
+ *  now matches different motes) self-corrects instead of drifting. */
+async function renderViewFilterRow() {
+  const rows = savedViewRows();
+  $("view-filter-row").classList.toggle("hidden", rows.length === 0);
+  const select = $("view-filter-select");
+  select.innerHTML = '<option value="">No filter</option>';
+  for (const row of rows) {
+    const opt = document.createElement("option");
+    opt.value = row.id;
+    opt.textContent = row.name;
+    select.appendChild(opt);
+  }
+  if (activeViewFilterId && !rows.some((r) => r.id === activeViewFilterId)) {
+    activeViewFilterId = null;
+    if (currentGarden) localStorage.removeItem(viewFilterKey(currentGarden));
+  }
+  select.value = activeViewFilterId || "";
+  await applyViewFilter(activeViewFilterId, { persist: false });
+}
+
+/** Fetches the chosen saved view's matches and pushes them into the
+ *  graph as an allow-list, or lifts the filter for a null/empty id.
+ *  `persist: false` is renderViewFilterRow's own re-apply, which must
+ *  not overwrite the stored choice with itself mid-reconciliation. */
+async function applyViewFilter(viewId, { persist = true } = {}) {
+  activeViewFilterId = viewId || null;
+  if (persist && currentGarden) {
+    if (activeViewFilterId) localStorage.setItem(viewFilterKey(currentGarden), activeViewFilterId);
+    else localStorage.removeItem(viewFilterKey(currentGarden));
+  }
+  if (!activeViewFilterId) {
+    graph.setViewFilter(null);
+    updateStatusbar();
+    return;
+  }
+  const ids = await call(api.view_filter_ids(activeViewFilterId));
+  if (ids === null) {
+    activeViewFilterId = null;
+    if (currentGarden) localStorage.removeItem(viewFilterKey(currentGarden));
+    $("view-filter-select").value = "";
+    graph.setViewFilter(null);
+    showToast("That saved view no longer exists.");
+  } else {
+    graph.setViewFilter(ids);
+  }
+  updateStatusbar();
 }
 
 // ---- advanced view settings ----
@@ -3406,6 +3485,9 @@ function setupViewControls() {
   });
 
   $("reset-view-btn").addEventListener("click", resetViewAndUnhideAll);
+  $("view-filter-select").addEventListener("change", async () => {
+    await applyViewFilter($("view-filter-select").value || null);
+  });
   $("close-panel").addEventListener("click", closeDetailPanel);
 
   wireNewValueRightClick($("detail-new-value"));

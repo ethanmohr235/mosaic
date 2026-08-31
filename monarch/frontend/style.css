@@ -445,11 +445,11 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 .filter-row .count { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
 
-#depth-row {
+#depth-row, #view-filter-row {
   display: flex; align-items: center; justify-content: space-between;
   gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 10px;
 }
-#depth-row select { padding: 4px 6px; font-size: 12px; }
+#depth-row select, #view-filter-row select { padding: 4px 6px; font-size: 12px; max-width: 120px; }
 #control-panel .linkish { display: block; }
 #control-panel .linkish + .linkish { margin-top: 7px; }
 

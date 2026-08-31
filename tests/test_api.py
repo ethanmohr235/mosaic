@@ -5,6 +5,7 @@ import webbrowser
 import pytest
 
 import monarch.api
+from core import query as q
 from core.gardens import create_garden, garden_exists, get_sync_dir
 from core.simulation import SimulationError, run_simulation
 from monarch.api import Api, _coerce_properties
@@ -806,3 +807,48 @@ def test_preview_reports_constraint_violations(api):
     assert len(result["constraint_violations"]) == 1
     assert "Too big" in result["constraint_violations"][0]
     assert result["steps"][0]["changes"][0]["new_value"] == 6   # advisory only
+
+
+# ---- saved view filter ----
+#
+# A saved view is Monolith's, but the mote it lives on is an ordinary
+# mote like any other -- these build one directly with core/query.py
+# rather than going through monolith.api.Api.save_view, the same way
+# test_monolith_api.py's own query_with() skips the frontend's editor.
+
+def _saved_view(api, name: str, **kwargs) -> dict:
+    query = q.Query(**kwargs).to_json()
+    return api.create_mote({"name": name, q.QUERY_KEY: query})
+
+
+def test_view_filter_ids_returns_only_matching_motes(api):
+    matching = api.create_mote({"status": "doing"})
+    other = api.create_mote({"status": "done"})
+    view = _saved_view(
+        api, "In flight",
+        conditions=(q.Condition(q.Field(q.PROPERTY, "status"), "is", "doing"),),
+    )
+
+    ids = api.view_filter_ids(view["id"])
+
+    assert ids == [matching["id"]]
+    assert other["id"] not in ids
+
+
+def test_view_filter_ids_with_no_conditions_matches_everything(api):
+    a = api.create_mote({"name": "a"})
+    b = api.create_mote({"name": "b"})
+    view = _saved_view(api, "Everything")
+
+    ids = api.view_filter_ids(view["id"])
+
+    assert set(ids) == {a["id"], b["id"], view["id"]}
+
+
+def test_view_filter_ids_returns_none_for_a_mote_with_no_query(api):
+    plain = api.create_mote({"name": "not a view"})
+    assert api.view_filter_ids(plain["id"]) is None
+
+
+def test_view_filter_ids_returns_none_for_a_missing_mote(api):
+    assert api.view_filter_ids("nonexistent") is None

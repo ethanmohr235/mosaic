@@ -351,10 +351,21 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 }
 .group-row .pick:hover { color: var(--fg-bright); }
 
-.row { border-bottom: 1px solid oklch(1 0 0 / 0.045); }
+.row { position: relative; border-bottom: 1px solid oklch(1 0 0 / 0.045); }
 .row:hover { background: oklch(0.185 0 0); }
 .row.on { background: oklch(0.215 0 0); }
 .row.on .checkcell { border-left-color: var(--accent); }
+
+.inspect-btn {
+  position: absolute; top: 50%; right: 2px; transform: translateY(-50%);
+  width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border-soft);
+  background: oklch(0.22 0 0); color: oklch(0.68 0 0); font-family: var(--mono);
+  font-size: 10.5px; font-style: italic; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+}
+.row:hover .inspect-btn { opacity: 1; pointer-events: auto; }
+.inspect-btn:hover { background: oklch(0.28 0 0); color: var(--fg-bright); }
 
 .cell {
   display: flex; align-items: center; gap: 7px; padding: 0 10px; min-width: 0;
@@ -432,7 +443,7 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
   width: 22px; height: 22px; flex-shrink: 0; padding: 0;
   display: flex; align-items: center; justify-content: center;
   border: 1px solid oklch(1 0 0 / 0.04); background: transparent;
-  font-family: var(--mono); font-size: 10px; color: transparent;
+  font-family: var(--mono); font-size: 15px; font-weight: 600; line-height: 1; color: transparent;
 }
 .matrix-cell:hover { background: oklch(1 0 0 / 0.09); }
 .matrix-cell.self { background: oklch(0.185 0 0); cursor: default; }
@@ -487,6 +498,7 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 .pop-option .hint { font-family: var(--mono); font-size: 10px; color: oklch(0.45 0 0); flex-shrink: 0; }
 .pop-option.danger { color: oklch(0.78 0.13 25); }
 #pop-note { padding: 7px 11px; border-top: 1px solid var(--hairline); font-size: 11px; line-height: 1.45; color: var(--muted); }
+#pop.wide #pop-note { max-height: 160px; overflow-y: auto; }
 #pop-form { padding: 7px; border-top: 1px solid var(--hairline); display: flex; gap: 6px; }
 #pop-input {
   flex: 1; min-width: 0; background: oklch(0.165 0 0); border: 1px solid oklch(1 0 0 / 0.12);

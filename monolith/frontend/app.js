@@ -310,13 +310,18 @@ function button(className, text) {
   return node;
 }
 
-function toast(message, isError) {
+function toast(message, isError, action) {
   const node = clear($("toast"));
   node.append(el("span", null, message));
+  if (action) {
+    const undo = button("toast-action", action.label);
+    undo.onclick = () => { node.classList.add("hidden"); action.run(); };
+    node.append(undo);
+  }
   node.classList.toggle("error", !!isError);
   node.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.add("hidden"), 4200);
+  toastTimer = setTimeout(() => node.classList.add("hidden"), action ? 8000 : 4200);
 }
 
 /** Every api call goes through here: a bridge error is a toast, never a
@@ -701,7 +706,11 @@ function rowNode(row, template) {
   node.append(box);
 
   row.cells.forEach((cell, index) => node.append(cellNode(row, cell, data.columns[index])));
-  node.ondblclick = () => inspect(row);
+
+  const inspectBtn = button("inspect-btn", "i");
+  inspectBtn.onclick = (event) => { event.stopPropagation(); inspect(row); };
+  node.append(inspectBtn);
+
   return node;
 }
 
@@ -879,7 +888,7 @@ function renderFooter() {
     : "unsorted";
   $("hint").textContent = sel.size > 1
     ? "editing any cell in the selection writes to every selected mote"
-    : "shift-click a checkbox to select a range · double-click a row to inspect it";
+    : "shift-click a checkbox to select a range · hover a row for its inspector";
 }
 
 function renderBulk() {
@@ -918,7 +927,7 @@ function renderBulk() {
   actions.append(link);
 
   const remove = button("bulk-btn danger", "Delete");
-  remove.onclick = (event) => confirmDelete(event.currentTarget, ids);
+  remove.onclick = () => deleteMotes(ids);
   actions.append(remove);
 
   $("bulk-deselect").onclick = () => { sel.clear(); render(); };
@@ -964,23 +973,23 @@ function pickLinkShape(anchor, ids, type) {
   openPop(anchor, { title: `${ordered.length} motes ${type} …`, options });
 }
 
-function confirmDelete(anchor, ids) {
-  openPop(anchor, {
-    title: `delete ${ids.length} mote${ids.length === 1 ? "" : "s"}`,
-    note: "Deleting a mote takes its properties and its relationships with it, and no other window will get them back. Type delete to confirm.",
-    form: {
-      value: "", placeholder: "delete", label: "Delete", danger: true,
-      commit: async (text) => {
-        if (text.trim().toLowerCase() !== "delete") { toast("Type delete to confirm.", true); return; }
-        closePop();
-        const answer = await call(api.delete_motes(ids, true), "Could not delete those motes.");
-        if (answer === null) return;
-        sel.clear();
-        toast(`${answer.deleted} mote${answer.deleted === 1 ? "" : "s"} deleted from the garden.`);
-        refresh();
-      },
-    },
-  });
+async function deleteMotes(ids) {
+  const answer = await call(api.delete_motes(ids), "Could not delete those motes.");
+  if (answer === null) return;
+  sel.clear();
+  refresh();
+  toast(
+    `${answer.deleted} mote${answer.deleted === 1 ? "" : "s"} deleted from the garden.`,
+    false,
+    { label: "Undo", run: () => undoDelete(answer.undo) },
+  );
+}
+
+async function undoDelete(tokens) {
+  const answer = await call(api.undo_delete(tokens), "Could not undo that.");
+  if (answer === null) return;
+  refresh();
+  toast(`${answer.restored} mote${answer.restored === 1 ? "" : "s"} restored.`);
 }
 
 // ---- the relationship matrix ----------------------------------------
@@ -1065,7 +1074,7 @@ function glyphFor(type) {
 //
 // Every picker in this window is this popover: cell editors, the
 // condition chips' three menus, the column picker, the bulk actions and
-// the delete confirmation. One implementation because they are one
+// the view delete confirmation. One implementation because they are one
 // interaction -- a list of options, sometimes with a text field under it
 // -- and five copies of it would drift apart by the third.
 

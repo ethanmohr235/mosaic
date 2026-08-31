@@ -17,11 +17,13 @@ this window to have invented.
 Unlike the other four windows, this one writes a *lot*: the whole point
 is editing many motes at once. The mitigation is not fewer writes but
 narrower ones -- set_property touches exactly the key it was given on
-exactly the ids it was given, and delete_motes refuses without an
-explicit confirm rather than trusting a click that landed on a 200-row
-selection.
+exactly the ids it was given, and delete_motes hands back an undo token
+per mote rather than gating the click on a confirmation dialog, so a
+click that landed on a 200-row selection is one toast away from undone
+instead of one dialog away from prevented.
 """
 import logging
+import sqlite3
 import threading
 
 import webview
@@ -35,6 +37,7 @@ from core import graph as graph_repo
 from core import motes as motes_repo
 from core import query as query_repo
 from core import relationships as relationships_repo
+from core import species as species_repo
 from core import sync as sync_repo
 from core.db import get_connection, initialize_database
 from core.entities import Mote, Relationship
@@ -44,6 +47,12 @@ from monolith import payload as payload_repo
 logger = logging.getLogger(__name__)
 
 _SEARCH_LIMIT = 20
+
+# The species a saved view is an instance of, found or created by name --
+# same trick momentum/api.py plays for SESSION_SPECIES_NAME: an ordinary
+# mote, discovered rather than reserved, so a garden that has never saved
+# a view never grows one.
+VIEW_SPECIES_NAME = "Saved View"
 
 # Same reasoning as mora/api.py: Monolith is opened *from* another window
 # as often as on its own, so two processes holding the same garden file
@@ -237,15 +246,51 @@ class Api:
         return {"id": motes_repo.create_mote(self._conn, properties)}
 
     @_synchronized
-    def delete_motes(self, mote_ids: list[str], confirm: bool = False) -> dict:
+    def delete_motes(self, mote_ids: list[str]) -> dict:
         """The one destructive thing in this window, and the reason it
-        takes a flag: every other action here is reversible by editing
-        the cell back, and this one is not. The frontend asks first; the
-        bridge checks for itself rather than trusting that it did."""
-        if not confirm:
-            raise ValueError("Deleting motes needs an explicit confirmation.")
-        deleted = [m for m in self._existing(mote_ids) if motes_repo.delete_mote(self._conn, m)]
-        return {"deleted": len(deleted)}
+        hands back an undo token per mote instead of asking first: every
+        other action here is reversible by editing the cell back, and a
+        confirmation dialog was the wrong shape for a bulk selection that
+        might be one row or two hundred. undo_delete() below is what
+        makes skipping that dialog safe.
+
+        Relationships are recorded before the delete, not after -- they
+        cascade with the mote (core/db.py's ON DELETE CASCADE), so this
+        is the last moment they can be read."""
+        undo = []
+        for mote_id in self._existing(mote_ids):
+            mote = motes_repo.get_mote(self._conn, mote_id)
+            relationships = [
+                {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+                for r in graph_repo.relationships_touching(self._conn, mote_id)
+            ]
+            if motes_repo.delete_mote(self._conn, mote_id):
+                undo.append({"moteId": mote_id, "properties": mote.properties, "relationships": relationships})
+        return {"deleted": len(undo), "undo": undo}
+
+    @_synchronized
+    def undo_delete(self, tokens: list[dict]) -> dict:
+        """Put back exactly what delete_motes() took, under the same ids
+        -- create_mote() and create_relationship() both accept one -- so
+        every arrow that pointed at a restored mote still points at it."""
+        restored = 0
+        for token in tokens or []:
+            if not isinstance(token, dict) or not token.get("moteId"):
+                continue
+            motes_repo.create_mote(self._conn, token.get("properties") or {}, id=token["moteId"])
+            for relationship in token.get("relationships") or []:
+                try:
+                    relationships_repo.create_relationship(
+                        self._conn, relationship["fromId"], relationship["toId"],
+                        relationship["type"], id=relationship["id"],
+                    )
+                except sqlite3.IntegrityError:
+                    # The mote at the other end went away while the undo
+                    # toast was still up. Restoring the rest is better
+                    # than refusing the whole undo over one dangling arrow.
+                    logger.warning("could not restore relationship %r", relationship.get("id"))
+            restored += 1
+        return {"restored": restored}
 
     # ---- editing relationships ----
 
@@ -316,19 +361,37 @@ class Api:
                  if query_repo.has_query(m.properties)]
         return sorted(views, key=lambda v: v["name"].casefold())
 
+    def _view_species_id(self) -> str:
+        """Finds or creates the `Saved View` species, same lazy pattern as
+        momentum/api.py::_session_species_id -- but creating rather than
+        answering None, since save_view always needs one to point at."""
+        for mote in species_repo.list_species(self._conn):
+            name = mote.properties.get("name")
+            if isinstance(name, str) and name.casefold() == VIEW_SPECIES_NAME.casefold():
+                return mote.id
+        return motes_repo.create_mote(self._conn, {"name": VIEW_SPECIES_NAME})
+
     @_synchronized
     def save_view(self, name: str, raw_query: dict, view_id: str | None = None) -> dict:
         """A view is an ordinary mote with a `query` property, so it
         syncs, shows up in Monarch's graph, and can be linked from a Mora
         note like anything else. Re-parsed through Query rather than
         stored as handed in: what is written is what this window can read
-        back."""
+        back.
+
+        Every saved view is declared an instance of `Saved View`, the same
+        way momentum/api.py::log_session declares a logged session an
+        instance of `Work Session` -- so a garden's saved views show up as
+        one kind of thing in Monarch and Monastery without either window
+        knowing this one exists."""
         parsed = Query.from_json(raw_query).to_json()
         properties = {"name": name or "Untitled view", query_repo.QUERY_KEY: parsed}
         if view_id and motes_repo.get_mote(self._conn, view_id) is not None:
             motes_repo.update_mote(self._conn, view_id, properties)
             return {"id": view_id, "created": False}
-        return {"id": motes_repo.create_mote(self._conn, properties), "created": True}
+        new_id = motes_repo.create_mote(self._conn, properties)
+        species_repo.set_species(self._conn, new_id, self._view_species_id())
+        return {"id": new_id, "created": True}
 
     @_synchronized
     def delete_view(self, view_id: str) -> dict:

@@ -2,7 +2,7 @@
 
 What earns a test here is behavior this layer adds -- which columns a
 garden discovers, that a bulk edit writes every id it was given and
-nothing else, that deleting refuses without a confirmation, and that a
+nothing else, that a delete can be undone under the same ids, and that a
 saved view round-trips through a mote. The query language itself is
 tests/test_query.py's; a method that only forwards to a repository is
 already covered by that repository's tests. Same line mora/api.py's own
@@ -11,6 +11,7 @@ tests draw.
 import pytest
 
 from core import query as q
+from core import species as species_repo
 from core.gardens import create_garden
 from core.graph import whole_garden
 from core.motes import create_mote, get_mote
@@ -160,12 +161,20 @@ def test_clearing_removes_the_key_rather_than_emptying_it(api, garden):
     assert "status" not in get_mote(api._conn, garden["schema"]).properties
 
 
-def test_deleting_needs_an_explicit_confirmation(api, garden):
-    with pytest.raises(ValueError):
-        api.delete_motes([garden["schema"]])
-    assert get_mote(api._conn, garden["schema"]) is not None
-    assert api.delete_motes([garden["schema"]], confirm=True)["deleted"] == 1
+def test_deleting_needs_no_confirmation_but_can_be_undone(api, garden):
+    answer = api.delete_motes([garden["schema"]])
+    assert answer["deleted"] == 1
     assert get_mote(api._conn, garden["schema"]) is None
+    _motes, relationships = whole_garden(api._conn)
+    assert garden["schema"] not in {r.from_id for r in relationships} | {r.to_id for r in relationships}
+
+    restored = api.undo_delete(answer["undo"])
+    assert restored["restored"] == 1
+    assert get_mote(api._conn, garden["schema"]).properties["name"] == "Schema"
+    _motes, relationships = whole_garden(api._conn)
+    pairs = {(r.from_id, r.to_id, r.type) for r in relationships}
+    assert (garden["schema"], garden["species"], q.INSTANCE_OF) in pairs
+    assert (garden["backfill"], garden["schema"], "depends_on") in pairs
 
 
 # ---- editing relationships ----
@@ -245,11 +254,30 @@ def test_a_view_mote_is_not_a_kind(api, garden):
     assert row["kinds"] == []
 
 
+def test_saving_a_view_makes_it_an_instance_of_saved_view(api, garden):
+    """Same as momentum/api.py::log_session declaring a logged session an
+    instance of `Work Session`: every saved view is an instance of one
+    `Saved View` species, found or created lazily the first time a view is
+    saved -- so a garden's saved views show up as one kind of thing in
+    Monarch and Monastery."""
+    first = api.save_view("In flight", query_with())
+    second = api.save_view("Todo", query_with())
+    species = [m for m in species_repo.list_species(api._conn)
+               if m.properties.get("name") == "Saved View"]
+    assert len(species) == 1
+    instance_ids = {m.id for m in species_repo.instances_of(api._conn, species[0].id)}
+    assert instance_ids == {first["id"], second["id"]}
+
+
 def test_deleting_a_view_removes_only_that_mote(api, garden):
+    before = api.table()["total"]
     saved = api.save_view("In flight", query_with())
     assert api.delete_view(saved["id"])["deleted"]
     assert api.table()["views"] == []
-    assert api.table()["total"] == 4
+    # The view instance is gone; the `Saved View` species it pointed at
+    # (created lazily by save_view) is not -- a species persists past its
+    # last instance, same as momentum/api.py's `Work Session`.
+    assert api.table()["total"] == before + 1
 
 
 # ---- the window ----

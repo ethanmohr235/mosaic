@@ -23,6 +23,8 @@ from core import garden_io
 from core import graph as graph_repo
 from core import links as links_repo
 from core import motes as motes_repo
+from core import query as query_repo
+from core.query import Index, Query
 from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import kinds as kinds_repo
@@ -725,6 +727,35 @@ class Api:
             "valueShapes": reserved_repo.VALUE_SHAPES,
             "propertyModelProviders": reserved_repo.PROPERTY_MODEL_PROVIDERS,
         }
+
+    # ---- saved view filter ----
+
+    def _updated(self) -> dict[str, str]:
+        """Mirrors monolith/api.py::_updated -- when each mote last
+        changed, for the `updated` builtin a saved view's query can
+        filter or sort on."""
+        rows = self._conn.execute(
+            "SELECT mote_id, MAX(updated_at) AS updated FROM mote_properties GROUP BY mote_id"
+        ).fetchall()
+        return {row["mote_id"]: row["updated"] for row in rows if row["updated"]}
+
+    @_synchronized
+    def view_filter_ids(self, view_id: str) -> list[str] | None:
+        """Every mote id Monolith's saved view `view_id` matches,
+        evaluated fresh over the whole garden -- what the control panel's
+        saved-view filter keeps on screen, hiding everything else. A
+        saved view is an ordinary mote carrying a `query` property
+        (core/query.py); this is Monarch's only reach into that
+        language, since the graph doesn't otherwise care what a saved
+        view is. None if the mote is gone or no longer carries a query,
+        so a stale picker selection clears itself instead of raising."""
+        mote = motes_repo.get_mote(self._conn, view_id)
+        if mote is None or not query_repo.has_query(mote.properties):
+            return None
+        motes, relationships = graph_repo.whole_garden(self._conn)
+        index = Index.of(motes, relationships, self._updated())
+        query = Query.from_json(mote.properties[query_repo.QUERY_KEY])
+        return [m.id for m in query_repo.evaluate(index, motes, query)]
 
     # ---- graph/focus ----
 
