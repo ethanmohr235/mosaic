@@ -131,6 +131,14 @@
               <span id="phase">ready</span>
             </div>
           </div>
+          <div id="timer-settings">
+            <label id="duration-label">
+              <input type="number" id="duration-input" min="1" max="180" value="25"> min
+            </label>
+            <label id="stopwatch-label">
+              <input type="checkbox" id="stopwatch-toggle"> Count up instead
+            </label>
+          </div>
           <div id="timer-controls">
             <button id="run-btn" class="primary" type="button">Begin 25m</button>
             <button id="reset-btn" type="button">Reset</button>
@@ -239,7 +247,7 @@
     <div id="launcher-results"></div>
     <div id="launcher-empty" class="hidden"></div>
     <div id="launcher-footer">
-      <span>↑↓ select</span><span>↵ open</span><span>⌘1–3 jump</span>
+      <span>↑↓ select</span><span>↵ open</span><span>⌘1–4 jump</span>
       <div class="spacer"></div>
       <span id="launcher-garden"></span>
     </div>

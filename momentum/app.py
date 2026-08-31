@@ -2,7 +2,7 @@
 """The Momentum window. monastery/app.py's twin, for the same reasons it
 is monarch/app.py's -- same pywebview settings, same cache workaround,
 different frontend and different Api. window_launcher.py carries the
-settings and workaround all four apps share.
+settings and workaround all five apps share.
 
 A fourth window rather than a tab inside another: a board wants the
 width of a monitor, and a timer you can only see while the graph window

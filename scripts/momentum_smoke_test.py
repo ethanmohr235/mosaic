@@ -409,7 +409,7 @@ def run_checks(window):
         # Wind the clock forward rather than waiting out a real 25
         # minutes: the elapsed time is what gets logged, and this is the
         # only part of it the test cannot afford to do honestly.
-        js(window, "remaining = remaining - 120;")
+        js(window, "elapsed = elapsed + 120;")
         click(window, "#finish-btn")
         assert wait_until(lambda: _session_count() == before + 1), \
             "finishing the session logged nothing"
@@ -434,6 +434,50 @@ def run_checks(window):
 
     check("the session log and streak reflect the logged session",
           the_session_shows_in_the_log_and_streak)
+
+    def the_duration_is_editable_and_remembered():
+        js(window, """
+            const input = document.getElementById('duration-input');
+            input.value = '50';
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        assert wait_until(lambda: js(window, "sessionMinutes") == 50), \
+            "editing the duration input never round-tripped into sessionMinutes"
+        assert js(window, "document.getElementById('run-btn').textContent") == "Begin 50m", \
+            "the begin button should reflect the edited duration"
+        stored = js(window, "JSON.parse(window.localStorage.getItem('momentum.timer'))")
+        assert stored["minutes"] == 50, f"the duration should persist to localStorage, got {stored!r}"
+
+    check("the duration input is editable and remembered", the_duration_is_editable_and_remembered)
+
+    def stopwatch_mode_counts_up_with_no_target():
+        js(window, """
+            const box = document.getElementById('stopwatch-toggle');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+        assert wait_until(lambda: js(window, "stopwatch") is True), \
+            "checking the stopwatch box never flipped stopwatch mode"
+        assert js(window, "document.getElementById('duration-input').disabled") is True, \
+            "the duration input should be disabled while in stopwatch mode"
+        before = _session_count()
+        click(window, "#run-btn")
+        assert wait_until(lambda: js(window, "document.getElementById('phase').textContent") == "in session"), \
+            "the stopwatch never started"
+        # A stopwatch has no target to hit, so it must still be running
+        # well past what would have finished a countdown session.
+        js(window, "elapsed = elapsed + 3000;")
+        assert js(window, "running") is True, "a stopwatch must not auto-finish like a countdown does"
+        click(window, "#finish-btn")
+        assert wait_until(lambda: _session_count() == before + 1), \
+            "stopping and logging a stopwatch session logged nothing"
+        js(window, """
+            const box = document.getElementById('stopwatch-toggle');
+            box.checked = false;
+            box.dispatchEvent(new Event('change', {bubbles: true}));
+        """)
+
+    check("stopwatch mode counts up with no target until stopped", stopwatch_mode_counts_up_with_no_target)
 
     def nothing_threw_along_the_way():
         errors = js(window, "JSON.stringify(window.__momentumErrors || [])")

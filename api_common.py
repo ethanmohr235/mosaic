@@ -1,6 +1,6 @@
 # api_common.py
 """Shared pieces of the pywebview Api bridge every desktop app (monarch,
-mora, monastery, momentum) exposes as its js_api. Before this, each
+mora, monastery, momentum, monolith) exposes as its js_api. Before this, each
 app's api.py carried its own byte-for-byte copy of `synchronized` and,
 where properties are edited as text, `coerce`/`coerce_properties` --
 see window_launcher.py for the other half of the boilerplate that used
@@ -8,10 +8,13 @@ to get re-copied per app.
 """
 import functools
 import json
+import sqlite3
 import subprocess
 import sys
 import threading
 from pathlib import Path
+
+from core import species as species_repo
 
 
 def synchronized(method):
@@ -47,6 +50,25 @@ def coerce_properties(raw_properties: dict) -> dict:
     return {k: coerce(v) for k, v in raw_properties.items()}
 
 
+def species_ids(conn: sqlite3.Connection) -> list[str]:
+    """Every species in the garden, sorted -- the universe each window's
+    colour palette claims its entries from.
+
+    Every window colours a mote by its species, and they must agree, so
+    the answer cannot be "the species I can currently see": Monarch under
+    a hop limit sees a subset of what Monolith's table lists, and a
+    palette claimed from a subset would give the same species two
+    colours in two windows. The garden's whole species list is the one
+    answer all five can ask for. Sorted here rather than in each
+    frontend: the claiming order decides who gets which entry when two
+    ids want the same one.
+
+    Every window's main payload carries this rather than fetching it on
+    the side -- it changes only when somebody makes a new species, and a
+    bridge call per poll was enough to cost Monastery a redraw."""
+    return sorted(mote.id for mote in species_repo.list_species(conn))
+
+
 # ---- launching a sibling app ----
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -54,13 +76,14 @@ REPO_ROOT = Path(__file__).resolve().parent
 # app id -> (display name, its run_*.py, the flag that opens straight to
 # one mote -- None where that script takes no such flag). The single
 # source both the ⌘J switcher (below) and each app's own frontend read,
-# so a fifth app is one entry here rather than a fifth copy-pasted
+# so a sixth app is one entry here rather than a sixth copy-pasted
 # open_<sibling>() per existing app.
 APPS = {
     "monarch": ("Monarch", REPO_ROOT / "run_monarch.py", None),
     "mora": ("Mora", REPO_ROOT / "run_mora.py", "--note"),
     "monastery": ("Monastery", REPO_ROOT / "run_monastery.py", "--focus"),
     "momentum": ("Momentum", REPO_ROOT / "run_momentum.py", "--focus"),
+    "monolith": ("Monolith", REPO_ROOT / "run_monolith.py", "--view"),
 }
 
 

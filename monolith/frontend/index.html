@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Monolith</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="shell">
+
+  <header id="topbar">
+    <div id="brand">
+      <svg width="22" height="22" viewBox="0 0 128 128" aria-hidden="true">
+        <rect width="128" height="128" rx="28" fill="var(--panel)"></rect>
+        <rect x="46" y="24" width="36" height="80" rx="6" fill="none" stroke="var(--fg)"
+              stroke-width="5" opacity="0.55"></rect>
+        <rect x="56" y="38" width="16" height="8" rx="2" fill="var(--accent)"></rect>
+        <rect x="56" y="56" width="16" height="8" rx="2" fill="var(--fg)" opacity="0.4"></rect>
+        <rect x="56" y="74" width="16" height="8" rx="2" fill="var(--fg)" opacity="0.4"></rect>
+      </svg>
+      <div id="brand-text">
+        <span id="brand-name">Monolith</span>
+        <span id="brand-sub">MonOSS</span>
+      </div>
+    </div>
+
+    <div class="rule"></div>
+
+    <div class="topbar-menu">
+      <button id="garden-btn" class="topbar-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+        <span id="garden-name">…</span>
+        <span class="caret">⌄</span>
+      </button>
+      <div id="garden-menu" class="menu hidden" role="menu"></div>
+    </div>
+
+    <div id="view-head">
+      <span id="view-title">All motes</span>
+      <span id="view-sub"></span>
+    </div>
+
+    <button id="matrix-toggle" class="toggle-btn" type="button" title="Relationship matrix">relations</button>
+    <span class="group-label">group</span>
+    <div id="group-chips" class="segmented"></div>
+    <button id="new-mote" class="topbar-trigger icon-btn" type="button" title="New mote">＋</button>
+    <button id="refresh-btn" class="topbar-trigger icon-btn" type="button" title="Refresh: sync and reload">⟳</button>
+    <button id="switch-app-btn" class="topbar-trigger icon-btn" type="button" title="Switch app (⌘J)">⊞</button>
+  </header>
+
+  <div id="wherebar">
+    <span class="where-label">Where</span>
+    <div id="conditions" style="display:contents"></div>
+    <button id="add-cond" class="add-cond" type="button">+ condition</button>
+    <div class="spacer"></div>
+    <span id="dirty-note" class="hidden">unsaved changes to view</span>
+    <button id="update-view" class="pill-btn hidden" type="button">Update view</button>
+    <button id="save-view" class="pill-btn primary hidden" type="button">Save as new view</button>
+  </div>
+
+  <div id="body">
+
+    <aside id="rail">
+      <div id="rail-views">
+        <div class="rail-title">
+          <span>Saved views</span>
+          <div class="spacer"></div>
+          <button id="clear-view" type="button">all motes</button>
+        </div>
+        <div id="views"></div>
+      </div>
+      <div id="rail-split-resizer"></div>
+      <div id="rail-columns">
+        <div class="rail-title">
+          <span>Columns</span>
+          <div class="spacer"></div>
+          <span id="column-count" class="count"></span>
+        </div>
+        <input type="text" id="column-filter" placeholder="filter keys…" autocomplete="off">
+        <div id="columns"></div>
+      </div>
+    </aside>
+
+    <div id="rail-resizer"></div>
+
+    <section id="table-area">
+      <div id="table-scroll">
+        <div id="table"></div>
+        <div id="table-empty" class="hidden">no motes match this query</div>
+        <div id="table-more" class="hidden"><button type="button">show more rows</button></div>
+      </div>
+
+      <div id="matrix-resizer" class="hidden"></div>
+      <div id="matrix" class="hidden">
+        <div id="matrix-head">
+          <span class="title">Relationship matrix</span>
+          <div id="matrix-types" class="segmented"></div>
+          <span id="matrix-note"></span>
+          <button id="matrix-close" class="close-x" type="button" title="Close">×</button>
+        </div>
+        <div id="matrix-scroll"></div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer id="statusbar">
+    <span id="stat-rows">0 of 0 motes</span>
+    <span class="dot">·</span>
+    <span id="stat-sel">0 selected</span>
+    <span class="dot">·</span>
+    <span id="stat-sort">unsorted</span>
+    <div class="spacer"></div>
+    <span class="hint" id="hint">shift-click a checkbox to select a range</span>
+    <span class="dot">·</span>
+    <span class="hint"><kbd>⌘J</kbd> switch app</span>
+  </footer>
+
+  <div id="bulkbar" class="hidden">
+    <span id="bulk-count">0 selected</span>
+    <div class="sep"></div>
+    <div id="bulk-actions" style="display:contents"></div>
+    <div class="sep"></div>
+    <button id="bulk-deselect" class="plain" type="button">Deselect</button>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+
+</div>
+
+<div id="pop-shade" class="hidden"></div>
+<div id="pop" class="hidden">
+  <div id="pop-title"></div>
+  <div id="pop-options"></div>
+  <div id="pop-note" class="hidden"></div>
+  <div id="pop-form" class="hidden">
+    <input type="text" id="pop-input" autocomplete="off">
+    <button id="pop-commit" type="button">Set</button>
+  </div>
+</div>
+
+<div id="launcher-overlay" class="hidden">
+  <div id="launcher-modal">
+    <div id="launcher-input-row">
+      <span class="launcher-glyph"></span>
+      <input type="text" id="launcher-input" placeholder="Open an app…" autocomplete="off">
+      <kbd>esc</kbd>
+    </div>
+    <div id="launcher-results"></div>
+    <div id="launcher-empty" class="hidden"></div>
+    <div id="launcher-footer">
+      <span>↑↓ select</span><span>↵ open</span><span>⌘1–4 jump</span>
+      <div class="spacer"></div>
+      <span id="launcher-garden"></span>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

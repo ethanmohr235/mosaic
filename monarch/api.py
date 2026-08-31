@@ -14,6 +14,7 @@ import webview
 
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
+from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core.db import get_connection, initialize_database
 from core import derivations as derivations_repo
@@ -741,7 +742,8 @@ class Api:
         if mote_id is None:
             mote_id = graph_repo.most_recent_mote_id(self._conn)
         if mote_id is None:
-            return {"focus_id": None, "motes": [], "relationships": [], "kinds": {}}
+            return {"focus_id": None, "motes": [], "relationships": [], "kinds": {},
+                    "speciesIds": _species_ids(self._conn)}
 
         if hops is None:
             motes, rels = graph_repo.whole_garden(self._conn)
@@ -751,5 +753,10 @@ class Api:
             "focus_id": mote_id,
             "motes": [dataclasses.asdict(m) for m in motes],
             "relationships": [dataclasses.asdict(r) for r in rels],
+            # Asked of the garden, not of `motes`: under a hop limit this
+            # answer is a neighborhood, and a palette claimed from a
+            # neighborhood would colour a species differently here than
+            # in the four other windows. See api_common.species_ids.
+            "speciesIds": _species_ids(self._conn),
             **_classify(motes, rels),
         }

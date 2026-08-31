@@ -23,6 +23,7 @@ import threading
 import webview
 
 from api_common import open_app as _open_app
+from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core import gardens as gardens_repo
 from core import graph as graph_repo
@@ -214,7 +215,12 @@ class Api:
         resolution = modoc_bind.resolve(self._conn, mote_id, document, step=step)
         motes, relationships = graph_repo.whole_garden(self._conn)
         directory = payload_repo.Directory.of(motes, relationships)
-        return payload_repo.note_payload(document, resolution, directory, source)
+        return {
+            **payload_repo.note_payload(document, resolution, directory, source),
+            # The palette universe rides along with the answer rather
+            # than being a call of its own -- see api_common.species_ids.
+            "speciesIds": _species_ids(self._conn),
+        }
 
     # ---- the data panel ----
 

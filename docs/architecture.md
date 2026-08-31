@@ -57,9 +57,9 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units` and `modoc` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc` and `query` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
-A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below), and a task's status or estimate is likewise discovered from what the value looks like (`core/task_candidates.py`). The ten names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
+A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below), and a task's status or estimate is likewise discovered from what the value looks like (`core/task_candidates.py`). The names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
 
 # Units
 
@@ -356,8 +356,8 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/` and
-`mcp_server/` are five adapters over it, and each one's job is a
+`core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/`,
+`momentum/`, `monolith/` and `mcp_server/` are seven adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -386,6 +386,11 @@ The charter:
   (see Tasks below). A fourth window, for the same reason once more: a
   board, a planned week and a running timer are shapes neither a graph
   nor a calendar draws.
+* **Monolith** -- likewise once more, for the garden as a whole rather
+  than for any one kind of mote (see The table below). A fifth window,
+  because a query across every mote and an edit applied to two hundred
+  of them are shapes a graph, a page, a week and a board all lack: each
+  of those shows a mote at a time, and this one shows the set.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -612,8 +617,8 @@ reshapes.
 Two exclusions are inherited rather than reinvented. Templates and
 scenario overrides are never placed, even when dated, because they hold
 replacement values rather than real data. And a mote is coloured by its
-species through the same hash the graph canvas uses, so it reads the same
-colour in all four windows.
+species through the same palette the graph canvas uses, so it reads the
+same colour in all five windows.
 
 Monastery is a third process on the same terms as Mora, which means the
 same two collisions to avoid: `monastery/app.py::choose_port` asks for
@@ -680,3 +685,96 @@ Momentum is a fourth process on the same terms as the other two:
 `momentum/app.py::choose_port` asks for 42004 and falls back to an
 ephemeral port, `.webview_data_momentum/` is its own WebKit storage,
 and the window polls while focused. See `docs/ui-setup.md`.
+
+# Species colour
+
+A mote is coloured by its species, in all five windows, and the rule is
+one every window carries a copy of rather than one any of them decides.
+
+Hashing a hue out of the species id -- which is what this was -- gave
+every species an independent random hue, and at the lightness and chroma
+the palette uses, 360 hues read as about five colours: a garden's tenth
+species routinely looked like its third. Each species now claims one
+entry of a fixed palette instead. Hues walk the wheel by the golden
+angle so consecutive entries land far apart, and every twelfth entry
+changes lightness and chroma, so the second time past a hue is still
+visibly a different colour. A species mote itself draws as the brighter
+variant of its instances' colour.
+
+Which entry a species claims is decided by probing: it prefers the entry
+its id hashes to -- stable across sessions, and unmoved by most later
+additions -- and takes the next free one when that is claimed, which is
+what stops two species sharing a colour until the palette is genuinely
+full. Probing makes the answer depend on *which species exist*, and that
+is why the universe is the garden's whole species list
+(`api_common.py::species_ids`) rather than the ones a window can see:
+Monarch under a hop limit draws a subgraph, and a palette claimed from a
+subgraph would give one species two colours in two windows. Every
+window's main payload carries that list, so no window pays a call for
+it.
+
+# The table
+
+Monolith (`monolith/`) is a fifth window: the garden as rows and
+columns. It is where large edits happen -- forty motes given an owner in
+one gesture -- and where structured questions get asked across
+everything at once, rather than one mote at a time.
+
+**Columns are discovered, never declared.** A garden has no schema, so
+there is nothing to read a column list off. `monolith/payload.py::Schema`
+builds one per request from what is actually there: every property key
+anyone has used (with how many motes carry it, and whether it is a
+reserved name), every relationship type anyone has drawn -- in both
+directions -- and the handful of things every mote has: name, id,
+species, degree, last-updated. The same discovery pays for the cell
+editor, because a column's distinct values *are* its enum: clicking a
+`status` cell offers `todo`/`doing`/`blocked` on a garden where nobody
+ever declared a status type, and offers a plain text field on a column
+where every value differs.
+
+**A query is a first-class thing, and it lives in `core/`.**
+`core/query.py` holds the language -- fields, operators, joins, sorting,
+grouping -- and Monolith is only an editor for it, the same split
+`core/modoc.py` and Mora draw. A **field** names one of four sources:
+
+    property   a JSON property key
+    builtin    name, id, species, degree, last-updated
+    rel        the motes across one relationship type, in one direction
+    graph      what the graph makes this mote: instance_of, kind, related
+
+The last two are why this is a table over a *graph*. `→ depends_on
+includes "Schema translation"`, `kind is species` and `related is empty`
+(which is how you ask for orphans) are questions no property filter can
+express. `rel` and `graph` fields are list-valued and therefore share one
+set of operators, and a `rel` column is editable: setting a cell writes
+relationships, which is the join a spreadsheet cannot do.
+
+**A saved view is an ordinary mote** carrying a `query` property -- the
+one reserved name this window adds. Like `modoc`, carrying one is data
+rather than a job in the graph's machinery, so it is deliberately not a
+`core/kinds.py` kind: a view mote that read as a kind would displace its
+real species in every other window's type label. Being ordinary is what
+makes a view sync between devices, appear in Monarch, and be linkable
+from a note.
+
+**Two gestures write relationships in bulk.** The relationship matrix
+puts the visible rows on both axes and writes or erases one edge per
+click, painting the type selected above it; and the bulk bar chains a
+selection in row order or fans it into its first row. Thirty imported
+motes into a dependency chain is one gesture here and twenty-nine in the
+graph window.
+
+Everything else the window does is ordinary writes through
+`core/motes.py` and `core/relationships.py`, one primitive at a time, so
+a two-hundred-mote edit is two hundred oplog rows that `core/sync.py`
+replicates like any other. The one destructive action is guarded rather
+than fast: `monolith/api.py::delete_motes` refuses without an explicit
+confirmation, the same preview/commit split Mora keeps between saving a
+note and applying a simulation step.
+
+Monolith is a fifth process on the same terms as the other three:
+`monolith/app.py::choose_port` asks for 42005 and falls back to an
+ephemeral port, `.webview_data_monolith/` is its own WebKit storage, and
+the draft query -- the one being edited before it is saved as a view --
+is the window's own state in `localStorage`, not the garden's. See
+`docs/ui-setup.md`.

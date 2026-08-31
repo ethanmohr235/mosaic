@@ -28,6 +28,7 @@ import webview
 
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
+from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core import calendar as calendar_repo
 from core import gardens as gardens_repo
@@ -295,6 +296,13 @@ class Api:
             "total": len(cards),
         }
 
+    def _with_palette(self, answer: dict) -> dict:
+        """Every view answer carries the palette universe -- see
+        api_common.species_ids. One place rather than three, because a
+        tab that forgot it would draw a species in a colour no other
+        window uses."""
+        return {**answer, "speciesIds": _species_ids(self._conn)}
+
     # ---- the board ----
 
     @_synchronized
@@ -312,13 +320,13 @@ class Api:
             estimate_key=estimate_key, bindings=bindings,
         )
         cards = [payload_repo.card_payload(m, directory, keys) for m in tasks]
-        return payload_repo.board_payload(
+        return self._with_palette(payload_repo.board_payload(
             cards,
             statuses=candidates_repo.statuses_for(tasks, keys.status),
             keys=keys,
             candidates=self._candidates(tasks, keys),
             stats=self._stats(cards, tasks, keys),
-        )
+        ))
 
     # ---- the week ----
 
@@ -364,7 +372,7 @@ class Api:
             ))
             cursor += timedelta(days=1)
 
-        return payload_repo.days_payload(
+        return self._with_palette(payload_repo.days_payload(
             days, pool,
             keys=keys,
             candidates=self._candidates(tasks, keys),
@@ -372,7 +380,7 @@ class Api:
             capacity_minutes=settings["capacityMinutes"],
             work_start=settings["workStart"].strftime("%H:%M"),
             work_end=settings["workEnd"].strftime("%H:%M"),
-        )
+        ))
 
     # ---- the focus tab ----
 
@@ -412,7 +420,7 @@ class Api:
             and (c["scheduled"] or {}).get("day") == today
         ]
         sessions = self._sessions(directory)
-        return payload_repo.focus_payload(
+        return self._with_palette(payload_repo.focus_payload(
             sorted(queue, key=lambda c: c["scheduled"]["start"]),
             sessions,
             keys=keys,
@@ -420,7 +428,7 @@ class Api:
             stats=self._stats(cards, tasks, keys),
             streak=_streak(sessions, date.today()),
             heatmap=_heatmap(sessions, date.today()),
-        )
+        ))
 
     # ---- the detail panel ----
 

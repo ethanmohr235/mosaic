@@ -26,6 +26,7 @@ import webview
 
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
+from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core import calendar as calendar_repo
 from core import gardens as gardens_repo
@@ -176,13 +177,18 @@ class Api:
             window_end=datetime.fromisoformat(window_end),
             exclude_ids=excluded,
         )
-        return payload_repo.calendar_payload(
-            found,
-            payload_repo.Directory.of(motes, relationships),
-            binding_counts=counts,
-            active_bindings=active,
-            undated=calendar_repo.undated_count(motes, exclude_ids=excluded),
-        )
+        return {
+            **payload_repo.calendar_payload(
+                found,
+                payload_repo.Directory.of(motes, relationships),
+                binding_counts=counts,
+                active_bindings=active,
+                undated=calendar_repo.undated_count(motes, exclude_ids=excluded),
+            ),
+            # The palette universe rides along with the answer rather
+            # than being a call of its own -- see api_common.species_ids.
+            "speciesIds": _species_ids(self._conn),
+        }
 
     # ---- the detail panel ----
 

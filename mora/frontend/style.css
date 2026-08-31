@@ -506,3 +506,59 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
   padding: 9px 20px; border-top: 1px solid var(--border-soft); background: var(--panel-bg);
   font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: 0.06em;
 }
+
+/* ---- print / PDF export ----
+   The rendered pane is the only thing a print or "save as PDF" should
+   produce: everything else here is editor chrome, not the note. Colours
+   are overridden explicitly rather than left to invert-on-print, since
+   the app's palette (oklch dark bg, light fg, see :root above) is built
+   for a screen, not paper -- a browser printing that untouched would
+   waste ink on the background and print near-white text. */
+/* Margin lives on the content, not on @page: WebKitGTK's print pipeline
+   (this app's Linux target) defers page margins to the OS print dialog's
+   own page-setup rather than reliably honouring @page's margin, so a 1in
+   @page rule alone left whatever the dialog's default was. Padding the
+   content itself is enforced by the box model regardless of what the
+   print engine does with @page, so @page is zeroed here to rule out it
+   adding its own margin on top of this one. */
+@page {
+  margin: 0;
+}
+
+@media print {
+  #topbar, #source-pane, #data-pane, #statusbar, .pane-head,
+  #notes-overlay, #launcher-overlay, #toast, #picker {
+    display: none !important;
+  }
+  body, #panes, #preview-pane, #rendered-scroll {
+    display: block !important; height: auto !important; overflow: visible !important;
+    background: #fff !important;
+  }
+  #rendered-scroll { padding: 0; }
+  #rendered { max-width: none; padding: 1in; color: #222; }
+  #rendered h1 { color: #000; }
+  #rendered h2 { color: #444; border-bottom-color: #ccc; }
+  #rendered p, #rendered li { color: #222; }
+  #rendered strong { color: #000; }
+  #rendered code { color: #333; }
+  #rendered li::before { background: #999; }
+  .math, .display-math { color: #000; }
+  .display-math { border-top-color: #ccc; border-bottom-color: #ccc; }
+  .math-raw { color: #555; }
+  /* Mote links print as plain referenced text -- there is nothing on
+     paper for a click to do, so the button chrome and cursor go too. */
+  .mote-link {
+    color: #222; cursor: default; text-decoration: underline;
+    border-bottom: none;
+  }
+  .mote-link.broken { color: #777; }
+  .val { color: #333; background: #eee; }
+  .val.broken { color: #a00; background: #fbe4e4; }
+  .figure { border-color: #ccc; background: #f7f7f7; }
+  .figure-head, .figure-axis, .bar-label { color: #666; }
+  .bar-track { background: #eee; }
+  .bar-fill { background: #888; }
+  .bar-value { color: #333; }
+  .figure-error { color: #a00; }
+  .empty-note { color: #888; }
+}

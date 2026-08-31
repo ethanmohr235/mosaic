@@ -34,6 +34,7 @@ let allRuns = [];                      // cached list_runs() result, while the r
 let selectedRunId = null;              // the run currently entered in history-scrub mode (simPreview.mode === 'history'), if any
 let viewSettings = null;               // this garden's advanced view settings (forces/colors/attractors)
 let attractorMode = false;             // arranging species attractors -- read-only, like a sim preview
+let closeOpenIntervalPanel = null;     // closes whichever interval picker (app.js::intervalField) is currently popped open, if any
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -232,6 +233,11 @@ function plural(count, noun) {
 async function refocus(moteId, { pan = true, select = true } = {}) {
   const next = await call(api.focus(moteId, loadDepth()));
   focusId = next.focus_id;
+  // Before setData, so the first paint of this answer already has the
+  // right palette: species colours are claimed from the garden's whole
+  // species list (which the answer carries), not from the subgraph a hop
+  // limit left on the canvas.
+  graph.setSpeciesUniverse(next.speciesIds);
   payload = next;
   localStorage.setItem(lastFocusKey(currentGarden), focusId || "");
 
@@ -1396,6 +1402,25 @@ function buildCalendarDays(monthStr, selectedDate, todayStr) {
   return days;
 }
 
+/** Drops the interval panel below its summary button, as a fixed-position
+ *  popup rather than an inline block -- the calendar grid needs real width
+ *  to stay usable, and the inspector panel is user-resizable down to sizes
+ *  that would otherwise crush it (see positionMenu, same idea for the
+ *  context menu). Nudged back onscreen if it would overflow either edge. */
+function positionIntervalPanel(panel, anchor) {
+  const anchorRect = anchor.getBoundingClientRect();
+  panel.style.left = anchorRect.left + "px";
+  panel.style.top = (anchorRect.bottom + 4) + "px";
+  panel.classList.remove("hidden");
+  const rect = panel.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    panel.style.left = Math.max(8, window.innerWidth - rect.width - 8) + "px";
+  }
+  if (rect.bottom > window.innerHeight) {
+    panel.style.top = Math.max(8, anchorRect.top - rect.height - 4) + "px";
+  }
+}
+
 /** A collapsed summary button that expands into a full calendar grid,
  *  time/end-time, and repeat controls -- Monarch's Observatory design
  *  (docs/ui-setup.md). Defines its own `value` getter/setter so the
@@ -1712,20 +1737,26 @@ function intervalField(rawValue, onCommit, moteId) {
     commit();
   });
 
-  summaryBtn.addEventListener("click", () => {
-    open = !open;
-    panel.classList.toggle("hidden", !open);
-    summaryBtn.classList.toggle("open", open);
-  });
-  doneBtn.addEventListener("click", () => {
+  function closePanel() {
     open = false;
     panel.classList.add("hidden");
     summaryBtn.classList.remove("open");
-  });
+    if (closeOpenIntervalPanel === closePanel) closeOpenIntervalPanel = null;
+  }
+
+  function openPanel() {
+    if (closeOpenIntervalPanel) closeOpenIntervalPanel();
+    open = true;
+    positionIntervalPanel(panel, summaryBtn);
+    summaryBtn.classList.add("open");
+    closeOpenIntervalPanel = closePanel;
+  }
+
+  summaryBtn.addEventListener("click", () => (open ? closePanel() : openPanel()));
+  doneBtn.addEventListener("click", closePanel);
   clearBtn.addEventListener("click", async () => {
     if (editBlocked()) return;
-    open = false;
-    panel.classList.add("hidden");
+    closePanel();
     await onCommit("");
     await openDetailPanel(moteId);
   });
@@ -2384,6 +2415,16 @@ function setupQuickAdd() {
       path.includes($("context-menu"))
     ) return;
     closeQuickAdd();
+  });
+
+  // The interval popup (app.js::intervalField) is fixed-positioned outside
+  // its row's flow, but stays put in the DOM as a child of that row -- so
+  // composedPath() still contains it for a click on the summary button or
+  // anywhere inside the panel, and only an actual outside click reaches here.
+  document.addEventListener("click", (e) => {
+    if (!closeOpenIntervalPanel) return;
+    if (e.composedPath().some((el) => el.classList && el.classList.contains("interval-field"))) return;
+    closeOpenIntervalPanel();
   });
 
   $("create-mote-btn").addEventListener("click", async () => {
@@ -3802,6 +3843,16 @@ const LAUNCHER_APPS = [
       <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
     </svg>`,
   },
+  {
+    id: "monolith", name: "Monolith", kind: "table",
+    desc: "Every mote as a row: query, bulk-edit and link the garden.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="13" y="6" width="14" height="28" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
+      <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
+      <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
+    </svg>`,
+  },
 ];
 const THIS_APP = "monarch";
 
@@ -3985,7 +4036,7 @@ function setupKeyboard() {
       openLauncher();
       return;
     }
-    if ((e.metaKey || e.ctrlKey) && /^[1-3]$/.test(e.key)) {
+    if ((e.metaKey || e.ctrlKey) && /^[1-4]$/.test(e.key)) {
       const app = launcherChoices()[Number(e.key) - 1];
       if (app) {
         e.preventDefault();
@@ -4047,6 +4098,7 @@ function setupKeyboard() {
     if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
     if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
+    if (closeOpenIntervalPanel) { closeOpenIntervalPanel(); return; }
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
     if (!$("sim-settings-panel").classList.contains("hidden")) { closeSimSettingsPanel(); return; }

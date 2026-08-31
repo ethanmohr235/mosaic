@@ -1,11 +1,12 @@
 # Running the desktop UI
 
-Four native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Five native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
 (`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
-**Monastery**, the calendar (`run_monastery.py`); and **Momentum**, the
-task board and timer (`run_momentum.py`). They share one palette and one
-set of vendored fonts, so the four read as one product.
+**Monastery**, the calendar (`run_monastery.py`); **Momentum**, the
+task board and timer (`run_momentum.py`); and **Monolith**, the table
+(`run_monolith.py`). They share one palette and one
+set of vendored fonts, so the five read as one product.
 
 ---
 
@@ -489,7 +490,8 @@ the right one.
 
 | Control | Action |
 |---|---|
-| Ctrl/Cmd+S, or **Save** | Write the source back to the mote's `modoc` property -- and nothing else |
+| (autosave) | About a second after typing stops -- and on leaving the source pane, switching note or garden, or closing the window -- the source is written back on its own. The pill reads `edited`, `saving…`, `synced` |
+| Ctrl/Cmd+S, or **Save** | Write now, without waiting for the pause. Same write: the mote's `modoc` property and nothing else |
 | `t+N` stepper | Resolve the whole note against a simulation preview N steps out. The label flips **Real** to **Projected**; nothing is written |
 | **Apply t+N…** | Commit that projection to the graph. Asks first, and is disabled at t+0 |
 | Esc | Close the note menu or the `@` picker |
@@ -639,7 +641,7 @@ and that an edit from another process arrives on the next poll. It holds
 42001 and 42002 for the whole run, because a Monastery that asks for the
 wrong port must fail visibly rather than load another app's page.
 
-Run the smoke tests one at a time. All four drive real windows with
+Run the smoke tests one at a time. All five drive real windows with
 synthetic gestures, and the timing-sensitive checks flake when they
 compete.
 
@@ -759,4 +761,114 @@ and that the timer writes a session only when it finishes. It holds
 
 ```
 .venv/bin/python scripts/momentum_smoke_test.py
+```
+
+---
+
+# Monolith -- the table
+
+A fifth window, over the same gardens: `./run_monolith.py`, or
+`.venv/bin/python run_monolith.py`. Same stack and the same terms as the
+other three -- pywebview over a local HTML/CSS/JS frontend, its own
+process, its own garden connection, opening and closing independently.
+
+```
+./run_monolith.py                      # the default garden
+./run_monolith.py --garden reactor     # a specific garden
+./run_monolith.py --view <mote id>     # open on a saved view
+```
+
+Every mote is a row. It is the window for the two things the other four
+are bad at: editing a lot of motes at once, and asking a question of the
+whole garden rather than of one mote.
+
+### The columns are your garden's own
+
+Nothing is declared. Monolith reads the garden and offers, in the rail:
+
+| Column kind | Where it comes from |
+|---|---|
+| a property key | every key any mote carries, commonest first, with its fill count |
+| `→ type` / `← type` | every relationship type anyone has drawn, in each direction |
+| Name, ID, Species, Links, Updated | things every mote has |
+| Instance of, Kinds, Related by | what the graph makes the mote (`core/kinds.py`) |
+
+Click a column to add it to the table; click a header to sort by it.
+Clicking a cell opens the editor, and its options are that column's own
+distinct values -- so a `status` column offers `todo`/`doing`/`blocked`
+without anyone having declared a status type, and a column of forty
+different values just gives you a text field. What you type is read as
+JSON where it parses (`api_common.coerce`), so `5` is stored as a number.
+
+### Asking the graph, not just the properties
+
+The Where bar builds a query out of conditions joined by AND or OR. A
+condition can name a property (`estimate > 3`), a builtin (`Updated
+after 2026-08-01`), a relationship (`→ depends_on includes "Schema
+translation"`) or the graph itself (`Kinds includes species`, `Related
+by is empty` -- which is how you list orphans). The language is
+`core/query.py`, not the window's; the window only edits it.
+
+### Editing many motes at once
+
+Tick rows (shift-click for a range, ⌘A for everything the query
+matched). Then **editing any cell inside the selection writes every
+selected mote** -- the footer says so while a selection is up. The bulk
+bar adds: set a property, clear one, link, and delete.
+
+Clicking a cell *outside* the selection edits that one mote and leaves
+the selection alone. That is deliberate: the alternative silently writes
+forty motes because a click missed.
+
+### Writing relationships in bulk
+
+**Link…** relates the whole selection at once: chained in row order, all
+pointing at the first row, or all pointing at one mote you search for.
+**relations** opens the matrix -- the visible rows on both axes, one
+click per edge, painting whichever type is selected above it. Clicking a
+linked cell erases that edge. It covers the first 24 rows and says so.
+
+### Saved views
+
+A view is an ordinary mote carrying the query as its `query` property --
+the only reserved name this window adds. So it syncs, it shows up in
+Monarch, and a Mora note can link to it. The rail lists them with a
+one-line summary of what each asks. The query you are editing right now
+is *not* a mote: it lives in `localStorage`, per garden, so the window
+reopens where you left it.
+
+Deleting rows asks for a typed confirmation. Nothing else here does,
+because everything else is an edit you can make back.
+
+### Keys
+
+| Key | Does |
+|---|---|
+| ⌘A | Select every row the query matched |
+| Shift-click | Select a range of rows |
+| Double-click a row | Inspect it: every property and every relationship |
+| R | Show or hide the relationship matrix |
+| Esc | Close the popover, else clear the selection |
+
+### Ports
+
+A fifth window means a fifth port: `monolith/app.py` asks for **42005**
+(42001 Monarch, 42002 Mora, 42003 Monastery, 42004 Momentum), falling
+back to an ephemeral one if taken -- the same collision the others guard
+against, for the same reason. `.webview_data_monolith/` is its own
+WebKit storage.
+
+### Smoke test
+
+`scripts/monolith_smoke_test.py`, the same instrument as the others. It
+drives a real window against a seeded throwaway garden and checks that
+the discovered keys really become columns, that a condition built by
+clicking the Where bar filters, that editing one cell inside a
+three-row selection writes all three motes, that the bulk bar chains a
+selection into relationships, that a matrix click writes an edge and a
+second one erases it, and that saving a view leaves a mote behind. It
+holds 42001-42004 for the whole run.
+
+```
+.venv/bin/python scripts/monolith_smoke_test.py
 ```

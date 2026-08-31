@@ -24,8 +24,14 @@ let renderTimer = null;
 let toastTimer = null;
 let picker = null;           // {start, query, rows, index} while the @ picker is open
 let renderSeq = 0;           // guards against two renders landing out of order
+let autosaveTimer = null;
+let savePromise = null;      // the save_note call in flight, if any
 
 const RENDER_DEBOUNCE_MS = 180;
+// Longer than the render debounce on purpose: a render is cheap and
+// local-feeling, a write touches the garden file that Monarch may have
+// open in another process, so it waits for a real pause in typing.
+const AUTOSAVE_DEBOUNCE_MS = 900;
 const MAX_STEP = 60;
 const UNKNOWN_COLOR = "oklch(0.62 0 0)";
 
@@ -53,13 +59,106 @@ function hueFor(seed) {
   return hashString(seed) % 360;
 }
 
-/** A mote's colour: its species' hue, brighter if it is itself a
- *  species, grey if it has no type at all. */
+// ---- the species palette ----
+//
+// The palette monarch/frontend/graph.js defines -- the same constants
+// and the same two functions, carried byte for byte, so a species is the
+// same colour in every window. Only the slot map differs: the graph
+// hangs its off the canvas object, which has a colour cache to
+// invalidate; here it is one module-level Map.
+//
+// Hashing a hue straight out of the species id gave every species an
+// independent random hue, which at this lightness and chroma meant a
+// garden's tenth species routinely looked like its third -- 360 hues read
+// as about five colours. Instead each species claims one entry of a fixed
+// palette of deliberately separated colours: hues walk the wheel by the
+// golden angle so consecutive entries land far apart, and each lap round
+// the wheel changes lightness and chroma so the second time past a hue is
+// still visibly a different colour.
+//
+// Which entry a species claims depends on which other species exist, so
+// the universe has to be the *garden's* species list (api.species_ids,
+// api_common.py) rather than the ones this window happens to be showing.
+// A window claiming from what it can see would give a species one colour
+// here and another in Monarch under a hop limit.
+
+const SPECIES_HUE_STEP = 137.508;    // golden angle
+const SPECIES_LAP = 12;              // entries before the tone changes
+const SPECIES_TONES = [
+  { l: 0.72, c: 0.13 },
+  { l: 0.85, c: 0.09 },
+  { l: 0.60, c: 0.16 },
+  { l: 0.79, c: 0.20 },
+];
+const SPECIES_PALETTE_SIZE = SPECIES_LAP * SPECIES_TONES.length;
+
+let speciesSlots = new Map();        // species id -> palette entry
+
+function paletteEntry(slot) {
+  const index = ((slot % SPECIES_PALETTE_SIZE) + SPECIES_PALETTE_SIZE) % SPECIES_PALETTE_SIZE;
+  return {
+    h: (index * SPECIES_HUE_STEP + 25) % 360,
+    ...SPECIES_TONES[Math.floor(index / SPECIES_LAP)],
+  };
+}
+
+function paletteColor(slot, emphatic) {
+  const entry = paletteEntry(slot);
+  // The species mote itself is the brighter variant of its instances'
+  // colour, as it was before -- same hue, one step more presence.
+  const l = emphatic ? Math.min(0.9, entry.l + 0.07) : entry.l;
+  const c = emphatic ? entry.c + 0.02 : entry.c;
+  return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${entry.h.toFixed(1)})`;
+}
+
+/** species id -> palette entry. Each species prefers the entry its id
+ *  hashes to -- so a colour is stable across sessions and unaffected by
+ *  most later additions -- and probes forward from there when that entry
+ *  is already claimed, which is what stops two species sharing a colour
+ *  until the palette is genuinely full. Sorted ids keep the claiming
+ *  order independent of the order they arrived in. */
+function claimSlots(ids) {
+  const slots = new Map();
+  const taken = new Set();
+  for (const id of [...ids].sort()) {
+    let slot = hashString(id) % SPECIES_PALETTE_SIZE;
+    for (let step = 0; step < SPECIES_PALETTE_SIZE && taken.has(slot); step++) {
+      slot = (slot + 1) % SPECIES_PALETTE_SIZE;
+    }
+    taken.add(slot);
+    slots.set(id, slot);
+  }
+  return slots;
+}
+
+/** A species created since the last refresh has claimed nothing yet; it
+ *  falls back to its unprobed entry, which is the one it will almost
+ *  always end up claiming anyway. */
+function slotOf(speciesId) {
+  return speciesSlots.has(speciesId)
+    ? speciesSlots.get(speciesId)
+    : hashString(speciesId) % SPECIES_PALETTE_SIZE;
+}
+
+/** The palette universe travels with the answer this window already
+ *  fetches (api_common.py::species_ids), so a species claims the same
+ *  entry here as in every other window and the bridge is asked nothing
+ *  extra. Asking for it separately on each refresh was the first
+ *  attempt: it doubled every poll's traffic for an answer that changes
+ *  only when somebody makes a new species, and the added round trip was
+ *  enough to make a freshly created mote miss the redraw that should
+ *  have shown it. */
+function adoptPalette(ids) {
+  if (ids) speciesSlots = claimSlots(ids);
+}
+
+/** A mote's colour: its species' palette entry, brighter if it is itself
+ *  a species, grey if it has no type at all. */
 function colorOf(entry) {
   if (!entry) return UNKNOWN_COLOR;
-  if ((entry.kinds || []).includes("species")) return `oklch(0.80 0.13 ${hueFor(entry.id || entry.moteId || "")})`;
+  if ((entry.kinds || []).includes("species")) return paletteColor(slotOf(entry.id || entry.moteId || ""), true);
   if (!entry.speciesId) return UNKNOWN_COLOR;
-  return `oklch(0.72 0.11 ${hueFor(entry.speciesId)})`;
+  return paletteColor(slotOf(entry.speciesId), false);
 }
 
 /** What a mote *is*: the kinds core says it is, else its species, else
@@ -124,13 +223,14 @@ function onEditorInput() {
   markDirty();
   updatePicker();
   scheduleRender();
+  scheduleAutosave();
 }
 
 function markDirty() {
   const dirty = $("editor").value !== savedSource;
   const pill = $("dirty");
-  pill.textContent = dirty ? "edited" : "synced";
-  pill.classList.toggle("edited", dirty);
+  pill.textContent = savePromise ? "saving…" : dirty ? "edited" : "synced";
+  pill.classList.toggle("edited", dirty && !savePromise);
 }
 
 function scheduleRender() {
@@ -152,6 +252,7 @@ async function renderNow() {
     return;
   }
   if (seq !== renderSeq) return;
+  adoptPalette(answer.speciesIds);
   payload = answer;
   drawRendered();
   drawStatus();
@@ -494,35 +595,93 @@ async function applyStep() {
   renderNow();
 }
 
+// ---- export ----------------------------------------------------------
+
+/** Print-to-PDF via the browser's own dialog rather than a server-side
+ *  renderer: the rendered pane only ever exists as live DOM (KaTeX
+ *  included, mathInto() above), so nothing here re-typesets it -- the
+ *  @media print rules in style.css just hide everything but #rendered
+ *  and swap it to a light page. The title becomes the dialog's
+ *  suggested filename. */
+function exportPdf() {
+  const previousTitle = document.title;
+  document.title = noteName || "Untitled note";
+  window.print();
+  document.title = previousTitle;
+}
+
 // ---- notes and saving ----------------------------------------------
 
-async function loadNote(id) {
+
+async function loadNote(id, { preserveFocus = false } = {}) {
+  await flushSave();
   const opened = await api.open_note(id ?? null);
   noteId = opened.noteId;
   noteName = opened.name;
   savedSource = opened.source;
   $("editor").value = opened.source;
   $("note-title").textContent = noteName || "no motes yet";
-  focusId = null;
+  if (!preserveFocus) focusId = null;
   step = 0;
   paintHighlight();
   markDirty();
   await renderNow();
 }
 
-async function save() {
+/** Autosave: a write once typing pauses. Manual save (⌘S, the topbar
+ *  button) stays, because the pill going from "edited" to "synced" on
+ *  its own is a promise, and the button is how you check it was kept.
+ *  Nothing here writes anything but the `modoc` property -- see
+ *  api.py::save_note. */
+function scheduleAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => save({ silent: true }), AUTOSAVE_DEBOUNCE_MS);
+}
+
+/** Writes now if there is anything to write, and waits for it to land.
+ *  Called before anything that replaces the editor's contents --
+ *  switching notes, switching gardens, closing the window -- so an edit
+ *  made a moment ago cannot be dropped by the debounce still waiting.
+ *  The loop is for the case where a write is already out with older
+ *  text: that one has to finish before the newer text can go. */
+async function flushSave() {
+  clearTimeout(autosaveTimer);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (savePromise) await savePromise.catch(() => {});
+    if (!noteId || $("editor").value === savedSource) return;
+    await save({ silent: true });
+  }
+}
+
+async function save({ silent = false } = {}) {
   if (!noteId) return;
+  clearTimeout(autosaveTimer);
+  // A write is already out. This text is newer, so it queues behind
+  // that one rather than racing it -- two save_note calls landing out
+  // of order would leave the older source on the mote.
+  if (savePromise) { scheduleAutosave(); return; }
   const source = $("editor").value;
+  if (silent && source === savedSource) return;
+  savePromise = api.save_note(noteId, source);
+  markDirty();
   try {
-    await api.save_note(noteId, source);
+    await savePromise;
   } catch (e) {
     toast(String(e), true);
     return;
+  } finally {
+    savePromise = null;
+    markDirty();
   }
   savedSource = source;
   markDirty();
-  toast("Note saved.");
-  notes = await api.list_notes();
+  // Kept typing while the write was out: the pane is ahead of the file
+  // again, so start the next one rather than leaving it unsaved.
+  if ($("editor").value !== savedSource) scheduleAutosave();
+  if (!silent) {
+    toast("Note saved.");
+    notes = await api.list_notes();
+  }
 }
 
 // ---- notes search/list window (⌘P) ---------------------------------
@@ -655,6 +814,7 @@ async function openGardenMenu() {
     if (name === current) item.classList.add("on");
     item.onclick = async () => {
       closeGardenMenu();
+      await flushSave();
       const answer = await api.switch_garden(name);
       $("garden-name").textContent = answer.garden;
       closeNotesWindow();
@@ -777,13 +937,13 @@ function wire() {
   const editor = $("editor");
   editor.addEventListener("input", onEditorInput);
   editor.addEventListener("scroll", () => { $("highlight").scrollTop = editor.scrollTop; });
-  editor.addEventListener("blur", closePicker);
+  editor.addEventListener("blur", () => { closePicker(); flushSave(); });
   editor.addEventListener("keydown", (event) => {
     if (onPickerKey(event)) { event.preventDefault(); return; }
   });
   editor.addEventListener("click", updatePicker);
 
-  $("save").onclick = save;
+  $("save").onclick = () => save();
   $("refresh-btn").onclick = async () => {
     const btn = $("refresh-btn");
     btn.disabled = true;
@@ -792,7 +952,7 @@ function wire() {
       const result = await api.refresh();
       notes = await api.list_notes();
       const dirty = $("editor").value !== savedSource;
-      if (!dirty) await loadNote(noteId);
+      if (!dirty) await loadNote(noteId, { preserveFocus: true });
       const base = result.synced ? "Synced" : "Refreshed";
       toast(dirty ? `${base} (unsaved edits kept).` : `${base} and refreshed.`);
     } catch (e) {
@@ -809,6 +969,7 @@ function wire() {
 
   $("garden-btn").onclick = openGardenMenu;
   $("notes-btn").onclick = openNotesWindow;
+  $("export-pdf-btn").onclick = exportPdf;
   $("notes-new-btn").onclick = createNote;
   $("notes-overlay").addEventListener("mousedown", (event) => {
     if (event.target === $("notes-overlay")) closeNotesWindow();
@@ -842,6 +1003,12 @@ function wire() {
   $("tick-down").onclick = () => setStep(step - 1);
   $("apply").onclick = applyStep;
 
+  // Last line of defence: the debounce may still be waiting when the
+  // window goes away. pagehide is the one that fires reliably inside
+  // pywebview's webview; the write itself is best-effort from here.
+  window.addEventListener("pagehide", () => { flushSave(); });
+  window.addEventListener("beforeunload", () => { flushSave(); });
+
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".topbar-menu")) closeGardenMenu();
   });
@@ -863,7 +1030,7 @@ function wire() {
       event.preventDefault();
       openLauncher();
     }
-    if ((event.ctrlKey || event.metaKey) && /^[1-3]$/.test(event.key)) {
+    if ((event.ctrlKey || event.metaKey) && /^[1-4]$/.test(event.key)) {
       const app = launcherChoices()[Number(event.key) - 1];
       if (app) {
         event.preventDefault();
@@ -917,6 +1084,16 @@ const LAUNCHER_APPS = [
       <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
       <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
       <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+  {
+    id: "monolith", name: "Monolith", kind: "table",
+    desc: "Every mote as a row: query, bulk-edit and link the garden.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="13" y="6" width="14" height="28" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
+      <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
+      <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
     </svg>`,
   },
 ];

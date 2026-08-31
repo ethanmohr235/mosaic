@@ -1,6 +1,6 @@
 # window_launcher.py
-"""Shared pywebview window-launching boilerplate for the four desktop
-apps (monarch, mora, monastery, momentum). Before this, each app's
+"""Shared pywebview window-launching boilerplate for the five desktop
+apps (monarch, mora, monastery, momentum, monolith). Before this, each app's
 app.py carried its own byte-for-byte copy of port picking and the
 WebKit HTTP-cache-clearing workaround -- see api_common.py for the
 other half of the boilerplate that used to get re-copied per app.
@@ -76,7 +76,7 @@ def launch_window(
     `api` becomes the window's js_api and gets `_window` set on it once
     the window exists (needed for native file dialogs), the same as
     every app.py did by hand before this. `storage_dir` must already be
-    this app's own directory, never shared with another window: all four
+    this app's own directory, never shared with another window: all five
     apps run at once by design, and clear_http_cache() deletes what is
     under it on startup."""
     clear_http_cache(storage_dir)

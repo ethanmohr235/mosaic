@@ -2,7 +2,7 @@
 """The Monastery window. mora/app.py's twin, for the same reasons it is
 monarch/app.py's -- same pywebview settings, same cache workaround,
 different frontend and different Api. window_launcher.py carries the
-settings and workaround all four apps share.
+settings and workaround all five apps share.
 
 A third window rather than a view inside the main app: a calendar wants
 the whole width of a monitor, and one that can only exist while the graph

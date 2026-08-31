@@ -92,6 +92,48 @@ function hueFor(seed) {
   return hashString(seed) % 360;
 }
 
+/** Species palette. Hashing a hue straight out of the id gave every species
+ *  an independent random hue, which at this lightness and chroma meant a
+ *  garden's tenth species routinely looked like its third -- 360 hues read
+ *  as about five colours. Instead each species claims one entry of a fixed
+ *  palette of deliberately separated colours: hues walk the wheel by the
+ *  golden angle so consecutive entries land far apart, and each lap round
+ *  the wheel changes lightness and chroma so the second time past a hue is
+ *  still visibly a different colour. */
+const SPECIES_HUE_STEP = 137.508;    // golden angle
+const SPECIES_LAP = 12;              // entries before the tone changes
+const SPECIES_TONES = [
+  { l: 0.72, c: 0.13 },
+  { l: 0.85, c: 0.09 },
+  { l: 0.60, c: 0.16 },
+  { l: 0.79, c: 0.20 },
+];
+const SPECIES_PALETTE_SIZE = SPECIES_LAP * SPECIES_TONES.length;
+
+function paletteEntry(slot) {
+  const index = ((slot % SPECIES_PALETTE_SIZE) + SPECIES_PALETTE_SIZE) % SPECIES_PALETTE_SIZE;
+  return {
+    h: (index * SPECIES_HUE_STEP + 25) % 360,
+    ...SPECIES_TONES[Math.floor(index / SPECIES_LAP)],
+  };
+}
+
+function paletteColor(slot, emphatic) {
+  const entry = paletteEntry(slot);
+  // The species mote itself is the brighter variant of its instances'
+  // colour, as it was before -- same hue, one step more presence.
+  const l = emphatic ? Math.min(0.9, entry.l + 0.07) : entry.l;
+  const c = emphatic ? entry.c + 0.02 : entry.c;
+  return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${entry.h.toFixed(1)})`;
+}
+
+// The four other windows carry these constants and these two functions
+// byte for byte (mora, monastery, momentum, monolith), so a species is
+// the same colour wherever it is drawn. What they cannot share is the
+// slot map below: this one hangs off the graph object and theirs is a
+// module-level Map, because only this window redraws 60 times a second
+// and has a colour cache to invalidate.
+
 /** Sequential ramp for the measured colour modes (connection count, a
  *  numeric property): one hue, dim at the low end and bright at the high,
  *  so the ordering reads as an ordering. Distinct hues per value -- what
@@ -139,6 +181,8 @@ class MonossGraph {
     this._moteById = new Map();
     this._colorCache = new Map();  // mote id -> colour, dropped whenever data or settings change
     this._colorStats = null;       // degree/numeric aggregates, computed once per invalidation
+    this._speciesSlots = null;     // species id -> palette entry, rebuilt with the colour cache
+    this.speciesUniverse = null;   // every species in the *garden*, not just the ones in view
 
     this._bindEvents();
     this._resize();
@@ -434,6 +478,43 @@ class MonossGraph {
   _invalidateColors() {
     this._colorCache.clear();
     this._colorStats = null;
+    this._speciesSlots = null;
+  }
+
+  /** Every species in the garden, which is what the palette is claimed
+   *  from -- see setSpeciesUniverse. Falls back to the ones in view,
+   *  which is all this window knows before the first answer lands. */
+  setSpeciesUniverse(ids) {
+    this.speciesUniverse = ids && ids.length ? new Set(ids) : null;
+    this._invalidateColors();
+  }
+
+  /** species id -> palette entry. Each species prefers the entry its id
+   *  hashes to -- so a colour is stable across sessions and unaffected by
+   *  most later additions -- and probes forward from there when that entry
+   *  is already claimed, which is what stops two species sharing a colour
+   *  until the palette is genuinely full. Sorted ids keep the claiming
+   *  order independent of the payload's order.
+   *
+   *  Claimed from the *garden's* species (api_common.py::species_ids),
+   *  not from the ones this view happens to contain: under a hop limit
+   *  the canvas shows a subset, and a palette claimed from a subset would
+   *  colour a species one way here and another way in the four other
+   *  windows, which all ask the same question of the same garden. */
+  _speciesSlotMap() {
+    if (this._speciesSlots) return this._speciesSlots;
+    const slots = new Map();
+    const taken = new Set();
+    for (const id of [...(this.speciesUniverse || this.speciesIds)].sort()) {
+      let slot = hashString(id) % SPECIES_PALETTE_SIZE;
+      for (let step = 0; step < SPECIES_PALETTE_SIZE && taken.has(slot); step++) {
+        slot = (slot + 1) % SPECIES_PALETTE_SIZE;
+      }
+      taken.add(slot);
+      slots.set(id, slot);
+    }
+    this._speciesSlots = slots;
+    return slots;
   }
 
   /** The colour a node is actually drawn in -- which is species membership
@@ -468,8 +549,14 @@ class MonossGraph {
     if (!speciesId || speciesId === NO_SPECIES) return UNKNOWN_COLOR;
     const custom = this.colors.species[speciesId];
     if (custom) return custom;
-    const hue = hueFor(speciesId);
-    return emphatic ? `oklch(0.80 0.13 ${hue})` : `oklch(0.72 0.11 ${hue})`;
+    // A species created since the last refresh has claimed nothing yet;
+    // it falls back to its unprobed entry, which still gives its
+    // instances a consistent colour.
+    const slots = this._speciesSlotMap();
+    const slot = slots.has(speciesId)
+      ? slots.get(speciesId)
+      : hashString(speciesId) % SPECIES_PALETTE_SIZE;
+    return paletteColor(slot, emphatic);
   }
 
   _speciesModeColor(moteId) {

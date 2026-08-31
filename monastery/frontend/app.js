@@ -57,8 +57,8 @@ const $ = (id) => document.getElementById(id);
 // ---- colour -------------------------------------------------------
 //
 // Byte-for-byte the hash monarch/frontend/graph.js uses, the same copy Mora
-// carries. Three windows disagreeing about what colour "Meeting" is
-// would be worse than any of them being arbitrary.
+// carries. Windows disagreeing about what colour "Meeting" is would be
+// worse than any of them being arbitrary.
 
 function hashString(text) {
   let h = 1779033703 ^ text.length;
@@ -71,41 +71,133 @@ function hashString(text) {
   return (h ^= h >>> 16) >>> 0;
 }
 
-function hueFor(seed) {
-  return hashString(seed) % 360;
+// ---- the species palette ----
+//
+// The palette monarch/frontend/graph.js defines -- the same constants
+// and the same two functions, carried byte for byte, so a species is the
+// same colour in every window. Only the slot map differs: the graph
+// hangs its off the canvas object, which has a colour cache to
+// invalidate; here it is one module-level Map.
+//
+// Hashing a hue straight out of the species id gave every species an
+// independent random hue, which at this lightness and chroma meant a
+// garden's tenth species routinely looked like its third -- 360 hues read
+// as about five colours. Instead each species claims one entry of a fixed
+// palette of deliberately separated colours: hues walk the wheel by the
+// golden angle so consecutive entries land far apart, and each lap round
+// the wheel changes lightness and chroma so the second time past a hue is
+// still visibly a different colour.
+//
+// Which entry a species claims depends on which other species exist, so
+// the universe has to be the *garden's* species list (api.species_ids,
+// api_common.py) rather than the ones this window happens to be showing.
+// A window claiming from what it can see would give a species one colour
+// here and another in Monarch under a hop limit.
+
+const SPECIES_HUE_STEP = 137.508;    // golden angle
+const SPECIES_LAP = 12;              // entries before the tone changes
+const SPECIES_TONES = [
+  { l: 0.72, c: 0.13 },
+  { l: 0.85, c: 0.09 },
+  { l: 0.60, c: 0.16 },
+  { l: 0.79, c: 0.20 },
+];
+const SPECIES_PALETTE_SIZE = SPECIES_LAP * SPECIES_TONES.length;
+
+let speciesSlots = new Map();        // species id -> palette entry
+
+function paletteEntry(slot) {
+  const index = ((slot % SPECIES_PALETTE_SIZE) + SPECIES_PALETTE_SIZE) % SPECIES_PALETTE_SIZE;
+  return {
+    h: (index * SPECIES_HUE_STEP + 25) % 360,
+    ...SPECIES_TONES[Math.floor(index / SPECIES_LAP)],
+  };
 }
 
-/** A mote's colour: its species' hue, brighter if it is itself a
- *  species, grey if it has no type at all. */
+function paletteColor(slot, emphatic) {
+  const entry = paletteEntry(slot);
+  // The species mote itself is the brighter variant of its instances'
+  // colour, as it was before -- same hue, one step more presence.
+  const l = emphatic ? Math.min(0.9, entry.l + 0.07) : entry.l;
+  const c = emphatic ? entry.c + 0.02 : entry.c;
+  return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${entry.h.toFixed(1)})`;
+}
+
+/** species id -> palette entry. Each species prefers the entry its id
+ *  hashes to -- so a colour is stable across sessions and unaffected by
+ *  most later additions -- and probes forward from there when that entry
+ *  is already claimed, which is what stops two species sharing a colour
+ *  until the palette is genuinely full. Sorted ids keep the claiming
+ *  order independent of the order they arrived in. */
+function claimSlots(ids) {
+  const slots = new Map();
+  const taken = new Set();
+  for (const id of [...ids].sort()) {
+    let slot = hashString(id) % SPECIES_PALETTE_SIZE;
+    for (let step = 0; step < SPECIES_PALETTE_SIZE && taken.has(slot); step++) {
+      slot = (slot + 1) % SPECIES_PALETTE_SIZE;
+    }
+    taken.add(slot);
+    slots.set(id, slot);
+  }
+  return slots;
+}
+
+/** A species created since the last refresh has claimed nothing yet; it
+ *  falls back to its unprobed entry, which is the one it will almost
+ *  always end up claiming anyway. */
+function slotOf(speciesId) {
+  return speciesSlots.has(speciesId)
+    ? speciesSlots.get(speciesId)
+    : hashString(speciesId) % SPECIES_PALETTE_SIZE;
+}
+
+/** The palette universe travels with the answer this window already
+ *  fetches (api_common.py::species_ids), so a species claims the same
+ *  entry here as in every other window and the bridge is asked nothing
+ *  extra. Asking for it separately on each refresh was the first
+ *  attempt: it doubled every poll's traffic for an answer that changes
+ *  only when somebody makes a new species, and the added round trip was
+ *  enough to make a freshly created mote miss the redraw that should
+ *  have shown it. */
+function adoptPalette(ids) {
+  if (ids) speciesSlots = claimSlots(ids);
+}
+
+/** A mote's colour: its species' palette entry, brighter if it is itself
+ *  a species, grey if it has no type at all. */
 function colorOf(entry) {
   if (!entry) return UNKNOWN_COLOR;
-  if ((entry.kinds || []).includes("species")) return `oklch(0.80 0.13 ${hueFor(entry.id || "")})`;
+  if ((entry.kinds || []).includes("species")) return paletteColor(slotOf(entry.id || ""), true);
   if (!entry.speciesId) return UNKNOWN_COLOR;
-  return `oklch(0.72 0.11 ${hueFor(entry.speciesId)})`;
+  return paletteColor(slotOf(entry.speciesId), false);
 }
 
-function hueOf(entry) {
+/** The palette entry behind a mote's colour, for the places that need to
+ *  build a translucent variant of it rather than the colour itself. */
+function paletteOf(entry) {
   if (!entry) return null;
-  if ((entry.kinds || []).includes("species")) return hueFor(entry.id || "");
-  return entry.speciesId ? hueFor(entry.speciesId) : null;
+  if ((entry.kinds || []).includes("species")) return paletteEntry(slotOf(entry.id || ""));
+  return entry.speciesId ? paletteEntry(slotOf(entry.speciesId)) : null;
 }
 
-/** The event rectangle's fill and edge: the mote's own hue, dimmed.
- *  A typeless mote gets grey rather than an arbitrary hue -- "no
+/** The event rectangle's fill and edge: the mote's own colour, dimmed.
+ *  A typeless mote gets grey rather than an arbitrary colour -- "no
  *  species" is worth seeing as itself. */
 function eventTint(entry, selected) {
-  const hue = hueOf(entry);
-  if (hue === null) {
+  const tone = paletteOf(entry);
+  if (tone === null) {
     return {
       bg: selected ? "oklch(0.62 0 0 / 0.3)" : "oklch(0.62 0 0 / 0.16)",
       border: selected ? UNKNOWN_COLOR : "oklch(0.62 0 0 / 0.32)",
       color: UNKNOWN_COLOR,
     };
   }
+  const face = `${tone.l.toFixed(3)} ${tone.c.toFixed(3)} ${tone.h.toFixed(1)}`;
   return {
-    bg: `oklch(0.74 0.1 ${hue} / ${selected ? 0.3 : 0.16})`,
-    border: `oklch(0.74 0.1 ${hue} / ${selected ? 0.85 : 0.32})`,
-    color: `oklch(0.74 0.1 ${hue})`,
+    bg: `oklch(${face} / ${selected ? 0.3 : 0.16})`,
+    border: `oklch(${face} / ${selected ? 0.85 : 0.32})`,
+    color: `oklch(${face})`,
   };
 }
 
@@ -226,6 +318,7 @@ async function call(promise, failure) {
 
 // ---- loading -------------------------------------------------------
 
+
 async function refresh() {
   const seq = ++refreshSeq;
   const [start, end] = visibleRange();
@@ -236,6 +329,7 @@ async function refresh() {
   // A poll that lands after the user has already navigated elsewhere
   // must not paint the range they left.
   if (answer === null || seq !== refreshSeq) return;
+  adoptPalette(answer.speciesIds);
   payload = answer;
   bindings = answer.bindings.filter((b) => b.active).map((b) => b.key);
   draw();
@@ -388,7 +482,7 @@ function drawSpeciesRows() {
     const row = button("toggle-row");
     if (hidden) row.classList.add("off");
     const dot = el("span", "toggle-dot");
-    dot.style.background = `oklch(0.72 0.11 ${hueFor(s.id)})`;
+    dot.style.background = paletteColor(slotOf(s.id), false);
     row.append(dot);
     row.append(el("span", "toggle-name plain", s.name));
     row.append(el("span", "toggle-count", String(counts.get(s.id) || 0)));
@@ -1252,11 +1346,11 @@ function drawDraft() {
   list.forEach((s) => {
     const chip = button("species-chip");
     const dot = el("span", "species-dot");
-    const hue = hueFor(s.id);
-    dot.style.background = `oklch(0.72 0.11 ${hue})`;
+    const color = paletteColor(slotOf(s.id), false);
+    dot.style.background = color;
     chip.append(dot);
     chip.append(el("span", null, s.name));
-    if (draft.speciesId === s.id) chip.style.borderColor = `oklch(0.72 0.11 ${hue})`;
+    if (draft.speciesId === s.id) chip.style.borderColor = color;
     chip.onclick = () => {
       draft.speciesId = draft.speciesId === s.id ? null : s.id;
       drawDraft();
@@ -1664,7 +1758,7 @@ function wire() {
       openLauncher();
       return;
     }
-    if ((event.metaKey || event.ctrlKey) && /^[1-3]$/.test(event.key)) {
+    if ((event.metaKey || event.ctrlKey) && /^[1-4]$/.test(event.key)) {
       const app = launcherChoices()[Number(event.key) - 1];
       if (app) {
         event.preventDefault();
@@ -1741,6 +1835,16 @@ const LAUNCHER_APPS = [
       <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
       <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
       <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+  {
+    id: "monolith", name: "Monolith", kind: "table",
+    desc: "Every mote as a row: query, bulk-edit and link the garden.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="13" y="6" width="14" height="28" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
+      <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
+      <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
     </svg>`,
   },
 ];

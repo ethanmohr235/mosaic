@@ -22,6 +22,7 @@ from core.links import URL_PROPERTY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
 from core.providers import describe_providers
+from core.query import QUERY_KEY
 from core.roles import ROLES_KEY
 from core.rules import APPLIES_TO, EQUATION_KEY, FREEDOMS_KEY
 from core.scenarios import OVERRIDES, VARIES
@@ -31,7 +32,7 @@ from core.units import UNITS_KEY
 RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
-    ROLES_KEY, MODOC_KEY,
+    ROLES_KEY, MODOC_KEY, QUERY_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -71,6 +72,13 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "\\mote/\\val/\\graph macros resolve live against the garden. The "
         "property is the canonical copy; .modoc files are import/export only. "
         "Written and read in Mora (run_mora.py); see docs/modoc.md.",
+    QUERY_KEY: "A saved view: the structured query (filter, sort, grouping "
+        "and columns) a table of the garden is drawn from, as JSON -- see "
+        "core/query.py for the shape. A field in it names a property key, a "
+        "builtin (name/id/species/degree/updated), a relationship type in one "
+        "direction, or the graph itself (instance_of/kind/related), which is "
+        "how a query asks about shape and not only about properties. Written "
+        "and read in Monolith (run_monolith.py).",
     "url": "A web address or local file path. core/links.py classifies it "
         "as a URL (has a scheme, or looks like a bare domain) or an "
         "explicit local path ('/', '~', './', '../', or a drive letter) "

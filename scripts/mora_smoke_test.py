@@ -312,9 +312,12 @@ def run_checks(window):
             editor.value = editor.value.replace('Atlas Migration}', 'Atlas Migration II}');
             editor.dispatchEvent(new Event('input'));
         """)
+        # Read the pill first: autosave clears it back to "synced" a
+        # second or so after the last keystroke, so asking about it
+        # after waiting on the render would be a race.
+        assert text_of(window, "#dirty") == "edited", "the dirty pill did not change"
         assert wait_until(lambda: text_of(window, "#rendered h1") == "Atlas Migration II"), \
             "the rendered pane did not follow the edit"
-        assert text_of(window, "#dirty") == "edited", "the dirty pill did not change"
 
     check("typing re-renders and marks the note edited", editing_updates_the_rendered_pane)
 
@@ -328,6 +331,25 @@ def run_checks(window):
         assert before == after, f"save touched other properties: {before} -> {after}"
 
     check("Save writes the note and nothing else", saving_writes_only_the_note)
+
+    def autosave_writes_without_pressing_save():
+        """The point of autosave: nobody touched #save here."""
+        before = dict(get_mote(_conn(), ids["project"]).properties)
+        js(window, """
+            const editor = document.getElementById('editor');
+            editor.value = editor.value.replace('Atlas Migration II}', 'Atlas Migration III}');
+            editor.dispatchEvent(new Event('input'));
+        """)
+        assert wait_until(
+            lambda: "Atlas Migration III" in get_mote(_conn(), ids["project"]).properties["modoc"]
+        ), "autosave did not write the note"
+        assert wait_until(lambda: text_of(window, "#dirty") == "synced"), \
+            "autosave did not clear the dirty pill"
+        after = dict(get_mote(_conn(), ids["project"]).properties)
+        del before["modoc"], after["modoc"]
+        assert before == after, f"autosave touched other properties: {before} -> {after}"
+
+    check("autosave writes the note with no click on Save", autosave_writes_without_pressing_save)
 
     def problems_show_even_when_nothing_is_linked():
         js(window, """

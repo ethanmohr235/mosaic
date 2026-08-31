@@ -31,14 +31,16 @@ let justDragged = false;     // true for one tick after a drop, so the trailing 
 let dropZones = [];          // {node, onDrop} for wherever a dragged card can land, this render
 let addingColumn = null;     // which column's inline "+ add mote" input is open
 let sessionMinutes = 25;
+let stopwatch = false;       // true: count up with no target, until stopped
 let workHours = { start: "09:00", end: "17:00" }; // last answer from the "days" tab; edited from the rail
-let remaining = 25 * 60;
+let elapsed = 0;             // seconds since the current session began
 let running = false;
 let startedAt = null;        // when the current session began, for the log
 
 const POLL_MS = 4000;
 const DRAG_PX = 4;           // how far a press moves before it counts as a drag, not a click
 const STORE_KEY = "momentum.keys";
+const TIMER_STORE_KEY = "momentum.timer";
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -68,11 +70,106 @@ function hueFor(seed) {
   return hashString(seed) % 360;
 }
 
+// ---- the species palette ----
+//
+// The palette monarch/frontend/graph.js defines -- the same constants
+// and the same two functions, carried byte for byte, so a species is the
+// same colour in every window. Only the slot map differs: the graph
+// hangs its off the canvas object, which has a colour cache to
+// invalidate; here it is one module-level Map.
+//
+// Hashing a hue straight out of the species id gave every species an
+// independent random hue, which at this lightness and chroma meant a
+// garden's tenth species routinely looked like its third -- 360 hues read
+// as about five colours. Instead each species claims one entry of a fixed
+// palette of deliberately separated colours: hues walk the wheel by the
+// golden angle so consecutive entries land far apart, and each lap round
+// the wheel changes lightness and chroma so the second time past a hue is
+// still visibly a different colour.
+//
+// Which entry a species claims depends on which other species exist, so
+// the universe has to be the *garden's* species list (api.species_ids,
+// api_common.py) rather than the ones this window happens to be showing.
+// A window claiming from what it can see would give a species one colour
+// here and another in Monarch under a hop limit.
+
+const SPECIES_HUE_STEP = 137.508;    // golden angle
+const SPECIES_LAP = 12;              // entries before the tone changes
+const SPECIES_TONES = [
+  { l: 0.72, c: 0.13 },
+  { l: 0.85, c: 0.09 },
+  { l: 0.60, c: 0.16 },
+  { l: 0.79, c: 0.20 },
+];
+const SPECIES_PALETTE_SIZE = SPECIES_LAP * SPECIES_TONES.length;
+
+let speciesSlots = new Map();        // species id -> palette entry
+
+function paletteEntry(slot) {
+  const index = ((slot % SPECIES_PALETTE_SIZE) + SPECIES_PALETTE_SIZE) % SPECIES_PALETTE_SIZE;
+  return {
+    h: (index * SPECIES_HUE_STEP + 25) % 360,
+    ...SPECIES_TONES[Math.floor(index / SPECIES_LAP)],
+  };
+}
+
+function paletteColor(slot, emphatic) {
+  const entry = paletteEntry(slot);
+  // The species mote itself is the brighter variant of its instances'
+  // colour, as it was before -- same hue, one step more presence.
+  const l = emphatic ? Math.min(0.9, entry.l + 0.07) : entry.l;
+  const c = emphatic ? entry.c + 0.02 : entry.c;
+  return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${entry.h.toFixed(1)})`;
+}
+
+/** species id -> palette entry. Each species prefers the entry its id
+ *  hashes to -- so a colour is stable across sessions and unaffected by
+ *  most later additions -- and probes forward from there when that entry
+ *  is already claimed, which is what stops two species sharing a colour
+ *  until the palette is genuinely full. Sorted ids keep the claiming
+ *  order independent of the order they arrived in. */
+function claimSlots(ids) {
+  const slots = new Map();
+  const taken = new Set();
+  for (const id of [...ids].sort()) {
+    let slot = hashString(id) % SPECIES_PALETTE_SIZE;
+    for (let step = 0; step < SPECIES_PALETTE_SIZE && taken.has(slot); step++) {
+      slot = (slot + 1) % SPECIES_PALETTE_SIZE;
+    }
+    taken.add(slot);
+    slots.set(id, slot);
+  }
+  return slots;
+}
+
+/** A species created since the last refresh has claimed nothing yet; it
+ *  falls back to its unprobed entry, which is the one it will almost
+ *  always end up claiming anyway. */
+function slotOf(speciesId) {
+  return speciesSlots.has(speciesId)
+    ? speciesSlots.get(speciesId)
+    : hashString(speciesId) % SPECIES_PALETTE_SIZE;
+}
+
+/** The palette universe travels with the answer this window already
+ *  fetches (api_common.py::species_ids), so a species claims the same
+ *  entry here as in every other window and the bridge is asked nothing
+ *  extra. Asking for it separately on each refresh was the first
+ *  attempt: it doubled every poll's traffic for an answer that changes
+ *  only when somebody makes a new species, and the added round trip was
+ *  enough to make a freshly created mote miss the redraw that should
+ *  have shown it. */
+function adoptPalette(ids) {
+  if (ids) speciesSlots = claimSlots(ids);
+}
+
+/** A mote's colour: its species' palette entry, brighter if it is itself
+ *  a species, grey if it has no type at all. */
 function colorOf(entry) {
   if (!entry) return UNKNOWN_COLOR;
-  if ((entry.kinds || []).includes("species")) return `oklch(0.80 0.13 ${hueFor(entry.id || "")})`;
+  if ((entry.kinds || []).includes("species")) return paletteColor(slotOf(entry.id || ""), true);
   if (!entry.speciesId) return UNKNOWN_COLOR;
-  return `oklch(0.72 0.11 ${hueFor(entry.speciesId)})`;
+  return paletteColor(slotOf(entry.speciesId), false);
 }
 
 /** What a mote *is*: the kinds core says it is, else its species, else
@@ -184,6 +281,33 @@ function saveKeys() {
   }
 }
 
+// ---- the timer preference -------------------------------------------
+//
+// How long a focus session runs, and whether it runs at all -- stopwatch
+// mode counts up with no target. Same shape as the key preference: it's
+// this window's own choice, so it's remembered in localStorage rather
+// than sent to Python.
+
+function loadTimerPrefs() {
+  try {
+    const raw = window.localStorage.getItem(TIMER_STORE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (Number.isFinite(saved.minutes) && saved.minutes > 0) sessionMinutes = saved.minutes;
+    stopwatch = !!saved.stopwatch;
+  } catch (error) {
+    /* fall back to the defaults declared above. */
+  }
+}
+
+function saveTimerPrefs() {
+  try {
+    window.localStorage.setItem(TIMER_STORE_KEY, JSON.stringify({ minutes: sessionMinutes, stopwatch }));
+  } catch (error) {
+    /* a window that cannot remember still works; it just uses defaults. */
+  }
+}
+
 /** The arguments every view call takes. Null on the very first call of
  *  a session, so Python picks defaults; the person's answer after that. */
 function keyArgs() {
@@ -225,6 +349,7 @@ function visibleRange() {
   return [start, addDays(start, 7)];
 }
 
+
 async function refresh() {
   // Nothing is re-rendered while a card is being dragged: it would
   // replace the very node the pointer is holding onto. See dragging.
@@ -245,6 +370,7 @@ async function refresh() {
   // A poll that lands after the user has already switched tabs is stale
   // by definition, and drawing it would flash the wrong view.
   if (answer === null || seq !== refreshSeq) return;
+  adoptPalette(answer.speciesIds);
   data = answer;
   adoptKeys(answer);
   if (answer.workStart) workHours = { start: answer.workStart, end: answer.workEnd };
@@ -798,17 +924,28 @@ function renderChrome() {
 }
 
 function renderTimer() {
-  $("clock").textContent = clock(remaining);
-  $("chip-time").textContent = clock(remaining);
+  const total = sessionMinutes * 60;
+  const shown = stopwatch ? elapsed : Math.max(0, total - elapsed);
+  $("clock").textContent = clock(shown);
+  $("chip-time").textContent = clock(shown);
   $("chip-time").classList.toggle("running", running);
   $("chip-label").textContent = running ? "running" : (tab === "focus" ? "paused" : "focus");
   $("phase").textContent = running ? "in session" : "ready";
   $("phase").classList.toggle("running", running);
 
-  const total = sessionMinutes * 60;
-  const pct = Math.max(0, Math.min(100, ((total - remaining) / total) * 100));
+  // Stopwatch mode has no target to fill toward, so the ring just laps
+  // once a minute -- motion without implying a duration that isn't there.
+  const pct = stopwatch
+    ? ((elapsed % 60) / 60) * 100
+    : Math.max(0, Math.min(100, (elapsed / total) * 100));
   $("ring").style.background = `conic-gradient(var(--accent) ${pct.toFixed(1)}%, oklch(0.225 0 0) 0)`;
-  $("run-btn").textContent = running ? "Pause" : (remaining === total ? `Begin ${sessionMinutes}m` : "Resume");
+  $("run-btn").textContent = running ? "Pause"
+    : (elapsed === 0 ? (stopwatch ? "Begin" : `Begin ${sessionMinutes}m`) : "Resume");
+
+  $("duration-input").disabled = running || stopwatch;
+  $("stopwatch-toggle").disabled = running;
+  if (document.activeElement !== $("duration-input")) $("duration-input").value = sessionMinutes;
+  $("stopwatch-toggle").checked = stopwatch;
 }
 
 // ---- actions -------------------------------------------------------
@@ -901,18 +1038,17 @@ function toggleTimer() {
 
 function resetTimer() {
   running = false;
-  remaining = sessionMinutes * 60;
+  elapsed = 0;
   startedAt = null;
   renderTimer();
 }
 
 async function finishSession(auto) {
-  const elapsed = sessionMinutes * 60 - remaining;
   const minutes = Math.round(elapsed / 60);
   const active = activeCard();
   const began = startedAt;
   running = false;
-  remaining = sessionMinutes * 60;
+  elapsed = 0;
   startedAt = null;
   renderTimer();
 
@@ -931,8 +1067,23 @@ async function finishSession(auto) {
 
 function tick() {
   if (!running) return;
-  remaining -= 1;
-  if (remaining <= 0) { finishSession(true); return; }
+  elapsed += 1;
+  if (!stopwatch && elapsed >= sessionMinutes * 60) { finishSession(true); return; }
+  renderTimer();
+}
+
+function setSessionMinutes(minutes) {
+  const clamped = Math.max(1, Math.min(180, Math.round(minutes) || 25));
+  sessionMinutes = clamped;
+  saveTimerPrefs();
+  if (!running) { elapsed = 0; startedAt = null; }
+  renderTimer();
+}
+
+function setStopwatch(on) {
+  stopwatch = on;
+  saveTimerPrefs();
+  if (!running) { elapsed = 0; startedAt = null; }
   renderTimer();
 }
 
@@ -1053,6 +1204,8 @@ function wire() {
   $("run-btn").onclick = toggleTimer;
   $("reset-btn").onclick = resetTimer;
   $("finish-btn").onclick = () => finishSession(false);
+  $("duration-input").onchange = (event) => setSessionMinutes(Number(event.target.value));
+  $("stopwatch-toggle").onchange = (event) => setStopwatch(event.target.checked);
 
   $("panel-close").onclick = () => select(null);
   $("panel-focus").onclick = () => {
@@ -1088,7 +1241,7 @@ function wire() {
       openLauncher();
       return;
     }
-    if ((event.metaKey || event.ctrlKey) && /^[1-3]$/.test(event.key)) {
+    if ((event.metaKey || event.ctrlKey) && /^[1-4]$/.test(event.key)) {
       const app = launcherChoices()[Number(event.key) - 1];
       if (app) {
         event.preventDefault();
@@ -1158,6 +1311,16 @@ const LAUNCHER_APPS = [
       <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
       <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
       <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
+    </svg>`,
+  },
+  {
+    id: "monolith", name: "Monolith", kind: "table",
+    desc: "Every mote as a row: query, bulk-edit and link the garden.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="13" y="6" width="14" height="28" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+      <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
+      <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
+      <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
     </svg>`,
   },
 ];
@@ -1237,7 +1400,7 @@ async function init() {
   api = window.pywebview.api;
   anchor = new Date();
   keyChoice = loadKeys();
-  remaining = sessionMinutes * 60;
+  loadTimerPrefs();
   wire();
   $("garden-name").textContent = await api.current_garden();
   await refresh();
