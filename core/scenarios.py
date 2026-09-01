@@ -38,8 +38,8 @@ import sqlite3
 from dataclasses import dataclass
 
 from core.entities import Mote
-from core.motes import get_mote, get_motes
-from core.relationships import list_relationships
+from core.motes import create_mote, get_mote, get_motes
+from core.relationships import create_relationship, list_relationships
 
 # An override mote -> the mote whose properties it replaces.
 OVERRIDES = "overrides"
@@ -124,6 +124,29 @@ def _build(conn: sqlite3.Connection, mote: Mote, relationships: list) -> Scenari
     name = mote.properties.get("name")
     label = str(name) if isinstance(name, str) and name.strip() else mote.id[:8]
     return Scenario(mote.id, label, tuple(sorted(overrides, key=lambda o: o.target_id)))
+
+
+def get_or_create_override(conn: sqlite3.Connection, scenario_id: str, target_id: str) -> str:
+    """The override mote through which `scenario_id` replaces
+    `target_id`'s properties -- the existing `varies`/`overrides` pair
+    between them, or a fresh empty override wired up the same way if
+    none exists yet.
+
+    Lets an editor write "this property, under this scenario" without
+    asking the user to build the override mote and both relationships by
+    hand first -- the same convenience create_mote's callers already get
+    for a plain mote."""
+    relationships = list_relationships(conn)
+    varied = {r.to_id for r in relationships if r.type == VARIES and r.from_id == scenario_id}
+    targets = {r.from_id: r.to_id for r in relationships if r.type == OVERRIDES}
+    for override_id in varied:
+        if targets.get(override_id) == target_id:
+            return override_id
+
+    override_id = create_mote(conn)
+    create_relationship(conn, scenario_id, override_id, VARIES)
+    create_relationship(conn, override_id, target_id, OVERRIDES)
+    return override_id
 
 
 def apply(properties: dict[str, dict], scenario: Scenario | None) -> dict[str, dict]:

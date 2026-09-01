@@ -69,6 +69,21 @@
       <pre id="highlight" aria-hidden="true"></pre>
       <textarea id="editor" spellcheck="false" placeholder="\section{…}"></textarea>
       <div id="picker" class="hidden" role="listbox"></div>
+      <div id="find-bar" class="hidden">
+        <div class="find-row">
+          <input type="text" id="find-input" placeholder="Find" autocomplete="off">
+          <button id="find-case" class="find-toggle" type="button" title="Match case">Aa</button>
+          <span id="find-count" class="find-count">0/0</span>
+          <button id="find-prev" class="find-nav" type="button" title="Previous match (⇧↵)">↑</button>
+          <button id="find-next" class="find-nav" type="button" title="Next match (↵)">↓</button>
+          <button id="find-close" class="find-nav" type="button" title="Close (esc)">✕</button>
+        </div>
+        <div class="find-row">
+          <input type="text" id="replace-input" placeholder="Replace" autocomplete="off">
+          <button id="replace-one" class="find-action" type="button">Replace</button>
+          <button id="replace-all" class="find-action" type="button">All</button>
+        </div>
+      </div>
     </div>
   </section>
 

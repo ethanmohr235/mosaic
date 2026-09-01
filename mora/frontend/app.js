@@ -202,28 +202,65 @@ function escapeHtml(text) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function syntaxRanges(text) {
+  const ranges = [];
+  const re = new RegExp(HIGHLIGHT_RE.source, "g");
+  let m;
+  while ((m = re.exec(text))) {
+    const cls = m[1] ? "hl-comment" : m[2] ? "hl-cmd" : m[3] ? "hl-brace" : "hl-math";
+    ranges.push({ start: m.index, end: m.index + m[0].length, cls });
+  }
+  return ranges;
+}
+
 /** A <pre> behind the transparent textarea, scrolled in lockstep with
  *  it. The trailing newline matters: without it the last line's
- *  highlight is a pixel short of the caret. */
+ *  highlight is a pixel short of the caret.
+ *
+ *  Command/comment/brace/math colouring and find-bar match highlighting
+ *  are two independent sets of ranges over the same text, so this cuts
+ *  the text at every boundary either one introduces and gives each
+ *  resulting piece whichever classes cover it -- a segment inside both
+ *  a \command and the current find match gets both, rather than one
+ *  highlighter clobbering the other's span. */
 function paintHighlight() {
-  const html = escapeHtml($("editor").value).replace(
-    HIGHLIGHT_RE,
-    (match, comment, command, brace, math) => {
-      if (comment) return `<span class="hl-comment">${comment}</span>`;
-      if (command) return `<span class="hl-cmd">${command}</span>`;
-      if (brace) return `<span class="hl-brace">${brace}</span>`;
-      return `<span class="hl-math">${math}</span>`;
-    },
-  );
+  const text = $("editor").value;
+  const synRanges = syntaxRanges(text);
+  const points = new Set([0, text.length]);
+  synRanges.forEach((r) => { points.add(r.start); points.add(r.end); });
+  findMatches.forEach(([s, e]) => { points.add(s); points.add(e); });
+  const bounds = [...points].sort((a, b) => a - b);
+
+  let html = "";
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const start = bounds[i];
+    const end = bounds[i + 1];
+    if (start === end) continue;
+    const classes = [];
+    const syn = synRanges.find((r) => r.start <= start && end <= r.end);
+    if (syn) classes.push(syn.cls);
+    const hitIndex = findMatches.findIndex(([s, e]) => s <= start && end <= e);
+    if (hitIndex !== -1) classes.push(hitIndex === findIndex ? "find-hit find-hit-current" : "find-hit");
+    const segment = escapeHtml(text.slice(start, end));
+    html += classes.length ? `<span class="${classes.join(" ")}">${segment}</span>` : segment;
+  }
   $("highlight").innerHTML = `${html}\n`;
 }
 
+function isFindBarOpen() {
+  return !$("find-bar").classList.contains("hidden");
+}
+
 function onEditorInput() {
-  paintHighlight();
   markDirty();
   updatePicker();
   scheduleRender();
   scheduleAutosave();
+  // Editing shifts every position after the caret, so a find bar left
+  // open needs its match ranges (and their highlight) recomputed rather
+  // than painted stale; otherwise paint them directly.
+  if (isFindBarOpen()) refreshFindMatches({ keepIndex: true });
+  else paintHighlight();
 }
 
 function markDirty() {
@@ -615,6 +652,7 @@ function exportPdf() {
 
 async function loadNote(id, { preserveFocus = false } = {}) {
   await flushSave();
+  closeFindBar();
   const opened = await api.open_note(id ?? null);
   noteId = opened.noteId;
   noteName = opened.name;
@@ -914,6 +952,169 @@ function onPickerKey(event) {
   return false;
 }
 
+// ---- find and replace (⌘F) ------------------------------------------
+//
+// Plain substring search over the editor's own value -- no regex, no
+// overlay highlighting of every hit (that would mean reconciling ranges
+// against the syntax-highlight pass above). The current match is instead
+// the textarea's own selection, moved with setSelectionRange(), which is
+// enough to see and to type over.
+
+let findMatches = [];   // [start, end) pairs, current query, current case
+let findIndex = -1;
+let findCaseSensitive = false;
+
+function findQuery() {
+  return $("find-input").value;
+}
+
+function computeFindMatches() {
+  const query = findQuery();
+  findMatches = [];
+  if (!query) return;
+  const haystack = findCaseSensitive ? $("editor").value : $("editor").value.toLowerCase();
+  const needle = findCaseSensitive ? query : query.toLowerCase();
+  let from = 0;
+  while (true) {
+    const at = haystack.indexOf(needle, from);
+    if (at === -1) break;
+    findMatches.push([at, at + needle.length]);
+    from = at + needle.length;
+  }
+}
+
+/** Picks the match nearest the caret so opening the bar (or editing the
+ *  query) lands on what the reader is already looking at, rather than
+ *  always snapping back to the top of the note. */
+function findNearestIndex() {
+  if (!findMatches.length) return -1;
+  const caret = $("editor").selectionStart;
+  for (let i = 0; i < findMatches.length; i++) {
+    if (findMatches[i][0] >= caret) return i;
+  }
+  return 0;
+}
+
+function refreshFindMatches({ keepIndex = false } = {}) {
+  const previous = findIndex;
+  computeFindMatches();
+  if (!findMatches.length) {
+    findIndex = -1;
+  } else if (keepIndex && previous >= 0) {
+    findIndex = Math.min(previous, findMatches.length - 1);
+  } else {
+    findIndex = findNearestIndex();
+  }
+  drawFindState();
+}
+
+function drawFindState() {
+  $("find-count").textContent = findMatches.length ? `${findIndex + 1}/${findMatches.length}` : "0/0";
+  if (findIndex >= 0) selectFindMatch(findIndex);
+  paintHighlight();
+}
+
+/** Selects a match in the textarea without moving focus off the find
+ *  input, and scrolls it into view by line rather than by pixel offset,
+ *  since the editor wraps and its line height is the one fixed unit. */
+function selectFindMatch(index) {
+  const editor = $("editor");
+  const [start, end] = findMatches[index];
+  editor.setSelectionRange(start, end);
+  const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
+  const line = editor.value.slice(0, start).split("\n").length - 1;
+  const target = line * lineHeight;
+  if (target < editor.scrollTop || target > editor.scrollTop + editor.clientHeight - lineHeight * 2) {
+    editor.scrollTop = Math.max(0, target - editor.clientHeight / 2);
+  }
+}
+
+function stepFind(delta) {
+  if (!findMatches.length) return;
+  findIndex = (findIndex + delta + findMatches.length) % findMatches.length;
+  drawFindState();
+}
+
+function openFindBar() {
+  if (mode === "preview") setMode("split");
+  closePicker();
+  const editor = $("editor");
+  const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+  const bar = $("find-bar");
+  bar.classList.remove("hidden");
+  const input = $("find-input");
+  if (selected && !selected.includes("\n")) input.value = selected;
+  input.focus();
+  input.select();
+  refreshFindMatches();
+}
+
+function closeFindBar() {
+  $("find-bar").classList.add("hidden");
+  findMatches = [];
+  findIndex = -1;
+  paintHighlight();
+  $("editor").focus();
+}
+
+function replaceCurrentMatch() {
+  if (findIndex < 0 || !findMatches.length) return;
+  const editor = $("editor");
+  const [start, end] = findMatches[findIndex];
+  const replacement = $("replace-input").value;
+  editor.value = editor.value.slice(0, start) + replacement + editor.value.slice(end);
+  editor.setSelectionRange(start + replacement.length, start + replacement.length);
+  onEditorInput();
+  refreshFindMatches();
+}
+
+function replaceAllMatches() {
+  if (!findMatches.length) return;
+  const editor = $("editor");
+  const query = findQuery();
+  const replacement = $("replace-input").value;
+  const count = findMatches.length;
+  editor.value = findCaseSensitive
+    ? editor.value.split(query).join(replacement)
+    : editor.value.replace(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), replacement);
+  onEditorInput();
+  refreshFindMatches();
+  toast(`Replaced ${count} match${count === 1 ? "" : "es"}.`);
+}
+
+function wireFindBar() {
+  const input = $("find-input");
+  input.addEventListener("input", () => refreshFindMatches());
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      stepFind(event.shiftKey ? -1 : 1);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeFindBar();
+    }
+  });
+  $("replace-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      replaceCurrentMatch();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeFindBar();
+    }
+  });
+  $("find-case").addEventListener("click", () => {
+    findCaseSensitive = !findCaseSensitive;
+    $("find-case").classList.toggle("on", findCaseSensitive);
+    refreshFindMatches({ keepIndex: true });
+  });
+  $("find-prev").onclick = () => stepFind(-1);
+  $("find-next").onclick = () => stepFind(1);
+  $("find-close").onclick = closeFindBar;
+  $("replace-one").onclick = replaceCurrentMatch;
+  $("replace-all").onclick = replaceAllMatches;
+}
+
 // ---- layout --------------------------------------------------------
 
 function applyLayout() {
@@ -1013,7 +1214,7 @@ function wire() {
     if (!event.target.closest(".topbar-menu")) closeGardenMenu();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { closeGardenMenu(); closeNotesWindow(); closePicker(); closeLauncher(); }
+    if (event.key === "Escape") { closeGardenMenu(); closeNotesWindow(); closePicker(); closeLauncher(); closeFindBar(); }
     // Window-level rather than scoped to the editor (as this used to be):
     // Save has its own persistent topbar button and dirty-state pill, so
     // Ctrl/Cmd+S reads as "save the note" from anywhere in the window, not
@@ -1030,6 +1231,10 @@ function wire() {
       event.preventDefault();
       openLauncher();
     }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      openFindBar();
+    }
     if ((event.ctrlKey || event.metaKey) && /^[1-5]$/.test(event.key)) {
       const app = launcherChoices()[Number(event.key) - 1];
       if (app) {
@@ -1040,6 +1245,7 @@ function wire() {
   });
 
   setupLauncher();
+  wireFindBar();
 }
 
 // ---- app switcher (⌘J) ----

@@ -64,6 +64,8 @@ let playTimer = null;
 let mode = "run";          // build | run | compare
 let scenario = null;       // active scenario mote id, or null for the garden as it stands
 let compareWith = null;
+let compareRunA = null;    // a saved run's id standing in for scenario A, in compare mode
+let compareRunB = null;    // a saved run's id standing in for scenario B, in compare mode
 let panelTab = "rules";
 let activeRule = null;
 let selectedId = null;
@@ -345,7 +347,7 @@ function setMode(next) {
     const other = board.scenarios.find((s) => s.id !== scenario);
     compareWith = other ? other.id : null;
   }
-  if (mode !== "compare") { runB = null; lanesB = []; }
+  if (mode !== "compare") { runB = null; lanesB = []; compareRunA = null; compareRunB = null; }
   if (mode === "build") panelTab = "rules";
   render();
 }
@@ -378,12 +380,16 @@ function renderRail() {
   for (const run of board.runs) {
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "card" + (replayRunId === run.run_id ? " on" : "");
-    const label = `run-${String(run.run_number).padStart(4, "0")}`;
+    const isRunA = mode === "compare" && compareRunA === run.run_id;
+    const isRunB = mode === "compare" && compareRunB === run.run_id;
+    card.className = "card" + (replayRunId === run.run_id || isRunA || isRunB ? " on" : "");
     card.innerHTML =
-      `<div class="card-top"><span class="card-label"></span></div>` +
+      `<div class="card-top"><span class="card-label"></span>` +
+      (isRunA ? `<span class="chip a">A</span>` : "") +
+      (isRunB ? `<span class="chip b">B</span>` : "") +
+      `</div>` +
       `<div class="card-meta"></div>`;
-    card.querySelector(".card-label").textContent = label;
+    card.querySelector(".card-label").textContent = runLabel(run);
     card.querySelector(".card-meta").textContent =
       [run.status, run.committed ? "committed" : "saved",
        `${run.change_count} value${run.change_count === 1 ? "" : "s"}`,
@@ -399,7 +405,26 @@ function renderRail() {
       card.appendChild(chips);
     }
     if (run.detail) card.title = run.detail;
-    card.onclick = () => enterRun(run.run_id);
+    if (mode === "compare") {
+      // In compare mode a saved run can stand in for a scenario on
+      // either side -- left click for A, right click for B, mirroring
+      // how scenario cards themselves are picked.
+      card.title = (card.title ? card.title + " -- " : "") +
+        "Click to compare as scenario A, right-click for B.";
+      card.onclick = () => {
+        compareRunA = run.run_id;
+        render();
+        if (runA) runSimulation();
+      };
+      card.oncontextmenu = (e) => {
+        e.preventDefault();
+        compareRunB = run.run_id;
+        render();
+        if (runA) runSimulation();
+      };
+    } else {
+      card.onclick = () => enterRun(run.run_id);
+    }
     runs.appendChild(card);
   }
   if (!board.runs.length) {
@@ -414,10 +439,12 @@ function scenarioCard(sc, on) {
   const card = document.createElement("button");
   card.type = "button";
   card.className = "card" + (on ? " on" : "");
-  const isB = mode === "compare" && compareWith === sc.id;
+  const isA = mode === "compare" && !compareRunA && scenario === sc.id;
+  const isB = mode === "compare" && !compareRunB && compareWith === sc.id;
   card.innerHTML =
     `<div class="card-top">` +
     `<span class="card-dot"></span><span class="card-label"></span>` +
+    (isA ? `<span class="chip a">A</span>` : "") +
     (isB ? `<span class="chip b">B</span>` : "") +
     `</div>`;
   card.querySelector(".card-dot").style.background =
@@ -433,15 +460,29 @@ function scenarioCard(sc, on) {
     card.appendChild(chips);
   }
   card.onclick = () => {
-    // In compare mode a click on a scenario that isn't already A picks
-    // B, so the two are chosen with the same gesture rather than with a
-    // separate B-picker nobody would find.
-    if (mode === "compare" && sc.id !== scenario) compareWith = sc.id;
-    else { scenario = sc.id; replayRunId = null; }
+    // In compare mode, left click always picks scenario A.
+    scenario = sc.id;
+    compareRunA = null;
+    replayRunId = null;
+    render();
+    if (runA) runSimulation();
+  };
+  card.oncontextmenu = (e) => {
+    if (mode !== "compare") return;
+    e.preventDefault();
+    compareWith = sc.id;
+    compareRunB = null;
     render();
     if (runA) runSimulation();
   };
   return card;
+}
+
+/** A run's label the way the rail lists it -- "run-0004" -- shared by
+ *  the run card and, once a run stands in for a scenario, the compare
+ *  board head. */
+function runLabel(run) {
+  return `run-${String(run.run_number).padStart(4, "0")}`;
 }
 
 function renderBoards() {
@@ -457,21 +498,22 @@ function renderBoards() {
     host.appendChild(empty);
     return;
   }
-  const boardA = buildBoard(runA, scenario, false);
+  const boardA = buildBoard(runA, scenario, false, compareRunA);
   host.appendChild(boardA);
   finishEdges(boardA, false);
   if (mode === "compare") {
-    const boardB = buildBoard(runB, compareWith, true);
+    const boardB = buildBoard(runB, compareWith, true, compareRunB);
     host.appendChild(boardB);
     finishEdges(boardB, true);
   }
 }
 
-function buildBoard(run, scenarioId, isB) {
+function buildBoard(run, scenarioId, isB, runId) {
   const el = document.createElement("div");
   el.className = "board";
 
-  const sc = board.scenarios.find((s) => s.id === scenarioId);
+  const sc = runId ? null : board.scenarios.find((s) => s.id === scenarioId);
+  const savedRun = runId ? board.runs.find((r) => r.run_id === runId) : null;
   const head = document.createElement("div");
   head.className = "board-head";
   head.innerHTML =
@@ -479,10 +521,12 @@ function buildBoard(run, scenarioId, isB) {
     `<span class="board-badge${isB ? " b" : ""}"></span>` +
     `<span class="board-readout"></span>`;
   head.querySelector(".card-dot").style.background =
-    scenarioId === null ? "var(--node-fixed)" : "var(--node-varied)";
-  head.querySelector(".board-label").textContent = sc ? sc.name : "Garden as it stands";
+    runId || scenarioId !== null ? "var(--node-varied)" : "var(--node-fixed)";
+  head.querySelector(".board-label").textContent =
+    savedRun ? runLabel(savedRun) : sc ? sc.name : "Garden as it stands";
   head.querySelector(".board-badge").textContent =
-    mode === "build" ? "editing" : isB ? "scenario B" : mode === "compare" ? "scenario A" : "running";
+    mode === "build" ? "editing" : runId ? (isB ? "run B" : "run A")
+      : isB ? "scenario B" : mode === "compare" ? "scenario A" : "running";
   head.querySelector(".board-readout").textContent = run
     ? `${run.steps.length} ${run.axis.label} · tick ${tick}`
     : "not run";
@@ -617,6 +661,18 @@ function buildEdges(extent, sizes, isB) {
   }
   svg.appendChild(defs);
 
+  // Two motes can carry several relationships between them -- stacking
+  // them on the same straight line leaves every edge but the topmost
+  // unclickable. Group edges by their unordered node pair and fan the
+  // group out into parallel, evenly spaced lines.
+  const PARALLEL_SPACING = 7;
+  const pairGroups = new Map();
+  for (const edge of board.edges) {
+    const key = [edge.from, edge.to].sort().join("::");
+    if (!pairGroups.has(key)) pairGroups.set(key, []);
+    pairGroups.get(key).push(edge);
+  }
+
   for (const edge of board.edges) {
     const a = positions[edge.from];
     const b = positions[edge.to];
@@ -627,8 +683,24 @@ function buildEdges(extent, sizes, isB) {
     const ay = a.y + sizeA.h / 2;
     const bx = b.x + sizeB.w / 2;
     const by = b.y + sizeB.h / 2;
-    const [sx, sy] = clip(ax, ay, bx - ax, by - ay, sizeA.w / 2, sizeA.h / 2, 3);
-    const [ex, ey] = clip(bx, by, ax - bx, ay - by, sizeB.w / 2, sizeB.h / 2, 6);
+    let [sx, sy] = clip(ax, ay, bx - ax, by - ay, sizeA.w / 2, sizeA.h / 2, 3);
+    let [ex, ey] = clip(bx, by, ax - bx, ay - by, sizeB.w / 2, sizeB.h / 2, 6);
+
+    const group = pairGroups.get([edge.from, edge.to].sort().join("::"));
+    if (group.length > 1) {
+      const idx = group.indexOf(edge);
+      const offset = (idx - (group.length - 1) / 2) * PARALLEL_SPACING;
+      // Derive the perpendicular from the pair's node order, not this
+      // edge's own from/to -- two relationships drawn in opposite
+      // directions between the same motes would otherwise negate each
+      // other's offset and land back on the same line.
+      const flip = edge.from > edge.to ? -1 : 1;
+      const len = Math.hypot(bx - ax, by - ay) || 1;
+      const px = (-(by - ay) / len) * flip;
+      const py = ((bx - ax) / len) * flip;
+      sx += px * offset; sy += py * offset;
+      ex += px * offset; ey += py * offset;
+    }
     // `reads` edges are synthetic -- see payload.build_edges -- and
     // carry no relationship row to select, rename or delete.
     const selectable = edge.kind !== "reads" && !isB;
@@ -660,7 +732,7 @@ function buildEdges(extent, sizes, isB) {
       hit.setAttribute("x2", ex);
       hit.setAttribute("y2", ey);
       hit.setAttribute("stroke", "transparent");
-      hit.setAttribute("stroke-width", "12");
+      hit.setAttribute("stroke-width", group.length > 1 ? String(Math.min(12, PARALLEL_SPACING)) : "12");
       hit.style.pointerEvents = "stroke";
       hit.style.cursor = "pointer";
       hit.onmousedown = (event) => { event.stopPropagation(); selectRelationship(edge.id); };
@@ -951,10 +1023,25 @@ async function runSimulation() {
   replayRunId = null;
   try {
     if (mode === "compare") {
-      const result = await call(api.compare(steps, solver, scenario, compareWith));
-      if (!result) return;
-      runA = result.a;
-      runB = result.b;
+      // Either side of a compare can be a saved run instead of a live
+      // scenario preview -- those are fetched with run_ticks (the same
+      // call enterRun uses) rather than folded into compare(), since a
+      // logged run has already happened and re-previewing it would be
+      // asking the engine a question it was never asked.
+      if (compareRunA || compareRunB) {
+        const [a, b] = await Promise.all([
+          compareRunA ? call(api.run_ticks(compareRunA)) : call(api.preview(steps, solver, null, scenario)),
+          compareRunB ? call(api.run_ticks(compareRunB)) : call(api.preview(steps, solver, null, compareWith)),
+        ]);
+        if (!a || !b) return;
+        runA = a;
+        runB = b;
+      } else {
+        const result = await call(api.compare(steps, solver, scenario, compareWith));
+        if (!result) return;
+        runA = result.a;
+        runB = result.b;
+      }
       lanesA = (await call(api.lanes(runA.steps))) || [];
       lanesB = (await call(api.lanes(runB.steps))) || [];
     } else {
@@ -1311,7 +1398,7 @@ async function deleteSelectedRelationship(edge) {
 async function openInspector(moteId) {
   if (panelTab !== "inspector") return;
   const host = $("panel-body");
-  const detail = await call(api.inspect(moteId));
+  const detail = await call(api.inspect(moteId, scenario));
   if (!detail) { host.innerHTML = `<div class="panel-empty">That mote is gone.</div>`; return; }
   lastInspectDetail = { moteId, detail };
 
@@ -1359,7 +1446,17 @@ async function openInspector(moteId) {
     // Build mode edits the stored value directly -- the same value the
     // rule editor commits, not the live overlay a run folded on top of
     // it, since editing a solved number would just be overwritten by the
-    // next run anyway.
+    // next run anyway. `stored` is already scenario's-eye (see
+    // openInspector's api.inspect(moteId, scenario) call), so the input
+    // shows and edits exactly the value a run under this scenario would
+    // start from.
+    //
+    // While a non-default scenario is selected, the edit is redirected
+    // to that scenario's override for this mote instead of the mote
+    // itself -- the garden is never the write target while you're
+    // looking at a hypothetical. update_mote_in_scenario creates the
+    // override (and wires it up with `varies`/`overrides`) the first
+    // time this scenario touches this mote.
     if (mode === "build") {
       const input = document.createElement("input");
       input.className = "prop-input";
@@ -1369,8 +1466,14 @@ async function openInspector(moteId) {
         if (input.value === String(stored)) return;
         const next = typeof stored === "number" ? Number(input.value) : input.value;
         if (typeof stored === "number" && Number.isNaN(next)) { input.value = String(stored); return; }
-        const written = await call(api.update_mote(moteId, { [key]: next }));
-        if (written) { toast(`${key} updated.`); await refresh(); await openInspector(moteId); }
+        const written = scenario
+          ? await call(api.update_mote_in_scenario(scenario, moteId, { [key]: next }))
+          : await call(api.update_mote(moteId, { [key]: next }));
+        if (written) {
+          toast(scenario ? `${key} overridden for this scenario.` : `${key} updated.`);
+          await refresh();
+          await openInspector(moteId);
+        }
       };
       input.onkeydown = (e) => { if (e.key === "Enter") input.blur(); };
       row.appendChild(input);

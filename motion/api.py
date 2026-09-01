@@ -295,15 +295,26 @@ class Api:
         }
 
     @_synchronized
-    def inspect(self, mote_id: str) -> dict | None:
+    def inspect(self, mote_id: str, scenario: str | None = None) -> dict | None:
         """One mote's current state and neighbourhood, for the inspector
         tab. The values are the garden's own, not a tick's: the frontend
         already holds every step and overlays the scrubbed-to values
         itself, so re-deriving them here would be a second answer to a
-        question the dock has already answered."""
+        question the dock has already answered.
+
+        `scenario`, when given, folds that scenario's override for this
+        mote (if any) over the garden's own properties -- the same merge
+        a run would see (core/scenarios.py::apply). Build mode edits
+        against this merged view, and write through update_mote_in_scenario,
+        so a property the user is looking at and the one their edit lands
+        on are always the same one."""
         mote = motes_repo.get_mote(self._conn, mote_id)
         if mote is None:
             return None
+        properties = mote.properties
+        if scenario is not None:
+            case = scenarios_repo.get_scenario(self._conn, scenario)
+            properties = scenarios_repo.apply({mote_id: properties}, case)[mote_id]
         _motes, relationships = self._simulable()
         labels = {
             m.id: str(m.properties.get("name", m.id[:8]))
@@ -323,9 +334,9 @@ class Api:
         return {
             "id": mote.id,
             "label": labels.get(mote.id, mote.id[:8]),
-            "properties": mote.properties,
+            "properties": properties,
             "freedoms": rules_repo.parse_freedoms(
-                mote.properties.get(rules_repo.FREEDOMS_KEY)
+                properties.get(rules_repo.FREEDOMS_KEY)
             ),
             "relationships": neighbours,
         }
@@ -563,6 +574,21 @@ class Api:
     def update_mote(self, mote_id: str, raw_properties: dict) -> dict:
         motes_repo.update_mote(self._conn, mote_id, _coerce_properties(raw_properties))
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
+
+    @_synchronized
+    def update_mote_in_scenario(
+        self, scenario_id: str, mote_id: str, raw_properties: dict
+    ) -> dict:
+        """Build mode's write path while a scenario is active: the edit
+        lands on that scenario's override for `mote_id`, not the mote
+        itself, so looking at a hypothetical never means overwriting the
+        garden's own state (core/scenarios.py's whole point). The override
+        is created -- with the `varies`/`overrides` relationships that
+        wire it to this scenario and this mote -- the first time this is
+        called for a mote that scenario doesn't already vary."""
+        override_id = scenarios_repo.get_or_create_override(self._conn, scenario_id, mote_id)
+        motes_repo.update_mote(self._conn, override_id, _coerce_properties(raw_properties))
+        return dataclasses.asdict(motes_repo.get_mote(self._conn, override_id))
 
     @_synchronized
     def delete_property(self, mote_id: str, key: str) -> bool:

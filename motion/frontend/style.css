@@ -255,6 +255,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   background: var(--panel); border: 1px solid var(--border-soft);
   border-radius: 5px; padding: 2px 5px; white-space: nowrap;
 }
+.chip.a { color: oklch(0.75 0 0); border-color: oklch(0.5 0 0 / 0.55); }
 .chip.b { color: var(--accent); border-color: oklch(0.5 0.08 68 / 0.55); }
 
 /* ---- centre: stage and board ---- */

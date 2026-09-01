@@ -203,6 +203,8 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
 .hl-brace { color: var(--faint); }
 .hl-comment { color: var(--faint); font-style: italic; }
 .hl-math { color: oklch(0.72 0.08 200); }
+.find-hit { background: oklch(0.74 0.10 68 / 0.16); border-radius: 2px; }
+.find-hit-current { background: oklch(0.74 0.10 68 / 0.5); box-shadow: 0 0 0 1px oklch(0.82 0.11 68 / 0.7); }
 
 #picker {
   position: absolute; z-index: 30; min-width: 240px; max-height: 220px; overflow-y: auto;
@@ -216,6 +218,36 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
 }
 .picker-row.on, .picker-row:hover { background: var(--raised); border: none; }
 .picker-row .sub { margin-left: auto; font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
+
+#find-bar {
+  position: absolute; top: 10px; right: 10px; z-index: 30; min-width: 260px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 9px; padding: 8px; box-shadow: 0 10px 30px oklch(0 0 0 / 0.5);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.find-row { display: flex; align-items: center; gap: 6px; }
+#find-input, #replace-input {
+  flex: 1; min-width: 0; background: var(--raised); border: 1px solid var(--border-soft);
+  border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: var(--mono);
+  color: var(--fg); outline: none;
+}
+#find-input:focus, #replace-input:focus { border-color: var(--accent); }
+.find-count {
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+  white-space: nowrap; min-width: 34px; text-align: center;
+}
+.find-toggle, .find-nav {
+  flex-shrink: 0; background: none; border: 1px solid transparent; border-radius: 6px;
+  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--faint);
+}
+.find-toggle.on { color: var(--accent-bright); border-color: var(--border-soft); background: var(--accent-soft); }
+.find-toggle:hover, .find-nav:hover { background: var(--raised); color: var(--fg); }
+.find-action {
+  font-size: 11.5px; padding: 5px 9px; border-radius: 6px;
+  background: var(--raised); border: 1px solid var(--border-soft); color: var(--fg);
+}
+.find-action:hover { border-color: var(--border); }
 
 /* ---- rendered ---- */
 
