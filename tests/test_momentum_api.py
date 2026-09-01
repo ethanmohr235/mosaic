@@ -15,7 +15,7 @@ from core.gardens import create_garden
 from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
 from core.species import set_species
-from momentum.api import Api
+from momentum.api import ESTIMATE_FLOOR_MINUTES, Api
 from momentum.app import DEFAULT_HTTP_PORT
 from window_launcher import choose_port
 
@@ -267,6 +267,162 @@ def test_an_empty_session_is_never_written(api, board):
 def test_a_session_logged_today_starts_a_streak(api, board):
     api.log_session(board["schema"], 25)
     assert api.focus_tab()["streak"] == 1
+
+
+# ---- estimate accounting and status presets ----
+
+def test_logging_a_session_deducts_it_from_the_estimate(api, board):
+    """Schema translation carries a 5h (300m) estimate; 25 logged
+    minutes are work that no longer remains to do."""
+    api.log_session(board["schema"], 25)
+    assert get_mote(api._conn, board["schema"]).properties["estimate"] == "275m"
+
+
+def test_a_deducted_estimate_is_written_in_the_unit_it_was_read_in(api, board):
+    """`5h` less an hour is `4h`, not `240` -- the courtesy a drag pays a
+    date (core/interval.py::format_like), paid to an estimate."""
+    api.log_session(board["schema"], 60)
+    assert get_mote(api._conn, board["schema"]).properties["estimate"] == "4h"
+
+
+def test_a_logged_session_does_not_push_the_estimate_below_the_floor(api):
+    """A task with 20 minutes left that gets a 30 minute session is not
+    yet claiming to owe -10 minutes -- it is still open, so the floor
+    holds."""
+    task = create_mote(api._conn, {"name": "Almost done", "estimate": 20})
+    api.log_session(task, 30)
+    assert get_mote(api._conn, task).properties["estimate"] == ESTIMATE_FLOOR_MINUTES
+
+
+def test_completing_via_the_timer_ignores_the_floor(api):
+    """The timer's own complete button is the one write allowed to push
+    the estimate all the way to zero and past what a normal session
+    would have floored at."""
+    task = create_mote(api._conn, {"name": "Wrap up", "status": "doing", "estimate": "20"})
+    api.log_session(task, 30, complete=True)
+    mote = get_mote(api._conn, task)
+    assert mote.properties["estimate"] == 0
+    assert mote.properties["status"] == "complete"
+
+
+def test_completing_a_task_with_no_timer_logs_the_remaining_estimate(api):
+    """The days view's check button: whatever is left becomes one last
+    logged session rather than vanishing when the task is marked done."""
+    task = create_mote(api._conn, {"name": "Loose end", "status": "todo", "estimate": "45"})
+    answer = api.complete_task(task)
+    mote = get_mote(api._conn, task)
+    assert mote.properties["estimate"] == 0
+    assert mote.properties["status"] == "complete"
+    sessions = api.focus_tab()["sessions"]
+    assert [(s["minutes"], s["subject"]["name"]) for s in sessions] == [(45.0, "Loose end")]
+    assert answer["status"] == "complete"
+
+
+def test_completing_an_already_closed_out_task_logs_nothing_more(api):
+    """Completing a task twice is not two closing sessions -- the first
+    call already zeroed the estimate, so the second has nothing left to
+    log."""
+    task = create_mote(api._conn, {"name": "Loose end", "status": "todo", "estimate": "45"})
+    api.complete_task(task)
+    api.complete_task(task)
+    assert len(api.focus_tab()["sessions"]) == 1
+
+
+def test_marking_a_task_done_on_the_board_closes_out_its_estimate(api):
+    """Dragging a card to a done column with no timer running means the
+    same thing as the days view's check button."""
+    task = create_mote(api._conn, {"name": "Shipped it", "status": "doing", "estimate": "40"})
+    api.set_status(task, "status", "shipped")
+    mote = get_mote(api._conn, task)
+    assert mote.properties["estimate"] == 0
+    assert mote.properties["status"] == "shipped", "the garden's own vocabulary is kept"
+    sessions = api.focus_tab()["sessions"]
+    assert [round(s["minutes"]) for s in sessions] == [40]
+
+
+def test_moving_between_open_columns_never_touches_the_estimate(api):
+    task = create_mote(api._conn, {"name": "Still going", "status": "todo", "estimate": "40"})
+    api.set_status(task, "status", "doing")
+    assert get_mote(api._conn, task).properties["estimate"] == "40"
+
+
+def test_a_task_already_done_is_not_closed_out_twice(api):
+    """Re-labeling an already-finished task with another done word is
+    not a second closing session."""
+    task = create_mote(api._conn, {"name": "Finished twice", "status": "done", "estimate": "40"})
+    api.set_status(task, "status", "shipped")
+    assert get_mote(api._conn, task).properties["estimate"] == "40"
+    assert api.focus_tab()["sessions"] == []
+
+
+# ---- auto-placement of a bare date ----
+
+def test_a_bare_date_is_placed_in_the_earliest_free_slot_by_the_days_view(api, board):
+    """A mote whose date was set with nothing else -- through the MCP
+    tools, say, not a drag in this window -- still lands at a real time
+    once the days view is read, the same earliest gap a drag would find.
+    The standup holds 09:00-09:30, so this lands right after it."""
+    task = create_mote(api._conn, {
+        "name": "Set elsewhere", "estimate": "1h", "date": "2026-08-26",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, task).properties["date"] == "2026-08-26T09:30/PT1H"
+
+
+def test_a_multi_day_all_day_span_is_left_alone(api, board):
+    """An all-day value lasting more than a day is a booking someone
+    declared, not an undated intention -- folding a three-day conference
+    into an hour at 09:00 would delete what the value said."""
+    booking = create_mote(api._conn, {
+        "name": "Conference", "status": "todo", "date": "2026-08-26/2026-08-28",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, booking).properties["date"] == "2026-08-26/2026-08-28"
+
+
+def test_a_bare_date_outside_the_window_is_left_alone(api, board):
+    """Auto-placement runs on a read, so it may only write where that
+    read is looking -- a task next March is not this week's business."""
+    later = create_mote(api._conn, {
+        "name": "Next year", "status": "todo", "estimate": "2h", "date": "2027-03-04",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, later).properties["date"] == "2027-03-04"
+
+
+def test_a_finished_task_is_not_given_a_slot(api, board):
+    """A done task has no work left to find a gap for, and placing one
+    would spend the morning's room on it -- pushing the open task that
+    shares its day later down the day."""
+    create_mote(api._conn, {
+        "name": "Old finished", "status": "done", "estimate": "1h", "date": "2026-08-27",
+    })
+    open_task = create_mote(api._conn, {
+        "name": "Still open", "status": "todo", "estimate": "1h", "date": "2026-08-27",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, open_task).properties["date"] == "2026-08-27T09:00/PT1H"
+
+
+def test_a_closing_session_is_not_back_dated_off_today(api):
+    """A session is filed under the day it starts, so a fortnight-sized
+    estimate must not land its closing entry on some day last week --
+    crediting the streak and the heatmap for work recorded today."""
+    from datetime import date
+
+    task = create_mote(api._conn, {"name": "Long haul", "status": "todo", "estimate": "40h"})
+    api.complete_task(task)
+    logged = api.focus_tab()["sessions"]
+    assert [s["day"] for s in logged] == [date.today().strftime("%Y-%m-%d")]
+
+
+def test_a_timed_placement_is_left_alone(api, board):
+    """Only a bare, all-day date is auto-placed -- a task already given a
+    real time (by a drag, or written by hand) keeps it."""
+    api.schedule(board["backfill"], "2026-08-27")
+    before = get_mote(api._conn, board["backfill"]).properties["date"]
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, board["backfill"]).properties["date"] == before
 
 
 def test_the_focus_queue_is_what_is_scheduled_for_today(api, board):

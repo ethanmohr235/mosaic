@@ -278,6 +278,16 @@ def day_payload(day: str, cards: list[dict], *, capacity_minutes: float) -> dict
     }
 
 
+def is_done_value(value) -> bool:
+    """Whether a raw status property value reads as finished. The same
+    test is_done() applies to a card's already-shaped "status" field,
+    lifted out so momentum/api.py can ask it of a mote's property
+    straight off the graph -- deciding whether marking a task done is
+    a *change* (and so owes a closing session) has to happen before a
+    card exists to ask is_done() of."""
+    return isinstance(value, str) and value.strip().casefold() in DONE_VALUES
+
+
 def is_done(card: dict) -> bool:
     """Whether a card counts as finished, for the two questions that
     need it: a day's remaining load and the "open" figure.
@@ -288,8 +298,7 @@ def is_done(card: dict) -> bool:
     entirely still boards correctly -- it only misses out on being
     discounted from the load, which is the safe direction to be wrong in.
     """
-    status = (card.get("status") or "").casefold()
-    return status in DONE_VALUES
+    return is_done_value(card.get("status"))
 
 
 def session_payload(mote: Mote, directory: Directory, subject_id: str | None) -> dict:

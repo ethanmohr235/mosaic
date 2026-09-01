@@ -396,7 +396,7 @@ function isDone(card) {
 /** One card, in whichever of the three views asked for it. Compact
  *  drops the type row and the progress bar, which is what makes a day
  *  column readable at seven-across. */
-function cardNode(card, compact, draggable = true) {
+function cardNode(card, compact, draggable = true, withComplete = false) {
   const node = el("div", "card" + (compact ? " compact" : ""));
   const color = colorOf(card);
   node.style.borderLeftColor = color;
@@ -430,6 +430,12 @@ function cardNode(card, compact, draggable = true) {
     foot.append(el("span", "subs", `${card.subtasksDone}/${card.subtasks.length}`));
   }
   if (card.estimate) foot.append(el("span", "est", card.estimate));
+  if (withComplete && !isDone(card)) {
+    const done = button("card-complete", "✓");
+    done.title = "Mark complete";
+    done.onclick = (event) => { event.stopPropagation(); completeTask(card.id); };
+    foot.append(done);
+  }
   node.append(foot);
 
   if (!compact && card.subtasks.length) {
@@ -670,7 +676,7 @@ function renderDays() {
     node.append(head);
 
     const body = el("div", "day-body");
-    day.cards.forEach((card) => body.append(cardNode(card, true)));
+    day.cards.forEach((card) => body.append(cardNode(card, true, true, true)));
     node.append(body);
 
     dropTarget(node, (id) => scheduleOn(id, day.day));
@@ -962,10 +968,22 @@ async function moveTo(moteId, status) {
     toast("Pick which property means status first — the sidebar lists the candidates.", true);
     return;
   }
-  const answer = await call(api.set_status(moteId, keyChoice.status, status), "Could not set that status.");
+  const [, , estimateArg] = keyArgs();
+  const answer = await call(
+    api.set_status(moteId, keyChoice.status, status, estimateArg), "Could not set that status.",
+  );
   if (answer === null) return;
   if (selectedId === moteId) panel = answer;
   toast(`${answer.name} → ${status}`);
+  refresh();
+}
+
+async function completeTask(moteId) {
+  const [statusArg, , estimateArg] = keyArgs();
+  const answer = await call(api.complete_task(moteId, statusArg, estimateArg), "Could not complete that task.");
+  if (answer === null) return;
+  if (selectedId === moteId) panel = answer;
+  toast(`${answer.name} marked complete.`);
   refresh();
 }
 
@@ -1002,7 +1020,10 @@ async function unschedule(moteId) {
 
 async function setStatus(moteId, status) {
   if (!keyChoice || !keyChoice.status) return;
-  const answer = await call(api.set_status(moteId, keyChoice.status, status), "Could not set that status.");
+  const [, , estimateArg] = keyArgs();
+  const answer = await call(
+    api.set_status(moteId, keyChoice.status, status, estimateArg), "Could not set that status.",
+  );
   if (answer === null) return;
   panel = answer;
   refresh();
@@ -1032,7 +1053,19 @@ async function createTask(name, status) {
 function toggleTimer() {
   if (tab !== "focus") setTab("focus");
   running = !running;
-  if (running && startedAt === null) startedAt = new Date();
+  if (running && startedAt === null) {
+    startedAt = new Date();
+    // Starting the timer against a task is the one moment this window
+    // moves a status-bound property on its own, to "working" -- one of
+    // the presets asked for. Fire-and-forget: a failure here is not
+    // worth blocking the timer over, and the next poll shows whatever
+    // actually happened.
+    const active = activeCard();
+    if (active && keyChoice && keyChoice.status) {
+      call(api.set_status(active.id, keyChoice.status, "working"), "Could not update status.")
+        .then(() => refresh());
+    }
+  }
   renderTimer();
 }
 
@@ -1056,12 +1089,41 @@ async function finishSession(auto) {
     if (!auto) toast("Nothing to log yet — that session is under a minute.");
     return;
   }
+  const [statusArg, , estimateArg] = keyArgs();
   const answer = await call(
-    api.log_session(active ? active.id : null, minutes, began ? isoLocal(began) : null),
+    api.log_session(active ? active.id : null, minutes, began ? isoLocal(began) : null, false, estimateArg, statusArg),
     "Could not log that session.",
   );
   if (answer === null) return;
   toast(`Session logged — ${minutes}m on ${active ? active.name : "nothing in particular"}.`);
+  refresh();
+}
+
+/** The timer's own complete button: log whatever ran (if anything) and
+ *  mark the task done in the same action, so a finished task is not a
+ *  log followed by a separate trip to the board. Under a minute in, there
+ *  is nothing worth logging as a session, so it goes straight to
+ *  complete_task() -- the same closing-session accounting the days
+ *  view's check button uses when no timer was running at all. */
+async function completeSession() {
+  const minutes = Math.round(elapsed / 60);
+  const active = activeCard();
+  const began = startedAt;
+  running = false;
+  elapsed = 0;
+  startedAt = null;
+  renderTimer();
+  if (!active) return;
+
+  const [statusArg, , estimateArg] = keyArgs();
+  const answer = minutes >= 1
+    ? await call(
+        api.log_session(active.id, minutes, began ? isoLocal(began) : null, true, estimateArg, statusArg),
+        "Could not complete that task.",
+      )
+    : await call(api.complete_task(active.id, statusArg, estimateArg), "Could not complete that task.");
+  if (answer === null) return;
+  toast(`${active.name} marked complete.`);
   refresh();
 }
 
@@ -1204,6 +1266,7 @@ function wire() {
   $("run-btn").onclick = toggleTimer;
   $("reset-btn").onclick = resetTimer;
   $("finish-btn").onclick = () => finishSession(false);
+  $("complete-btn").onclick = () => completeSession();
   $("duration-input").onchange = (event) => setSessionMinutes(Number(event.target.value));
   $("stopwatch-toggle").onchange = (event) => setStopwatch(event.target.checked);
 

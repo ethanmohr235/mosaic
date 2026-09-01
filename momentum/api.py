@@ -64,6 +64,27 @@ FALLBACK_BINDING = "scheduled"
 # task and the rectangle Monastery draws for it are the same length.
 DEFAULT_SLOT_MINUTES = 60
 
+# How low a logged session is allowed to push a task's remaining
+# estimate while the task is still open. An estimate hitting exactly
+# zero without the task itself being marked done reads as "nothing
+# left to do" everywhere that figure is shown, which is rarely true --
+# the last quarter hour is still owed until something says the task is
+# over. Completing the task (the timer's own complete button, the days
+# view's check, or dragging to a done column) lifts this floor.
+ESTIMATE_FLOOR_MINUTES = 15
+
+# The values the focus timer writes to a status-bound property on its
+# own -- two of the three presets the person asked for; a task with no
+# status at all already reads as "not started" everywhere this window
+# looks (board_payload's "no status" column, is_done()), so nothing
+# ever has to write that one down. Ordinary strings, exactly like
+# core/task_candidates.py::DEFAULT_STATUSES -- a garden using its own
+# vocabulary elsewhere still gets these from the timer, because
+# payload.is_done_value() already recognizes "complete" as finished
+# regardless of what else a garden calls its done column.
+STATUS_WORKING = "working"
+STATUS_COMPLETE = "complete"
+
 # The mote a garden keeps Momentum's settings on, found by name. No
 # reserved property and no new table: a garden that never edits these
 # never grows one, and one that does can edit it like any other mote.
@@ -342,16 +363,27 @@ class Api:
         already an event there, and anything dated there already appears
         here. That is the whole of the integration: there is no second
         store of "when I plan to do this".
+
+        A mote that only ever had its date set -- through the MCP tools,
+        say, rather than a drag in this window -- carries a bare day with
+        no time on it. _auto_place() gives that day a real start and end
+        the same way a drop onto a day would, so "set a date" and "drag
+        onto a day" converge on the same placement without the person
+        having to do the drag themselves. It is the one read in this
+        class that writes, and it is handed the same window the days are
+        drawn from so it can only ever touch what is on screen.
         """
-        _, tasks, _, keys, directory = self._garden_state(
+        visible, tasks, excluded, keys, directory = self._garden_state(
             status_key=status_key, priority_key=priority_key,
             estimate_key=estimate_key, bindings=bindings,
         )
         settings = self._settings(tasks)
-        cards = [payload_repo.card_payload(m, directory, keys) for m in tasks]
 
         start = datetime.fromisoformat(window_start).date()
         end = datetime.fromisoformat(window_end).date()
+        self._auto_place(tasks, visible, excluded, keys, settings, start, end)
+        cards = [payload_repo.card_payload(m, directory, keys) for m in tasks]
+
         by_day: dict[str, list[dict]] = {}
         pool: list[dict] = []
         for card in cards:
@@ -452,7 +484,9 @@ class Api:
     # ---- editing ----
 
     @_synchronized
-    def set_status(self, mote_id: str, status_key: str, status: str | None) -> dict | None:
+    def set_status(
+        self, mote_id: str, status_key: str, status: str | None, estimate_key=None,
+    ) -> dict | None:
         """What dragging a card between columns means: one write, to
         whichever key the person is reading as status.
 
@@ -461,12 +495,44 @@ class Api:
         edit of what you can see has to be an edit of the key you can
         see it by -- the same rule core/calendar.py states about writing
         back to the binding that placed a rectangle.
+
+        Landing on a done value that the mote was not already on closes
+        out its estimate first (see _log_closing_session) -- dragging a
+        card to a done column with no timer running means the same
+        thing as the days view's check button: whatever was left is
+        logged as one last session rather than silently disappearing.
         """
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is not None and isinstance(status, str) and payload_repo.is_done_value(status) \
+                and not payload_repo.is_done_value(mote.properties.get(status_key)):
+            _, _, _, keys, _ = self._garden_state(estimate_key=estimate_key, status_key=status_key)
+            self._log_closing_session(mote, keys.estimate)
         if status is None:
             motes_repo.delete_property(self._conn, mote_id, status_key)
         else:
             motes_repo.update_mote(self._conn, mote_id, {status_key: status})
         return self._panel(mote_id)
+
+    @_synchronized
+    def complete_task(self, mote_id: str, status_key=None, estimate_key=None) -> dict | None:
+        """The days view's check button: mark a task done with no timer
+        running to say how long its last stretch took.
+
+        Whatever estimate remains is logged as one closing session --
+        the same accounting a timer's own complete button does with the
+        time it actually watched go by -- and the status-bound property
+        (if the garden has one) is set to the literal "complete", one of
+        the three preset values this window's timer moves a task
+        through on its own (see toggleTimer() and _log_closing_session).
+        """
+        _, _, _, keys, _ = self._garden_state(estimate_key=estimate_key, status_key=status_key)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None:
+            return None
+        self._log_closing_session(mote, keys.estimate)
+        if keys.status:
+            motes_repo.update_mote(self._conn, mote_id, {keys.status: STATUS_COMPLETE})
+        return self._panel(mote_id, keys)
 
     @_synchronized
     def create_task(self, name: str, status_key=None, status: str | None = None,
@@ -562,20 +628,116 @@ class Api:
         defaults = calendar_repo.default_bindings(motes)
         return defaults[0] if defaults else FALLBACK_BINDING
 
+    def _place_in_earliest_slot(
+        self, mote: Mote, binding: str, day: date, minutes: float,
+        visible: list[Mote], excluded: set[str],
+        keys: payload_repo.Keys, settings: dict,
+    ) -> tuple[datetime, bool]:
+        """The earliest free start on `day` for `minutes` of work under
+        `binding`, written onto the mote -- what "the earliest unblocked
+        position" means everywhere this window places a task, whether
+        that is a drag onto a day (schedule()) or a bare date catching up
+        to a real time on its own (_auto_place()). One write to one key:
+        the span rides inside the value, so an estimate the mote made
+        becomes the length of the block rather than scheduling having to
+        decide whether it may also touch a separate `duration`. That the
+        span is *rewritten* is why both callers have to be sure the
+        placement was asked for -- a drag is a request to re-place, and
+        _auto_place() checks that nothing was declared before it writes.
+
+        The gap is found against everything the calendar considers busy
+        that day, through core/calendar.py, so a task never lands on top
+        of a meeting Monastery would draw. A day with no room left is
+        not an error -- the task is placed at the start of the working
+        day and the caller says so, because refusing to schedule
+        something is not this window's decision to make.
+        """
+        slot = calendar_repo.earliest_free_slot(
+            [m for m in visible if m.id != mote.id],
+            day=day,
+            duration=timedelta(minutes=minutes),
+            bindings=list(keys.bindings) or [FALLBACK_BINDING],
+            work_start=settings["workStart"],
+            work_end=settings["workEnd"],
+            exclude_ids=excluded,
+        )
+        full = slot is None
+        start = slot or datetime.combine(day, settings["workStart"])
+
+        existing = interval_repo.parse(mote.properties.get(binding))
+        placed = interval_repo.Interval(
+            start=start,
+            end=start + timedelta(minutes=minutes),
+            all_day=False,
+            rule_lines=existing.rule_lines if existing else (),
+        )
+        written = interval_repo.format(placed) if existing is None else \
+            interval_repo.format_like(mote.properties[binding], placed, force_span=True)
+        motes_repo.update_mote(self._conn, mote.id, {binding: written})
+        # Kept in step so a second mote placed in the same call -- or the
+        # card this same request renders -- sees the slot as taken and
+        # already timed, rather than a moment-old snapshot.
+        mote.properties[binding] = written
+        return start, full
+
+    def _auto_place(
+        self, tasks: list[Mote], visible: list[Mote], excluded: set[str],
+        keys: payload_repo.Keys, settings: dict,
+        window_start: date, window_end: date,
+    ) -> None:
+        """Give every task that carries only a bare date -- no time -- a
+        real start and end, in the earliest gap its day still has.
+
+        A mote can arrive with just a date and nothing else, set through
+        the MCP tools or any other window rather than dragged onto a day
+        here. Leaving it as an all-day block until someone happens to
+        drag it would mean "the estimate decides the block's length" is
+        only true for tasks scheduled one particular way. Doing this on
+        every days() read means it converges here, the same view that
+        already reads and writes the placement a drag makes.
+
+        Three things this deliberately will not touch, because giving a
+        day a time is a *convenience* and none of them asked for it:
+
+        - **A span someone declared.** An all-day value lasting more than
+          the default day is a booking, not an undated intention -- a
+          conference held across three days means those three days, and
+          folding it into an hour at 09:00 would delete what the value
+          said. Only a plain single day is a placement waiting to happen.
+        - **Anything outside the drawn window.** This runs on a read, so
+          it may only write where that read is looking. A task next March
+          is not this week's business.
+        - **A task already done.** A finished task has no work left to
+          find a gap for, and placing one would spend a morning's room on
+          it -- pushing the tasks that *are* open later down the day.
+        """
+        for mote in tasks:
+            if keys.status and payload_repo.is_done_value(mote.properties.get(keys.status)):
+                continue
+            for binding in keys.bindings:
+                existing = interval_repo.parse(mote.properties.get(binding))
+                if existing is None:
+                    continue
+                day = existing.start.date()
+                if existing.all_day \
+                        and existing.span == timedelta(days=interval_repo.DEFAULT_ALL_DAY_DAYS) \
+                        and window_start <= day < window_end:
+                    minutes = candidates_repo.parse_estimate_value(
+                        mote.properties.get(keys.estimate) if keys.estimate else None
+                    ) or DEFAULT_SLOT_MINUTES
+                    self._place_in_earliest_slot(
+                        mote, binding, day, minutes, visible, excluded, keys, settings
+                    )
+                break
+
     @_synchronized
     def schedule(
         self, mote_id: str, day: str,
         status_key=None, priority_key=None, estimate_key=None, bindings=None,
     ) -> dict | None:
         """Drop a task on a day: the person picks the day, the earliest
-        free gap picks the time.
-
-        The gap is found against everything the calendar considers busy
-        that day, through core/calendar.py, so a task never lands on top
-        of a meeting Monastery would draw. A day with no room left is
-        not an error -- the task is placed at the start of the working
-        day and the window says so, because refusing to schedule
-        something is not this window's decision to make.
+        free gap picks the time. See _place_in_earliest_slot() for what
+        that means.
         """
         visible, tasks, excluded, keys, _ = self._garden_state(
             status_key=status_key, priority_key=priority_key,
@@ -591,34 +753,10 @@ class Api:
             mote.properties.get(keys.estimate) if keys.estimate else None
         )
         minutes = estimated or DEFAULT_SLOT_MINUTES
-        slot = calendar_repo.earliest_free_slot(
-            [m for m in visible if m.id != mote_id],
-            day=target_day,
-            duration=timedelta(minutes=minutes),
-            bindings=list(keys.bindings) or [FALLBACK_BINDING],
-            work_start=settings["workStart"],
-            work_end=settings["workEnd"],
-            exclude_ids=excluded,
-        )
-        full = slot is None
-        start = slot or datetime.combine(target_day, settings["workStart"])
-
         binding = self._binding_to_write(mote, keys, tasks)
-        # One write to one key. The span rides inside the value, so
-        # scheduling no longer has to decide whether it may also touch a
-        # separate `duration` -- an estimate the mote made becomes the
-        # length of the block, and a mote that already carried an
-        # interval keeps whatever span that interval declared.
-        existing = interval_repo.parse(mote.properties.get(binding))
-        placed = interval_repo.Interval(
-            start=start,
-            end=start + timedelta(minutes=minutes),
-            all_day=False,
-            rule_lines=existing.rule_lines if existing else (),
+        start, full = self._place_in_earliest_slot(
+            mote, binding, target_day, minutes, visible, excluded, keys, settings
         )
-        written = interval_repo.format(placed) if existing is None else \
-            interval_repo.format_like(mote.properties[binding], placed, force_span=True)
-        motes_repo.update_mote(self._conn, mote_id, {binding: written})
 
         panel = self._panel(mote_id, keys)
         return {**(panel or {}), "slotFull": full, "binding": binding,
@@ -641,32 +779,20 @@ class Api:
 
     # ---- the timer ----
 
-    @_synchronized
-    def log_session(self, mote_id: str | None, minutes: float, started_at: str | None = None) -> dict:
-        """Write down a finished session.
-
-        Only a *finished* one. A running countdown is the window's own
-        state and nothing is written until it stops -- the same
-        preview/commit split core/simulation.py keeps, and for the same
-        reason: a session that was never completed describes work that
-        never happened.
-
-        The session is an ordinary mote carrying `date` and `duration`,
-        an instance of a `Work Session` species, pointing at the task
-        with `about` (the same relationship a Mora note uses for its
-        subject). Being ordinary is what makes it show up in Monastery
-        and Monarch without either window knowing this one exists.
+    def _record_session(self, subject: Mote | None, minutes: float, start: datetime) -> str:
+        """The mote a finished session becomes: an ordinary mote carrying
+        `date` and `duration`, an instance of a `Work Session` species,
+        pointing at the task with `about` (the same relationship a Mora
+        note uses for its subject). Being ordinary is what makes it show
+        up in Monastery and Monarch without either window knowing this
+        one exists. Shared by log_session() and _log_closing_session(),
+        which differ only in where `start` and `minutes` come from -- a
+        watched timer for one, whatever estimate was left for the other.
         """
-        if minutes <= 0:
-            return {"logged": False}
-        start = datetime.fromisoformat(started_at) if started_at else datetime.now()
-        subject = motes_repo.get_mote(self._conn, mote_id) if mote_id else None
         name = payload_repo.name_of(subject) if subject else "Work session"
-
         species_id = self._session_species_id()
         if species_id is None:
             species_id = motes_repo.create_mote(self._conn, {"name": SESSION_SPECIES_NAME})
-
         session_id = motes_repo.create_mote(self._conn, {
             "name": name,
             "date": interval_repo.format(interval_repo.Interval(
@@ -676,6 +802,92 @@ class Api:
         species_repo.set_species(self._conn, session_id, species_id)
         if subject is not None:
             rel_repo.create_relationship(self._conn, session_id, subject.id, modoc_repo.ABOUT)
+        return session_id
+
+    def _deduct_estimate(self, mote: Mote, estimate_key: str, minutes: float, *, floor: bool) -> None:
+        """A logged session's minutes taken back off the task's own
+        estimate -- the number is what's left to do, not what was
+        planned, once work against it has actually happened.
+
+        Stays at or above ESTIMATE_FLOOR_MINUTES while `floor` is set,
+        which callers pass as "the task is not being completed by this
+        same write" -- the last quarter hour of a task nobody has said
+        is finished yet is still owed, even if the session that just
+        finished ran longer than what was left on the clock.
+
+        Written back in the unit it was read in, the same courtesy
+        core/interval.py::format_like does for a date: a task estimated
+        at `5h` comes back as `4h`, not as `275`.
+        """
+        raw = mote.properties.get(estimate_key)
+        current = candidates_repo.parse_estimate_value(raw)
+        if current is None:
+            return
+        floor_minutes = ESTIMATE_FLOOR_MINUTES if floor else 0
+        remaining = max(current - minutes, floor_minutes)
+        motes_repo.update_mote(
+            self._conn, mote.id,
+            {estimate_key: candidates_repo.format_estimate_like(raw, remaining)},
+        )
+
+    def _log_closing_session(self, mote: Mote, estimate_key: str | None) -> None:
+        """What marking a task done means for whatever estimate is still
+        on it, with no timer around to say how long that last stretch
+        actually took: log it as one session ending now, so the hour a
+        task took to finish is not silently lost the moment it is marked
+        complete, then zero the estimate -- ESTIMATE_FLOOR_MINUTES stops
+        applying once the task is the thing declaring itself finished.
+
+        The session is anchored to end now, but never to start before
+        this morning. A session is filed under the day it starts, so a
+        task carrying a fortnight's estimate would otherwise land its
+        closing entry on some day last week -- crediting the streak and
+        the heatmap for work that was recorded today.
+        """
+        if not estimate_key:
+            return
+        remaining = candidates_repo.parse_estimate_value(mote.properties.get(estimate_key))
+        if not remaining or remaining <= 0:
+            return
+        now = datetime.now()
+        start = max(now - timedelta(minutes=remaining), datetime.combine(now.date(), time.min))
+        self._record_session(mote, remaining, start)
+        motes_repo.update_mote(
+            self._conn, mote.id,
+            {estimate_key: candidates_repo.format_estimate_like(mote.properties[estimate_key], 0)},
+        )
+
+    @_synchronized
+    def log_session(
+        self, mote_id: str | None, minutes: float, started_at: str | None = None,
+        complete: bool = False, estimate_key=None, status_key=None,
+    ) -> dict:
+        """Write down a finished session.
+
+        Only a *finished* one. A running countdown is the window's own
+        state and nothing is written until it stops -- the same
+        preview/commit split core/simulation.py keeps, and for the same
+        reason: a session that was never completed describes work that
+        never happened.
+
+        `complete` is the timer's own complete button: the same session
+        that would otherwise just be logged also closes the task out --
+        its estimate is deducted with no floor, and if the garden has a
+        status-bound property it is set to the literal "complete".
+        """
+        if minutes <= 0:
+            return {"logged": False}
+        start = datetime.fromisoformat(started_at) if started_at else datetime.now()
+        subject = motes_repo.get_mote(self._conn, mote_id) if mote_id else None
+        session_id = self._record_session(subject, minutes, start)
+
+        if subject is not None:
+            _, _, _, keys, _ = self._garden_state(estimate_key=estimate_key, status_key=status_key)
+            if keys.estimate:
+                self._deduct_estimate(subject, keys.estimate, minutes, floor=not complete)
+            if complete and keys.status:
+                motes_repo.update_mote(self._conn, subject.id, {keys.status: STATUS_COMPLETE})
+
         return {"logged": True, "id": session_id, "minutes": round(minutes),
                 "subject": subject.id if subject else None}
 

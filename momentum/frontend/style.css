@@ -297,6 +297,12 @@ body.dragging-on { user-select: none; cursor: grabbing; }
 .card-foot .subs { font-family: var(--mono); font-size: 10px; color: var(--faint); flex-shrink: 0; }
 .card-foot .est { font-family: var(--mono); font-size: 10px; color: oklch(0.45 0 0); flex-shrink: 0; }
 .card-foot .flag { font-family: var(--mono); font-size: 9px; color: var(--danger); flex-shrink: 0; }
+.card-complete {
+  flex-shrink: 0; width: 15px; height: 15px; border-radius: 50%; padding: 0;
+  border: 1px solid oklch(1 0 0 / 0.18); background: transparent; color: var(--faint);
+  font-size: 9px; line-height: 1; cursor: pointer;
+}
+.card-complete:hover { border-color: var(--accent-bright); color: var(--accent-bright); }
 
 .bar { height: 2px; border-radius: 2px; background: oklch(1 0 0 / 0.09); overflow: hidden; }
 .bar > i { display: block; height: 2px; background: var(--accent); }

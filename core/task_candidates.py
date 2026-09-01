@@ -131,13 +131,48 @@ def format_estimate(minutes: float | None) -> str:
     """Minutes as a board reads them back -- `90m`, `4h`, `1.5h`. The
     inverse of parse_estimate_value() for display only; nothing writes
     this back over what a person typed, the same way a drag never
-    reformats a date (core/calendar.py::_format_like)."""
+    reformats a date (core/calendar.py::_format_like). When an estimate
+    genuinely has to be written back -- work logged against it leaves
+    less of it -- that is format_estimate_like(), which keeps the
+    notation instead of imposing this one."""
     if not minutes or minutes <= 0:
         return ""
     if minutes < 60:
         return f"{round(minutes)}m"
     hours = minutes / 60
     return f"{hours:g}h"
+
+
+def format_estimate_like(original, minutes: float):
+    """`minutes`, written the way `original` was written.
+
+    The same rule core/interval.py::format_like states for a date, and
+    for the same reason: a garden holds what a person typed, and an edit
+    should move a value rather than reformat it. So `5h` less an hour
+    comes back `4h`, `90min` less half of it comes back `45min`, and a
+    bare `300` comes back a bare number -- as a string if that is how it
+    was held, since a garden that writes its estimates as text should
+    not find one turning into a number under it.
+
+    The unit only survives while it stays exact. `5h` less 25 minutes is
+    275, which no whole number of hours says; rounding to `4.6h` to keep
+    the suffix would trade the number for the notation, which is the
+    wrong way round -- what the estimate *is* outranks how it was
+    spelled, so those fall back to explicit minutes. Nothing is left of
+    an estimate spent down to zero, so that goes back as plain 0 rather
+    than an odd-reading `0h`.
+    """
+    minutes = round(minutes)
+    if minutes <= 0:
+        return 0
+    if isinstance(original, str):
+        match = _ESTIMATE_PATTERN.match(original.strip())
+        if match is None:
+            return str(minutes)
+        unit = match.group(2)
+        size = _ESTIMATE_UNIT_MINUTES[unit.lower()]
+        return f"{minutes // size}{unit}" if minutes % size == 0 else f"{minutes}m"
+    return minutes
 
 
 def _is_label(value) -> bool:
