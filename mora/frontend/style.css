@@ -199,10 +199,20 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
   overflow-y: auto;
 }
 #editor::selection { background: oklch(0.74 0.1 68 / 0.28); }
-.hl-cmd { color: var(--accent-bright); }
-.hl-brace { color: var(--faint); }
 .hl-comment { color: var(--faint); font-style: italic; }
 .hl-math { color: oklch(0.72 0.08 200); }
+.hl-cmd { color: var(--accent-bright); }
+/* A backslash-word the parser wouldn't recognize outside of math --
+   either a typo or a command that only means something inside `$…$` --
+   coloured like the rendered pane's other broken references rather
+   than like a command that's about to work. */
+.hl-cmd-unknown { color: var(--danger); text-decoration: underline dotted; text-underline-offset: 3px; }
+.hl-brace { color: var(--faint); }
+/* Layered on top of .hl-math for a command or brace inside an equation,
+   so `\frac{a}{b}` reads with the same structure `\section{…}` does
+   instead of as one flat span of colour. Declared after .hl-brace so
+   a brace nested in math still dims the way a brace anywhere else does. */
+.hl-math-cmd { color: oklch(0.78 0.13 200); }
 .find-hit { background: oklch(0.74 0.10 68 / 0.16); border-radius: 2px; }
 .find-hit-current { background: oklch(0.74 0.10 68 / 0.5); box-shadow: 0 0 0 1px oklch(0.82 0.11 68 / 0.7); }
 

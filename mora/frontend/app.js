@@ -196,19 +196,56 @@ function toast(message, isError) {
 
 // ---- source pane ---------------------------------------------------
 
-const HIGHLIGHT_RE = /(%[^\n]*)|(\\[a-zA-Z]+)|([{}[\]])|(\$[^$\n]*\$)/g;
+// The comment alternative's lookbehind mirrors core/modoc.py's
+// `_COMMENT_RE = re.compile(r"(?<!\\)%")` byte for byte: without it, a
+// literal `\%` (the escape that keeps a percent sign out of comment
+// territory) still read as a comment starting mid-line here even though
+// the parser it's highlighting for never treated it as one.
+const HIGHLIGHT_RE = /((?<!\\)%[^\n]*)|(\\[a-zA-Z]+)|([{}[\]])|(\$[^$\n]*\$)/g;
+const MATH_TOKEN_RE = /(\\[a-zA-Z]+)|([{}])/g;
+
+// core/modoc.py's INLINE_COMMANDS and BLOCK_COMMANDS -- the only
+// backslash-words that mean something to the parser outside of a `$…$`
+// span. Anything else is either a typo or a command that only exists
+// inside math, so it earns hl-cmd-unknown rather than being coloured as
+// if it were about to work.
+const KNOWN_COMMANDS = new Set([
+  "mote", "val", "textbf", "emph", "texttt",
+  "section", "subsection", "graph", "item", "begin", "end",
+]);
 
 function escapeHtml(text) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Ranges may nest: a `$…$` span is coloured as a whole, and the
+ *  commands and braces inside it (`\frac`, `{`, `}`) get their own
+ *  range layered on top, so an equation reads with the same structure
+ *  a `\section{…}` does rather than as one flat token. */
 function syntaxRanges(text) {
   const ranges = [];
   const re = new RegExp(HIGHLIGHT_RE.source, "g");
   let m;
   while ((m = re.exec(text))) {
-    const cls = m[1] ? "hl-comment" : m[2] ? "hl-cmd" : m[3] ? "hl-brace" : "hl-math";
-    ranges.push({ start: m.index, end: m.index + m[0].length, cls });
+    if (m[1]) {
+      ranges.push({ start: m.index, end: m.index + m[0].length, cls: "hl-comment" });
+    } else if (m[2]) {
+      const known = KNOWN_COMMANDS.has(m[2].slice(1));
+      ranges.push({ start: m.index, end: m.index + m[0].length, cls: known ? "hl-cmd" : "hl-cmd-unknown" });
+    } else if (m[3]) {
+      ranges.push({ start: m.index, end: m.index + m[0].length, cls: "hl-brace" });
+    } else {
+      const start = m.index;
+      const end = start + m[0].length;
+      ranges.push({ start, end, cls: "hl-math" });
+      const inner = m[0].slice(1, -1);
+      const tokenRe = new RegExp(MATH_TOKEN_RE.source, "g");
+      let tm;
+      while ((tm = tokenRe.exec(inner))) {
+        const tokenStart = start + 1 + tm.index;
+        ranges.push({ start: tokenStart, end: tokenStart + tm[0].length, cls: tm[1] ? "hl-math-cmd" : "hl-brace" });
+      }
+    }
   }
   return ranges;
 }
@@ -218,11 +255,13 @@ function syntaxRanges(text) {
  *  highlight is a pixel short of the caret.
  *
  *  Command/comment/brace/math colouring and find-bar match highlighting
- *  are two independent sets of ranges over the same text, so this cuts
- *  the text at every boundary either one introduces and gives each
- *  resulting piece whichever classes cover it -- a segment inside both
- *  a \command and the current find match gets both, rather than one
- *  highlighter clobbering the other's span. */
+ *  are independent sets of ranges over the same text, and the syntax
+ *  ranges can themselves nest (a command inside a `$…$` span sits inside
+ *  the span's own range), so this cuts the text at every boundary any
+ *  of them introduces and gives each resulting piece every class that
+ *  covers it -- a segment inside both a \command and the current find
+ *  match gets both, rather than one highlighter clobbering another's
+ *  span. */
 function paintHighlight() {
   const text = $("editor").value;
   const synRanges = syntaxRanges(text);
@@ -237,8 +276,7 @@ function paintHighlight() {
     const end = bounds[i + 1];
     if (start === end) continue;
     const classes = [];
-    const syn = synRanges.find((r) => r.start <= start && end <= r.end);
-    if (syn) classes.push(syn.cls);
+    synRanges.filter((r) => r.start <= start && end <= r.end).forEach((r) => classes.push(r.cls));
     const hitIndex = findMatches.findIndex(([s, e]) => s <= start && end <= e);
     if (hitIndex !== -1) classes.push(hitIndex === findIndex ? "find-hit find-hit-current" : "find-hit");
     const segment = escapeHtml(text.slice(start, end));
