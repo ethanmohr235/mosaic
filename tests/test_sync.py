@@ -1,8 +1,17 @@
 """Two-device sync, simulated in one process: each "device" is its own
 gardens/ directory (so it gets its own database and its own device_id),
-and both point core/sync.py at one shared tmp folder standing in for
-whatever a real Syncthing/Dropbox/iCloud folder would sync between two
-real machines.
+and both point core/sync.py at one shared `sync_dir` standing in for
+whatever two real machines would actually sync through.
+
+Every test below is parametrized over both transports via the `sync_dir`
+fixture (tests/conftest.py): a local tmp folder standing in for a real
+Syncthing/Dropbox/iCloud folder, and a live sync_server (sync_server/)
+backed by a real ephemeral Postgres, standing in for a real deployment.
+core/sync.py's push()/pull()/init() branch on which one they were given,
+but share every merge/conflict/replay code path regardless -- so the
+same assertions hold under both, which is the direct proof that swapping
+transports doesn't change sync's behavior. The server param is skipped
+automatically where Docker isn't available to run testcontainers.
 
 core.device.get_device_id() and every core.gardens.py/core.db.py path
 read core.db.GARDENS_DIR fresh on every call, so switching which
@@ -33,9 +42,7 @@ def _new_device(monkeypatch, root):
         return db.get_connection("g")
 
 
-def test_second_device_clones_existing_history(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_second_device_clones_existing_history(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         mote_a = create_mote(conn_a, {"name": "from A"})
@@ -52,9 +59,7 @@ def test_second_device_clones_existing_history(tmp_path, monkeypatch):
     conn_b.close()
 
 
-def test_cloning_without_permission_is_refused(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_cloning_without_permission_is_refused(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         create_mote(conn_a, {"name": "from A"})
@@ -71,9 +76,7 @@ def test_cloning_without_permission_is_refused(tmp_path, monkeypatch):
     conn_a.close()
 
 
-def test_disjoint_edits_converge_both_ways(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_disjoint_edits_converge_both_ways(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         sync.init("g", sync_dir)
@@ -109,9 +112,7 @@ def test_disjoint_edits_converge_both_ways(tmp_path, monkeypatch):
     conn_b.close()
 
 
-def test_concurrent_edits_to_different_properties_both_survive(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_concurrent_edits_to_different_properties_both_survive(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         mote_id = create_mote(conn_a, {"name": "shared", "status": "draft"})
@@ -142,9 +143,7 @@ def test_concurrent_edits_to_different_properties_both_survive(tmp_path, monkeyp
     conn_b.close()
 
 
-def test_same_property_conflict_resolves_last_write_wins(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_same_property_conflict_resolves_last_write_wins(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         mote_id = create_mote(conn_a, {"status": "draft"})
@@ -177,9 +176,7 @@ def test_same_property_conflict_resolves_last_write_wins(tmp_path, monkeypatch):
     conn_b.close()
 
 
-def test_delete_wins_over_a_racing_edit(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_delete_wins_over_a_racing_edit(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         mote_id = create_mote(conn_a, {"status": "draft"})
@@ -214,9 +211,7 @@ def test_delete_wins_over_a_racing_edit(tmp_path, monkeypatch):
     conn_b.close()
 
 
-def test_relationship_sync_and_update(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_relationship_sync_and_update(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         alice = create_mote(conn_a, {"name": "Alice"})
@@ -244,9 +239,7 @@ def test_relationship_sync_and_update(tmp_path, monkeypatch):
     conn_b.close()
 
 
-def test_push_with_nothing_new_is_a_noop(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_push_with_nothing_new_is_a_noop(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         create_mote(conn_a, {})
@@ -270,9 +263,7 @@ def test_push_with_nothing_new_is_a_noop(tmp_path, monkeypatch):
 # create op is gone, which is the actual invariant push() has to repair
 # (not *why* it's missing).
 
-def test_backfill_logs_an_orphan_mote_and_relationship(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_backfill_logs_an_orphan_mote_and_relationship(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         safe = create_mote(conn_a, {"name": "safe"})
@@ -302,9 +293,7 @@ def test_backfill_logs_an_orphan_mote_and_relationship(tmp_path, monkeypatch):
     conn_a.close()
 
 
-def test_orphan_backfill_end_to_end_matches_source(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_orphan_backfill_end_to_end_matches_source(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         safe = create_mote(conn_a, {"name": "safe"})
@@ -329,9 +318,7 @@ def test_orphan_backfill_end_to_end_matches_source(tmp_path, monkeypatch):
     conn_b.close()
 
 
-def test_backfill_is_idempotent(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_backfill_is_idempotent(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         orphan = create_mote(conn_a, {"name": "orphan"})
@@ -351,9 +338,7 @@ def test_backfill_is_idempotent(tmp_path, monkeypatch):
     conn_a.close()
 
 
-def test_self_heal_repairs_a_device_that_already_stalled(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_self_heal_repairs_a_device_that_already_stalled(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         orphan = create_mote(conn_a, {"name": "orphan"})
@@ -392,9 +377,7 @@ def test_self_heal_repairs_a_device_that_already_stalled(tmp_path, monkeypatch):
     conn_b.close()
 
 
-def test_backfill_relationship_referencing_a_non_orphan_mote(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_backfill_relationship_referencing_a_non_orphan_mote(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         mote1 = create_mote(conn_a, {"name": "one"})
@@ -422,9 +405,7 @@ def test_backfill_relationship_referencing_a_non_orphan_mote(tmp_path, monkeypat
     conn_b.close()
 
 
-def test_status_reports_local_and_remote_progress(tmp_path, monkeypatch):
-    sync_dir = tmp_path / "shared"
-
+def test_status_reports_local_and_remote_progress(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         create_mote(conn_a, {})

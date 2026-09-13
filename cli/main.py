@@ -97,16 +97,26 @@ def build_parser() -> argparse.ArgumentParser:
     # in main() the same way `garden` itself is.
     sync_parser = subparsers.add_parser("sync", help="Sync a garden between devices")
     sync_sub = sync_parser.add_subparsers(dest="action")
-    sync_init = sync_sub.add_parser("init", help="Point this garden at a shared sync folder")
-    sync_init.add_argument("folder", help="Path to the shared folder (e.g. a Syncthing/Dropbox/iCloud folder)")
+    sync_init = sync_sub.add_parser("init", help="Point this garden at a shared sync folder or sync server")
+    sync_init.add_argument(
+        "folder",
+        help="Path to the shared folder (e.g. a Syncthing/Dropbox/iCloud folder), "
+             "or an https://<token>@host/path sync server URL",
+    )
     sync_init.add_argument(
         "--clone", action="store_true",
-        help="If the folder already has history for this garden and it doesn't exist "
+        help="If the target already has history for this garden and it doesn't exist "
              "locally yet, create it here from that history",
     )
-    sync_sub.add_parser("push", help="Write local changes out to the sync folder")
-    sync_sub.add_parser("pull", help="Apply other devices' changes from the sync folder")
-    sync_sub.add_parser("run", help="push, then pull (the everyday one-shot sync)")
+    sync_push = sync_sub.add_parser("push", help="Write local changes out to the sync target")
+    sync_push.add_argument(
+        "--resend", action="store_true",
+        help="Resend this device's entire history -- only needed when moving an "
+             "already-synced garden onto a new, empty sync_dir",
+    )
+    sync_sub.add_parser("pull", help="Apply other devices' changes from the sync target")
+    sync_run = sync_sub.add_parser("run", help="push, then pull (the everyday one-shot sync)")
+    sync_run.add_argument("--resend", action="store_true", help="See `sync push --resend`")
     sync_sub.add_parser("status", help="Show sync progress and any conflicts from the last pull")
 
     # ------------------ MOTE COMMANDS ------------------
@@ -339,7 +349,7 @@ def _print_sync_notes(skipped: list[dict]) -> None:
 
 def _handle_sync(conn, garden: str, args) -> None:
     if args.action == "push":
-        result = sync_repo.push(conn, garden)
+        result = sync_repo.push(conn, garden, resend=args.resend)
         print(f"Pushed {result['pushed']} change(s)")
 
     elif args.action == "pull":
@@ -348,7 +358,7 @@ def _handle_sync(conn, garden: str, args) -> None:
         _print_sync_notes(result["skipped"])
 
     elif args.action == "run":
-        result = sync_repo.run(conn, garden)
+        result = sync_repo.run(conn, garden, resend=args.resend)
         print(f"Pushed {result['push']['pushed']} change(s), applied {result['pull']['applied']} change(s)")
         _print_sync_notes(result["pull"]["skipped"])
 

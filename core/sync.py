@@ -38,10 +38,16 @@ from core import gardens as gardens_repo
 from core import motes as motes_repo
 from core import oplog
 from core import relationships as rel_repo
+from core import sync_remote
 from core.db import get_connection, initialize_database
 from core.device import get_device_id
 
 OPS_SUBDIR = "ops"
+
+# Reserved key in sync_state (never a real device_id, which is always a
+# uuid4) holding how far this garden has paged through the server's
+# global ops cursor -- see _get_server_cursor/_set_server_cursor below.
+_SERVER_CURSOR_KEY = "__server_cursor__"
 
 
 def _ops_dir(sync_dir: str | Path, garden: str) -> Path:
@@ -74,6 +80,14 @@ def _set_state(conn: sqlite3.Connection, device_id: str, seq: int) -> None:
 
 def _all_state(conn: sqlite3.Connection) -> dict[str, int]:
     return {r["remote_device_id"]: r["last_applied_seq"] for r in conn.execute("SELECT * FROM sync_state")}
+
+
+def _get_server_cursor(conn: sqlite3.Connection) -> int:
+    return _get_state(conn, _SERVER_CURSOR_KEY)
+
+
+def _set_server_cursor(conn: sqlite3.Connection, since_id: int) -> None:
+    _set_state(conn, _SERVER_CURSOR_KEY, since_id)
 
 
 def _mote_exists(conn: sqlite3.Connection, mote_id: str) -> bool:
@@ -163,15 +177,29 @@ def _backfill_orphans(conn: sqlite3.Connection, device_id: str) -> None:
         conn.commit()
 
 
-def push(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
+def push(
+    conn: sqlite3.Connection,
+    garden: str,
+    sync_dir: str | Path | None = None,
+    *,
+    resend: bool = False,
+) -> dict[str, Any]:
     """Write this device's oplog rows since the last push as one new,
-    immutable batch file. A device only ever creates files under ops/,
-    never edits one -- that is what makes this safe for a naive folder-
-    sync tool to carry."""
+    immutable batch (a file under ops/ for a local folder, one POST for
+    a remote server). A device only ever adds new history, never edits
+    existing history -- that is what makes this safe for a naive
+    folder-sync tool to carry, and safe to retry against a server.
+
+    `resend=True` ignores this device's own push progress and resends
+    its entire local history -- needed the first time a garden already
+    synced through one sync_dir is pointed at a different, empty one
+    (see the migration note in core/sync.py's module docstring): without
+    it, a device that already pushed everything to the old sync_dir
+    would believe it has nothing left to push to the new one."""
     sync_dir = _resolve_sync_dir(garden, sync_dir)
     device_id = get_device_id()
     _backfill_orphans(conn, device_id)
-    last_pushed = _get_state(conn, device_id)
+    last_pushed = 0 if resend else _get_state(conn, device_id)
 
     rows = conn.execute(
         "SELECT * FROM oplog WHERE device_id = ? AND seq > ? ORDER BY seq",
@@ -180,9 +208,18 @@ def push(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = No
     if not rows:
         return {"pushed": 0}
 
+    to_seq = rows[-1]["seq"]
+
+    if sync_remote.is_remote(sync_dir):
+        ops = [_row_to_op(row) for row in rows]
+        result = sync_remote.push(sync_dir, garden, device_id, ops)
+        _set_state(conn, device_id, to_seq)
+        conn.commit()
+        return {"pushed": len(rows), **result}
+
     ops_dir = _ops_dir(sync_dir, garden)
     ops_dir.mkdir(parents=True, exist_ok=True)
-    from_seq, to_seq = rows[0]["seq"], rows[-1]["seq"]
+    from_seq = rows[0]["seq"]
     path = ops_dir / f"{device_id}__{from_seq}-{to_seq}.jsonl"
     with path.open("w") as f:
         for row in rows:
@@ -263,29 +300,47 @@ def _apply_op(conn: sqlite3.Connection, op: dict[str, Any]) -> dict[str, Any] | 
 
 
 def pull(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
-    """Replay every op from every other device's files that we haven't
-    applied yet. Ops from *all* pending files are merged and sorted by
-    timestamp before replay (not applied file-by-file) so a relationship
-    created moments after its mote, even from a different device, is
-    very likely to land in the right order -- this relies on the same
-    roughly-synced-clocks assumption noted at the top of this module."""
+    """Replay every op from every other device that we haven't applied
+    yet. Ops are merged and sorted by timestamp before replay (not
+    applied batch-by-batch) so a relationship created moments after its
+    mote, even from a different device, is very likely to land in the
+    right order -- this relies on the same roughly-synced-clocks
+    assumption noted at the top of this module.
+
+    The per-device `seq` baseline filter below is applied regardless of
+    transport, including against the server: the server's own cursor is
+    coarser than per-device seq, so a resend (push(resend=True), see the
+    migration note above) can hand back ops a device already applied --
+    this filter silently no-ops those, same as it already silently
+    no-ops a stale local `.jsonl` file today."""
     sync_dir = _resolve_sync_dir(garden, sync_dir)
     self_id = get_device_id()
-    ops_dir = _ops_dir(sync_dir, garden)
-    if not ops_dir.exists():
-        return {"applied": 0, "skipped": []}
-
     baseline = _all_state(conn)
     pending: dict[tuple[str, int], dict[str, Any]] = {}
-    for path in sorted(ops_dir.glob("*.jsonl")):
-        for line in path.read_text().splitlines():
-            if not line.strip():
-                continue
-            op = json.loads(line)
-            if op["device_id"] == self_id:
-                continue  # our own history, echoed back by the sync folder
-            if op["seq"] > baseline.get(op["device_id"], 0):
-                pending[(op["device_id"], op["seq"])] = op
+
+    if sync_remote.is_remote(sync_dir):
+        since_id = _get_server_cursor(conn)
+        next_since_id = since_id
+        while True:
+            page, next_since_id = sync_remote.pull_page(sync_dir, garden, self_id, next_since_id)
+            if not page:
+                break
+            for op in page:
+                if op["seq"] > baseline.get(op["device_id"], 0):
+                    pending[(op["device_id"], op["seq"])] = op
+    else:
+        ops_dir = _ops_dir(sync_dir, garden)
+        if not ops_dir.exists():
+            return {"applied": 0, "skipped": []}
+        for path in sorted(ops_dir.glob("*.jsonl")):
+            for line in path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                op = json.loads(line)
+                if op["device_id"] == self_id:
+                    continue  # our own history, echoed back by the sync folder
+                if op["seq"] > baseline.get(op["device_id"], 0):
+                    pending[(op["device_id"], op["seq"])] = op
 
     ordered = sorted(pending.values(), key=lambda o: (o["ts"], o["device_id"], o["seq"]))
 
@@ -293,16 +348,29 @@ def pull(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = No
     skipped: list[dict[str, Any]] = []
     advanced: dict[str, int] = {}
     stalled: set[str] = set()
+    # An op left unapplied because its device stalled must still be
+    # fetchable on the *next* pull -- the local .jsonl file it came from
+    # just sits in ops_dir untouched, so the existing per-device seq
+    # baseline naturally re-offers it next time. The server transport has
+    # no such file to re-read: advancing the cursor past it would lose it
+    # for good. So the cursor only ever advances up to the earliest
+    # unresolved op, leaving it (and everything after it) to be re-fetched
+    # and re-attempted on a later pull.
+    unresolved_since_id: int | None = None
     with oplog.suppressed():
         for op in ordered:
             dev = op["device_id"]
             if dev in stalled:
+                if "server_id" in op:
+                    unresolved_since_id = min(unresolved_since_id or op["server_id"], op["server_id"])
                 continue
             try:
                 note = _apply_op(conn, op)
             except sqlite3.IntegrityError as e:
                 skipped.append({"device_id": dev, "seq": op["seq"], "reason": str(e)})
                 stalled.add(dev)
+                if "server_id" in op:
+                    unresolved_since_id = min(unresolved_since_id or op["server_id"], op["server_id"])
                 continue
             applied += 1
             advanced[dev] = op["seq"]
@@ -311,14 +379,21 @@ def pull(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = No
 
     for dev, seq in advanced.items():
         _set_state(conn, dev, seq)
+    if sync_remote.is_remote(sync_dir):
+        cursor = next_since_id if unresolved_since_id is None else unresolved_since_id - 1
+        _set_server_cursor(conn, cursor)
     conn.commit()
     return {"applied": applied, "skipped": skipped}
 
 
-def run(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
-    """push() then pull() -- the everyday one-shot sync."""
+def run(
+    conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None, *, resend: bool = False
+) -> dict[str, Any]:
+    """push() then pull() -- the everyday one-shot sync. `resend` is for
+    moving an already-synced garden onto a new, empty sync_dir -- see
+    push()'s docstring."""
     sync_dir = _resolve_sync_dir(garden, sync_dir)
-    return {"push": push(conn, garden, sync_dir), "pull": pull(conn, garden, sync_dir)}
+    return {"push": push(conn, garden, sync_dir, resend=resend), "pull": pull(conn, garden, sync_dir)}
 
 
 def status(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
@@ -331,7 +406,7 @@ def status(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = 
     ).fetchone()["n"]
     remotes = [
         {"device_id": dev, "last_applied_seq": seq}
-        for dev, seq in state.items() if dev != self_id
+        for dev, seq in state.items() if dev not in (self_id, _SERVER_CURSOR_KEY)
     ]
     return {
         "device_id": self_id,
@@ -344,14 +419,17 @@ def status(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = 
 
 
 def init(garden: str, sync_dir: str | Path, clone: bool = False) -> dict[str, Any]:
-    """Point `garden` at a shared folder. If the folder already holds
-    history for it and there's no local garden by that name yet, the
-    caller must pass clone=True -- otherwise this would silently create
-    an empty garden that then quietly diverges from real history the
-    user clearly meant to join."""
-    ops_dir = _ops_dir(sync_dir, garden)
-    ops_dir.mkdir(parents=True, exist_ok=True)
-    has_history = any(ops_dir.glob("*.jsonl"))
+    """Point `garden` at a shared folder or sync server. If the target
+    already holds history for it and there's no local garden by that
+    name yet, the caller must pass clone=True -- otherwise this would
+    silently create an empty garden that then quietly diverges from real
+    history the user clearly meant to join."""
+    if sync_remote.is_remote(sync_dir):
+        has_history = sync_remote.has_history(sync_dir, garden)
+    else:
+        ops_dir = _ops_dir(sync_dir, garden)
+        ops_dir.mkdir(parents=True, exist_ok=True)
+        has_history = any(ops_dir.glob("*.jsonl"))
 
     if not gardens_repo.garden_exists(garden):
         if has_history and not clone:
