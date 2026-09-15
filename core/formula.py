@@ -222,12 +222,20 @@ class Context:
     before it enters the linear system. Everything downstream -- the
     substitution loop, both solver backends -- then works in one
     consistent set of units without knowing units exist at all. Defaults
-    to declaring nothing, which is exactly today's behavior."""
+    to declaring nothing, which is exactly today's behavior.
+
+    `neighbors` lists the motes immediately connected to a given mote --
+    any relationship type, either direction -- for connected-name
+    references (`R1.current` reaching a wired-up mote literally named
+    "R1", without a declared role). Defaults to nobody connected, which
+    makes the feature simply absent for a caller that doesn't wire it up
+    (core/modoc.py's `expression_context`, existing tests)."""
     mote_id: str
     properties: Callable[[str], dict]
     unknown_keys: Callable[[str], set[str]]
     targets: Callable[[str, str], list[str]]
     sources: Callable[[str, str], list[str]]
+    neighbors: Callable[[str], list[str]] = lambda mote_id: []
     solved: dict[Unknown, float] = field(default_factory=dict)
     tick: float = 0.0
     previous: Callable[[str], dict] = lambda mote_id: {}
@@ -274,6 +282,32 @@ def parse_equation(text: str) -> Relation:
             f"{', '.join(sorted(_COMPARISONS.values()))}"
         )
     return Relation(body.left, body.comparators[0], operator)
+
+
+def attribute_bases(text: str) -> list[str]:
+    """Every bare identifier used as the left side of a dotted access in
+    `text` (e.g. `["R1", "B"]` for `"R1.voltage == B.x"`), in source
+    order with duplicates removed, without evaluating anything.
+
+    An editor that wants to know what an equation *references* before
+    running it reads this rather than parsing formulas itself --
+    core/simulation.py's `unresolved_equation_names()` is what an
+    unconnected name here turns into: an offer to wire up the missing
+    relationship (docs/simulation.md's "Connected-name references"). A
+    formula that fails to parse simply yields nothing here -- this never
+    raises the parse errors evaluate_equation() would; a checker's job is
+    to inform an editor, not to be a second place a bad formula fails."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return []
+    bases: list[str] = []
+    for side in (relation.left, relation.right):
+        for node in ast.walk(side):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                if node.value.id not in bases:
+                    bases.append(node.value.id)
+    return bases
 
 
 def evaluate_equation(text: str, ctx: Context) -> Equation:
@@ -400,20 +434,56 @@ def _attribute(node: ast.Attribute, ctx: Context):
 
 
 def _role_or_value(node: ast.Attribute, ctx: Context):
-    """Resolve the left-hand side of an attribute access, preferring a
-    declared role. Returns the Role it matched (or None) alongside the
-    value, because arity decides whether one mote collapses to a scalar."""
+    """Resolve the left-hand side of an attribute access: a declared
+    role first, then a mote connected to the anchor by name, then
+    whatever a plain property lookup makes of it (which -- unless it
+    happens to be a MoteSet already -- _attribute() will reject). Returns
+    the Role it matched (or None) alongside the value, because arity
+    decides whether one mote collapses to a scalar; a name match always
+    reaches at most one mote (see _connected_by_name)."""
     if not isinstance(node.value, ast.Name):
         return None, _evaluate(node.value, ctx)
-    role = ctx.roles(ctx.mote_id).get(node.value.id)
-    if role is None:
-        return None, _evaluate(node.value, ctx)
+    identifier = node.value.id
+    role = ctx.roles(ctx.mote_id).get(identifier)
+    if role is not None:
+        mote_ids = ctx.targets(ctx.mote_id, role.name)
+        problem = roles_repo.arity_problem(role, len(mote_ids))
+        if problem is not None:
+            raise FormulaError(f"mote {ctx.mote_id[:8]}: {problem}")
+        return role, MoteSet(mote_ids, role.name)
 
-    mote_ids = ctx.targets(ctx.mote_id, role.name)
-    problem = roles_repo.arity_problem(role, len(mote_ids))
-    if problem is not None:
-        raise FormulaError(f"mote {ctx.mote_id[:8]}: {problem}")
-    return role, MoteSet(mote_ids, role.name)
+    matches = _connected_by_name(ctx, identifier)
+    if matches is not None:
+        return None, MoteSet(matches, identifier)
+
+    return None, _evaluate(node.value, ctx)
+
+
+def _connected_by_name(ctx: Context, name: str) -> list[str] | None:
+    """A mote immediately wired to the anchor -- any relationship type,
+    either direction -- whose `name` property equals `name`. None means
+    "no such neighbor", which sends the caller on to the ordinary
+    property-lookup path (and that path's existing error, if `name`
+    isn't a property of the anchor either).
+
+    Deliberately narrower than a role: this exists so a garden wired by
+    hand doesn't need a role declared for a one-off reference, not to
+    replace targets()/sources() for real navigation -- which is why two
+    connected motes sharing a name is an error rather than a silently
+    collapsed set. A name is meant to pick one specific thing."""
+    matches = [
+        mid for mid in ctx.neighbors(ctx.mote_id)
+        if ctx.properties(mid).get("name") == name
+    ]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise FormulaError(
+            f"'{name}' matches {len(matches)} motes connected to mote "
+            f"{ctx.mote_id[:8]} -- rename one of them, or reach it with "
+            f"targets('relationship-type')"
+        )
+    return matches
 
 
 def _call(node: ast.Call, ctx: Context):

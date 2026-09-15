@@ -25,6 +25,7 @@ from core.relationships import (
 from core.gardens import (
     create_garden,
     delete_garden,
+    rename_garden,
     get_default_garden,
     list_gardens,
     resolve_garden,
@@ -88,6 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
     garden_delete.add_argument("name", help="Garden name")
     garden_restore = garden_sub.add_parser("restore", help="Restore a deleted garden")
     garden_restore.add_argument("name", help="Garden name")
+    garden_rename = garden_sub.add_parser("rename", help="Rename a garden")
+    garden_rename.add_argument("old", help="Current garden name")
+    garden_rename.add_argument("new", help="New garden name")
 
     # ------------------ SYNC COMMANDS ------------------
     # A sibling of `mote`/`rel`, not `garden`: push/pull/run/status need
@@ -330,8 +334,11 @@ def _handle_garden(args) -> None:
     elif args.action == "restore":
         restore_garden(args.name)
         print(f"Garden restored: {args.name}")
+    elif args.action == "rename":
+        rename_garden(args.old, args.new)
+        print(f"Garden renamed: {args.old} -> {args.new}")
     else:
-        print("Specify a garden action: create, list, delete, restore")
+        print("Specify a garden action: create, list, delete, restore, rename")
 
 
 def _handle_sync_init(garden: str, args) -> None:

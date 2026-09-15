@@ -38,6 +38,7 @@ from core.formula import (
     FormulaError,
     NonlinearError,
     Unknown,
+    attribute_bases,
     evaluate_equation,
     relation_operator,
 )
@@ -190,6 +191,12 @@ class _GardenView:
     in_edges: dict[tuple[str, str], list[str]]
     units: dict[str, dict[str, str]] = field(default_factory=dict)
     roles: dict[str, dict[str, roles_repo.Role]] = field(default_factory=dict)
+    # Every mote immediately wired to a given mote, any relationship type
+    # collapsed together and either direction -- for connected-name
+    # references (core/formula.py's Context.neighbors). A coarser index
+    # than out_edges/in_edges on purpose: a name reference doesn't care
+    # which relationship carried it, only that one did.
+    neighbors: dict[str, list[str]] = field(default_factory=dict)
 
 
 def step_payloads(steps: "list[StepResult] | list[RunTick]") -> list[dict]:
@@ -321,6 +328,7 @@ def run_time_series(
     strict_units: bool = False,
     scenario: str | None = None,
     strict_constraints: bool = False,
+    detail: str | None = None,
 ) -> TimeSeriesResult:
     """Runs step_count steps entirely in memory, each step's solve
     starting from the *previous* step's solved values rather than
@@ -356,7 +364,14 @@ def run_time_series(
     hypothetical by construction, and `commit` is an explicit request to
     make something the garden's state, so silently ignoring one of the
     two would be worse than refusing. save=True keeps the run for
-    comparison, which is what a scenario is usually for."""
+    comparison, which is what a scenario is usually for.
+
+    `detail` is an optional free-text note attached to the logged run
+    (simulation_runs.detail, the same column a failed run's error message
+    lives in) -- a caller can use it to mark runs of a kind a frontend
+    wants to tell apart later, e.g. Motion's Fast mode tagging its own
+    auto-commits so they can be filtered out of the Saved-runs list
+    without losing them from the audit trail."""
     if commit and save:
         raise ValueError("commit and save are mutually exclusive")
     if commit and scenario is not None:
@@ -450,7 +465,7 @@ def run_time_series(
         if commit:
             _write_back(conn, baseline, cumulative)
         run_id = _log_run(
-            conn, run_number, "ok", None, [s.changes for s in steps],
+            conn, run_number, "ok", detail, [s.changes for s in steps],
             committed=commit, step_journals=journals, scenario_id=scenario,
         )
         logger.info(
@@ -481,10 +496,13 @@ def _build_view(
 
     out_edges: dict[tuple[str, str], list[str]] = {}
     in_edges: dict[tuple[str, str], list[str]] = {}
+    neighbor_sets: dict[str, set[str]] = {}
 
     for rel in relationships:
         out_edges.setdefault((rel.from_id, rel.type), []).append(rel.to_id)
         in_edges.setdefault((rel.to_id, rel.type), []).append(rel.from_id)
+        neighbor_sets.setdefault(rel.from_id, set()).add(rel.to_id)
+        neighbor_sets.setdefault(rel.to_id, set()).add(rel.from_id)
 
     acting_as_species = _acting_as_species(relationships)
     return _GardenView(
@@ -494,6 +512,7 @@ def _build_view(
         in_edges,
         _units_for(properties),
         _roles_for(properties, relationships, acting_as_species),
+        {mote_id: list(ids) for mote_id, ids in neighbor_sets.items()},
     )
 
 
@@ -806,6 +825,7 @@ def _context(
         unknown_keys=lambda mid: view.freedoms.get(mid, set()),
         targets=lambda mid, type_: view.out_edges.get((mid, type_), []),
         sources=lambda mid, type_: view.in_edges.get((mid, type_), []),
+        neighbors=lambda mid: view.neighbors.get(mid, []),
         solved=solved if reads is None else reads.solved(mote_id, solved),
         tick=tick,
         previous=previous_properties,
@@ -927,6 +947,55 @@ def _capability_units(
         return None
 
 
+def unresolved_equation_names(
+    conn: sqlite3.Connection,
+    mote_id: str,
+    equation: str,
+    scenario: str | None = None,
+) -> list[dict]:
+    """Names `equation` references that aren't reachable from `mote_id`
+    -- neither a declared role nor a mote already connected to it (see
+    core/formula.py's connected-name resolution) -- but that do match
+    some *other* mote's name somewhere in the garden. Each entry names
+    the candidate mote id(s) an editor could offer to wire up a
+    relationship to, turning an opaque "no property" failure into a
+    one-click fix (docs/simulation.md's "Connected-name references").
+
+    Read-only and does not evaluate the equation itself: a name that
+    doesn't parse, isn't any mote's name, or is already reachable, is
+    simply absent from the result rather than reported as a problem.
+    Several candidates for one name means the garden has more than one
+    mote by that name -- surfaced as-is, so a caller can list them rather
+    than silently connecting to a guess."""
+    properties = {m.id: m.properties for m in list_motes(conn)}
+    relationships = list_relationships(conn)
+    case = _resolve_scenario(conn, scenario)
+    view = _build_view(scenarios_repo.apply(properties, case), relationships)
+
+    role_names = set(view.roles.get(mote_id, {}))
+    connected_names = {
+        view.properties.get(mid, {}).get("name")
+        for mid in view.neighbors.get(mote_id, [])
+    }
+
+    by_name: dict[str, list[str]] = {}
+    for other_id, props in view.properties.items():
+        if other_id == mote_id:
+            continue
+        name = props.get("name")
+        if isinstance(name, str) and name:
+            by_name.setdefault(name, []).append(other_id)
+
+    results = []
+    for name in attribute_bases(equation):
+        if name in role_names or name in connected_names:
+            continue
+        candidates = by_name.get(name)
+        if candidates:
+            results.append({"name": name, "candidates": candidates})
+    return results
+
+
 def check_dimensions(
     view: _GardenView,
     pairs: list[tuple[rules_repo.Rule, str]],
@@ -950,6 +1019,8 @@ def check_dimensions(
             capability_units=lambda mid, rel, op: _capability_units(view, cache, mid, rel, op),
             label=lambda mid: _mote_label(view, mid),
             roles=lambda mid: view.roles.get(mid, {}),
+            neighbors=lambda mid: view.neighbors.get(mid, []),
+            mote_name=lambda mid: view.properties.get(mid, {}).get("name"),
         )
         for problem in check_equation(rule.equation, ctx):
             problems.append(f"{rule.name} on {_mote_label(view, mote_id)}: {problem}")

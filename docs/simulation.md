@@ -81,6 +81,7 @@ to both.
 |---|---|
 | `resistance` | A property of the mote the rule is running against. If it is among the mote's [freedoms](#the-three-pieces), it becomes something to solve for; otherwise it must already hold a number. |
 | `turbine.work` | A property of the mote filling the declared role `turbine` (see [Roles](#roles)). A bare name is always a property; a name in this position is always a role. |
+| `R1.current` | A property of a mote *connected* to the anchor -- any relationship type, either direction -- whose own `name` matches `R1`, tried when the identifier isn't a declared role (see [Connected-name references](#connected-name-references)). |
 | `targets('a')` | The motes this one points at via a relationship of type `a`. |
 | `sources('a')` | The motes pointing *at* this one via a relationship of type `a`. |
 | `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached -- unlike an `arity: many` role, which never collapses. |
@@ -367,6 +368,49 @@ is the whole of what makes them strict.
 
 Chained comparisons (`0 <= x <= 1`) are rejected with advice to write
 them as two relations -- which is what they are.
+
+## Connected-name references
+
+A dotted identifier that isn't a declared role can still reach a mote by
+its literal name, as long as that mote is directly wired to the rule's
+anchor -- any relationship type, either direction:
+
+```text
+R1 --relates_to--> R2
+```
+
+```text
+R1.voltage - R2.voltage == current * resistance
+```
+
+This is a shorthand for `targets('relates_to').voltage`, not a
+replacement for it: it exists so a garden wired by hand doesn't need a
+relationship *type* chosen and a role declared just to write one
+reference, and it stops working the moment the relationship is removed
+-- the connection stays the thing that makes a reference legal, exactly
+as it always has. The name it matches is the target mote's own `name`
+property, so it only ever reaches a mote you can already see labelled
+that way on the board.
+
+Two things keep this from becoming a second, looser navigation:
+
+- **A role always wins.** If the identifier is a role declared on the
+  anchor, it resolves as a role (see [Roles](#roles) below) and the name
+  search never runs -- a role is a stated intention and takes precedence
+  over an accidental name collision.
+- **A name must pick exactly one mote.** Two motes connected to the same
+  anchor sharing a name is rejected outright (`'R2' matches 2 motes
+  connected to mote ...`), never silently combined the way a `many` role
+  or `sum()` would. A name is for reaching one specific thing.
+
+An identifier that matches neither a role nor a connected mote's name
+falls through to an ordinary property lookup, and fails exactly as it
+always did if the anchor has no such property either -- so a name that
+exists elsewhere in the garden but isn't wired to this mote is simply
+not visible from here, on purpose. Motion's equation editor detects this
+case (a name that exists in the garden but isn't reachable) and offers
+to draw the missing relationship rather than leaving you to work out
+why the reference fails.
 
 ## Roles
 

@@ -7,17 +7,22 @@ from core import formula
 from core.dimensions import DimensionContext, check_equation
 
 
-def context(mote_id="r1", units=None, targets=None, capability_units=None):
+def context(mote_id="r1", units=None, targets=None, capability_units=None,
+            neighbors=None, names=None):
     """A checker context over plain dicts -- the same testing shape
     core/formula.py's Context is built for."""
     units = units or {}
     targets = targets or {}
+    neighbors = neighbors or {}
+    names = names or {}
     return DimensionContext(
         mote_id=mote_id,
         units=lambda mid: units.get(mid, {}),
         targets=lambda mid, rel: targets.get((mid, rel), []),
         sources=lambda mid, rel: [],
         capability_units=capability_units or (lambda *a: None),
+        neighbors=lambda mid: neighbors.get(mid, []),
+        mote_name=lambda mid: names.get(mid),
     )
 
 
@@ -267,3 +272,28 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
     # No assertion on the result -- the point is that it doesn't raise
     # 'unknown function', which check_equation() would surface.
     check_equation(f"y == {calls[name]}", context(targets={("r1", "a"): ["n1"]}))
+
+
+# ---- connected-name references ----
+
+def test_connected_name_dimension_is_checked_like_a_role():
+    units = {"r1": {"x": "V"}, "n1": {"voltage": "A"}}
+    problems = check_equation(
+        "x == n1.voltage",
+        context(units=units, neighbors={"r1": ["n1"]}, names={"n1": "n1"}),
+    )
+    assert len(problems) == 1
+    assert "different dimensions" in problems[0]
+
+
+def test_ambiguous_connected_name_reports_nothing_here():
+    # An ambiguous name is a resolution problem, not a units problem --
+    # core/formula.py raises the real error at solve time; the checker
+    # only swallows it here, the same way it swallows any other
+    # FormulaError the real evaluator would also reject (see
+    # check_equation's docstring).
+    problems = check_equation(
+        "y == n1.voltage",
+        context(neighbors={"r1": ["n1", "n1b"]}, names={"n1": "n1", "n1b": "n1"}),
+    )
+    assert problems == []

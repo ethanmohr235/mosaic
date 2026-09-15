@@ -98,6 +98,12 @@ class DimensionContext:
     provider's Capability already declares -- and returns None when the
     model, operation, or unit can't be determined, which simply makes
     that call unspecified rather than an error.
+
+    `neighbors` and `mote_name` back connected-name references
+    (`R1.current`), mirroring core/formula.py's Context -- the two walks
+    must agree about what a name means, exactly as they already agree
+    about roles. Both default to "nobody connected"/"nameless", so a
+    caller that doesn't wire them up simply never matches one.
     """
     mote_id: str
     units: Callable[[str], dict[str, str]]
@@ -106,6 +112,8 @@ class DimensionContext:
     capability_units: Callable[[str, str, str], str | None] = _no_capability_units
     label: Callable[[str], str] = lambda mote_id: mote_id[:8]
     roles: Callable[[str], dict] = lambda mote_id: {}
+    neighbors: Callable[[str], list[str]] = lambda mote_id: []
+    mote_name: Callable[[str], str | None] = lambda mote_id: None
 
 
 def check_equation(text: str, ctx: DimensionContext) -> list[str]:
@@ -278,15 +286,36 @@ class _Checker:
     def _role_or_value(self, node: ast.Attribute):
         if not isinstance(node.value, ast.Name):
             return None, self._walk(node.value)
-        role = self.ctx.roles(self.ctx.mote_id).get(node.value.id)
-        if role is None:
-            return None, self._walk(node.value)
+        identifier = node.value.id
+        role = self.ctx.roles(self.ctx.mote_id).get(identifier)
+        if role is not None:
+            mote_ids = self.ctx.targets(self.ctx.mote_id, role.name)
+            problem = roles_repo.arity_problem(role, len(mote_ids))
+            if problem is not None:
+                raise FormulaError(f"mote {self.ctx.mote_id[:8]}: {problem}")
+            return role, _Motes(mote_ids, role.name)
 
-        mote_ids = self.ctx.targets(self.ctx.mote_id, role.name)
-        problem = roles_repo.arity_problem(role, len(mote_ids))
-        if problem is not None:
-            raise FormulaError(f"mote {self.ctx.mote_id[:8]}: {problem}")
-        return role, _Motes(mote_ids, role.name)
+        matches = self._connected_by_name(identifier)
+        if matches is not None:
+            return None, _Motes(matches, identifier)
+
+        return None, self._walk(node.value)
+
+    def _connected_by_name(self, name: str) -> list[str] | None:
+        """Mirrors core/formula.py's _connected_by_name."""
+        matches = [
+            mid for mid in self.ctx.neighbors(self.ctx.mote_id)
+            if self.ctx.mote_name(mid) == name
+        ]
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise FormulaError(
+                f"'{name}' matches {len(matches)} motes connected to mote "
+                f"{self.ctx.mote_id[:8]} -- rename one of them, or reach it "
+                f"with targets('relationship-type')"
+            )
+        return matches
 
     def _call(self, node: ast.Call):
         if not isinstance(node.func, ast.Name):

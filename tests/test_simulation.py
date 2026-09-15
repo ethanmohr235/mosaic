@@ -13,6 +13,7 @@ from core.simulation import (
     run_ticks,
     run_time_series,
     step_payloads,
+    unresolved_equation_names,
 )
 from core.species import set_species
 
@@ -100,6 +101,52 @@ def test_rerunning_gives_identical_values(conn, divider):
     run_simulation(conn)
     second = {name: get_mote(conn, mid).properties for name, mid in divider.items()}
     assert first == second
+
+
+def test_connected_name_reference_solves_through_the_full_stack(conn):
+    # A rule may reach a wired-up mote by its literal name (`B.x`)
+    # instead of targets('relates_to').x -- see core/formula.py's
+    # _connected_by_name. Exercised here through run_simulation() itself
+    # so the whole view-building/Context-wiring path (core/simulation.py)
+    # is covered, not just the formula walk in isolation.
+    a = create_mote(conn, {"name": "A", "x": 5, "freedoms": "y"})
+    b = create_mote(conn, {"name": "B", "x": 5})
+    create_relationship(conn, a, b, "relates_to")
+    add_rule(conn, a, "Sum", "y == x + B.x")
+
+    run_simulation(conn)
+
+    assert prop(conn, a, "y") == pytest.approx(10.0)
+
+
+# ---- unresolved_equation_names ----
+
+def test_unresolved_equation_names_offers_an_unconnected_mote(conn):
+    a = create_mote(conn, {"name": "A"})
+    b = create_mote(conn, {"name": "B", "x": 5})
+    result = unresolved_equation_names(conn, a, "y == B.x")
+    assert result == [{"name": "B", "candidates": [b]}]
+
+
+def test_unresolved_equation_names_ignores_already_connected_names(conn):
+    a = create_mote(conn, {"name": "A"})
+    b = create_mote(conn, {"name": "B", "x": 5})
+    create_relationship(conn, a, b, "relates_to")
+    assert unresolved_equation_names(conn, a, "y == B.x") == []
+
+
+def test_unresolved_equation_names_ignores_names_nobody_has(conn):
+    a = create_mote(conn, {"name": "A"})
+    assert unresolved_equation_names(conn, a, "y == NoSuchMote.x") == []
+
+
+def test_unresolved_equation_names_lists_every_candidate_for_a_shared_name(conn):
+    a = create_mote(conn, {"name": "A"})
+    b1 = create_mote(conn, {"name": "B", "x": 1})
+    b2 = create_mote(conn, {"name": "B", "x": 2})
+    result = unresolved_equation_names(conn, a, "y == B.x")
+    assert result[0]["name"] == "B"
+    assert set(result[0]["candidates"]) == {b1, b2}
 
 
 def test_editing_an_input_changes_the_solution(conn, divider):
