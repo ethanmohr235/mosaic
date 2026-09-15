@@ -24,8 +24,10 @@ from datetime import datetime
 
 import webview
 
+from api_common import CommandBarApi, InspectorApi
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
+from api_common import open_gardens as _open_gardens
 from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core import calendar as calendar_repo
@@ -59,7 +61,7 @@ SERIES = "series"
 OCCURRENCE = "occurrence"
 
 
-class Api:
+class Api(InspectorApi, CommandBarApi):
     """Every read takes the visible window as arguments rather than
     holding a cursor of its own. The frontend owns where the calendar is
     scrolled to; asking for a range keeps that the one source of truth
@@ -143,6 +145,20 @@ class Api:
         self._garden = resolved
         self._best_effort_sync()
         return {"garden": resolved}
+
+    @_synchronized
+    def open_gardens(self, sync: bool = False) -> dict:
+        """Open the shared Gardens window (gardens_app/): create, rename,
+        delete, import, export and sync, for every garden rather than
+        just this one.
+
+        All six windows expose this same method, which is the point --
+        garden management used to exist once, privately, inside
+        Monarch's own modal, so doing any of it from here meant opening
+        Monarch first. Switching which garden *this* window shows stays
+        here (switch_garden above); everything about the gardens
+        themselves is one window all six can open."""
+        return _open_gardens(self._garden, sync=sync)
 
     @_synchronized
     def initial_focus(self) -> str | None:

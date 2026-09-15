@@ -378,7 +378,12 @@ function buildLink(node) {
   if (node.moteId) {
     button.style.color = colorOf(node);
     button.title = `${kindOf(node)} · ${node.moteId}`;
-    button.onclick = () => selectMote(node.moteId);
+    button.onclick = () => selectMote(node.moteId, { anchor: button });
+    button.oncontextmenu = (event) => {
+      event.preventDefault();
+      ContextMenu.open(event.clientX, event.clientY,
+                       ContextMenu.inspectItems(node.moteId, button));
+    };
   } else {
     button.classList.add("broken");
     button.title = node.error || "unresolved";
@@ -578,11 +583,15 @@ function drawProblems() {
   });
 }
 
-function selectMote(moteId) {
+function selectMote(moteId, options = {}) {
   focusId = moteId === payload.anchor.id ? null : moteId;
   dataOpen = true;
   applyLayout();
   drawPanel(moteId);
+  // Mora could read a mote's properties and edit none of them -- the
+  // data panel is a reading surface beside the prose. Editing one is
+  // now the same act here as anywhere else.
+  Inspector.open(moteId, { anchor: options.anchor, newTab: !!options.newTab });
 }
 
 // ---- status bar ----------------------------------------------------
@@ -839,6 +848,23 @@ async function createNote() {
 
 // ---- garden menu ----
 
+/** The "Manage gardens…" footer every one of the six garden menus
+ *  carries, byte for byte the same in each -- the shared Gardens window
+ *  is only standard if the way in is. */
+function gardenMenuManageItem(close) {
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "menu-item";
+  item.textContent = "Manage gardens…";
+  item.title = "Create, rename, import, export and sync gardens";
+  item.onclick = () => { close(); api.open_gardens(); };
+  const frag = document.createDocumentFragment();
+  frag.append(sep, item);
+  return frag;
+}
+
 async function openGardenMenu() {
   const menu = $("garden-menu");
   if (!menu.classList.contains("hidden")) { closeGardenMenu(); return; }
@@ -861,6 +887,13 @@ async function openGardenMenu() {
     };
     menu.append(item);
   });
+
+  // Every window ends its garden menu with the same two lines: the
+  // gardens you can switch to, then the one window where gardens
+  // themselves are made, renamed, imported, exported and synced
+  // (gardens_app/). Switching is per window; managing is not, which is
+  // why this opens a window instead of a modal.
+  menu.append(gardenMenuManageItem(closeGardenMenu));
   menu.classList.remove("hidden");
   $("garden-btn").setAttribute("aria-expanded", "true");
 }
@@ -1420,6 +1453,12 @@ function setupLauncher() {
 
 async function init() {
   api = window.pywebview.api;
+  Inspector.install({ api, onChanged: () => renderNow(), notesDoor: false });
+  CommandBar.install({
+    api,
+    onChanged: () => renderNow(),
+    onNavigate: (moteId) => Inspector.open(moteId),
+  });
   wire();
   applyLayout();
   $("garden-name").textContent = await api.current_garden();

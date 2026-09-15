@@ -44,13 +44,10 @@ const MONTHS = ["January", "February", "March", "April", "May", "June",
 const MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const UNKNOWN_COLOR = "oklch(0.62 0 0)";
+// Monday-first, which is how this window draws a week. The shared repeat
+// editor works in RRULE's own Sunday-first order; only this one lookup
+// needs the difference, so it stays here rather than becoming an option.
 const DAY_CODES = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
-const DAY_MIN = { MO: "M", TU: "T", WE: "W", TH: "T", FR: "F", SA: "S", SU: "S" };
-const FREQ_OPTS = [
-  { id: "NONE", label: "Once" }, { id: "DAILY", label: "Daily" }, { id: "WEEKLY", label: "Weekly" },
-  { id: "MONTHLY", label: "Monthly" }, { id: "YEARLY", label: "Yearly" },
-];
-const FREQ_UNIT = { DAILY: "day", WEEKLY: "week", MONTHLY: "month", YEARLY: "year" };
 
 const $ = (id) => document.getElementById(id);
 
@@ -667,6 +664,18 @@ function eventFor(o) {
     if (justDragged) return;
     select(o.id, o.key);
   };
+  // A placement is both a mote and an occurrence of one, so the menu
+  // offers both -- the inspector edits the mote, and "Remove this one"
+  // is about the rectangle that was actually clicked.
+  node.oncontextmenu = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    ContextMenu.open(event.clientX, event.clientY, [
+      ...ContextMenu.inspectItems(o.id, node),
+      "-",
+      { label: "Remove this occurrence", danger: true, run: () => deleteOccurrence(o) },
+    ]);
+  };
   return node;
 }
 
@@ -1189,7 +1198,7 @@ function drawStatus() {
 
 // ---- detail panel ----
 
-async function select(moteId, occurrenceKey) {
+async function select(moteId, occurrenceKey, options = {}) {
   selectedId = moteId;
   // Which *placement* was clicked, not just which mote: a weekly standup
   // draws five rectangles, and deleting "this one" has to know which one
@@ -1199,12 +1208,17 @@ async function select(moteId, occurrenceKey) {
   panel = await call(api.focus(moteId), "Could not read that mote.");
   drawPanel();
   draw();
+  // The docked panel stays for the things a *placement* has and a mote
+  // does not -- which occurrence was clicked, moving it, detaching it --
+  // while the mote itself opens in the shared inspector.
+  await Inspector.open(moteId, { anchor: options.anchor, newTab: !!options.newTab });
 }
 
 function closePanel() {
   selectedId = null;
   selectedKey = null;
   panel = null;
+  Inspector.close();
   $("panel").classList.add("hidden");
   draw();
 }
@@ -1378,111 +1392,46 @@ function drawDraft() {
   });
 }
 
-/** The repeat row's frequency pills plus, once one is chosen, the
- *  interval/weekday/ends controls beneath it. Ported from Monarch's
- *  interval picker, which used to own this: Monastery is the app that
- *  actually reads a `recurring` mote back (core/calendar.py, via
- *  dateutil), so it's the app that should author the rule too. Every
- *  control just mutates draft.rule and redraws -- same pattern as the
- *  species chips above. */
+/** The repeat controls, drawn by the shared interval widget
+ *  (frontend_shared/interval.js::repeatEditor).
+ *
+ *  This editor was written here, and for a while Monastery was the only
+ *  window that had one -- the picker in every other window had been
+ *  reduced to showing an RRULE as raw text, on the reasoning that
+ *  Monastery is the app that actually reads a `recurring` mote back
+ *  (core/calendar.py, via dateutil) and so should be the app that
+ *  authors the rule. That held right up until the inspector became one
+ *  surface in six windows, at which point "edit this date properly"
+ *  had to work wherever you were standing. The editor moved into the
+ *  shared widget; this is now one of its two callers.
+ *
+ *  draft.rule is the same shape either way, so composeRepeatLines below
+ *  is unchanged. */
 function drawRepeat() {
-  const pills = clear($("draft-freq-pills"));
-  for (const f of FREQ_OPTS) {
-    const pill = button("freq-pill" + (draft.rule.freq === f.id ? " on" : ""), f.label);
-    pill.dataset.freq = f.id;
-    pill.onclick = () => {
-      const byday = f.id === "WEEKLY" && !draft.rule.byday.length
-        ? [DAY_CODES[(new Date(`${draft.dateKey}T00:00`).getDay() + 6) % 7]]
-        : draft.rule.byday;
-      draft.rule = { ...draft.rule, freq: f.id, byday };
-      drawDraft();
-    };
-    pills.append(pill);
-  }
-
   const detail = clear($("draft-repeat-detail"));
-  if (draft.rule.freq === "NONE") return;
+  clear($("draft-freq-pills"));
 
-  const intervalRow = el("div", "repeat-stepper-row");
-  intervalRow.append(el("span", "draft-label", "Every"));
-  const intervalStepper = el("div", "repeat-stepper");
-  const intervalDec = button(null, "−");
-  intervalDec.onclick = () => { draft.rule.interval = Math.max(1, draft.rule.interval - 1); drawDraft(); };
-  const intervalInc = button(null, "+");
-  intervalInc.onclick = () => { draft.rule.interval = Math.min(30, draft.rule.interval + 1); drawDraft(); };
-  intervalStepper.append(intervalDec, el("span", null, draft.rule.interval), intervalInc);
-  intervalRow.append(intervalStepper);
-  intervalRow.append(el("span", "repeat-unit", FREQ_UNIT[draft.rule.freq] + (draft.rule.interval > 1 ? "s" : "")));
-  detail.append(intervalRow);
-
-  if (draft.rule.freq === "WEEKLY") {
-    const weekdayRow = el("div", "repeat-weekday-row");
-    weekdayRow.append(el("span", "draft-label", "On"));
-    const weekdayPills = el("div", "repeat-weekday-pills");
-    for (const c of DAY_CODES) {
-      const on = draft.rule.byday.includes(c);
-      const p = button("weekday-pill" + (on ? " on" : ""), DAY_MIN[c]);
-      p.dataset.day = c;
-      p.onclick = () => {
-        draft.rule.byday = on
-          ? draft.rule.byday.filter((x) => x !== c)
-          : DAY_CODES.filter((x) => draft.rule.byday.includes(x) || x === c);
-        drawDraft();
-      };
-      weekdayPills.append(p);
-    }
-    weekdayRow.append(weekdayPills);
-    detail.append(weekdayRow);
-  }
-
-  // "Ends" is a 3-way choice -- never, after N times, or on a date --
-  // and RRULE only ever carries one of COUNT/UNTIL at a time, so
-  // picking a mode clears whichever of the two isn't its own.
-  const endMode = draft.rule.until ? "UNTIL" : draft.rule.count ? "COUNT" : "NEVER";
-  const endsRow = el("div", "repeat-stepper-row");
-  endsRow.append(el("span", "draft-label", "Ends"));
-  const endsPills = el("div", "repeat-ends-pills");
-  for (const [id, label] of [["NEVER", "Never"], ["COUNT", "After"], ["UNTIL", "On date"]]) {
-    const p = button("freq-pill" + (endMode === id ? " on" : ""), label);
-    p.dataset.end = id;
-    p.onclick = () => {
-      if (id === "NEVER") { draft.rule.count = null; draft.rule.until = null; }
-      else if (id === "COUNT") { draft.rule.count = draft.rule.count || 5; draft.rule.until = null; }
-      else { draft.rule.until = draft.rule.until || draft.dateKey; draft.rule.count = null; }
+  if (draft.rule.freq === "NONE") {
+    const add = button("repeat-add", "+ Add a repeat rule");
+    add.onclick = () => {
+      const day = DAY_CODES[(new Date(`${draft.dateKey}T00:00`).getDay() + 6) % 7];
+      draft.rule = { ...draft.rule, freq: "WEEKLY", interval: 1, byday: [day] };
       drawDraft();
     };
-    endsPills.append(p);
+    detail.append(add);
+    return;
   }
-  endsRow.append(endsPills);
-  detail.append(endsRow);
 
-  if (endMode === "COUNT") {
-    const countRow = el("div", "repeat-stepper-row");
-    countRow.append(el("span", "draft-label", ""));
-    const countStepper = el("div", "repeat-stepper");
-    const countDec = button(null, "−");
-    countDec.onclick = () => { draft.rule.count = Math.max(1, draft.rule.count - 1); drawDraft(); };
-    const countInc = button(null, "+");
-    countInc.onclick = () => { draft.rule.count = draft.rule.count + 1; drawDraft(); };
-    countStepper.append(countDec, el("span", null, `${draft.rule.count}×`), countInc);
-    countRow.append(countStepper);
-    detail.append(countRow);
-  } else if (endMode === "UNTIL") {
-    const untilRow = el("div", "repeat-stepper-row");
-    untilRow.append(el("span", "draft-label", ""));
-    const untilInput = el("input");
-    untilInput.type = "date";
-    untilInput.value = draft.rule.until;
-    untilInput.onchange = () => {
-      if (!untilInput.value) return;
-      draft.rule.until = untilInput.value;
-      draft.rule.count = null;
-      drawDraft();
-    };
-    untilRow.append(untilInput);
-    detail.append(untilRow);
-  }
+  detail.append(IntervalPicker.repeatEditor(draft.rule, drawDraft));
+
+  const stop = button("repeat-add", "Remove repeat");
+  stop.onclick = () => {
+    draft.rule = { ...draft.rule, freq: "NONE", byday: [], count: null, until: null };
+    drawDraft();
+  };
+  detail.append(stop);
 }
+
 
 /** draft.rule as RRULE lines, the same grammar core/calendar.py's
  *  dateutil expansion reads (core/interval.py owns it). Mirrors the
@@ -1571,6 +1520,23 @@ async function createFromDraft() {
 
 // ---- garden menu ----
 
+/** The "Manage gardens…" footer every one of the six garden menus
+ *  carries, byte for byte the same in each -- the shared Gardens window
+ *  is only standard if the way in is. */
+function gardenMenuManageItem(close) {
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "menu-item";
+  item.textContent = "Manage gardens…";
+  item.title = "Create, rename, import, export and sync gardens";
+  item.onclick = () => { close(); api.open_gardens(); };
+  const frag = document.createDocumentFragment();
+  frag.append(sep, item);
+  return frag;
+}
+
 async function openGardenMenu() {
   const menu = $("garden-menu");
   if (!menu.classList.contains("hidden")) { closeGardenMenu(); return; }
@@ -1595,6 +1561,13 @@ async function openGardenMenu() {
     };
     menu.append(item);
   });
+
+  // Every window ends its garden menu with the same two lines: the
+  // gardens you can switch to, then the one window where gardens
+  // themselves are made, renamed, imported, exported and synced
+  // (gardens_app/). Switching is per window; managing is not, which is
+  // why this opens a window instead of a modal.
+  menu.append(gardenMenuManageItem(closeGardenMenu));
   menu.classList.remove("hidden");
   $("garden-btn").setAttribute("aria-expanded", "true");
 }
@@ -1930,6 +1903,12 @@ async function launchApp(appId) {
 
 async function init() {
   api = window.pywebview.api;
+  Inspector.install({ api, onChanged: refresh });
+  CommandBar.install({
+    api,
+    onChanged: refresh,
+    onNavigate: (moteId) => Inspector.open(moteId),
+  });
   anchor = new Date();
   wire();
   $("garden-name").textContent = await api.current_garden();

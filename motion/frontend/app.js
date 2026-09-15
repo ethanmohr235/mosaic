@@ -68,11 +68,15 @@ let compareRunA = null;    // a saved run's id standing in for scenario A, in co
 let compareRunB = null;    // a saved run's id standing in for scenario B, in compare mode
 let panelTab = "rules";
 let activeRule = null;
+// Rule mote id -> [{name, candidates: [{id, label}]}] from the last
+// check_equation_names() call on that rule's equation -- names it
+// references that exist in the garden but aren't reachable from where
+// it runs. Cleared on connect, dismiss, or the next successful equation
+// write (which re-checks). Not part of `board`: it's a client-side
+// hint about the *previous* blur's text, not a fact core answers.
+let equationSuggestions = {};
 let selectedId = null;
 let selectedRelId = null;   // a clicked edge, mutually exclusive with selectedId
-let lastInspectDetail = null; // { moteId, detail } -- the last openInspector() fetch, so a
-                               // tick change can restyle its tick-dependent numbers without
-                               // re-fetching or tearing down the panel
 let connectArmed = false;
 let solver = "linear";
 let steps = DEFAULT_STEPS;
@@ -82,6 +86,22 @@ let launcherHighlight = 0;
 let drag = null;
 let pan = null;
 let resize = null;
+// The id of the board node the open inspector's leader line points at,
+// if any -- re-resolved by data-id on every pan/zoom tick rather than
+// held as an element reference, because render() rebuilds the board's
+// DOM (renderBoards' innerHTML = "") on plenty of things that aren't a
+// pan, including the click that opens the inspector in the first place.
+// Only board A's nodes are ever clickable (buildNode only wires
+// onmousedown for !isB), so a plain data-id match is unambiguous even
+// in compare mode. Null when the inspector is anchored to something
+// that doesn't pan with the board (a dock lane, a relationship
+// endpoint) or not anchored at all.
+let inspectedNodeId = null;
+
+function resolveInspectedNode() {
+  if (!inspectedNodeId) return null;
+  return document.querySelector(`.node[data-id="${inspectedNodeId}"]`);
+}
 let scrubbing = false;
 let linkDrag = null;       // { sourceId, x1, y1, line } -- a ctrl+drag in progress
 
@@ -89,6 +109,10 @@ let layout = {             // sizes and view the user drags -- window chrome, no
   railW: 236, panelW: 328, dockH: 280, zoom: 1, panX: 0, panY: 0,
 };
 let positions = {};        // mote id -> {x, y}, per garden
+// mote id -> [key, ...], per garden -- which of a node's numeric
+// properties its card previews. A mote with no entry falls back to
+// primaryKey's auto-pick (see previewKeysFor).
+let previewKeys = {};
 
 const $ = (id) => document.getElementById(id);
 
@@ -119,6 +143,7 @@ function toast(message, isError) {
 
 function layoutKey() { return "motion.layout"; }
 function positionsKey() { return `motion.positions.${board ? board.garden : "?"}`; }
+function previewKeysKey() { return `motion.previewKeys.${board ? board.garden : "?"}`; }
 
 function loadLayout() {
   try {
@@ -153,6 +178,50 @@ function savePositions() {
   } catch (error) {
     // Not fatal.
   }
+}
+
+function loadPreviewKeys() {
+  previewKeys = {};
+  try {
+    const raw = window.localStorage.getItem(previewKeysKey());
+    if (raw) previewKeys = JSON.parse(raw) || {};
+  } catch (error) {
+    previewKeys = {};
+  }
+}
+
+function savePreviewKeys() {
+  try {
+    window.localStorage.setItem(previewKeysKey(), JSON.stringify(previewKeys));
+  } catch (error) {
+    // Not fatal.
+  }
+}
+
+/** Which of a node's numeric properties its card shows, in the order the
+ *  user picked them. Empty/unset falls back to primaryKey's single
+ *  auto-pick, so a mote nobody has customized still shows its most
+ *  relevant value the way it always has. */
+function previewKeysFor(node, moved) {
+  const chosen = (previewKeys[node.id] || []).filter((k) =>
+    Object.prototype.hasOwnProperty.call(node.values, k)
+  );
+  if (chosen.length) return chosen;
+  const auto = primaryKey(node, moved);
+  return auto ? [auto] : [];
+}
+
+function togglePreviewKey(nodeId, key) {
+  const node = board.nodes.find((n) => n.id === nodeId);
+  const current = previewKeys[nodeId] && previewKeys[nodeId].length
+    ? previewKeys[nodeId].slice()
+    : [primaryKey(node, movedKeys(runA))].filter(Boolean);
+  const at = current.indexOf(key);
+  if (at >= 0) current.splice(at, 1);
+  else current.push(key);
+  previewKeys[nodeId] = current;
+  savePreviewKeys();
+  render();
 }
 
 function applyLayout() {
@@ -284,6 +353,16 @@ function renderTopbar() {
   $("solver-caption").textContent = runA
     ? `${solver} · ${stepCount()} ${runA.axis.label}`
     : "";
+
+  // Fast mode solves and commits on its own -- the manual Run/Save/
+  // Commit trio would otherwise still kick off the old preview flow
+  // into a dock that Fast mode has hidden.
+  const fast = mode === "fast";
+  $("run-btn").classList.toggle("hidden", fast);
+  $("save-btn").classList.toggle("hidden", fast);
+  $("commit-btn").classList.toggle("hidden", fast);
+  if (fast) { setRunState(); return; }
+
   // Saving is the only way to keep a scenario run, so it is offered
   // wherever there is a run to keep -- including the cases Commit
   // refuses.
@@ -312,6 +391,12 @@ function renderTopbar() {
 function setRunState() {
   const chip = $("run-state");
   chip.className = "state-chip";
+  if (mode === "fast") {
+    chip.classList.remove("hidden");
+    chip.textContent = fastStatus === "solving" ? "solving…" : fastStatus === "error" ? "error" : "solved";
+    if (fastStatus === "error") chip.classList.add("replay");
+    return;
+  }
   // A selected scenario is worth saying before anything has been run:
   // it is the question the next Run will answer, and picking one with
   // no visible acknowledgement is how you end up reading a scenario's
@@ -331,7 +416,7 @@ function setRunState() {
 function renderModes() {
   const host = $("mode-chips");
   host.innerHTML = "";
-  for (const [id, label] of [["build", "Build"], ["run", "Run"], ["compare", "Compare"]]) {
+  for (const [id, label] of [["build", "Build"], ["run", "Run"], ["compare", "Compare"], ["fast", "Fast"]]) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = label;
@@ -348,11 +433,28 @@ function setMode(next) {
     compareWith = other ? other.id : null;
   }
   if (mode !== "compare") { runB = null; lanesB = []; compareRunA = null; compareRunB = null; }
+  if (mode === "fast") {
+    runA = null;
+    tick = 0;
+    replayRunId = null;
+    panelTab = "rules";
+    scheduleFastRun();
+  }
   if (mode === "build") panelTab = "rules";
   render();
 }
 
 function renderRail() {
+  // Fast mode's edits commit straight away, so none of the rail earns
+  // its space: a scenario can never be committed (core/simulation.py
+  // refuses one), the saved-run history is exactly what Fast mode is
+  // trying not to accumulate, and pre-flight role checking is a
+  // build-time concern.
+  const fast = mode === "fast";
+  $("rail").classList.toggle("hidden", fast);
+  $("rail-resize").classList.toggle("hidden", fast);
+  if (fast) return;
+
   const scenarios = $("scenario-list");
   scenarios.innerHTML = "";
   $("scenario-count").textContent = board.scenarios.length
@@ -376,8 +478,12 @@ function renderRail() {
 
   const runs = $("run-list");
   runs.innerHTML = "";
-  $("run-count").textContent = board.runs.length ? `${board.runs.length} kept` : "";
-  for (const run of board.runs) {
+  // Fast mode auto-commits on every debounced edit and tags each one
+  // "fast" (see runFastCommit) precisely so they don't pile up here --
+  // they're still logged for the audit trail, just not worth a card.
+  const keptRuns = board.runs.filter((r) => r.detail !== "fast");
+  $("run-count").textContent = keptRuns.length ? `${keptRuns.length} kept` : "";
+  for (const run of keptRuns) {
     const card = document.createElement("button");
     card.type = "button";
     const isRunA = mode === "compare" && compareRunA === run.run_id;
@@ -427,7 +533,7 @@ function renderRail() {
     }
     runs.appendChild(card);
   }
-  if (!board.runs.length) {
+  if (!keptRuns.length) {
     const note = document.createElement("div");
     note.className = "rail-empty";
     note.textContent = "No runs logged yet. Commit or save a run to keep it here.";
@@ -610,17 +716,19 @@ function buildNode(node, overlay, moved, run, isB) {
     eq.textContent = node.equation;
     el.appendChild(eq);
   } else {
-    const key = primaryKey(node, moved);
-    if (key) {
+    for (const key of previewKeysFor(node, moved)) {
       const now = nodeValue(node, overlay, key);
       const before = nodeValue(node, valuesAt(run, Math.max(0, tick - 1)), key);
       const delta = typeof now === "number" && typeof before === "number" ? now - before : 0;
+      const unit = (node.units && node.units[key]) || "";
       const row = document.createElement("div");
       row.className = "node-value";
+      row.dataset.key = key;
       row.innerHTML =
-        `<span class="node-num"></span><span class="node-key"></span>` +
+        `<span class="node-num"></span><span class="node-unit"></span><span class="node-key"></span>` +
         `<span class="node-delta"></span>`;
       row.querySelector(".node-num").textContent = fmt(now);
+      row.querySelector(".node-unit").textContent = unit;
       row.querySelector(".node-key").textContent = key;
       const deltaEl = row.querySelector(".node-delta");
       deltaEl.textContent = delta === 0 ? "—" : `${delta > 0 ? "+" : ""}${fmt(delta)}`;
@@ -632,7 +740,10 @@ function buildNode(node, overlay, moved, run, isB) {
   // Only board A takes edits: two boards showing the same motes under
   // two scenarios would otherwise offer two places to drag the same node
   // to two different positions.
-  if (!isB) el.onmousedown = onNodeDown(node.id);
+  if (!isB) {
+    el.onmousedown = onNodeDown(node.id);
+    el.oncontextmenu = onNodeContext(node.id);
+  }
   return el;
 }
 
@@ -760,6 +871,11 @@ function clip(cx, cy, dx, dy, halfW, halfH, pad) {
 // ---- dock ------------------------------------------------------------
 
 function renderDock() {
+  const fast = mode === "fast";
+  $("dock").classList.toggle("hidden", fast);
+  $("dock-resize").classList.toggle("hidden", fast);
+  if (fast) return;
+
   const total = stepCount();
   const hasRun = total > 0;
   $("dock-empty").classList.toggle("hidden", hasRun);
@@ -849,7 +965,13 @@ function buildLane(a, b) {
   el.className = "lane" + (selectedId === a.moteId ? " on" : "");
   el.dataset.id = a.moteId;
   el.dataset.key = a.key;
-  el.onclick = () => { selectedRelId = null; selectedId = a.moteId; panelTab = "inspector"; render(); openInspector(a.moteId); };
+  el.onclick = (event) => {
+    selectedRelId = null;
+    selectedId = a.moteId;
+    inspectedNodeId = null;
+    Inspector.open(a.moteId, { anchor: el, newTab: event.ctrlKey || event.metaKey });
+    render();
+  };
 
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
@@ -973,21 +1095,22 @@ function updateBoardsForTick() {
     if (readout) readout.textContent = run ? `${run.steps.length} ${run.axis.label} · tick ${tick}` : "not run";
     const overlay = valuesAt(run, tick);
     const before = valuesAt(run, Math.max(0, tick - 1));
-    const moved = movedKeys(run);
     for (const nodeEl of el.querySelectorAll(".node")) {
       const node = byId.get(nodeEl.dataset.id);
       if (!node || node.kind === "rule") continue;
-      const key = primaryKey(node, moved);
-      if (!key) continue;
-      const now = nodeValue(node, overlay, key);
-      const prev = nodeValue(node, before, key);
-      const delta = typeof now === "number" && typeof prev === "number" ? now - prev : 0;
-      const numEl = nodeEl.querySelector(".node-num");
-      const deltaEl = nodeEl.querySelector(".node-delta");
-      if (numEl) numEl.textContent = fmt(now);
-      if (deltaEl) {
-        deltaEl.textContent = delta === 0 ? "—" : `${delta > 0 ? "+" : ""}${fmt(delta)}`;
-        deltaEl.className = `node-delta ${delta === 0 ? "flat" : delta > 0 ? "up" : "down"}`;
+      for (const row of nodeEl.querySelectorAll(".node-value")) {
+        const key = row.dataset.key;
+        if (!key) continue;
+        const now = nodeValue(node, overlay, key);
+        const prev = nodeValue(node, before, key);
+        const delta = typeof now === "number" && typeof prev === "number" ? now - prev : 0;
+        const numEl = row.querySelector(".node-num");
+        const deltaEl = row.querySelector(".node-delta");
+        if (numEl) numEl.textContent = fmt(now);
+        if (deltaEl) {
+          deltaEl.textContent = delta === 0 ? "—" : `${delta > 0 ? "+" : ""}${fmt(delta)}`;
+          deltaEl.className = `node-delta ${delta === 0 ? "flat" : delta > 0 ? "up" : "down"}`;
+        }
       }
     }
   }
@@ -1063,6 +1186,28 @@ async function runSimulation() {
   }
 }
 
+// Fast mode's own run loop: no preview/dock, just a one-step commit
+// debounced after every edit. `fastStatus` drives the run-state chip
+// the same way scenario/replay do in the other three modes.
+let fastRunTimer = null;
+const FAST_RUN_DEBOUNCE_MS = 400;
+let fastStatus = "solved"; // "solving" | "solved" | "error"
+
+function scheduleFastRun() {
+  if (mode !== "fast") return;
+  clearTimeout(fastRunTimer);
+  fastRunTimer = setTimeout(runFastCommit, FAST_RUN_DEBOUNCE_MS);
+}
+
+async function runFastCommit() {
+  fastStatus = "solving";
+  renderTopbar();
+  const result = await call(api.commit(1, solver, null, "fast"));
+  fastStatus = result && !result.error ? "solved" : "error";
+  if (result) await refresh();
+  else renderTopbar();
+}
+
 /** Load a logged run into the same dock a preview uses. Nothing is
  *  written, and the run-state chip says `replay` so a scrub through
  *  history is never mistaken for a pending change. */
@@ -1113,7 +1258,10 @@ async function saveRun() {
 function renderPanel() {
   const tabs = $("panel-tabs");
   tabs.innerHTML = "";
-  for (const [id, label] of [["rules", "Rules"], ["inspector", "Inspector"]]) {
+  const available = selectedRelId
+    ? [["rules", "Rules"], ["relationship", "Relationship"]]
+    : [["rules", "Rules"]];
+  for (const [id, label] of available) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = label;
@@ -1121,8 +1269,8 @@ function renderPanel() {
     btn.onclick = () => { panelTab = id; renderPanel(); };
     tabs.appendChild(btn);
   }
-  if (panelTab === "rules") renderRulesPanel();
-  else renderInspectorPanel();
+  if (panelTab === "relationship" && selectedRelId) renderRelationshipInspector();
+  else renderRulesPanel();
 }
 
 /** setTick's counterpart to updateBoardsForTick: the panel's tick-dependent
@@ -1131,9 +1279,6 @@ function renderPanel() {
  *  over the bridge on every scrub step. */
 function updatePanelForTick() {
   if (panelTab === "rules") updateRulesBindingsForTick();
-  else if (!selectedRelId && selectedId && lastInspectDetail && lastInspectDetail.moteId === selectedId) {
-    updateInspectorForTick();
-  }
 }
 
 function updateRulesBindingsForTick() {
@@ -1146,41 +1291,6 @@ function updateRulesBindingsForTick() {
     const live = overlay[`${binding.moteId}|${binding.key}`];
     const valueEl = rows[i].querySelector(".binding-value");
     if (valueEl) valueEl.textContent = fmt(live === undefined ? binding.value : live);
-  });
-}
-
-function updateInspectorForTick() {
-  const host = $("panel-body");
-  const { moteId, detail } = lastInspectDetail;
-  const heading = Array.from(host.querySelectorAll(".panel-section"))
-    .find((h) => h.textContent.startsWith("State"));
-  if (heading) heading.textContent = runA ? `State at tick ${tick}` : "State";
-
-  const entries = Object.entries(detail.properties)
-    .filter(([, v]) => typeof v === "number" || typeof v === "string")
-    .sort(([a], [b]) => a.localeCompare(b));
-  const rows = host.querySelectorAll(".prop-row");
-  if (rows.length !== entries.length) return;
-
-  const overlay = valuesAt(runA, tick);
-  entries.forEach(([key, stored], i) => {
-    const row = rows[i];
-    const live = overlay[`${moteId}|${key}`];
-    // Build mode's input edits the stored value directly and never shows
-    // the live overlay (see openInspector), so only the "solved" marker
-    // moves there.
-    if (mode !== "build") {
-      const valueEl = row.querySelector(".prop-value");
-      if (valueEl && typeof stored === "number") valueEl.textContent = fmt(live === undefined ? stored : live);
-      row.style.cursor = live !== undefined ? "pointer" : "";
-      row.title = live !== undefined ? "Why this value?" : "";
-      row.onclick = live !== undefined ? () => explain(moteId, key) : null;
-    }
-    const src = row.querySelector(".prop-src");
-    if (src) {
-      src.className = `prop-src ${live === undefined ? "stored" : "solved"}`;
-      src.textContent = live === undefined ? "" : "solved";
-    }
   });
 }
 
@@ -1235,14 +1345,23 @@ function renderRulesPanel() {
   editor.className = "eq-edit";
   editor.value = rule.equation;
   editor.spellcheck = false;
-  if (mode === "build") {
+  if (mode === "build" || mode === "fast") {
     // Committed on blur rather than per keystroke: an equation is only
     // valid in whole, and writing it letter by letter would put a dozen
     // broken rules through the oplog for every edit.
     editor.onblur = async () => {
       if (editor.value === rule.equation) return;
       const written = await call(api.update_mote(rule.moteId, { equation: editor.value }));
-      if (written) { toast(`${rule.name} updated.`); await refresh(); }
+      if (!written) return;
+      toast(`${rule.name} updated.`);
+      // Fired without awaiting: the name check is advisory, not part of
+      // what "the equation was written" means, and letting it hold up
+      // refresh() here used to delay it long enough to land after
+      // whatever the user clicked next, undoing that click's state when
+      // it finally resolved.
+      checkEquationNames(rule, editor.value);
+      scheduleFastRun();
+      await refresh();
     };
   } else {
     // Same rule as the inspector's stored properties: editable in Build
@@ -1254,6 +1373,8 @@ function renderRulesPanel() {
   }
   box.appendChild(editor);
   host.appendChild(box);
+
+  renderNameSuggestions(host, rule);
 
   const bindHeading = document.createElement("div");
   bindHeading.className = "panel-section";
@@ -1299,17 +1420,72 @@ function renderRulesPanel() {
   host.appendChild(actions);
 }
 
-async function renderInspectorPanel() {
-  const host = $("panel-body");
-  host.innerHTML = "";
-  if (selectedRelId) { renderRelationshipInspector(); return; }
-  if (!selectedId) {
-    host.innerHTML =
-      `<div class="panel-empty">No mote selected. Click one on the board to see its state ` +
-      `at the current tick, and what it is wired to.</div>`;
-    return;
+/** Runs after an equation write, independently of the write's own
+ *  refresh() -- see the editor's onblur handler. Checked against the
+ *  rule's first anchor: the mote it already applies_to, which the
+ *  equation edit didn't touch. A brand-new rule with no applies_to yet
+ *  has no anchor to check against, so this simply clears any stale
+ *  suggestion and waits until one exists. */
+async function checkEquationNames(rule, equationText) {
+  const anchorId = rule.anchors[0];
+  if (!anchorId) { delete equationSuggestions[rule.moteId]; return; }
+  const result = await call(api.check_equation_names(anchorId, equationText, scenario));
+  equationSuggestions[rule.moteId] = result || [];
+  // Only worth a re-render if this rule's equation panel is still the
+  // one on screen -- a suggestion for a rule the user has since clicked
+  // away from is still there next time they open it, not forced back now.
+  if (panelTab === "rules" && activeRule === rule.moteId) render();
+}
+
+/** One row per name the last equation check found unreachable but
+ *  recognisable elsewhere in the garden -- offering to draw the
+ *  relationship that would make it resolve (docs/simulation.md's
+ *  "Connected-name references"). Reads equationSuggestions rather than
+ *  taking data as an argument, the same as renderRulesPanel reads board:
+ *  it's this rule's own pending state, keyed by its mote id so a
+ *  refresh() in between doesn't lose it. */
+function renderNameSuggestions(host, rule) {
+  const pending = equationSuggestions[rule.moteId];
+  if (!pending || !pending.length) return;
+
+  for (const item of pending) {
+    const row = document.createElement("div");
+    row.className = "name-hint";
+    const text = document.createElement("span");
+    text.className = "name-hint-text";
+    text.textContent = `'${item.name}' isn't connected yet — `;
+    row.appendChild(text);
+    for (const candidate of item.candidates) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "name-hint-btn";
+      btn.textContent = item.candidates.length > 1
+        ? `connect to ${candidate.label}`
+        : "connect";
+      btn.onclick = async () => {
+        const anchorId = rule.anchors[0];
+        const made = await call(api.create_relationship(anchorId, candidate.id, "relates_to"));
+        if (!made) return;
+        toast(`Connected to ${candidate.label} — ${item.name} now resolves.`);
+        clearNameSuggestion(rule.moteId, item);
+        await refresh();
+      };
+      row.appendChild(btn);
+    }
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "name-hint-btn ghost";
+    dismiss.textContent = "dismiss";
+    dismiss.onclick = () => { clearNameSuggestion(rule.moteId, item); render(); };
+    row.appendChild(dismiss);
+    host.appendChild(row);
   }
-  await openInspector(selectedId);
+}
+
+function clearNameSuggestion(ruleMoteId, item) {
+  const remaining = (equationSuggestions[ruleMoteId] || []).filter((x) => x !== item);
+  if (remaining.length) equationSuggestions[ruleMoteId] = remaining;
+  else delete equationSuggestions[ruleMoteId];
 }
 
 /** The inspector's other shape, for a clicked edge instead of a clicked
@@ -1360,7 +1536,13 @@ function renderRelationshipInspector() {
     const target = row.querySelector(".binding-target");
     target.textContent = node ? node.label : id;
     target.style.cursor = "pointer";
-    target.onclick = () => { selectedRelId = null; selectedId = id; render(); openInspector(id); };
+    target.onclick = (event) => {
+      selectedRelId = null;
+      selectedId = id;
+      inspectedNodeId = null;
+      Inspector.open(id, { anchor: target, newTab: event.ctrlKey || event.metaKey });
+      render();
+    };
     host.appendChild(row);
   }
 
@@ -1395,168 +1577,6 @@ async function deleteSelectedRelationship(edge) {
   await refresh();
 }
 
-async function openInspector(moteId) {
-  if (panelTab !== "inspector") return;
-  const host = $("panel-body");
-  const detail = await call(api.inspect(moteId, scenario));
-  if (!detail) { host.innerHTML = `<div class="panel-empty">That mote is gone.</div>`; return; }
-  lastInspectDetail = { moteId, detail };
-
-  host.innerHTML = "";
-  const title = document.createElement("div");
-  title.style.cssText = "font-family:var(--serif);font-size:19px;color:var(--fg-bright);margin:6px 0 2px";
-  title.textContent = detail.label;
-  const id = document.createElement("div");
-  id.className = "mono-note";
-  id.style.marginBottom = "6px";
-  id.textContent = detail.id;
-  host.append(title, id);
-
-  if (detail.freedoms.length) {
-    const chips = document.createElement("div");
-    chips.className = "card-chips";
-    for (const freedom of detail.freedoms) {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.textContent = `free: ${freedom}`;
-      chips.appendChild(chip);
-    }
-    host.appendChild(chips);
-  }
-
-  const overlay = valuesAt(runA, tick);
-  const heading = document.createElement("div");
-  heading.className = "panel-section";
-  heading.textContent = runA ? `State at tick ${tick}` : "State";
-  host.appendChild(heading);
-
-  const entries = Object.entries(detail.properties)
-    .filter(([, v]) => typeof v === "number" || typeof v === "string")
-    .sort(([a], [b]) => a.localeCompare(b));
-  for (const [key, stored] of entries) {
-    const live = overlay[`${moteId}|${key}`];
-    const row = document.createElement("div");
-    row.className = "prop-row";
-
-    const keyEl = document.createElement("span");
-    keyEl.className = "prop-key";
-    keyEl.textContent = key;
-    row.appendChild(keyEl);
-
-    // Build mode edits the stored value directly -- the same value the
-    // rule editor commits, not the live overlay a run folded on top of
-    // it, since editing a solved number would just be overwritten by the
-    // next run anyway. `stored` is already scenario's-eye (see
-    // openInspector's api.inspect(moteId, scenario) call), so the input
-    // shows and edits exactly the value a run under this scenario would
-    // start from.
-    //
-    // While a non-default scenario is selected, the edit is redirected
-    // to that scenario's override for this mote instead of the mote
-    // itself -- the garden is never the write target while you're
-    // looking at a hypothetical. update_mote_in_scenario creates the
-    // override (and wires it up with `varies`/`overrides`) the first
-    // time this scenario touches this mote.
-    if (mode === "build") {
-      const input = document.createElement("input");
-      input.className = "prop-input";
-      input.value = String(stored);
-      input.spellcheck = false;
-      input.onblur = async () => {
-        if (input.value === String(stored)) return;
-        const next = typeof stored === "number" ? Number(input.value) : input.value;
-        if (typeof stored === "number" && Number.isNaN(next)) { input.value = String(stored); return; }
-        const written = scenario
-          ? await call(api.update_mote_in_scenario(scenario, moteId, { [key]: next }))
-          : await call(api.update_mote(moteId, { [key]: next }));
-        if (written) {
-          toast(scenario ? `${key} overridden for this scenario.` : `${key} updated.`);
-          await refresh();
-          await openInspector(moteId);
-        }
-      };
-      input.onkeydown = (e) => { if (e.key === "Enter") input.blur(); };
-      row.appendChild(input);
-    } else {
-      const valueEl = document.createElement("span");
-      valueEl.className = "prop-value";
-      valueEl.textContent =
-        typeof stored === "number" ? fmt(live === undefined ? stored : live) : String(stored);
-      // Only a value some run determined has a derivation to explain.
-      if (live !== undefined) {
-        row.style.cursor = "pointer";
-        row.title = "Why this value?";
-        row.onclick = () => explain(moteId, key);
-      } else {
-        // Editable in Build mode, not here -- say so rather than leaving a
-        // plain span that looks the same as an editable one and quietly
-        // ignores clicks.
-        valueEl.classList.add("prop-value-locked");
-        row.title = "Switch to Build mode to edit";
-      }
-      row.appendChild(valueEl);
-    }
-
-    const src = document.createElement("span");
-    src.className = `prop-src ${live === undefined ? "stored" : "solved"}`;
-    src.textContent = live === undefined ? "" : "solved";
-    row.appendChild(src);
-    host.appendChild(row);
-  }
-
-  const relHeading = document.createElement("div");
-  relHeading.className = "panel-section";
-  relHeading.textContent = "Relationships";
-  host.appendChild(relHeading);
-  for (const rel of detail.relationships) {
-    const row = document.createElement("div");
-    row.className = "rel-row";
-    row.innerHTML =
-      `<span class="rel-arrow"></span><span class="rel-type"></span><span class="rel-other"></span>`;
-    row.querySelector(".rel-arrow").textContent = rel.direction === "out" ? "→" : "←";
-    row.querySelector(".rel-type").textContent = rel.type;
-    const other = row.querySelector(".rel-other");
-    other.textContent = rel.otherLabel;
-    other.onclick = () => { selectedRelId = null; selectedId = rel.otherId; render(); openInspector(rel.otherId); };
-    host.appendChild(row);
-  }
-  if (!detail.relationships.length) {
-    const note = document.createElement("div");
-    note.className = "rail-empty";
-    note.textContent = "Nothing points at this mote, and it points at nothing.";
-    host.appendChild(note);
-  }
-
-  const actions = document.createElement("div");
-  actions.className = "panel-actions";
-  const connect = document.createElement("button");
-  connect.className = "wide-btn";
-  connect.type = "button";
-  connect.textContent = connectArmed ? "Pick a target…" : "Connect to…";
-  connect.onclick = () => { armConnect(); openInspector(moteId); };
-  actions.appendChild(connect);
-  host.appendChild(actions);
-}
-
-/** The provenance answer, read off the run log. Needs a logged run: a
- *  discarded preview leaves nothing to explain, which is why this says
- *  so rather than showing an empty panel. */
-async function explain(moteId, key) {
-  const answer = await call(api.why(moteId, key, replayRunId));
-  if (!answer) {
-    toast("No logged run determined this value — commit or save a run first.");
-    return;
-  }
-  const lines = [`${answer.method}: ${answer.detail || ""}`.trim()];
-  for (const equation of answer.equations) {
-    lines.push(`${equation.rule_name}: ${equation.equation}`);
-  }
-  for (const input of answer.inputs) {
-    lines.push(`  reads ${input.mote_id === moteId ? "" : input.mote_id + " "}${input.key} = ${fmt(input.value)}`);
-  }
-  toast(lines.join(" · "));
-}
-
 // ---- build mode ------------------------------------------------------
 
 async function addMote() {
@@ -1564,8 +1584,9 @@ async function addMote() {
   if (!created) return;
   await refresh();
   selectedId = created.id;
-  panelTab = "inspector";
   render();
+  inspectedNodeId = null;
+  Inspector.open(created.id);
 }
 
 async function addRule() {
@@ -1591,6 +1612,7 @@ async function deleteSelectedMote() {
   delete positions[id];
   savePositions();
   if (activeRule === id) activeRule = null;
+  delete equationSuggestions[id];
   selectedId = null;
   await refresh();
 }
@@ -1658,11 +1680,62 @@ async function finishLinkDrag(clientX, clientY) {
   const el = document.elementFromPoint(clientX, clientY);
   const nodeEl = el && el.closest && el.closest(".node");
   const targetId = nodeEl ? nodeEl.dataset.id : null;
+  // Released on the node it started from, or on nothing: a link that
+  // went nowhere, so nothing happens. This used to open a second
+  // inspector tab, on the theory that a ctrl-press that never moved was
+  // a ctrl-click -- but guessing which of two gestures ctrl meant, from
+  // how far the mouse travelled, is how you get a relationship you did
+  // not ask for. Right-click -> Inspect in new tab says it outright.
   if (!targetId || targetId === sourceId) return;
   await connectTo(targetId, sourceId);
 }
 
 // ---- pointer gestures -------------------------------------------------
+
+/** The "which values does this card show" submenu, inlined as its own
+ *  checklist rather than a real submenu -- ContextMenu only knows flat
+ *  lists. Toggling a row reopens the menu at the same point instead of
+ *  dismissing it, so picking several properties is one right-click, not
+ *  one per property. */
+function previewMenuItems(node, reopen) {
+  const keys = Object.keys(node.values);
+  if (node.kind === "rule" || keys.length < 2) return [];
+  const shown = new Set(previewKeysFor(node, movedKeys(runA)));
+  return [
+    "-",
+    { label: "Displayed values", disabled: true },
+    ...keys.map((key) => ({
+      label: `${shown.has(key) ? "\u2713" : "\u00a0\u00a0"} ${key}${node.units[key] ? ` (${node.units[key]})` : ""}`,
+      run: () => { togglePreviewKey(node.id, key); reopen(); },
+    })),
+  ];
+}
+
+function onNodeContext(id) {
+  return (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const anchorEl = event.currentTarget;
+    const openMenu = () => {
+      const node = board.nodes.find((n) => n.id === id);
+      ContextMenu.open(event.clientX, event.clientY, [
+        ...ContextMenu.inspectItems(id, anchorEl).map((item) => ({
+          ...item,
+          run: () => { inspectedNodeId = id; item.run(); },
+        })),
+        "-",
+        node && node.kind === "rule"
+          ? { label: "Edit this rule", run: () => { activeRule = id; panelTab = "rules"; render(); } }
+          : null,
+        { label: "Connect to\u2026", run: () => { selectedId = id; armConnect(); render(); } },
+        ...(node ? previewMenuItems(node, openMenu) : []),
+        "-",
+        { label: "Delete mote", danger: true, run: () => { selectedId = id; return deleteSelectedMote(); } },
+      ]);
+    };
+    openMenu();
+  };
+}
 
 function onNodeDown(id) {
   return (event) => {
@@ -1677,9 +1750,9 @@ function onNodeDown(id) {
     selectedId = id;
     const node = board.nodes.find((n) => n.id === id);
     if (node && node.kind === "rule") { activeRule = id; panelTab = "rules"; }
-    else panelTab = "inspector";
+    inspectedNodeId = id;
+    Inspector.open(id, { anchor: event.currentTarget });
     render();
-    if (panelTab === "inspector") openInspector(id);
   };
 }
 
@@ -1698,6 +1771,8 @@ function deselect() {
   if (!selectedId && !selectedRelId) return;
   selectedId = null;
   selectedRelId = null;
+  inspectedNodeId = null;
+  Inspector.close();
   render();
 }
 
@@ -1709,7 +1784,7 @@ function selectRelationship(relId) {
   selectedRelId = relId;
   connectArmed = false;
   $("tool-link").classList.remove("armed");
-  panelTab = "inspector";
+  panelTab = "relationship";
   render();
 }
 
@@ -1741,6 +1816,12 @@ function applyBoardTransforms() {
   transformSettleTimer = setTimeout(() => {
     for (const world of document.querySelectorAll(".board-world")) world.classList.remove("transforming");
   }, 150);
+  // The inspected node just moved under this same transform; its own
+  // getBoundingClientRect() is already up to date by the time the
+  // browser hands back control here, so the leader can follow it on
+  // this tick rather than waiting for the settle timeout above.
+  const inspectedEl = resolveInspectedNode();
+  if (inspectedEl) Inspector.updateAnchor(inspectedEl);
 }
 
 function onZoomWheel(event) {
@@ -1824,6 +1905,23 @@ function closeSettings() { $("settings-overlay").classList.add("hidden"); }
 
 // ---- garden menu ------------------------------------------------------
 
+/** The "Manage gardens…" footer every one of the six garden menus
+ *  carries, byte for byte the same in each -- the shared Gardens window
+ *  is only standard if the way in is. */
+function gardenMenuManageItem(close) {
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "menu-item";
+  item.textContent = "Manage gardens…";
+  item.title = "Create, rename, import, export and sync gardens";
+  item.onclick = () => { close(); api.open_gardens(); };
+  const frag = document.createDocumentFragment();
+  frag.append(sep, item);
+  return frag;
+}
+
 async function openGardenMenu() {
   const menu = $("garden-menu");
   if (!menu.classList.contains("hidden")) { menu.classList.add("hidden"); return; }
@@ -1838,11 +1936,18 @@ async function openGardenMenu() {
       menu.classList.add("hidden");
       await call(api.switch_garden(name));
       runA = null; runB = null; lanesA = []; lanesB = []; tick = 0; replayRunId = null;
-      scenario = null; selectedId = null; selectedRelId = null;
+      scenario = null; selectedId = null; selectedRelId = null; equationSuggestions = {};
       await refresh();
     };
     menu.appendChild(btn);
   }
+
+  // Every window ends its garden menu with the same two lines: the
+  // gardens you can switch to, then the one window where gardens
+  // themselves are made, renamed, imported, exported and synced
+  // (gardens_app/). Switching is per window; managing is not, which is
+  // why this opens a window instead of a modal.
+  menu.append(gardenMenuManageItem(() => menu.classList.add("hidden")));
   menu.classList.remove("hidden");
 }
 
@@ -2120,19 +2225,27 @@ async function refresh() {
   board = next;
   // Positions are keyed by garden, so a switch reloads them rather than
   // dragging the old garden's layout onto motes that do not exist here.
-  if (firstLoad || gardenChanged) loadPositions();
+  if (firstLoad || gardenChanged) { loadPositions(); loadPreviewKeys(); }
   if (!solver || !board.solvers.includes(solver)) solver = board.solvers[0] || "linear";
   if (!activeRule && board.rules.length) activeRule = board.rules[0].moteId;
-  if (firstLoad && board.focus) {
-    selectedId = board.focus;
-    panelTab = "inspector";
-  }
+  if (firstLoad && board.focus) selectedId = board.focus;
   render();
-  if (panelTab === "inspector" && selectedId) await openInspector(selectedId);
+  // The scenario picker moves independently of the inspector, and the
+  // bridge redirects property writes onto the selected scenario's
+  // override -- so it has to be told which hypothetical is on screen.
+  await call(api.set_inspector_scenario(scenario || null));
+  if (firstLoad && board.focus) { inspectedNodeId = null; Inspector.open(board.focus); }
+  else await Inspector.reload();
 }
 
 async function init() {
   api = window.pywebview.api;
+  Inspector.install({ api, onChanged: () => { refresh(); scheduleFastRun(); } });
+  CommandBar.install({
+    api,
+    onChanged: () => { refresh(); scheduleFastRun(); },
+    onNavigate: (moteId) => { inspectedNodeId = null; Inspector.open(moteId); },
+  });
   loadLayout();
   applyLayout();
   wire();

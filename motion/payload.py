@@ -51,6 +51,7 @@ from core import kinds as kinds_repo
 from core import rules as rules_repo
 from core import scenarios as scenarios_repo
 from core.entities import Mote, Relationship
+from core.units import UNITS_KEY, parse_units_property
 
 # Node kinds. Deliberately about the simulation rather than the domain --
 # see the module docstring.
@@ -102,6 +103,11 @@ class Node:
     # why they travel with the board rather than being re-fetched per
     # tick -- see app.js::valuesAt.
     values: dict = field(default_factory=dict)
+    # Each of those keys' declared unit, from the mote's own `units`
+    # property (core/units.py) -- {"resistance": "kohm"}. A key with no
+    # entry is unitless. Travels alongside `values` so the card can label
+    # a number without a second round trip.
+    units: dict = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {
@@ -111,6 +117,7 @@ class Node:
             "equation": self.equation,
             "freedoms": list(self.freedoms),
             "values": dict(self.values),
+            "units": dict(self.units),
         }
 
 
@@ -270,6 +277,7 @@ def build_nodes(
                     rules_repo.parse_freedoms(mote.properties.get(rules_repo.FREEDOMS_KEY))
                 ),
                 values=_numeric_values(mote),
+                units=parse_units_property(mote.properties.get(UNITS_KEY)),
             )
         )
     return nodes

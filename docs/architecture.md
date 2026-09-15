@@ -357,7 +357,8 @@ the user should approve in the app, or need a live window. See
 # What belongs on which surface
 
 `core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/`,
-`momentum/`, `monolith/` and `mcp_server/` are seven adapters over it, and each one's job is a
+`momentum/`, `monolith/`, `motion/`, `gardens_app/` and `mcp_server/`
+are nine adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -397,6 +398,17 @@ The charter:
   bindings are shapes none of the other five draws -- and because
   simulation had been a settings panel and a scrub bar bolted onto
   Monarch, which is a graph editor and not a simulator.
+* **Gardens** -- the gardens themselves, rather than anything inside
+  one: create, rename, delete (with undo), import, export, and the
+  per-garden sync folder. A seventh window, and the only one that opens
+  on no garden at all -- which is exactly why it is separate. All six of
+  the others open it ("Manage gardens…" in each garden dropdown) instead
+  of carrying a copy, and it holds no garden connection, so renaming or
+  deleting the garden the window that opened it is looking at is an
+  ordinary operation rather than a case to refuse. Its own process, so
+  it cannot switch that window's garden; each row offers **Open in**
+  instead. Deliberately not: anything inside a garden -- it never reads
+  or writes a mote.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -718,6 +730,136 @@ Monarch under a hop limit draws a subgraph, and a palette claimed from a
 subgraph would give one species two colours in two windows. Every
 window's main payload carries that list, so no window pays a call for
 it.
+
+# The inspector
+
+One mote, one surface, six windows. Selecting a mote anywhere -- a node
+in Monarch, a row in Monolith, a card in Momentum, a placement in
+Monastery, a link in Mora, a node in Motion -- opens the same floating
+panel, with the same tools in it.
+
+It was not like that. Each window had grown its own docked detail panel,
+and what you were allowed to do to a mote depended on which window you
+happened to be standing in: Monarch could add a property, rename a key
+and set a species; Motion could overwrite the values a mote already had
+and nothing else, with no way to add one; Mora could read properties and
+edit none. Same mote, six different sets of permissions, none of them
+decided -- just whichever panel had been written when.
+
+The panel floats rather than docking, and that is the same argument as
+sharing it. A docked panel is part of the window it is docked to, and
+six docked panels read as six panels however alike they look. One slab
+of glass hovering over a graph, a table and a calendar reads as one
+instrument you carried there. It opens in the same place in every window
+(upper right), draws a dashed leader line back to whatever you clicked,
+and remembers where you drag it -- per window, because each is its own
+HTTP origin and localStorage cannot literally be shared between them.
+
+**Three shared files, not one.** `frontend_shared/inspector.js` is the
+panel; `interval.js` is the calendar a date-shaped property opens, which
+is separate because two callers need it -- the panel, and Monastery's
+draft editor, which is not a panel at all; `menu.js` is the right-click
+dropdown, which is separate because what goes *in* it is each window's
+own business and only the look, placement and dismissal are shared.
+
+**Two halves, one contract.** `api_common.py::InspectorApi` is mixed into
+all six `Api` classes and is the whole bridge the panel speaks:
+`inspect_mote` plus the `inspector_*` writes. `frontend_shared/
+inspector.js` and `inspector.css` are the panel, symlinked into each
+app's `frontend/` -- pywebview serves each frontend directory as its own
+HTTP root, so a file above that root is not fetchable, and the symlink
+is what makes six copies one file. `tests/test_inspector_api.py` asserts
+every window implements the whole contract, so a seventh window that
+grows an `Api` without the mixin fails there rather than at the first
+click in a panel that silently does nothing.
+
+**A species is a relationship, and the panel says so.** `instance_of`
+is listed like anything else. It was hidden at first, on the grounds
+that a species dropdown in Advanced said the same thing -- which made
+the one structural fact the whole graph is built on the only one you
+could not see in the list of what a mote is wired to. The dropdown is
+gone; setting a species is adding that relationship, in the same picker
+as any other. What stayed in Advanced is the template button, which is
+not a restatement of anything: it declares that *this* mote is the one
+new instances start from.
+
+**Types come from the garden, not from a table.** The panel draws a
+typed editor per property -- text, number, date, boolean, enum, or a
+button that walks to another mote -- and decides which from the value's
+shape and the mote's species, never from a hardcoded vocabulary of key
+names. An enum is a key whose values, across the instances of that
+species *and its template*, are a small repeated set; the template
+counts because it is the species' own statement of what a value looks
+like, and without it a four-instance garden shows `status` as free text
+until two motes happen to agree. The "usually has" chips are the
+template's keys this mote lacks. A species with no template offers none,
+which is honest: nothing in the garden has said what that kind of mote
+usually carries.
+
+**What stayed in app chrome.** The panel is for one mote. A selection of
+two hundred is a different question, so Monarch's and Monolith's bulk
+editors stay where they were, as do Monarch's relationship panels,
+Monastery's occurrence controls (which placement was clicked, moving it,
+detaching it), Momentum's status pills and subtasks, and Motion's rule
+editor. Deleting a mote likewise stays in each window's own chrome --
+the inspector edits a mote, it does not end one.
+
+**What a window may still contribute.** Two hooks, both narrow on
+purpose. `valueEditor` lets a host offer a better editor for a value the
+generic ones would flatten -- what is left there is Monarch's `provider`
+summary, and the list is meant to keep shrinking: the interval picker
+used to be in it and is now everyone's. `advancedSections` adds to the Advanced pane, which is also where the
+two window-specific powers live: Motion's `why` (the run log's answer
+for where a solved value came from -- it is the only window with a
+solver, so `inspector_why` returns None in the other five and the
+control is never drawn) and Monarch's "+ New instance". Anything only
+one window can do is a gap in the other five, so both lists should stay
+short and shrink.
+
+**Motion writes differently.** While a scenario is selected, Motion
+redirects property writes onto that scenario's override mote rather than
+the mote itself -- looking at a hypothetical must never mean overwriting
+the garden's own state (see Scenarios). That is an override of
+`inspector_set_property`, one layer below the panel, so every editing
+affordance the shared panel has -- add a property, rename a key, toggle
+a boolean -- inherits the rule instead of each having to remember it.
+
+# Dates and the interval picker
+
+A date in MonOSS is an ISO 8601 interval (`core/interval.py`): a start,
+an optional span after a `/`, and optional RRULE lines beneath it. That
+is a good thing to store and an awful thing to type, so any property
+holding one gets a calendar -- **by value shape, not by key name**.
+`date` stopped being a key the engine reads when a start became an
+interval, so `when`, `due`, `starts` or whatever this garden calls it
+all get the same editor, repeating or not.
+
+The widget is `frontend_shared/interval.js`, and it has two callers: the
+inspector's property rows, and Monastery's draft editor. It did not
+start that way. The picker was Monarch's, and the structured repeat
+editor -- frequency, interval, weekdays, how it ends -- was Monastery's,
+on the reasoning that Monastery is the window that actually reads a
+`recurring` mote back and so should be the window that authors the rule.
+Monarch's picker was correspondingly reduced to showing an RRULE as raw
+text. Both halves of that argument stopped holding when the inspector
+became one surface in six windows: "edit this date properly" has to work
+wherever you are standing. One widget now, one repeat editor inside it,
+two callers.
+
+It never expands a recurring value into occurrences -- that is
+`core/calendar.py`'s job, via dateutil, and "no JavaScript reads an
+RRULE" stays true for *that*. What it does is decompose a value into an
+editable draft and recompose one back. Anything it cannot safely
+decompose -- a multi-day span, two RRULE lines, a `BYMONTHDAY` -- is
+marked `simple: false` and kept as raw, editable text. Structured
+controls that silently dropped an `EXDATE` would be worse than an honest
+textarea.
+
+The popup is fixed-position rather than inline: the calendar needs real
+width, and the panel hosting it is resizable down to sizes that would
+crush it. It re-measures its anchor on every reposition and watches for
+the host panel moving, because measuring once on open is what left the
+calendar stranded at the coordinates the field used to be at.
 
 # The table
 

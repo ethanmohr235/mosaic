@@ -9,6 +9,11 @@ task board and timer (`run_momentum.py`); **Monolith**, the table
 They share one palette and one set of vendored fonts, so the six read as
 one product.
 
+A seventh window sits beside rather than among them: **Gardens**
+(`run_gardens.py`), where the gardens themselves are made, renamed,
+deleted, imported, exported and synced. Any of the six opens it from its
+own garden dropdown ("Manage gardens…"); see below.
+
 ---
 
 # Monarch -- the graph
@@ -26,11 +31,100 @@ are clustered into radial sectors by species, and the camera pans to a mote
 on selection rather than re-fitting the whole view. Fonts are vendored under
 `monarch/frontend/vendor/fonts/`, so nothing is fetched at runtime.
 
+### The inspector
+
+Selecting a mote -- here, or in any of the other five windows -- opens
+the **inspector**: a floating panel on the right that is literally the
+same panel everywhere (`frontend_shared/inspector.js`, symlinked into
+each app's `frontend/`; see "The inspector" in `docs/architecture.md`
+for why). It is where a mote is edited, and what it can do does not
+change from window to window.
+
+| Gesture | Action |
+|---|---|
+| Left-click a mote | Open it, replacing the active tab |
+| Right-click a mote → Inspect in new tab | Open it in an additional tab |
+| Click a relationship, or a property that holds a mote id | Walk to that mote (Ctrl/Cmd-click for a new tab) |
+| Drag the header or tab strip | Move the panel |
+| Drag the bottom-right grip | Resize it |
+| Esc | Close it (or, while typing in a field, just leave the field) |
+
+Up to six tabs; the oldest drops off, and with only one open the tab
+ribbon hides entirely. Position and size are remembered per window, and
+the panel opens in the same place in each one.
+
+"In a new tab" is a right-click item rather than Ctrl-click because
+Ctrl+drag from a mote already draws a relationship in both windows with
+a canvas — deciding which of the two you meant from how far the mouse
+travelled is how you get a relationship you didn't ask for. Inside the
+panel, where nothing drags, Ctrl-click on a relationship or a mote-id
+property still opens it in a new tab.
+
+In it:
+
+* **The name**, as the title. Editing it renames the mote.
+* **Properties**, one row each, with an editor chosen from the value --
+  a dropdown where the species' other instances agree on a small set of
+  values, a full calendar for anything interval-shaped (see below), a
+  number box for a number, a toggle for a boolean, and a button that
+  walks there for a value that holds another mote's id. Click a key to
+  rename it in place. `×` removes it.
+* **An add row**, and -- if the mote's species has a template -- chips
+  for the keys that template has and this mote doesn't ("Task usually
+  has owner, due").
+* **Relationships**, both directions, each removable, plus a picker that
+  searches the garden and accepts a relationship type that doesn't exist
+  yet. `instance_of` is in this list like anything else — a species *is*
+  a relationship, and giving a mote one means adding that relationship
+  here.
+* **Advanced** (the footer toggle, remembered): the mote's id with a
+  copy button, a `name` marker under the title (the title is that
+  property, in a bigger font), whether this mote is its species'
+  template, the door to its note in Mora, the raw JSON, and -- in Motion
+  only -- a `why` button per property that reads the run log for where a
+  solved value came from.
+
+Everything autosaves as you type, debounced, with a `saved` flash in the
+header.
+
+Deliberately not in it: deleting a mote, and editing a selection of
+several. Both stay in each window's own chrome -- the inspector is about
+one mote.
+
+
+### Dates
+
+Any property whose value is an ISO 8601 interval — a plain `2026-09-22`
+counts — is edited with a calendar rather than a text box, in every
+window. By value shape, not by key name: `when`, `due`, `starts` and
+whatever else this garden calls it all get the same editor.
+
+Click the summary line to open it. Inside: a month grid with Today /
+Tomorrow / Next week shortcuts, a start time and an optional end time
+(shown with the duration it works out to), and a repeat editor —
+frequency, how many of that unit, which weekdays for a weekly rule, and
+whether it ends never, after N times, or on a date. Done closes it;
+Clear removes the property's value entirely.
+
+A rule the editor can't represent — two RRULE lines, a `BYMONTHDAY`, an
+`EXDATE` left behind by detaching one occurrence in Monastery — is shown
+as editable RRULE text instead, and anything it doesn't understand is
+preserved rather than dropped.
+
+### Right-click
+
+Every window has a context menu on a mote now, and the first two items
+are the same everywhere: **Inspect** and **Inspect in new tab**. What
+follows is that window's own — Monarch offers copy/pin/delete on the
+whole selection, Monastery offers removing the one occurrence you
+clicked, Motion offers connecting or editing a rule.
+
 ### Graph interactions
 
 | Gesture | Action |
 |---|---|
-| Left-click a mote | Select it |
+| Left-click a mote | Select it, and open it in the inspector |
+| Right-click a mote | Context menu, including "Inspect in new tab" |
 | Left-click an edge | Select the relationship it represents |
 | Shift+Left-click an edge | Add/remove that relationship from the selection |
 | Left-click empty canvas | Deselect |
@@ -51,11 +145,11 @@ on selection rather than re-fitting the whole view. Fonts are vendored under
 
 Motes/relationships highlight live as a box-select drag grows over them,
 not only once the mouse is released. Copying more than one mote preserves
-their relative layout on paste. The topbar's garden button opens a quick
-switch/create dropdown; its "Manage gardens…" item (also reachable from
-the File menu) opens the fuller modal that Export/Delete/Import still
-live in, since those need real per-row buttons a narrow menu item can't
-give them.
+their relative layout on paste. The topbar's garden button opens a
+switcher over the gardens that exist; its "Manage gardens…" item (also
+reachable from the File menu) opens the Gardens window, which is where
+creating, renaming, deleting, importing, exporting and syncing live —
+for every window, not just this one.
 
 Shift+clicking an edge, or shift-dragging a box, builds up a relationship
 selection the same way plain box-select does for motes. Selecting
@@ -71,7 +165,7 @@ named property. Combine it with the species/relationship filter chips for
 something like "every Task with priority = high." Anything more involved
 than that is expected to live in external BI software instead, not here.
 
-Deleting motes/relationships or a garden surfaces a toast with an "Undo"
+Deleting motes/relationships surfaces a toast with an "Undo"
 action (also triggerable with Ctrl/Cmd+Z) for a few seconds afterward.
 It's single-step -- only the most recent delete can be undone, and the
 window closes once the toast disappears. A restored mote/relationship
@@ -91,12 +185,8 @@ ever open at a time -- opening any one closes the rest, and Esc or a
 click outside the open one closes it too.
 
 Most items are real, existing actions relocated rather than rebuilt:
-File hosts "New garden…", "Import garden…", "Export garden as JSON…"
-and "Export to Calendar" -- the garden import/export items are the same
-flows the gardens modal's own Import button and per-row Export button
-run, sharing one implementation so the two entry points can't drift
-(they replaced "soon" stubs that advertised features already working
-elsewhere in the app); View hosts "Reset
+File hosts "Manage gardens…" (the same Gardens window the garden
+dropdown opens) and "Export to Calendar"; View hosts "Reset
 view", a "Hide/Show controls" toggle for the always-docked
 top-right panel (species legend, relationship filters, depth, reset
 view) -- the first way to reclaim that screen space, persisted across
@@ -105,7 +195,8 @@ simulation step count, the **solver** and **scenario** pickers, the
 Simulate…/Exit simulation trigger for the same non-blocking
 preview/scrub/commit bar described above, "Check roles…", and
 "Notes (Mora)…", which opens the note editor on the current garden (see
-Mora, below). A handful of items (Import motes, Export as CSV/JSON,
+Mora, below), and "Sync…", which opens the Gardens window straight at
+this garden's sync settings. A handful of items (Import motes, Export as CSV/JSON,
 Print graph, Timeline view, Group by type, Automations, Webhooks, API
 access) are inert placeholders with a small "soon" badge, staged for
 future expansion -- clicking one just toasts an explanation rather than
@@ -204,12 +295,15 @@ garden export.
 ### Linking out to files and websites
 
 `url` is a reserved property name: give any mote a `url` property (a
-web address or a local file path) and its detail panel row gets an
-"Open" (↗) button that launches it via the OS's default handler.
+web address or a local file path) and its inspector row gets an
+"Open" (↗) button that launches it via the OS's default handler. In all
+six windows -- the button moved into the shared inspector along with
+everything else about editing one mote, so following a link is no longer
+something only the graph window could do.
 `core/links.py::classify_link` decides which: a web address goes to the
 stdlib `webbrowser` module, while a local file is instead handed to the
 OS's native "open with the registered default app" mechanism
-(`monarch/api.py::_open_with_os_default`), not `webbrowser.open()`, since
+(`api_common.py::open_with_os_default`), not `webbrowser.open()`, since
 that always launches the web browser itself and would show a `.py`
 file as plain text rather than opening it in, say, VSCode. On Linux
 that's `gio open` (falling back to `xdg-open` only if `gio` isn't
@@ -234,8 +328,9 @@ drop yet; the path/URL has to be pasted in by hand.
 `docs/architecture.md` lists every property key and relationship type
 MonOSS recognizes by convention (`url`, `date`, `duration`, `equation`,
 `freedoms`, `roles`, `instance_of`, `overrides`, `varies`, ...). Any property or relationship using one of these
-gets a small dot badge next to its name in the detail panel, so it
-doesn't look like ordinary data -- hover it for a tooltip. This is
+is accented in the inspector rather than drawn as ordinary data --
+hover it for a tooltip. A reserved property key is also not renameable
+in place, since its name is what gives it meaning. This is
 purely a visual cue; the name still works exactly like any other
 property/relationship, editable and deletable like anything else.
 
@@ -963,6 +1058,80 @@ whole run.
 
 ```
 .venv/bin/python scripts/motion_smoke_test.py
+```
+
+Run it alone — the pywebview window suites interfere with each other,
+and two at once produce failures that are about the display rather than
+the code.
+
+---
+
+# Gardens -- the garden manager
+
+`./run_gardens.py`, or `.venv/bin/python run_gardens.py`. Also reachable
+from every one of the six windows: the garden dropdown's "Manage
+gardens…" footer, plus Monarch's File menu and its Tools → Sync…, which
+opens it straight at the selected garden's sync settings.
+
+```
+./run_gardens.py                        # the list, nothing selected
+./run_gardens.py --garden reactor       # opens with that row selected
+./run_gardens.py --garden reactor --sync
+```
+
+Garden management used to be Monarch's alone — a modal that only that
+window had — so making a garden from Motion meant opening Monarch first.
+This is that modal pulled out into a window all seven processes share,
+and Monarch's copy is gone rather than duplicated.
+
+### Why a separate window, and a separate process
+
+A manager living inside an app would be managing, among others, the
+garden that app is holding open. That is why Monarch's modal had to
+refuse to delete the current garden, and refuse to delete the last one:
+it *was* a garden window, and both cases would have left it standing in
+nothing. This window holds no garden connection at all (every read opens
+a short-lived one and closes it), so both are ordinary operations here.
+
+The cost of being its own process is that it cannot switch the garden of
+the app that opened it. It doesn't try: each row's **Open in** launches
+any of the six windows already on that garden, and an app that is
+already running finds a newly created garden in its own switcher, which
+reads the directory every time it opens.
+
+### What it does
+
+| Action | Notes |
+|---|---|
+| New garden | Name validated in the field against the same rule `core/db.py` enforces |
+| Rename | Moves the `.db` and its sidecars, and follows the default-garden pointer. Refused while the garden syncs — `core/sync.py` keys the shared folder by garden name, so renaming would point this device at an empty op stream while other devices kept writing to the old one. Stop syncing, rename, set it up again |
+| Delete | The file is moved aside, not erased, so the toast's **Undo** is real (`restore_garden`). A window already open on that garden keeps working off its own file handle until it closes |
+| Export as JSON | `core/garden_io.py`'s export document, through a native save dialog |
+| Import | Always lands in a *new* garden — `garden_io` refuses to merge into one already holding any of the incoming mote ids — so the name is asked for before the file. A failed import removes the garden it just made, rather than leaving an empty one under the name you wanted |
+| Sync | The folder-sync controls that used to be Monarch's Tools → Sync…, now per garden: choose the shared folder, the auto-sync flag that gates each app's lifecycle sync points (open, garden switch, close), a manual **Sync now**, and **Stop syncing**, which keeps the oplog so turning it back on resumes |
+
+### Ports
+
+42007, after the six windows' 42001-42006, falling back to an ephemeral
+one if taken. `.webview_data_gardens/` is its own WebKit storage. Opening
+it twice is allowed rather than guarded: pywebview cannot raise and focus
+a window belonging to another process, so a menu item that silently did
+nothing because the first one was buried would be the worse failure.
+
+### Smoke test
+
+`scripts/gardens_smoke_test.py`, the same instrument as the others. It
+drives a real window against a throwaway gardens directory and checks
+that the list renders every garden with its counts, that selecting one
+fills the detail pane, that the name modal catches an invalid or
+duplicate name before Python sees it, that rename really moves the
+garden, that delete offers a working Undo, and that sync can be turned
+on and off per garden. Opening an app and opening a native file dialog
+are stubbed in the page — one would spawn a process the run can't reap,
+the other would block on a dialog nobody will answer.
+
+```
+.venv/bin/python scripts/gardens_smoke_test.py
 ```
 
 Run it alone — the pywebview window suites interfere with each other,

@@ -447,6 +447,15 @@ function cardNode(card, compact, draggable = true, withComplete = false) {
     node.append(bar);
   }
 
+  node.oncontextmenu = (event) => {
+    event.preventDefault();
+    ContextMenu.open(event.clientX, event.clientY, [
+      ...ContextMenu.inspectItems(card.id, node),
+      "-",
+      { label: "Delete mote", danger: true, run: () => deleteMote(card.id, card.name) },
+    ]);
+  };
+
   if (draggable) node.addEventListener("pointerdown", (event) => beginCardDrag(event, card.id, node));
   node.addEventListener("click", () => {
     if (justDragged) return;
@@ -956,11 +965,26 @@ function renderTimer() {
 
 // ---- actions -------------------------------------------------------
 
-async function select(moteId) {
+/** The one delete path -- the panel's own button and the card's context
+ *  menu both call this, rather than the second growing an inline copy of
+ *  the first. */
+async function deleteMote(moteId, name = "That mote") {
+  const ok = await call(api.delete_mote(moteId), "Could not delete that mote.");
+  if (!ok) return;
+  if (selectedId === moteId) select(null);
+  toast(`${name} deleted.`);
+  refresh();
+}
+
+async function select(moteId, options = {}) {
   selectedId = moteId;
-  if (!moteId) { panel = null; render(); return; }
+  if (!moteId) { panel = null; Inspector.close(); render(); return; }
   panel = await call(api.focus(moteId), "Could not read that mote.");
   render();
+  // The docked panel keeps what is Momentum's own -- status pills drawn
+  // from the board's own columns, subtasks, scheduling -- and the mote
+  // itself goes to the surface every window shares.
+  await Inspector.open(moteId, { anchor: options.anchor, newTab: !!options.newTab });
 }
 
 async function moveTo(moteId, status) {
@@ -1168,6 +1192,23 @@ function step(direction) {
 
 // ---- garden menu ---------------------------------------------------
 
+/** The "Manage gardens…" footer every one of the six garden menus
+ *  carries, byte for byte the same in each -- the shared Gardens window
+ *  is only standard if the way in is. */
+function gardenMenuManageItem(close) {
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "menu-item";
+  item.textContent = "Manage gardens…";
+  item.title = "Create, rename, import, export and sync gardens";
+  item.onclick = () => { close(); api.open_gardens(); };
+  const frag = document.createDocumentFragment();
+  frag.append(sep, item);
+  return frag;
+}
+
 async function openGardenMenu() {
   const menu = $("garden-menu");
   if (!menu.classList.contains("hidden")) { closeGardenMenu(); return; }
@@ -1191,6 +1232,13 @@ async function openGardenMenu() {
     };
     menu.append(item);
   });
+
+  // Every window ends its garden menu with the same two lines: the
+  // gardens you can switch to, then the one window where gardens
+  // themselves are made, renamed, imported, exported and synced
+  // (gardens_app/). Switching is per window; managing is not, which is
+  // why this opens a window instead of a modal.
+  menu.append(gardenMenuManageItem(closeGardenMenu));
   menu.classList.remove("hidden");
   $("garden-btn").setAttribute("aria-expanded", "true");
 }
@@ -1276,16 +1324,7 @@ function wire() {
     activeId = panel.id;
     setTab("focus");
   };
-  $("panel-delete").onclick = async () => {
-    if (!panel) return;
-    const name = panel.name;
-    const id = panel.id;
-    const ok = await call(api.delete_mote(id), "Could not delete that mote.");
-    if (!ok) return;
-    select(null);
-    toast(`${name} deleted.`);
-    refresh();
-  };
+  $("panel-delete").onclick = () => panel && deleteMote(panel.id, panel.name);
   $("panel-add-sub").onclick = async () => {
     if (!panel) return;
     const text = window.prompt("Subtask");
@@ -1471,6 +1510,12 @@ async function launchApp(appId) {
 
 async function init() {
   api = window.pywebview.api;
+  Inspector.install({ api, onChanged: refresh });
+  CommandBar.install({
+    api,
+    onChanged: refresh,
+    onNavigate: (moteId) => Inspector.open(moteId),
+  });
   anchor = new Date();
   keyChoice = loadKeys();
   loadTimerPrefs();

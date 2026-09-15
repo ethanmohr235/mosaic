@@ -329,6 +329,22 @@ def test_solvers_come_from_the_registry_not_a_fixed_menu(api):
     assert api.board()["solvers"] == solvers_repo.list_solvers()
 
 
+# ---- check_equation_names ----
+
+def test_check_equation_names_offers_an_unconnected_mote(api):
+    a = api.create_mote({"name": "A"})
+    b = api.create_mote({"name": "B", "x": 5})
+    result = api.check_equation_names(a["id"], "y == B.x")
+    assert result == [{"name": "B", "candidates": [{"id": b["id"], "label": "B"}]}]
+
+
+def test_check_equation_names_empty_once_connected(api):
+    a = api.create_mote({"name": "A"})
+    b = api.create_mote({"name": "B", "x": 5})
+    api.create_relationship(a["id"], b["id"], "relates_to")
+    assert api.check_equation_names(a["id"], "y == B.x") == []
+
+
 def test_a_rule_mote_is_a_rule_node_and_carries_its_equation(api):
     garden = _seed_ohm(api)
     node = next(n for n in api.board()["nodes"] if n["id"] == garden["rule"])

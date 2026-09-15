@@ -22,7 +22,9 @@ import threading
 
 import webview
 
+from api_common import CommandBarApi, InspectorApi
 from api_common import open_app as _open_app
+from api_common import open_gardens as _open_gardens
 from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core import gardens as gardens_repo
@@ -48,7 +50,7 @@ _SEARCH_LIMIT = 12
 _BUSY_TIMEOUT_MS = 5000
 
 
-class Api:
+class Api(InspectorApi, CommandBarApi):
     """Every method takes the note's *live* source rather than reading it
     back from the database. The source pane is the truth while you type;
     the property only catches up when you save. Resolving what is on
@@ -132,6 +134,20 @@ class Api:
         self._garden = resolved
         self._best_effort_sync()
         return {"garden": resolved}
+
+    @_synchronized
+    def open_gardens(self, sync: bool = False) -> dict:
+        """Open the shared Gardens window (gardens_app/): create, rename,
+        delete, import, export and sync, for every garden rather than
+        just this one.
+
+        All six windows expose this same method, which is the point --
+        garden management used to exist once, privately, inside
+        Monarch's own modal, so doing any of it from here meant opening
+        Monarch first. Switching which garden *this* window shows stays
+        here (switch_garden above); everything about the gardens
+        themselves is one window all six can open."""
+        return _open_gardens(self._garden, sync=sync)
 
     # ---- notes ----
 

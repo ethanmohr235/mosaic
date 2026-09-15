@@ -1,10 +1,6 @@
 # monarch/api.py
 import dataclasses
-import json
 import logging
-import os
-import platform
-import subprocess
 import sys
 import threading
 import webbrowser
@@ -12,13 +8,16 @@ from pathlib import Path
 
 import webview
 
+from api_common import CommandBarApi, InspectorApi
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
+from api_common import open_gardens as _open_gardens
+from api_common import open_with_os_default as _open_with_os_default
+from api_common import popen_detached as _popen_detached
 from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
 from core.db import get_connection, initialize_database
 from core import gardens as gardens_repo
-from core import garden_io
 from core import graph as graph_repo
 from core import links as links_repo
 from core import motes as motes_repo
@@ -52,55 +51,10 @@ MONASTERY_SCRIPT = Path(__file__).resolve().parent.parent / "run_monastery.py"
 MOMENTUM_SCRIPT = Path(__file__).resolve().parent.parent / "run_momentum.py"
 
 
-def _popen_detached(args: list[str], *, quiet: bool = True) -> None:
-    """Launches args without waiting on it (see _open_with_os_default for
-    why), but still reaps the child on a background thread so it doesn't
-    sit as a zombie for as long as MonOSS keeps running -- this app is
-    long-lived and every Open click spawns one of these.
-
-    `quiet` discards the child's output, which is right for an OS opener
-    (`gio open` chatters about nothing we can act on) and wrong for our
-    own apps: a discarded traceback is how a crashed Mora came to look
-    like a mysteriously wrong window instead of an error."""
-    streams = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if quiet else {}
-    proc = subprocess.Popen(args, **streams)
-    threading.Thread(target=proc.wait, daemon=True).start()
-
-
-def _open_with_os_default(path: str) -> None:
-    """Launches a local file with whatever the OS has registered as the
-    default app for its type -- e.g. a .py file opens in VSCode, not as
-    text in a browser tab, which is what webbrowser.open() would do.
-
-    Fire-and-forget: open_link() is @_synchronized, so blocking here
-    until the opener command exits would hold that lock -- and freeze
-    every other Api call -- for as long as the opener (or the app it
-    launches) takes to return, which observably is not always fast."""
-    system = platform.system()
-    if system == "Darwin":
-        _popen_detached(["open", path])
-    elif system == "Windows":
-        os.startfile(path)
-    else:
-        # gio (GLib/GVFS) detects content-type the same way GTK file
-        # managers do (extension-aware glob matching), which is what a
-        # user expects "Open" to match. xdg-open shells out to a cruder
-        # MIME-sniffing heuristic that can disagree -- observed here as a
-        # .py file coming back as the legacy "text/x-script.python"
-        # alias, which has no registered default, instead of
-        # "text/x-python", which does, silently falling back to a web
-        # browser instead of erroring. Only falls back to xdg-open if
-        # gio itself isn't installed.
-        try:
-            _popen_detached(["gio", "open", path])
-        except FileNotFoundError:
-            _popen_detached(["xdg-open", path])
-
-
 logger = logging.getLogger(__name__)
 
 
-class Api:
+class Api(InspectorApi, CommandBarApi):
     """JS-facing bridge over the core data layer. Holds the live garden
     connection as instance state -- not module-global, same pattern as
     cli/repl.py's locals.
@@ -161,10 +115,6 @@ class Api:
         return gardens_repo.list_gardens()
 
     @_synchronized
-    def create_garden(self, name: str) -> None:
-        gardens_repo.create_garden(name)
-
-    @_synchronized
     def switch_garden(self, name: str) -> dict:
         resolved = gardens_repo.resolve_garden(name)
         self._conn.close()
@@ -175,117 +125,17 @@ class Api:
         return {"garden": resolved}
 
     @_synchronized
-    def delete_garden(self, name: str) -> dict:
-        # Checked in this order deliberately: if it's the only garden left,
-        # "switch away first" would be misleading advice -- there's nowhere
-        # to switch to.
-        if len(gardens_repo.list_gardens()) <= 1:
-            raise ValueError("Can't delete the last garden.")
-        if name == self._current_garden:
-            raise ValueError("Can't delete the garden you're currently in -- switch to another one first.")
-        gardens_repo.delete_garden(name)
-        return {"deleted": name}
+    def open_gardens(self, sync: bool = False) -> dict:
+        """Open the shared Gardens window (gardens_app/), which is where
+        creating, renaming, deleting, importing, exporting and syncing a
+        garden now live -- for every window, not just this one.
 
-    @_synchronized
-    def restore_garden(self, name: str) -> dict:
-        gardens_repo.restore_garden(name)
-        return {"restored": name}
-
-    @_synchronized
-    def get_default_garden(self) -> str | None:
-        return gardens_repo.get_default_garden()
-
-    @_synchronized
-    def set_default_garden(self, name: str) -> None:
-        gardens_repo.set_default_garden(name)
-
-    @_synchronized
-    def clear_default_garden(self) -> None:
-        gardens_repo.clear_default_garden()
-
-    @_synchronized
-    def export_garden_to_file(self, garden_name: str | None = None) -> dict:
-        """Exports the current garden by default, or any named garden --
-        via a short-lived connection, so exporting one from the gardens
-        list doesn't disturb the currently open one.
-
-        Named for what it does that core's export_garden() doesn't: ask
-        the user for a path and write the file. The two used to share a
-        name while returning completely different things (a document vs.
-        a path or {"cancelled": True})."""
-        target_name = garden_name or self._current_garden
-        path = self._window.create_file_dialog(
-            webview.FileDialog.SAVE, save_filename=f"{target_name}.json"
-        )
-        if not path:
-            return {"cancelled": True}
-        target = Path(path if isinstance(path, str) else path[0])
-
-        if target_name == self._current_garden:
-            data = garden_io.export_garden(self._conn)
-        else:
-            conn = get_connection(target_name)
-            try:
-                data = garden_io.export_garden(conn)
-            finally:
-                conn.close()
-        target.write_text(json.dumps(data, indent=2))
-        return {"path": str(target)}
-
-    @_synchronized
-    def import_garden_into_new(self, new_garden_name: str) -> dict:
-        paths = self._window.create_file_dialog(webview.FileDialog.OPEN)
-        if not paths:
-            return {"cancelled": True}
-        data = json.loads(Path(paths[0]).read_text())
-
-        gardens_repo.create_garden(new_garden_name)
-        conn = get_connection(new_garden_name)
-        try:
-            initialize_database(conn)
-            motes, rels = garden_io.import_garden(conn, data)
-        finally:
-            conn.close()
-        return {"garden": new_garden_name, "motes": motes, "relationships": rels}
-
-    # ---- sync ----
-
-    @_synchronized
-    def sync_status(self) -> dict:
-        status = sync_repo.status(self._conn, self._current_garden)
-        status["auto_sync"] = gardens_repo.get_auto_sync_enabled(self._current_garden)
-        return status
-
-    @_synchronized
-    def choose_sync_folder(self) -> dict:
-        """Native folder picker -- same cancel-handling shape as
-        export_garden_to_file's SAVE dialog."""
-        path = self._window.create_file_dialog(webview.FileDialog.FOLDER)
-        if not path:
-            return {"cancelled": True}
-        return {"path": path if isinstance(path, str) else path[0]}
-
-    @_synchronized
-    def enable_sync(self, folder: str) -> dict:
-        # clone=True is always safe here: the only case sync.init() needs
-        # it for is "garden doesn't exist locally yet," which can't be
-        # true for a garden the GUI already has open.
-        return sync_repo.init(self._current_garden, folder, clone=True)
-
-    @_synchronized
-    def disable_sync(self) -> None:
-        gardens_repo.clear_sync_dir(self._current_garden)
-
-    @_synchronized
-    def set_auto_sync(self, enabled: bool) -> None:
-        gardens_repo.set_auto_sync_enabled(self._current_garden, enabled)
-
-    @_synchronized
-    def sync_now(self) -> dict:
-        """Unlike _best_effort_sync(), a manual click doesn't swallow
-        errors -- surfaced to the user as a toast via call()'s existing
-        rejection handling."""
-        return sync_repo.run(self._conn, self._current_garden)
+        This window used to carry all of that privately, as a modal only
+        Monarch had, which is why "make a new garden" from Motion meant
+        opening Monarch first. What stays here is the half that is
+        genuinely about *this* window: which garden it is looking at
+        (list_gardens/switch_garden above)."""
+        return _open_gardens(self._current_garden, sync=sync)
 
     @_synchronized
     def refresh(self) -> dict:

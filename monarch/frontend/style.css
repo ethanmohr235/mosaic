@@ -237,6 +237,9 @@ button.linkish:hover { color: var(--fg); border-color: transparent; }
 #context-menu {
   position: fixed; top: 0; left: 0; /* overridden inline per-open */
   min-width: 170px;
+  /* Above the inspector (z-index 60) -- .menu's own z-index is 20, tuned
+     for topbar dropdowns that never compete with a floating panel. */
+  z-index: 70;
 }
 
 #select-box {
@@ -531,102 +534,6 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 .picker-checkbox input[type="checkbox"] { margin: 0; }
 
-/* ---- interval picker (app.js::intervalField) ----
-   A collapsed summary button that expands into a calendar grid, time/
-   end-time, and repeat controls. Monarch's Observatory design
-   (docs/ui-setup.md). */
-
-.interval-field { flex: 1; min-width: 0; }
-
-.interval-summary-btn {
-  display: block; width: 100%; text-align: left;
-  background: var(--raised); border: 1px solid var(--border-soft);
-  border-radius: 6px; padding: 6px 8px; font-size: 12.5px; color: var(--fg);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
-}
-.interval-summary-btn:hover { border-color: var(--accent); }
-
-/* Fixed-position popup rather than an inline block -- decouples the
-   calendar's width from #detail-panel's own (user-resizable, sometimes very
-   narrow) width. Position is set inline per-open, same idiom as
-   #context-menu; the width here is what makes it not resizable at all. */
-.interval-panel {
-  position: fixed; top: 0; left: 0; width: 280px;
-  max-width: calc(100vw - 16px);
-  background: var(--panel-bg); border: 1px solid var(--border-soft);
-  border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45); z-index: 20;
-}
-
-.interval-divider { border-top: 1px solid var(--border-soft); margin: 2px 0; }
-.interval-row-label { font-size: 11px; color: var(--muted); min-width: 44px; flex-shrink: 0; }
-
-.interval-cal-header { display: flex; align-items: center; justify-content: space-between; }
-.interval-cal-month { font-size: 12.5px; color: var(--fg-bright); font-weight: 500; }
-.interval-cal-nav {
-  background: transparent; border: none; color: var(--muted); font-size: 14px;
-  cursor: pointer; padding: 2px 8px; border-radius: 6px;
-}
-.interval-cal-nav:hover { background: var(--raised); color: var(--fg); }
-
-.interval-cal-weekdays, .interval-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-.interval-cal-weekdays span { text-align: center; font-size: 9.5px; letter-spacing: 0.05em; color: var(--faint); }
-.interval-cal-day {
-  height: 24px; background: transparent; border: 1px solid transparent; border-radius: 6px;
-  color: var(--fg); font-size: 11.5px; cursor: pointer; padding: 0; font-variant-numeric: tabular-nums;
-}
-.interval-cal-day:hover { background: var(--raised); }
-.interval-cal-day.out { color: var(--faint); }
-.interval-cal-day.today { border-color: var(--border-soft); }
-.interval-cal-day.selected { background: var(--accent); color: var(--panel-bg); font-weight: 600; border-color: transparent; }
-
-.interval-jump-chips { display: flex; gap: 5px; }
-.interval-jump-chip {
-  flex: 1; background: transparent; border: 1px solid var(--border-soft); border-radius: 999px;
-  padding: 4px 0; font-size: 10.5px; color: var(--muted); cursor: pointer;
-}
-.interval-jump-chip:hover { border-color: var(--accent); color: var(--fg-bright); }
-
-.interval-time-row, .interval-end-row { display: flex; align-items: center; gap: 8px; }
-.interval-time-row input[type="time"], .interval-end-row input[type="time"] {
-  flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px;
-}
-.interval-end-ghost {
-  flex: 1; background: transparent; border: 1px dashed var(--border); border-radius: 8px;
-  padding: 5px 8px; font-size: 11.5px; color: var(--muted); cursor: pointer;
-}
-.interval-end-ghost:hover { border-color: var(--accent); color: var(--fg-bright); }
-.interval-end-duration { font-size: 10.5px; color: var(--faint); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.interval-end-clear {
-  background: transparent; border: none; color: var(--faint); font-size: 14px;
-  cursor: pointer; padding: 0 4px; flex-shrink: 0;
-}
-.interval-end-clear:hover { color: var(--fg-bright); }
-
-.interval-repeat-row { display: flex; align-items: center; gap: 8px; }
-.interval-repeat-detail { display: flex; flex-direction: column; gap: 8px; }
-
-.interval-fallback-note { font-size: 11px; color: var(--muted); }
-.interval-fallback-reset {
-  align-self: flex-start; background: transparent; border: 1px solid var(--border-soft);
-  border-radius: 8px; padding: 4px 9px; font-size: 11px; color: var(--muted); cursor: pointer;
-}
-.interval-fallback-reset:hover { border-color: var(--accent); color: var(--fg-bright); }
-
-.interval-summary-text { font-size: 12px; color: var(--fg); line-height: 1.4; }
-.interval-raw-value { font-family: var(--mono); font-size: 9.5px; color: var(--faint); word-break: break-all; }
-.interval-footer-btns { display: flex; gap: 6px; margin-top: 2px; }
-.interval-clear-btn {
-  background: transparent; border: 1px solid var(--border-soft); border-radius: 8px;
-  padding: 5px 10px; font-size: 11.5px; color: var(--danger); cursor: pointer;
-}
-.interval-clear-btn:hover { border-color: var(--danger); }
-.interval-done-btn {
-  margin-left: auto; background: var(--accent); border: none; border-radius: 8px;
-  padding: 5px 14px; font-size: 11.5px; color: var(--panel-bg); font-weight: 600; cursor: pointer;
-}
-.interval-done-btn:hover { background: var(--accent-bright); }
-
 .reserved-badge {
   display: inline-block; width: 6px; height: 6px; border-radius: 50%;
   background: var(--accent); margin-left: 5px; flex-shrink: 0; vertical-align: middle;
@@ -797,56 +704,6 @@ main { flex: 1; min-height: 0; display: flex; }
   padding: 9px 20px; border-top: 1px solid var(--border-soft); background: var(--panel-bg);
   font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: 0.06em;
 }
-
-/* ---- gardens modal ---- */
-
-#gardens-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
-}
-#gardens-modal {
-  width: 460px; max-width: 90vw; max-height: 72vh;
-  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
-  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  display: flex; flex-direction: column; overflow: hidden;
-  padding: 20px;
-}
-#gardens-list { flex: 1; overflow-y: auto; min-height: 0; margin: 4px 0 14px; }
-.garden-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 6px; border-radius: 7px; cursor: pointer;
-}
-.garden-row:hover { background: var(--raised); }
-.garden-row .check { color: var(--accent); width: 14px; flex-shrink: 0; text-align: center; }
-.garden-row .name {
-  flex: 1; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px;
-}
-.garden-row button { font-size: 12px; padding: 5px 9px; flex-shrink: 0; }
-.garden-row .star {
-  color: var(--faint); font-size: 15px; padding: 0 3px; line-height: 1;
-}
-.garden-row .star.on { color: var(--accent); }
-.garden-row .star:hover { color: var(--accent); border-color: transparent; }
-#gardens-modal-actions { display: flex; align-items: center; gap: 8px; }
-
-/* ---- sync modal ---- */
-
-#sync-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-  z-index: 30; display: flex; justify-content: center; padding-top: 9vh;
-}
-#sync-modal {
-  width: 440px; max-width: 90vw; max-height: 72vh;
-  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
-  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  display: flex; flex-direction: column; overflow: hidden; padding: 20px;
-}
-#sync-folder-path {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; text-align: right; font-size: 12px; color: var(--muted);
-}
-#sync-modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 
 /* ---- toast ---- */
 

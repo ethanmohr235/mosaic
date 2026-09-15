@@ -38,6 +38,10 @@ db.GARDENS_DIR = _TMP / "gardens"
 import webview  # noqa: E402  (import after GARDENS_DIR patched, matches app startup order)
 from window_launcher import choose_port  # noqa: E402
 from monarch.api import Api  # noqa: E402
+# Setup only: creating a garden is the Gardens window's job now
+# (gardens_app/), not this bridge's, so scenarios that need a
+# second garden to switch into make it through core directly.
+from core.gardens import create_garden  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "monarch" / "frontend"
 
@@ -254,7 +258,7 @@ def run_checks(window):
         x, y = node_xy(window, "window.__seed.bobId")
         drag(window, x, y, x, y)  # press and release without moving = click
         time.sleep(2.0)
-        title = js(window, "document.getElementById('detail-title').textContent")
+        title = js(window, "document.querySelector('.ins-name').value")
         assert title == "Bob", f"clicking Bob should open its panel, got {title!r}"
 
     check("clicking a node selects it and opens the panel", click_selects_and_opens_panel)
@@ -322,16 +326,27 @@ def run_checks(window):
 
         # "New instance" appears on a species that has a template, and the
         # instance comes out pre-filled from it.
-        hidden = js(window, "document.getElementById('new-instance-btn').classList.contains('hidden')")
-        assert hidden is False, "a species with a template should offer New instance"
+        js(window, """
+            if (!document.querySelector('.ins-toggle').classList.contains('on'))
+                document.querySelector('.ins-toggle').click();
+        """)
+        time.sleep(0.4)
+        found = js(window, """
+            !!Array.from(document.querySelectorAll('.ins-body .ins-ghost'))
+                   .find(b => b.textContent === '+ New instance')
+        """)
+        assert found is True, "a species with a template should offer New instance"
 
-        js(window, "document.getElementById('new-instance-btn').click();")
+        js(window, """
+            Array.from(document.querySelectorAll('.ins-body .ins-ghost'))
+                 .find(b => b.textContent === '+ New instance').click();
+        """)
         time.sleep(2.5)
         props = json.loads(js(window, "JSON.stringify((payload.motes.find(m => m.id === focusId) || {}).properties)"))
         assert props.get("resistance") == 100, f"instance should inherit the template, got {props}"
         assert props.get("name") == "R", f"instance should inherit the template, got {props}"
 
-        kind = js(window, "document.getElementById('detail-type-label').textContent")
+        kind = js(window, "document.querySelector('.ins-species').textContent")
         assert kind == "Resistor", f"new instance should report its species, got {kind!r}"
 
     check("species template: New instance copies template properties", species_and_templating)
@@ -360,7 +375,7 @@ def run_checks(window):
             document.getElementById('create-mote-btn').click();
         """)
         time.sleep(2.5)
-        name = js(window, "document.getElementById('detail-title').textContent")
+        name = js(window, "document.querySelector('.ins-name').value")
         assert name == "R99", f"quick-add should create and select the new mote, got {name!r}"
 
     check("quick add: species chip prefills from template", quick_add_prefills_from_template)
@@ -379,7 +394,7 @@ def run_checks(window):
             }
         """)
         time.sleep(2.0)
-        name = js(window, "document.getElementById('detail-title').textContent")
+        name = js(window, "document.querySelector('.ins-name').value")
         assert name == "EnterMote", f"Enter in quick-add should create the mote, got {name!r}"
         hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
         assert hidden is True, "creating via Enter should close the quick-add panel"
@@ -577,9 +592,9 @@ def run_checks(window):
 
         info = json.loads(js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const rows = document.querySelectorAll('.ins-body .ins-row');
                 for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'equation') {
+                    if (r.querySelector('.ins-key').value === 'equation') {
                         const f = r.querySelector('textarea');
                         return JSON.stringify({tag: f ? 'textarea' : 'none', height: f ? f.clientHeight : 0});
                     }
@@ -609,42 +624,44 @@ def run_checks(window):
 
         has_open_on_url = js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const rows = document.querySelectorAll('.ins-body .ins-row');
                 for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'url') return !!r.querySelector('.open-link');
+                    if (r.querySelector('.ins-key').value === 'url') return !!r.querySelector('.ins-follow');
                 }
                 return 'row not found';
             })()
         """)
         assert has_open_on_url is True, f"a url property should get an Open button, got {has_open_on_url!r}"
 
-        has_open_on_name = js(window, """
+        with_open = json.loads(js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const rows = document.querySelectorAll('.ins-body .ins-row');
+                const keys = [];
                 for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'name') return !!r.querySelector('.open-link');
+                    if (r.querySelector('.ins-follow')) keys.push(r.querySelector('.ins-key').value);
                 }
-                return 'row not found';
+                return JSON.stringify(keys);
             })()
-        """)
-        assert has_open_on_name is False, "only the url property should get an Open button"
+        """))
+        assert with_open == ["url"], \
+            f"only the url property should get an Open button, got {with_open}"
 
         # Stub api.open_link so clicking Open doesn't try to launch a real
         # browser on the test machine; restored immediately after.
         js(window, """
             window.__opened = [];
-            window.__origOpenLink = api.open_link.bind(api);
-            api.open_link = (t) => { window.__opened.push(t); return Promise.resolve({opened: t}); };
+            window.__origOpenLink = api.inspector_open_link.bind(api);
+            api.inspector_open_link = (t) => { window.__opened.push(t); return Promise.resolve({opened: t}); };
         """)
         js(window, """
-            const rows = document.querySelectorAll('#detail-properties .detail-row');
+            const rows = document.querySelectorAll('.ins-body .ins-row');
             for (const r of rows) {
-                if (r.querySelector('.key').textContent === 'url') r.querySelector('.open-link').click();
+                if (r.querySelector('.ins-key').value === 'url') r.querySelector('.ins-follow').click();
             }
         """)
         time.sleep(0.5)
         opened = json.loads(js(window, "JSON.stringify(window.__opened)"))
-        js(window, "api.open_link = window.__origOpenLink;")
+        js(window, "api.inspector_open_link = window.__origOpenLink;")
         assert opened == ["https://example.com"], f"Open should call api.open_link with the property's value, got {opened}"
 
     check("detail panel: a url property gets a working Open button", url_property_gets_an_open_button)
@@ -664,9 +681,9 @@ def run_checks(window):
 
         info = json.loads(js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const rows = document.querySelectorAll('.ins-body .ins-row');
                 for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'date') {
+                    if (r.querySelector('.ins-key').value === 'date') {
                         const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({found: false});
                         field.querySelector('.interval-summary-btn').click();
@@ -688,7 +705,7 @@ def run_checks(window):
 
         # Uncheck All day and set a time -- should commit a full timed value.
         js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
+            const field = document.querySelector('.ins-body .interval-field');
             const allDay = field.querySelector('.interval-time-row input[type=\"checkbox\"]');
             allDay.checked = false;
             allDay.dispatchEvent(new Event('change', {bubbles: true}));
@@ -726,9 +743,9 @@ def run_checks(window):
 
         info = json.loads(js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const rows = document.querySelectorAll('.ins-body .ins-row');
                 for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'when') {
+                    if (r.querySelector('.ins-key').value === 'when') {
                         const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({found: false});
                         return JSON.stringify({found: true, value: field.value});
@@ -749,7 +766,7 @@ def run_checks(window):
         """Moving the start has to move the end with it -- the span is
         what an edit here must preserve, not the end's own clock time."""
         js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
+            const field = document.querySelector('.ins-body .interval-field');
             field.querySelector('.interval-summary-btn').click();
             const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
             timeInput.value = '11:30';
@@ -786,17 +803,19 @@ def run_checks(window):
 
         info = json.loads(js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const rows = document.querySelectorAll('.ins-body .ins-row');
                 for (const r of rows) {
-                    if (r.querySelector('.key').textContent === 'when') {
+                    if (r.querySelector('.ins-key').value === 'when') {
                         const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({picker: false});
                         field.querySelector('.interval-summary-btn').click();
-                        const raw = field.querySelector(
-                            '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
+                        const editor = field.querySelector('.interval-repeat-editor');
+                        const on = Array.from(
+                            field.querySelectorAll('.interval-repeat-editor .interval-pill.on'))
+                            .map((b) => b.textContent);
                         return JSON.stringify({
                             picker: true, value: field.value,
-                            repeatText: raw ? raw.value : null,
+                            structured: !!editor, activePills: on,
                         });
                     }
                 }
@@ -805,18 +824,19 @@ def run_checks(window):
         """))
         assert info["picker"] is True, \
             f"a repeating interval should get the picker, with its rule shown and editable, got {info}"
-        assert "RRULE:FREQ=WEEKLY" in (info["repeatText"] or ""), \
-            f"the repeat section should show the stored rule as editable text, got {info}"
+        assert info["structured"] is True, \
+            f"a stored rule should open in the structured repeat editor, got {info}"
+        assert "Week" in info["activePills"], \
+            f"the editor should show the stored frequency selected, got {info}"
         assert "RRULE:FREQ=WEEKLY" in info["value"], f"the rule must still be present, got {info}"
 
     check("detail panel: a repeating interval gets the picker, with an editable repeat rule",
           a_repeating_interval_gets_the_picker_with_an_editable_repeat_rule)
 
     def adding_a_repeat_rule_and_editing_it_writes_a_real_rrule():
-        """No frequency/weekday pills in Monarch any more -- "+ Add a
-        repeat rule" seeds raw RRULE text (monastery/frontend/app.js now
-        owns structured authoring), and typing into that text is what
-        commits a real rule."""
+        """The frequency and weekday pills are back, and shared -- the
+        same editor Monastery's draft uses (frontend_shared/interval.js).
+        Clicking them is what commits a real rule."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({name: 'weekly task', due: '2026-08-17T09:00'});
@@ -830,33 +850,38 @@ def run_checks(window):
         assert result == '"ok"', f"weekly mote setup failed: {result}"
 
         js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
+            const field = document.querySelector('.ins-body .interval-field');
             field.querySelector('.interval-summary-btn').click();
             field.querySelector('.interval-repeat-detail .interval-end-ghost').click();
         """)
         time.sleep(0.5)
+        # "+ Add a repeat rule" seeds weekly on the start's own weekday
+        # (a Monday here); clicking We and Fr adds the other two.
         js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
-            const raw = field.querySelector(
-                '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
-            raw.value = 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR';
-            raw.dispatchEvent(new Event('change', {bubbles: true}));
+            const field = document.querySelector('.ins-body .interval-field');
+            const days = Array.from(field.querySelectorAll('.interval-day-pill'));
+            for (const code of ['W', 'F']) {
+                const pill = days.find((d, i) => d.textContent === code && i >= 3);
+                if (pill) pill.click();
+            }
         """)
-        time.sleep(0.5)
+        time.sleep(0.6)
         updated = json.loads(js_async(window, """
             async () => { window.__result = (await api.get_mote(window.__seed.weeklyId)).properties.due; }
         """))
         assert "RRULE:FREQ=WEEKLY" in updated, f"editing the repeat text should write a real RRULE, got {updated!r}"
-        assert "BYDAY=MO,WE,FR" in updated, f"typed BYDAY should be preserved, got {updated!r}"
+        assert "BYDAY=" in updated, f"the weekday pills should write a BYDAY, got {updated!r}"
+        for code in ("MO", "WE", "FR"):
+            assert code in updated.split("BYDAY=")[1], \
+                f"BYDAY should carry every selected weekday, got {updated!r}"
 
     check("detail panel: adding a repeat rule and editing it writes a real RRULE",
           adding_a_repeat_rule_and_editing_it_writes_a_real_rrule)
 
-    def an_until_rule_stays_editable_text_and_survives_a_start_edit():
-        """UNTIL= no longer decomposes into a structured "ends on date"
-        control here (that's Monastery's job now) -- it shows as
-        editable raw text, and an edit to the start must leave the rule
-        untouched rather than dropping it."""
+    def an_until_rule_decomposes_and_survives_a_start_edit():
+        """UNTIL= decomposes into the editor's "ends on" date control,
+        and an edit to the start must leave the rule intact rather than
+        dropping it."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({
@@ -874,18 +899,17 @@ def run_checks(window):
 
         info = json.loads(js(window, """
             (function() {
-                const field = document.querySelector('#detail-properties .interval-field');
+                const field = document.querySelector('.ins-body .interval-field');
                 field.querySelector('.interval-summary-btn').click();
-                const raw = field.querySelector(
-                    '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
-                return JSON.stringify({ repeatText: raw ? raw.value : null });
+                const until = field.querySelector('.interval-until-input');
+                return JSON.stringify({ until: until ? until.value : null });
             })()
         """))
-        assert "UNTIL=20261231" in (info["repeatText"] or ""), \
-            f"an UNTIL= rule should stay visible as editable text, got {info}"
+        assert info["until"] == "2026-12-31", \
+            f"an UNTIL= rule should decompose into the ends-on control, got {info}"
 
         js(window, """
-            const field = document.querySelector('#detail-properties .interval-field');
+            const field = document.querySelector('.ins-body .interval-field');
             const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
             timeInput.value = '10:15';
             timeInput.dispatchEvent(new Event('change', {bubbles: true}));
@@ -899,8 +923,8 @@ def run_checks(window):
             f"the repeat-until-date should survive a start-only edit, got {updated!r}"
         )
 
-    check("detail panel: an UNTIL= rule stays editable text and survives a start edit",
-          an_until_rule_stays_editable_text_and_survives_a_start_edit)
+    check("detail panel: an UNTIL= rule decomposes and survives a start edit",
+          an_until_rule_decomposes_and_survives_a_start_edit)
 
     def a_rule_with_an_unsupported_param_still_shows_as_raw_text():
         """BYMONTHDAY isn't part of the FREQ/INTERVAL/BYDAY/COUNT/UNTIL
@@ -924,7 +948,7 @@ def run_checks(window):
 
         info = json.loads(js(window, """
             (function() {
-                const field = document.querySelector('#detail-properties .interval-field');
+                const field = document.querySelector('.ins-body .interval-field');
                 field.querySelector('.interval-summary-btn').click();
                 const raw = field.querySelector(
                     '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
@@ -940,7 +964,10 @@ def run_checks(window):
     check("detail panel: a rule with an unsupported param (BYMONTHDAY) still shows as raw text",
           a_rule_with_an_unsupported_param_still_shows_as_raw_text)
 
-    def detail_panel_is_resizable():
+    def the_panel_is_movable_and_resizable():
+        """The floating panel's corner grip resizes it and its header
+        drags it, and both survive a garden reload -- geometry is a
+        preference about the panel, not about the data."""
         result = js_async(window, """
             async () => {
                 const m = await api.create_mote({name: 'resize-checker'});
@@ -953,43 +980,95 @@ def run_checks(window):
         """, wait=2.0)
         assert result == '"ok"', f"resize mote setup failed: {result}"
 
-        before_width = json.loads(js(window,
-            "JSON.stringify(document.getElementById('detail-panel').getBoundingClientRect().width)"))
+        def box():
+            """The panel's geometry in CSS pixels, read off its own inline
+            style rather than getBoundingClientRect().
 
-        handle = json.loads(js(window, """
-            (function() {
-                const r = document.getElementById('detail-resize-handle').getBoundingClientRect();
-                return JSON.stringify({x: r.left + r.width / 2, y: r.top + r.height / 2});
-            })()
-        """))
+            The rect is not the same number: this window renders at a
+            fractional zoom, so a panel 312 CSS pixels wide measures
+            307.32, and the panel's open animation starts at
+            scale(0.985) on top of that. The inline style is what the
+            drag writes and what gets persisted, so it is what a claim
+            about persistence should be checked against."""
+            return json.loads(js(window, """
+                (function() {
+                    const s = document.querySelector('.ins').style;
+                    return JSON.stringify({
+                        w: parseFloat(s.width), h: parseFloat(s.height),
+                        x: parseFloat(s.left), y: parseFloat(s.top),
+                    });
+                })()
+            """))
 
-        # Drag the handle 80px to the left -- the panel is right-anchored,
-        # so that should grow it by ~80px.
-        hx, hy = handle["x"], handle["y"]
-        js(window, f"""
-            (function() {{
-                const h = document.getElementById('detail-resize-handle');
-                function fire(type, x, target) {{
-                    target.dispatchEvent(new MouseEvent(type, {{
-                        clientX: x, clientY: {hy}, bubbles: true, cancelable: true,
-                    }}));
-                }}
-                fire('mousedown', {hx}, h);
-                fire('mousemove', {hx} - 80, window);
-                fire('mouseup', {hx} - 80, window);
-            }})();
-        """)
-        time.sleep(0.3)
+        def drag_from(selector, dx, dy):
+            spot = json.loads(js(window, f"""
+                (function() {{
+                    const r = document.querySelector('{selector}').getBoundingClientRect();
+                    return JSON.stringify({{x: r.left + r.width / 2, y: r.top + r.height / 2}});
+                }})()
+            """))
+            js(window, f"""
+                (function() {{
+                    const h = document.querySelector('{selector}');
+                    function fire(type, x, y, target) {{
+                        target.dispatchEvent(new MouseEvent(type, {{
+                            clientX: x, clientY: y, bubbles: true, cancelable: true,
+                        }}));
+                    }}
+                    fire('mousedown', {spot["x"]}, {spot["y"]}, h);
+                    fire('mousemove', {spot["x"] + dx}, {spot["y"] + dy}, window);
+                    fire('mouseup', {spot["x"] + dx}, {spot["y"] + dy}, window);
+                }})();
+            """)
+            time.sleep(0.3)
 
-        after_width = json.loads(js(window,
-            "JSON.stringify(document.getElementById('detail-panel').getBoundingClientRect().width)"))
-        grew_by = after_width - before_width
-        assert 70 <= grew_by <= 90, f"dragging the handle 80px should grow the panel by ~80px, got {grew_by}"
+        # Always put the panel back, even when an assertion fails: this
+        # is the only check that moves it, and a panel parked over the
+        # canvas swallows the clicks and keystrokes every later check
+        # aims at the graph.
+        try:
+            _check_geometry(box, drag_from)
+        finally:
+            # Park it back at the top right rather than clearing the
+            # stored geometry: with nothing stored, every later open
+            # anchors the panel beside the mote that was clicked, which
+            # puts it over the canvas the next check is aiming at.
+            js(window, """
+                localStorage.setItem('monoss:inspector:geometry', JSON.stringify({
+                    x: window.innerWidth - 392 - 24, y: 58, w: 392,
+                    h: Math.min(560, window.innerHeight - 90),
+                }));
+                Inspector.close();
+            """)
+            time.sleep(0.2)
 
-        stored = js(window, "localStorage.getItem('monoss:detailWidth')")
-        assert stored == str(int(after_width)), f"resized width should persist to localStorage, got {stored!r}"
+    def _check_geometry(box, drag_from):
+        # The grip is the bottom-right corner, so dragging it inward
+        # shrinks the panel.
+        before = box()
+        drag_from(".ins-grip", -80, -60)
+        after = box()
+        assert -90 <= (after["w"] - before["w"]) <= -70, \
+            f"dragging the grip 80px should shrink the panel by ~80px, got {after['w'] - before['w']}"
+        assert -70 <= (after["h"] - before["h"]) <= -50, \
+            f"dragging the grip 60px should shrink the panel by ~60px, got {after['h'] - before['h']}"
 
-        # Reopening after a reload should restore the resized width.
+        # The header is the drag handle.
+        moved_from = box()
+        drag_from(".ins-head", -50, 40)
+        moved = box()
+        assert abs((moved["x"] - moved_from["x"]) + 50) < 6, \
+            f"dragging the header should move the panel left by 50px, got {moved['x'] - moved_from['x']}"
+        assert abs((moved["y"] - moved_from["y"]) - 40) < 6, \
+            f"dragging the header should move the panel down by 40px, got {moved['y'] - moved_from['y']}"
+
+        stored = json.loads(js(window,
+            "localStorage.getItem('monoss:inspector:geometry')") or "null")
+        assert stored is not None, "the panel's geometry should persist to localStorage"
+        assert abs(stored["w"] - moved["w"]) < 2 and abs(stored["x"] - moved["x"]) < 2, \
+            f"stored geometry should match what is on screen, got {stored} vs {moved}"
+
+        # Reopening after a reload should restore it.
         js_async(window, """
             async () => {
                 await loadGarden(currentGarden);
@@ -997,12 +1076,12 @@ def run_checks(window):
                 window.__result = 'ok';
             }
         """, wait=1.5)
-        after_reload_width = json.loads(js(window,
-            "JSON.stringify(document.getElementById('detail-panel').getBoundingClientRect().width)"))
-        assert abs(after_reload_width - after_width) < 2, \
-            f"resized width should survive a garden reload, got {after_reload_width} vs {after_width}"
+        reloaded = box()
+        assert abs(reloaded["w"] - moved["w"]) < 2 and abs(reloaded["x"] - moved["x"]) < 2, \
+            f"panel geometry should survive a garden reload, got {reloaded} vs {moved}"
 
-    check("detail panel is resizable by dragging its left edge, and the width persists", detail_panel_is_resizable)
+    check("the inspector is movable and resizable, and its geometry persists",
+          the_panel_is_movable_and_resizable)
 
     def click_edge_selects_and_inspects_relationship():
         result = js_async(window, """
@@ -1054,7 +1133,7 @@ def run_checks(window):
         p_xy = node_xy(window, "window.__edgeIds.p")
         drag(window, p_xy[0], p_xy[1], p_xy[0], p_xy[1])
         time.sleep(0.5)
-        single_shown = js(window, "!document.getElementById('detail-single').classList.contains('hidden')")
+        single_shown = js(window, "!document.querySelector('.ins').classList.contains('hidden')")
         rel_hidden = js(window, "document.getElementById('detail-relationship').classList.contains('hidden')")
         assert single_shown is True and rel_hidden is True, \
             "selecting a mote after a relationship should show the mote panel, not the relationship one"
@@ -1319,7 +1398,8 @@ def run_checks(window):
         result = js_async(window, """
             async () => {
                 const other = await api.create_mote({name: 'badge-other'});
-                const m = await api.create_mote({name: 'badge-checker', url: 'example.com'});
+                const m = await api.create_mote(
+                    {name: 'badge-checker', url: 'example.com', colour: 'teal'});
                 await api.create_relationship(m.id, other.id, 'applies_to');
                 await api.create_relationship(m.id, other.id, 'knows');
                 window.__badgeIds = {m: m.id, other: other.id};
@@ -1333,25 +1413,28 @@ def run_checks(window):
 
         badges = json.loads(js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-properties .detail-row');
+                const rows = document.querySelectorAll('.ins-body .ins-row');
                 const out = {};
                 for (const r of rows) {
-                    out[r.querySelector('.key').textContent] = !!r.querySelector('.key .reserved-badge');
+                    out[r.querySelector('.ins-key').value] =
+                        r.querySelector('.ins-key').classList.contains('reserved');
                 }
                 return JSON.stringify(out);
             })()
         """))
-        assert badges.get("url") is True, f"a reserved property (url) should get a badge, got {badges}"
-        assert badges.get("name") is False, f"an ordinary property (name) should not get a badge, got {badges}"
+        assert badges.get("url") is True, f"a reserved property (url) should be marked, got {badges}"
+        assert badges.get("colour") is False, \
+            f"an ordinary property (colour) should not be marked, got {badges}"
         assert badges.get("date") is not True, \
             "`date` stopped being reserved when a start became a value shape"
 
         rel_badges = json.loads(js(window, """
             (function() {
-                const rows = document.querySelectorAll('#detail-relationships .rel-row');
+                const rows = document.querySelectorAll('.ins-body .ins-rel');
                 const out = {};
                 for (const r of rows) {
-                    out[r.querySelector('.rel-type').textContent] = !!r.querySelector('.rel-type .reserved-badge');
+                    const t = r.querySelector('.ins-rel-type');
+                    out[t.textContent] = t.classList.contains('reserved');
                 }
                 return JSON.stringify(out);
             })()
@@ -1375,6 +1458,21 @@ def run_checks(window):
                 window.__moraCalls.push(moteId === undefined ? null : moteId);
                 return Promise.resolve({garden: 'test', note: moteId});
             };
+            // The inspector's note door goes through the shared bridge's
+            // open_app rather than Monarch's own open_mora.
+            window.__origOpenApp = api.open_app.bind(api);
+            api.open_app = (appId, moteId) => {
+                if (appId === 'mora') window.__moraCalls.push(moteId === undefined ? null : moteId);
+                return Promise.resolve({app: appId, focus: moteId});
+            };
+            // The door lives in the panel's Advanced pane; make sure it
+            // is open before reaching for it.
+            window.noteDoor = () => {
+                const toggle = document.querySelector('.ins-toggle');
+                if (!toggle.classList.contains('on')) toggle.click();
+                return Array.from(document.querySelectorAll('.ins-body .ins-ghost'))
+                    .find(b => b.textContent.indexOf('note') !== -1);
+            };
         """)
         js(window, "document.getElementById('tools-btn').click();")
         time.sleep(0.2)
@@ -1393,21 +1491,21 @@ def run_checks(window):
                 window.__noteMote = m.id;
                 await refocus(m.id);
                 await openDetailPanel(m.id);
-                window.__result = document.getElementById('open-note-btn').textContent;
+                window.__result = noteDoor().textContent;
             }
         """, wait=3.0)
         label = json.loads(js(window, "JSON.stringify(window.__result)"))
         assert label == "Write a note\u2026", \
             f"a mote with no note should offer to start one, got {label!r}"
 
-        js(window, "document.getElementById('open-note-btn').click();")
+        js(window, "noteDoor().click();")
         time.sleep(0.4)
         calls = json.loads(js(window, "JSON.stringify(window.__moraCalls)"))
         expected = js(window, "window.__noteMote")
         assert calls[-1] == expected, \
             f"the panel button should open Mora on the selected mote, got {calls[-1]!r}"
 
-        js(window, "api.open_mora = window.__origOpenMora;")
+        js(window, "api.open_app = window.__origOpenApp;")
 
     check("Notes (Mora) opens on the garden, and the panel button on the mote",
           opening_mora_from_the_graph_passes_the_right_mote)
@@ -1445,16 +1543,20 @@ def run_checks(window):
         js(window, f"window.__noteSource = {json.dumps(chr(92) + 'section{A}' + chr(10) * 2 + 'line two' + chr(10))};")
         js_async(window, """
             async () => {
+                const m = await api.create_mote({name: 'Notebook 2'});
+                window.__noteMote = m.id;
                 await api.update_mote(window.__noteMote, {modoc: window.__noteSource});
                 await openDetailPanel(window.__noteMote);
-                const rows = Array.from(document.querySelectorAll('#detail-properties .detail-row'));
-                const row = rows.find(r => r.querySelector('.key').textContent === 'modoc');
-                const field = row.querySelector('input, textarea');
+                const rows = Array.from(document.querySelectorAll('.ins-body .ins-row'));
+                const row = rows.find(r => r.querySelector('.ins-key').value === 'modoc');
+                // .ins-val, not the row: a property's key is an input too
+                // (click to rename), and it would match first.
+                const field = row.querySelector('.ins-val input, .ins-val textarea');
                 window.__result = {
-                    label: document.getElementById('open-note-btn').textContent,
+                    label: noteDoor().textContent,
                     value: field.value,
                     readOnly: field.readOnly,
-                    hasOpen: !!row.querySelector('.open-link'),
+                    hasOpen: !!row.querySelector('.ins-follow'),
                 };
             }
         """, wait=3.0)
@@ -1490,9 +1592,9 @@ def run_checks(window):
     check("depth control limits how much of the graph is visible", depth_control_limits_the_graph)
 
     def garden_switch_isolates_data():
+        create_garden('smoke-second')
         result = js_async(window, """
             async () => {
-                await api.create_garden('smoke-second');
                 await api.switch_garden('smoke-second');
                 await loadGarden('smoke-second');
                 const motes = await api.list_motes();
@@ -1513,119 +1615,44 @@ def run_checks(window):
 
     check("garden switch isolates data", garden_switch_isolates_data)
 
-    def gardens_modal_lists_switches_and_guards_delete():
-        # Two gardens exist at this point: 'default' (current) and
-        # 'smoke-second', left behind by the check above. The garden
-        # button itself now opens a quick switch/create dropdown, not the
-        # modal directly -- "Manage gardens…" inside it is the bridge to
-        # the modal, which is still where Export/Delete live.
-        js(window, "document.getElementById('garden-btn').click();")
-        time.sleep(0.5)
-        js(window, "document.getElementById('garden-menu-manage').click();")
-        time.sleep(1.0)
-        visible = js(window, "!document.getElementById('gardens-overlay').classList.contains('hidden')")
-        assert visible is True, "Manage gardens… should open the modal"
+    def manage_gardens_opens_the_gardens_window():
+        """Creating, deleting, importing, exporting and syncing a garden
+        left this window: they are the Gardens window's (gardens_app/),
+        which every app opens the same way. What is still Monarch's is
+        the way in -- both entry points, the garden dropdown's and
+        File's, and the Tools -> Sync… item that now deep-links to the
+        same window's sync settings.
 
-        rows = json.loads(js(window, """
-            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => [
-                r.querySelector('.name').textContent, r.querySelector('.danger').disabled
-            ]))
-        """))
-        assert dict(rows) == {"default": True, "smoke-second": False}, (
-            f"delete should be disabled only for the current garden, got {rows}"
+        The bridge call is stubbed rather than let through: the real one
+        spawns a second pywebview process, which a smoke run has no way
+        to clean up."""
+        js(window, """
+            window.__opened = [];
+            api.open_gardens = (sync) => { window.__opened.push(sync || false); return Promise.resolve({}); };
+        """)
+
+        for menu_btn, item in [
+            ("garden-btn", "garden-menu-manage"),
+            ("file-btn", "file-manage-gardens"),
+            ("tools-btn", "open-sync-btn"),
+        ]:
+            js(window, f"document.getElementById('{menu_btn}').click();")
+            time.sleep(0.4)
+            js(window, f"document.getElementById('{item}').click();")
+            time.sleep(0.4)
+
+        opened = json.loads(js(window, "JSON.stringify(window.__opened)"))
+        assert opened == [False, False, True], (
+            "the two Manage gardens… items should open the window and Tools -> Sync… "
+            f"should open it on sync, got {opened}"
         )
 
-        # Deleting the non-current garden should work end-to-end.
-        js(window, "window.confirm = () => true;")
-        js(window, """
-            Array.from(document.querySelectorAll('.garden-row'))
-                .find(r => r.querySelector('.name').textContent === 'smoke-second')
-                .querySelector('.danger').click();
-        """)
-        time.sleep(2.0)
-        remaining = json.loads(js(window, """
-            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => r.querySelector('.name').textContent))
-        """))
-        assert remaining == ["default"], f"deleting smoke-second should remove its row, got {remaining}"
+        for gone in ["gardens-overlay", "sync-overlay"]:
+            assert js(window, f"!document.getElementById('{gone}')") is True, (
+                f"#{gone} should be gone from this window entirely"
+            )
 
-        deleted_from_disk = json.loads(js_async(window, """
-            async () => { window.__result = await api.list_gardens(); }
-        """))
-        assert "smoke-second" not in deleted_from_disk, "the garden should actually be gone, not just hidden"
-
-    check("gardens modal: lists gardens, guards delete, deletes a non-current garden", gardens_modal_lists_switches_and_guards_delete)
-
-    def gardens_modal_delete_can_be_undone():
-        js_async(window, """
-            async () => {
-                await api.create_garden('smoke-undo');
-                window.__result = 'ok';
-            }
-        """, wait=1.0)
-        js(window, "document.getElementById('garden-btn').click();")
-        time.sleep(0.5)
-        js(window, "document.getElementById('garden-menu-manage').click();")
-        time.sleep(1.0)
-        js(window, "window.confirm = () => true;")
-        js(window, """
-            Array.from(document.querySelectorAll('.garden-row'))
-                .find(r => r.querySelector('.name').textContent === 'smoke-undo')
-                .querySelector('.danger').click();
-        """)
-        time.sleep(2.0)
-
-        after_delete = json.loads(js(window, """
-            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => r.querySelector('.name').textContent))
-        """))
-        assert "smoke-undo" not in after_delete, f"setup: delete should have removed the row, got {after_delete}"
-
-        toast_text = js(window, "document.getElementById('toast').textContent")
-        assert "Undo" in toast_text, f"deleting a garden should surface an Undo toast, got {toast_text!r}"
-        js(window, "document.querySelector('#toast button').click();")
-        time.sleep(2.0)
-
-        on_disk = json.loads(js_async(window, "async () => { window.__result = await api.list_gardens(); }"))
-        assert "smoke-undo" in on_disk, "Undo should bring the garden back on disk"
-
-        rows_after_undo = json.loads(js(window, """
-            JSON.stringify(Array.from(document.querySelectorAll('.garden-row')).map(r => r.querySelector('.name').textContent))
-        """))
-        assert "smoke-undo" in rows_after_undo, "Undo should re-list the garden in the modal"
-
-    check("gardens modal: a deleted garden's Undo toast brings it back", gardens_modal_delete_can_be_undone)
-
-    def gardens_modal_esc_closes_it():
-        press_key(window, "Escape")
-        time.sleep(0.5)
-        hidden = js(window, "document.getElementById('gardens-overlay').classList.contains('hidden')")
-        assert hidden is True, "Esc should close the gardens modal"
-
-    check("gardens modal: Esc closes it", gardens_modal_esc_closes_it)
-
-    def gardens_modal_creates_and_switches():
-        js(window, "window.prompt = () => 'smoke-third';")
-        js(window, "document.getElementById('garden-btn').click();")
-        time.sleep(0.5)
-        js(window, "document.getElementById('garden-menu-manage').click();")
-        time.sleep(1.0)
-        js(window, "document.getElementById('new-garden-btn').click();")
-        time.sleep(2.5)
-
-        assert js(window, "currentGarden") == "smoke-third", "creating a garden should switch to it"
-        modal_closed = js(window, "document.getElementById('gardens-overlay').classList.contains('hidden')")
-        assert modal_closed is True, "creating a garden should close the modal"
-
-        # Restore 'default' as current so the rest of the suite isn't
-        # affected by starting a fresh garden here.
-        js_async(window, """
-            async () => {
-                await api.switch_garden('default');
-                await loadGarden('default');
-                window.__result = 'ok';
-            }
-        """, wait=2.0)
-
-    check("gardens modal: creating a garden switches to it and closes the modal", gardens_modal_creates_and_switches)
+    check("Manage gardens… and Sync… open the shared Gardens window", manage_gardens_opens_the_gardens_window)
 
     def box_select_multiple_nodes():
         result = js_async(window, """
@@ -2088,19 +2115,20 @@ def run_checks(window):
         """, wait=2.0)
         assert result == '"ok"', f"typing-guard setup failed: {result}"
 
-        js(window, "document.getElementById('detail-new-key').focus();")
+        js(window, "document.querySelector('.ins-add-key').focus();")
         time.sleep(0.2)
-        focused = js(window, "document.activeElement.id")
-        assert focused == "detail-new-key", "setup: the property key field should have focus"
+        focused = js(window, "document.activeElement.className")
+        assert focused == "ins-input ins-add-key", \
+            "setup: the property key field should have focus"
         js(window, """
-            document.getElementById('detail-new-key').dispatchEvent(
+            document.querySelector('.ins-add-key').dispatchEvent(
                 new KeyboardEvent('keydown', {key: 'c', ctrlKey: true, bubbles: true}));
         """)
         time.sleep(0.3)
         assert js(window, "clipboard") is None, (
             "Ctrl+C while typing in a field must not hijack normal text copy"
         )
-        js(window, "document.getElementById('detail-new-key').blur();")
+        js(window, "document.querySelector('.ins-add-key').blur();")
 
     check("Ctrl+C is ignored while typing in a field", ctrl_c_is_ignored_while_typing)
 
@@ -2335,9 +2363,9 @@ def run_checks(window):
         dragging a node during that window looked broken -- the very next
         frame's fitToContent() would silently overwrite the camera out
         from under the user's gesture."""
+        create_garden('smoke-autofit')
         result = js_async(window, """
             async () => {
-                await api.create_garden('smoke-autofit');
                 await api.switch_garden('smoke-autofit');
                 const a = await api.create_mote({name: 'only'});
                 window.__afId = a.id;
@@ -2381,9 +2409,9 @@ def run_checks(window):
         across several frames -- under the old bug it would still be
         getting pushed around by repulsion/damping/anchor pull even
         though invisible."""
+        create_garden('smoke-perf')
         result = js_async(window, """
             async () => {
-                await api.create_garden('smoke-perf');
                 await api.switch_garden('smoke-perf');
                 const species = await api.create_mote({name: 'Batch'});
                 let sample = null;
@@ -2474,7 +2502,7 @@ def run_checks(window):
     check("a topbar menu closes on outside click", topbar_menu_closes_on_outside_click)
 
     def garden_dropdown_lists_and_switches():
-        js_async(window, "async () => { await api.create_garden('smoke-dropdown'); window.__result = 'ok'; }", wait=1.0)
+        create_garden('smoke-dropdown')
 
         js(window, "document.getElementById('garden-btn').click();")
         time.sleep(1.0)
@@ -2548,9 +2576,9 @@ def run_checks(window):
         # Its own garden: these checks assert on exact slider values and
         # stored settings, which the shared 'default' garden's accumulated
         # species/relationships would make brittle.
+        create_garden('smoke-viewsettings')
         js_async(window, """
             async () => {
-                await api.create_garden('smoke-viewsettings');
                 await api.switch_garden('smoke-viewsettings');
                 const species = await api.create_mote({name: 'Task'});
                 const a = await api.create_mote({name: 'a1', status: 'open'});

@@ -1,0 +1,633 @@
+/* The floating mote inspector — one surface, six windows.
+ *
+ * Floating rather than docked on purpose: a docked panel is part of the
+ * window it is docked to, and six docked panels read as six different
+ * panels however similar they look. The same slab of glass hovering over
+ * a graph, a table, a calendar and a board reads as one instrument you
+ * carried there.
+ *
+ * Every colour here is a token each app's own style.css already defines
+ * (--bg, --panel, --accent, ...), which is why this file can be dropped
+ * into all six without a reskin: the palettes were already identical.
+ * The only values spelled literally are the ones with no token — the
+ * glass tint and the two drop shadows that make it read as floating. */
+
+.ins {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 310px;
+  min-height: 300px;
+  background: oklch(0.185 0 0 / 0.97);
+  backdrop-filter: blur(14px);
+  border: 1px solid oklch(1 0 0 / 0.13);
+  border-radius: 14px;
+  /* Three layers: an inside top highlight so the panel has a lit edge, a
+     tight shadow that seats it, and a wide soft one that lifts it off
+     whatever it is covering. */
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    0 2px 8px rgba(0, 0, 0, 0.45),
+    0 32px 70px rgba(0, 0, 0, 0.62);
+  overflow: hidden;
+  color: var(--fg);
+  font-family: var(--sans);
+  animation: ins-in 0.16s ease-out;
+}
+.ins.hidden { display: none; }
+
+@keyframes ins-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The leader line back to the mote the panel is about. Its own fixed
+   overlay rather than a child of .ins: it has to be drawn outside the
+   panel's rounded, overflow-hidden box. */
+.ins-leader {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 59;
+  pointer-events: none;
+}
+.ins-leader.hidden { display: none; }
+
+/* ---- tab strip ---- */
+
+/* Doubles as the drag handle, which is why it has no padding-bottom: the
+   tabs sit on the strip's bottom edge and their underline is the seam. */
+.ins-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 6px 0;
+  flex-shrink: 0;
+  cursor: grab;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ins-tabs::-webkit-scrollbar { display: none; }
+.ins-tabs:active { cursor: grabbing; }
+
+.ins-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px 5px 9px;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  max-width: 170px;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ins-tab:hover { color: var(--fg); }
+.ins-tab.active {
+  background: var(--raised);
+  border-bottom-color: var(--accent);
+  color: var(--fg-bright);
+}
+.ins-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--unknown);
+}
+.ins-tab .ins-dot { width: 7px; height: 7px; }
+
+.ins-x {
+  background: transparent;
+  border: none;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 1px;
+}
+.ins-x:hover { color: var(--fg-bright); }
+.ins-close { align-self: center; font-size: 16px; padding: 2px 4px; flex-shrink: 0; }
+
+/* ---- title block ---- */
+
+.ins-head {
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+  cursor: grab;
+}
+.ins-head:active { cursor: grabbing; }
+
+.ins-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
+}
+.ins-species {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ins-saved {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: oklch(0.72 0.1 150);
+  flex-shrink: 0;
+}
+.ins-saved.hidden { visibility: hidden; }
+
+/* Underlined only on hover and focus: a name is the one field you edit
+   without meaning to, so it reads as a heading until you aim at it. */
+.ins-name {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 1px 0 3px;
+  font-family: var(--serif);
+  font-size: 19px;
+  color: var(--fg-bright);
+}
+.ins-name:hover { border-bottom-color: oklch(1 0 0 / 0.14); }
+.ins-name:focus { outline: none; border-bottom-color: var(--accent); }
+
+.ins-idline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+.ins-id {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+  word-break: break-all;
+}
+
+/* ---- body ---- */
+
+.ins-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.ins-section {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 20px 0 8px;
+}
+.ins-section:first-child { margin-top: 0; }
+
+.ins-rows { display: flex; flex-direction: column; gap: 5px; }
+
+.ins-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Fixed-width so every value box starts at the same x — the property
+   list is read down the values, not down the keys. */
+.ins-key {
+  width: 88px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 0;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+.ins-key:hover { border-bottom-color: oklch(1 0 0 / 0.14); color: var(--fg); }
+.ins-key:focus { outline: none; border-bottom-color: var(--accent); color: var(--fg-bright); }
+.ins-key.reserved { color: var(--accent); cursor: default; }
+.ins-key.reserved:hover { border-bottom-color: transparent; color: var(--accent); }
+
+.ins-val { flex: 1; min-width: 0; }
+
+.ins-input,
+.ins-select {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 5px 7px;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+.ins-input:focus,
+.ins-select:focus { outline: none; border-color: var(--accent); }
+.ins-select { cursor: pointer; }
+.ins-input.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ins-input.text-area { resize: vertical; min-height: 54px; line-height: 1.5; }
+
+/* A dict-valued property (a mote's `units` map) is set structurally, not
+   typed into -- shown as plain key: value lines rather than an editor. */
+.ins-map {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg);
+  padding: 5px 7px;
+}
+.ins-map-row + .ins-map-row { margin-top: 2px; }
+
+/* A reference is a destination, not a string — so it is a button that
+   walks there rather than a box you can typo a mote id into. */
+.ins-ref {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 5px 8px;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.ins-ref:hover { border-color: var(--accent); }
+.ins-ref-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-ref-go { color: var(--faint); font-size: 11px; }
+
+.ins-bool {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  padding: 5px 0;
+  cursor: pointer;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.ins-del {
+  background: transparent;
+  border: none;
+  color: oklch(0.38 0 0);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.ins-del:hover { color: var(--danger); }
+
+/* Dashed where the solid fields are filled: this row is an empty slot
+   rather than a value. */
+.ins-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ins-add .ins-input {
+  background: oklch(0.2 0 0);
+  border-style: dashed;
+  border-color: oklch(1 0 0 / 0.14);
+}
+.ins-add-key { width: 88px; flex-shrink: 0; font-family: var(--mono); font-size: 11px; }
+
+.ins-btn {
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 5px 10px;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ins-btn:hover { border-color: var(--accent); }
+
+.ins-ghost {
+  background: transparent;
+  border: 1px dashed oklch(1 0 0 / 0.16);
+  border-radius: 7px;
+  padding: 5px 10px;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ins-ghost:hover { color: var(--fg-bright); border-color: var(--accent); }
+
+.ins-hints {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+.ins-hint-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+.ins-chip {
+  background: transparent;
+  border: 1px dashed oklch(1 0 0 / 0.16);
+  border-radius: 6px;
+  padding: 2px 7px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.ins-chip:hover { color: var(--fg-bright); border-color: var(--accent); }
+
+/* ---- relationships ---- */
+
+.ins-rel {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 2px;
+}
+.ins-arrow {
+  width: 12px;
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.ins-rel-type {
+  width: 82px;
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ins-rel-other {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.ins-rel-other:hover { color: var(--accent-bright); }
+.ins-rel-other span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ins-picker {
+  margin-top: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  padding: 9px;
+  background: oklch(0.2 0 0);
+}
+.ins-picker-top { display: flex; gap: 6px; margin-bottom: 7px; }
+.ins-picker-type {
+  width: 112px;
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.ins-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+.ins-candidate {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 6px;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.ins-candidate:hover { background: var(--raised); }
+.ins-candidate-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-candidate-species { font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
+
+.ins-empty {
+  font-size: 12px;
+  color: var(--faint);
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+/* ---- advanced ---- */
+
+.ins-raw {
+  margin: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--muted);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ins-why {
+  background: transparent;
+  border: none;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.ins-why:hover { color: var(--accent-bright); }
+
+.ins-why-out {
+  margin: 4px 0 8px 96px;
+  border-left: 2px solid var(--accent-soft);
+  padding: 4px 0 4px 9px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- footer ---- */
+
+.ins-foot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--hairline);
+  flex-shrink: 0;
+  background: oklch(0.175 0 0 / 0.8);
+}
+.ins-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ins-toggle.on { color: var(--fg-bright); }
+.ins-track {
+  width: 26px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--raised);
+  border: 1px solid var(--border-soft);
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.ins-toggle.on .ins-track { background: oklch(0.4 0.07 68); }
+.ins-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--faint);
+  transition: left 0.14s ease, background 0.14s ease;
+}
+.ins-toggle.on .ins-knob { left: 12px; background: var(--accent-bright); }
+
+.ins-note {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: oklch(0.42 0 0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ins-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg,
+    transparent 52%, oklch(1 0 0 / 0.22) 52%, oklch(1 0 0 / 0.22) 62%,
+    transparent 62%, transparent 72%, oklch(1 0 0 / 0.22) 72%,
+    oklch(1 0 0 / 0.22) 82%, transparent 82%);
+}
+
+/* The one-click follow on a `url` or `modoc` property. Sized to the
+   delete cross beside it so the row's trailing controls line up. */
+.ins-follow {
+  background: transparent;
+  border: none;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.ins-follow:hover { color: var(--accent-bright); }
+
+/* A reserved relationship type, accented like a reserved property key. */
+.ins-rel-type.reserved { color: var(--accent); }
+
+/* The title is the `name` property in a bigger font; Advanced says so
+   rather than leaving it looking like a field of its own. */
+.ins-name-note {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-top: 3px;
+}
+.ins-name-note.hidden { display: none; }
+
+/* Close moves to the panel's own top-right corner when the tab ribbon is
+   hidden, rather than crowding the eyebrow next to the title -- .ins is
+   the nearest positioned ancestor, so this sits relative to the panel. */
+.ins-head-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.ins-head-close.hidden { display: none; }
+.ins-tabs.hidden { display: none; }
+
+/* With the ribbon gone the title block is the top of the panel, so it
+   needs the rounded corners' worth of breathing room the strip gave it. */
+.ins-tabs.hidden + .ins-head { padding-top: 12px; }
+/* Reserve room so "saved", right-aligned in the eyebrow, doesn't run
+   under the close button now sitting in the panel's corner. */
+.ins-tabs.hidden + .ins-head .ins-eyebrow { padding-right: 20px; }

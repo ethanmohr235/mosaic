@@ -124,6 +124,23 @@ def texts(window, selector):
     """))
 
 
+# The inspector's name and property keys are <input>s -- the name is
+# edited in place and a key is renamed by clicking it -- so reading them
+# is .value, not .textContent.
+
+def value(window, selector):
+    return js(window, f"""
+        (document.querySelector({json.dumps(selector)}) || {{}}).value || ''
+    """).strip()
+
+
+def texts_values(window, selector):
+    return json.loads(js(window, f"""
+        JSON.stringify(Array.from(document.querySelectorAll({json.dumps(selector)}))
+            .map(n => (n.value || '').trim()))
+    """))
+
+
 def click_text(window, selector, wanted):
     """Click the first node matching `selector` whose text contains
     `wanted` -- by what it says, which is what a person clicks, rather
@@ -374,16 +391,52 @@ def run_checks(window):
           the_bindings_partition_solved_from_read)
 
     def clicking_a_node_opens_the_inspector():
+        """The inspector is the shared floating panel now
+        (frontend_shared/inspector.js), not a tab of Motion's docked one
+        -- so this asks the panel, and asks for the things every window's
+        inspector has: the mote's name, its properties, its
+        relationships."""
         press(window, node_selector("acct2"))
-        assert wait_until(lambda: count(window, "#panel-tabs button.on") == 1
-                          and texts(window, "#panel-tabs button.on") == ["Inspector"]), \
-            "pressing a node did not switch the panel to the inspector"
-        assert wait_until(lambda: "Operating" in text(window, "#panel-body")), \
-            "pressing a node did not open it in the inspector"
-        assert wait_until(lambda: count(window, ".rel-row") >= 1), \
-            "the inspector should list what the mote is wired to"
+        assert wait_until(lambda: count(window, ".ins:not(.hidden)") == 1), \
+            "pressing a node did not open the inspector"
+        assert wait_until(lambda: "Operating" in value(window, ".ins-name")), \
+            "the inspector should be showing the mote that was pressed"
+        assert wait_until(lambda: count(window, ".ins-body .ins-row") >= 1), \
+            "the inspector should list the mote's properties"
+
+        # A species *is* a relationship, so it is listed like any other --
+        # this mote is wired to nothing else, and that one row is it.
+        assert wait_until(lambda: text(window, ".ins-species") != ""), \
+            "the inspector should name the mote's species"
+        assert wait_until(lambda: "instance_of" in texts(window, ".ins-body .ins-rel-type")), \
+            "instance_of should be listed like any other relationship"
 
     check("clicking a node inspects it", clicking_a_node_opens_the_inspector)
+
+    def the_inspector_can_add_a_property():
+        """The gap this whole change started from: Motion could overwrite
+        the values a mote already had and had no way to add one."""
+        js(window, """
+            document.querySelector('.ins-add-key').value = 'smoke_added';
+            document.querySelector('.ins-add .ins-input:not(.ins-add-key)').value = '42';
+        """)
+        click(window, ".ins-add .ins-btn")
+        assert wait_until(lambda: "smoke_added" in texts_values(window, ".ins-body .ins-key")), \
+            "adding a property should put a row for it in the inspector"
+
+        stored = js(window, """
+            (function() {
+                const rows = document.querySelectorAll('.ins-body .ins-row');
+                for (const r of rows) {
+                    if (r.querySelector('.ins-key').value === 'smoke_added')
+                        return r.querySelector('.ins-val input').value;
+                }
+                return null;
+            })()
+        """)
+        assert stored == "42", f"the added property should hold what was typed, got {stored!r}"
+
+    check("the inspector can add a property to a mote", the_inspector_can_add_a_property)
 
     def pre_flight_reports_on_roles():
         click(window, "#check-roles-btn")
@@ -391,6 +444,34 @@ def run_checks(window):
             "Check roles reported nothing at all"
 
     check("the pre-flight check reports on roles", pre_flight_reports_on_roles)
+
+    def empty_garden_leaves_the_tools_clickable():
+        """A garden with nothing in it yet draws the stage's empty state,
+        and that placeholder once stretched across the whole stage --
+        toolbar included -- so a new garden opened with every tool dead
+        to the click. Hit-test the tools rather than trust the layout:
+        .click() fires on a button no person could reach."""
+        # This is about the empty-state placeholder, not the inspector --
+        # which the checks above leave open, floating over the stage.
+        js(window, "Inspector.close();")
+        js(window, "window.__savedNodes = board.nodes; board.nodes = []; renderBoards();")
+        try:
+            assert count(window, ".stage-empty") == 1, "empty state did not draw"
+            covered = json.loads(js(window, """
+                JSON.stringify(['tool-mote', 'tool-rule', 'tool-link', 'tool-layout']
+                  .filter(id => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    const hit = document.elementFromPoint(r.left + r.width / 2,
+                                                          r.top + r.height / 2);
+                    return !hit || !hit.closest('#' + id);
+                  }))
+            """))
+            assert not covered, f"tools covered on an empty garden: {covered}"
+        finally:
+            js(window, "board.nodes = window.__savedNodes; renderBoards();")
+
+    check("an empty garden leaves the stage tools clickable",
+          empty_garden_leaves_the_tools_clickable)
 
     check("the page raised no JavaScript errors", no_errors)
 

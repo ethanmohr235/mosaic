@@ -707,8 +707,23 @@ function rowNode(row, template) {
 
   row.cells.forEach((cell, index) => node.append(cellNode(row, cell, data.columns[index])));
 
+  // Right-click a row for the same things the "i" button and the bulk
+  // bar offer, aimed at just this mote.
+  node.oncontextmenu = (event) => {
+    event.preventDefault();
+    ContextMenu.open(event.clientX, event.clientY, [
+      ...ContextMenu.inspectItems(row.id, node),
+      "-",
+      { label: sel.has(row.id) ? "Deselect" : "Select", run: () => toggleRow(row.id, false) },
+      { label: "Delete mote", danger: true, run: () => deleteMotes([row.id]) },
+    ]);
+  };
+
   const inspectBtn = button("inspect-btn", "i");
-  inspectBtn.onclick = (event) => { event.stopPropagation(); inspect(row); };
+  inspectBtn.onclick = (event) => {
+    event.stopPropagation();
+    Inspector.open(row.id, { anchor: inspectBtn, newTab: event.ctrlKey || event.metaKey });
+  };
   node.append(inspectBtn);
 
   return node;
@@ -847,35 +862,6 @@ async function writeLinks(action, pairs, type) {
     ? (action === "relate" ? "Those relationships already exist." : "Nothing to unlink there.")
     : `${n} relationship${n === 1 ? "" : "s"} ${action === "relate" ? "written" : "erased"} · ${type}`);
   refresh();
-}
-
-// ---- the row inspector ---------------------------------------------
-
-async function inspect(row) {
-  const panel = await call(api.focus(row.id), "Could not read that mote.");
-  if (!panel) return;
-  const lines = Object.entries(panel.properties)
-    .map(([key, value]) => `${key}: ${format(value)}`);
-  const options = panel.relationships.map((relationship) => ({
-    label: `${relationship.outgoing ? "→" : "←"} ${relationship.type} ${relationship.other.name}`,
-    dot: typeColor(relationship.type),
-    hint: "unlink",
-    run: () => writeLinks("unrelate",
-      [relationship.outgoing ? [row.id, relationship.other.id] : [relationship.other.id, row.id]],
-      relationship.type),
-  }));
-  openPop(document.getElementById("table-scroll"), {
-    title: `${panel.name} · ${panel.speciesName || "no species"}`,
-    note: lines.length ? lines.join("\n") : "no properties",
-    options,
-    centered: true,
-  });
-}
-
-function format(value) {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }
 
 // ---- the footer and the bulk bar ------------------------------------
@@ -1269,6 +1255,23 @@ function confirmDeleteView(anchor, view) {
 
 // ---- garden menu ----------------------------------------------------
 
+/** The "Manage gardens…" footer every one of the six garden menus
+ *  carries, byte for byte the same in each -- the shared Gardens window
+ *  is only standard if the way in is. */
+function gardenMenuManageItem(close) {
+  const sep = document.createElement("div");
+  sep.className = "menu-sep";
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "menu-item";
+  item.textContent = "Manage gardens…";
+  item.title = "Create, rename, import, export and sync gardens";
+  item.onclick = () => { close(); api.open_gardens(); };
+  const frag = document.createDocumentFragment();
+  frag.append(sep, item);
+  return frag;
+}
+
 async function openGardenMenu() {
   const menu = $("garden-menu");
   if (!menu.classList.contains("hidden")) { closeGardenMenu(); return; }
@@ -1293,6 +1296,13 @@ async function openGardenMenu() {
     };
     menu.append(item);
   });
+
+  // Every window ends its garden menu with the same two lines: the
+  // gardens you can switch to, then the one window where gardens
+  // themselves are made, renamed, imported, exported and synced
+  // (gardens_app/). Switching is per window; managing is not, which is
+  // why this opens a window instead of a modal.
+  menu.append(gardenMenuManageItem(closeGardenMenu));
   menu.classList.remove("hidden");
   $("garden-btn").setAttribute("aria-expanded", "true");
 }
@@ -1556,6 +1566,12 @@ async function launchApp(appId) {
 
 async function init() {
   api = window.pywebview.api;
+  Inspector.install({ api, onChanged: refresh });
+  CommandBar.install({
+    api,
+    onChanged: refresh,
+    onNavigate: (moteId) => Inspector.open(moteId),
+  });
   const garden = await api.current_garden();
   restore(garden);
   loadLayout();

@@ -615,11 +615,28 @@ def run_checks(window):
         )), "sweeping an empty slot did not open the draft popover"
 
         js(window, "document.getElementById('draft-name').value = 'Repeat Test';")
-        click(window, "#draft-freq-pills .freq-pill[data-freq='WEEKLY']")
-        assert wait_until(lambda: count(window, "#draft-repeat-detail .repeat-weekday-pills") == 1), \
-            "picking Weekly did not reveal the weekday row"
-        click(window, "#draft-repeat-detail .weekday-pill[data-day='FR']")
-        click(window, "#draft-repeat-detail .repeat-ends-pills .freq-pill[data-end='COUNT']")
+
+        # The repeat controls are the shared interval widget's now
+        # (frontend_shared/interval.js::repeatEditor) -- the same editor
+        # the inspector's calendar uses, rather than a second copy living
+        # only here. "+ Add a repeat rule" seeds weekly on the start's
+        # own weekday; the pills below are that editor's.
+        click(window, "#draft-repeat-detail .repeat-add")
+        assert wait_until(lambda: count(window, "#draft-repeat-detail .interval-day-pill") == 7), \
+            "adding a repeat rule did not reveal the weekday row"
+        # The shared editor lists days in RRULE's own Sunday-first order,
+        # so Friday is index 5. The rule is seeded on the start's own
+        # weekday (a Thursday here), and this adds a second one.
+        js(window, """
+            const days = Array.from(
+                document.querySelectorAll('#draft-repeat-detail .interval-day-pill'));
+            days[5].click();
+        """)
+        js(window, """
+            const pills = Array.from(
+                document.querySelectorAll('#draft-repeat-detail .interval-pill'));
+            pills.find((p) => p.textContent === 'After').click();
+        """)
         js(window, "document.getElementById('draft-create').click();")
         assert wait_until(lambda: len(all_motes()) == before + 1, timeout=8.0), \
             "Create did not write a mote"
@@ -628,9 +645,11 @@ def run_checks(window):
         assert standup is not None, "the created mote is not named Repeat Test"
         value = standup.properties.get("date", "")
         assert "RRULE:FREQ=WEEKLY" in value, f"picking Weekly should write a real RRULE, got {value!r}"
-        assert "BYDAY=" in value and "FR" in value.split("BYDAY=")[1], \
-            f"the weekday toggle should carry into BYDAY=, got {value!r}"
-        assert "COUNT=5" in value, f"the default 'ends after' count should be written, got {value!r}"
+        byday = value.split("BYDAY=")[1] if "BYDAY=" in value else ""
+        assert "FR" in byday, f"the weekday toggle should carry into BYDAY=, got {value!r}"
+        assert "TH" in byday, f"the seeded weekday should survive, got {value!r}"
+        assert "COUNT=10" in value, \
+            f"the default 'ends after' count should be written, got {value!r}"
 
     check("the draft popover authors a real repeat rule", the_draft_popover_authors_a_real_repeat_rule)
 
