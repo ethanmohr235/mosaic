@@ -25,6 +25,7 @@ from core.formula import Context, FormulaError, evaluate_expression, evaluate_se
 from core.motes import list_motes
 from core.relationships import list_relationships
 from core.simulation import SimulationError, expression_context, run_time_series
+from core.units import UNITS_KEY, format_unit, parse_units_property
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,16 @@ NAME_KEY = "name"
 DEFAULT_HORIZON = 8
 
 _PLAIN_PROPERTY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# `\val{n.E}`: a bare "mote.property" reference, one dot, no arithmetic.
+# Caught before the formula evaluator sees it for the same reason the
+# plain-property fast path exists -- core/formula.py normalizes every
+# property it reads to its dimension's base SI unit (so the solver can
+# combine values from different motes), which is exactly wrong for
+# display: `n.E` declared in eV must read back as eV, not as its tiny
+# value in joules.
+_DOTTED_REF_RE = re.compile(
+    r"^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$"
+)
 _MISSING = "—"
 
 
@@ -269,8 +280,19 @@ def _value(
         # The fast path, and the reason \val{due} can be a date at all:
         # core/formula.py is numeric by construction, so a plain property
         # read has to happen before the expression evaluator sees it.
-        raw = properties[node.expression]
-        return ValueResult(format_value(raw), raw)
+        return _property_result(properties, node.expression)
+
+    dotted = _DOTTED_REF_RE.match(node.expression)
+    if dotted:
+        other_ref, other_key = dotted.groups()
+        other, error = _find(other_ref, motes)
+        if other is not None:
+            other_properties = timeline.at(step).get(other.id, {})
+            if other_key in other_properties:
+                return _property_result(other_properties, other_key)
+        # No mote named `other_ref` (or it doesn't carry `other_key`) --
+        # fall through to the formula evaluator, which also resolves
+        # `role.property` and a name-matched relationship neighbor.
 
     try:
         number = evaluate_expression(node.expression, timeline.context(step, mote_id)).value()
@@ -279,17 +301,45 @@ def _value(
     return ValueResult(format_value(number), number)
 
 
+def _property_result(properties: dict, key: str) -> ValueResult:
+    """A plain property read off some mote's properties, formatted with
+    its declared unit suffix if it has one. Shared by the anchor-property
+    fast path and the cross-mote `mote.property` fast path -- both read a
+    value straight off a mote without going through the formula
+    evaluator, so both display it in its own declared unit rather than
+    the solver's base SI."""
+    raw = properties[key]
+    unit_name = parse_units_property(properties.get(UNITS_KEY)).get(key)
+    text = format_value(raw)
+    if unit_name and isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        text = f"{text} {format_unit(unit_name)}"
+    return ValueResult(text, raw)
+
+
 def format_value(value: object) -> str:
-    """One reading of a property for every surface. Integral floats lose
-    their `.0` -- a task count solved by the simulation is a count, and
-    "12.0 tasks are closed" reads like a bug."""
+    """One reading of a property for every surface. Numbers are rounded
+    to six significant figures and switch to scientific notation outside
+    a plain range -- `%g`'s own rule, which also strips a solved integral
+    float's trailing `.0` for free ("12.0 tasks are closed" reads like a
+    bug) -- so a unit conversion or a solved value doesn't render as
+    fifteen digits of float noise."""
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
+    if isinstance(value, (int, float)):
+        return _format_number(value)
     if isinstance(value, (list, dict)):
         return json.dumps(value, separators=(", ", ": "))
     return str(value)
+
+
+def _format_number(value: float) -> str:
+    if value == 0:
+        return "0"
+    text = f"{value:.6g}"
+    if "e" in text:
+        mantissa, exponent = text.split("e")
+        text = f"{mantissa}e{int(exponent)}"
+    return text
 
 
 # --- graphs ----------------------------------------------------------

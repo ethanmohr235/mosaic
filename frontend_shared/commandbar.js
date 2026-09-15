@@ -508,12 +508,12 @@ const CommandBar = (() => {
    *  shape, not a unit-table lookup) so the two read as distinct rather
    *  than one undifferentiated blob. */
   function tokenizeValue(value) {
-    const withUnit = /^(-?\d+(?:\.\d+)?)(\s+)([A-Za-z]+)$/.exec(value);
+    const withUnit = /^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(\s+)([A-Za-z]+)$/.exec(value);
     if (withUnit) {
       const [, num, sp, unit] = withUnit;
       return [{ t: num, c: "num" }, { t: sp }, { t: unit, c: "unit" }];
     }
-    if (/^-?\d+(?:\.\d+)?$/.test(value)) return [{ t: value, c: "num" }];
+    if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)) return [{ t: value, c: "num" }];
     return [{ t: value }];
   }
 

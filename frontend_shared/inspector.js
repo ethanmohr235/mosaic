@@ -228,12 +228,23 @@ const Inspector = (() => {
     if (!anchor) return null;
     if (anchor.getBoundingClientRect) {
       const box = anchor.getBoundingClientRect();
-      return { x: box.right, y: box.bottom };
+      return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
     }
     if (typeof anchor.x === "number" && typeof anchor.y === "number") {
       return { x: anchor.x, y: anchor.y };
     }
     return null;
+  }
+
+  /** A single point from an anchor -- for a box, the corner nearest
+   *  `toward` (the panel), so the leader lands on whichever corner is
+   *  closest instead of always the bottom-right, and never has to cross
+   *  over the box to get there. For a plain point, itself. */
+  function nearestPoint(anchor, toward) {
+    if (anchor.left === undefined) return anchor;
+    const x = toward.x < (anchor.left + anchor.right) / 2 ? anchor.left : anchor.right;
+    const y = toward.y < (anchor.top + anchor.bottom) / 2 ? anchor.top : anchor.bottom;
+    return { x, y };
   }
 
   async function load() {
@@ -669,7 +680,9 @@ const Inspector = (() => {
    *  of values, and shipping those to the frontend would make the payload
    *  the size of the garden. */
   function valueEditor(data, key, meta, value) {
-    if (key === "modoc" && typeof value === "string") return noteSummary(value);
+    if (key === "modoc" && typeof value === "string") {
+      return noteSummary(value, () => bridge(() => api.open_app("mora", data.id)));
+    }
 
     // By shape, not by key name: `date` stopped being a key the engine
     // reads when a start became an ISO 8601 interval (core/interval.py),
@@ -786,7 +799,23 @@ const Inspector = (() => {
         if (input.value === "" || Number.isNaN(Number(input.value))) return;
         writeProperty(key, Number(input.value));
       });
-      return input;
+      if (!meta.unit) return input;
+
+      // A declared unit (`Mote.prop = 8 ft`, or the "/" bar's `units`
+      // form) is silently honored by the solver -- it converts to a
+      // common base before combining values across motes -- but until
+      // now nothing in this shared panel showed that a unit was even
+      // attached. The badge names it; the tooltip gives the base-SI
+      // equivalent so a conversion that already happens under the hood
+      // is at least visible somewhere.
+      const wrap = document.createElement("div");
+      wrap.className = "ins-unit-wrap";
+      const badge = document.createElement("span");
+      badge.className = "ins-unit-badge";
+      badge.textContent = meta.unit;
+      if (meta.unitBase) badge.title = `= ${meta.unitBase}`;
+      wrap.append(input, badge);
+      return wrap;
     }
 
     // Long strings get a textarea: a rule's equation and a note's body
@@ -812,14 +841,18 @@ const Inspector = (() => {
 
   /** A note, summarized and not editable. Mora renders .modoc; a 12px
    *  property box can only mangle it, so the panel says how much note
-   *  there is and leaves the editing to the window that can do it. */
-  function noteSummary(text) {
+   *  there is and leaves the editing to the window that can do it.
+   *  Double-clicking it is the same door as the ↗ follow button next to
+   *  it (trailingControls) -- this is just the bigger target, since the
+   *  box is what most of the row's width actually is. */
+  function noteSummary(text, onOpen) {
     const lines = text.split("\n").length;
     const field = document.createElement("input");
     field.className = "ins-input";
     field.readOnly = true;
     field.value = `${lines} line${lines === 1 ? "" : "s"}`;
-    field.title = "Notes are edited in Mora";
+    field.title = "Notes are edited in Mora -- double-click to open";
+    if (onOpen) field.addEventListener("dblclick", onOpen);
     return field;
   }
 
@@ -1153,7 +1186,8 @@ const Inspector = (() => {
    *  panel has a remembered home -- once you have put it somewhere, it
    *  staying put is worth more than it following each click. */
   function positionBeside(anchor) {
-    state.pos = clamp(anchor.x + 34, anchor.y - 90);
+    const p = anchor.left === undefined ? anchor : { x: anchor.right, y: anchor.bottom };
+    state.pos = clamp(p.x + 34, p.y - 90);
   }
 
   function clamp(x, y) {
@@ -1188,12 +1222,14 @@ const Inspector = (() => {
   function drawLeader(anchor) {
     if (!anchor) { leader.classList.add("hidden"); return; }
     leader.classList.remove("hidden");
-    els.leaderLine.setAttribute("x1", anchor.x);
-    els.leaderLine.setAttribute("y1", anchor.y);
-    els.leaderLine.setAttribute("x2", state.pos.x + 6);
-    els.leaderLine.setAttribute("y2", state.pos.y + 46);
-    els.leaderDot.setAttribute("cx", anchor.x);
-    els.leaderDot.setAttribute("cy", anchor.y);
+    const target = { x: state.pos.x + 6, y: state.pos.y + 46 };
+    const point = nearestPoint(anchor, target);
+    els.leaderLine.setAttribute("x1", point.x);
+    els.leaderLine.setAttribute("y1", point.y);
+    els.leaderLine.setAttribute("x2", target.x);
+    els.leaderLine.setAttribute("y2", target.y);
+    els.leaderDot.setAttribute("cx", point.x);
+    els.leaderDot.setAttribute("cy", point.y);
   }
 
   let drag = null;

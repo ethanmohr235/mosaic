@@ -39,5 +39,5 @@ def launch(garden: str | None = None, view: str | None = None) -> None:
         default_port=DEFAULT_HTTP_PORT,
         width=1560,
         height=940,
-        min_size=(1080, 620),
+        min_size=(900, 620),
     )

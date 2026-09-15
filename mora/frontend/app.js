@@ -17,21 +17,26 @@ let savedSource = "";
 let payload = null;          // the last render() answer
 let notes = [];              // every note mote in the garden
 let mode = "split";
-let dataOpen = true;
 let step = 0;
-let focusId = null;          // panel target while browsing away from the anchor
 let renderTimer = null;
 let toastTimer = null;
 let picker = null;           // {start, query, rows, index} while the @ picker is open
 let renderSeq = 0;           // guards against two renders landing out of order
 let autosaveTimer = null;
 let savePromise = null;      // the save_note call in flight, if any
+let undoStack = [];          // {value, start, end} snapshots, oldest first
+let redoStack = [];
+let undoPending = null;      // pre-edit snapshot for the burst in progress
+let undoTimer = null;
+let applyingUndo = false;    // true while an undo/redo restore is landing
 
 const RENDER_DEBOUNCE_MS = 180;
 // Longer than the render debounce on purpose: a render is cheap and
 // local-feeling, a write touches the garden file that Monarch may have
 // open in another process, so it waits for a real pause in typing.
 const AUTOSAVE_DEBOUNCE_MS = 900;
+const UNDO_COALESCE_MS = 700;   // a pause this long ends the current undo step
+const UNDO_LIMIT = 200;
 const MAX_STEP = 60;
 const UNKNOWN_COLOR = "oklch(0.62 0 0)";
 
@@ -270,6 +275,85 @@ function markDirty() {
   pill.classList.toggle("edited", dirty && !savePromise);
 }
 
+// ---- undo/redo -------------------------------------------------------
+//
+// A stack of our own rather than the textarea's native undo: find/replace
+// and the @ picker rewrite `editor.value` wholesale, which silently wipes
+// the browser's built-in history, so anything that wants those rewrites
+// to be undoable has to track state itself. Ctrl/Cmd+Z and
+// Ctrl/Cmd+Shift+Z (or +Y) are fully routed through this instead of the
+// native command, so the two histories never fight each other.
+//
+// undoStack/redoStack hold states strictly before/after the current one,
+// never the current state itself. Ordinary typing coalesces into one
+// step per pause (undoPending, flushed by undoTimer) so every keystroke
+// doesn't become its own undo step.
+
+function editorSnapshot() {
+  const editor = $("editor");
+  return { value: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
+}
+
+function resetUndoHistory() {
+  clearTimeout(undoTimer);
+  undoStack = [];
+  redoStack = [];
+  undoPending = null;
+}
+
+function commitUndoBurst() {
+  clearTimeout(undoTimer);
+  if (!undoPending) return;
+  undoStack.push(undoPending);
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  undoPending = null;
+  redoStack = [];
+}
+
+/** Called on every keystroke that edits the textarea, before the edit
+ *  lands (see the "beforeinput" listener in wire()). The first keystroke
+ *  of a burst captures the pre-edit state; later ones just push the
+ *  coalescing deadline back. */
+function markUndoBurst() {
+  if (applyingUndo) return;
+  if (!undoPending) undoPending = editorSnapshot();
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(commitUndoBurst, UNDO_COALESCE_MS);
+}
+
+/** Called before a discrete programmatic rewrite of the editor's value
+ *  (find/replace, the @ picker) so that rewrite becomes its own undo
+ *  step, distinct from whatever typing burst was in progress. */
+function pushUndoStep() {
+  commitUndoBurst();
+  undoStack.push(editorSnapshot());
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack = [];
+}
+
+function restoreEditorSnapshot(snap) {
+  const editor = $("editor");
+  applyingUndo = true;
+  editor.value = snap.value;
+  editor.setSelectionRange(snap.start, snap.end);
+  applyingUndo = false;
+  editor.focus();
+  onEditorInput();
+}
+
+function undo() {
+  commitUndoBurst();
+  if (!undoStack.length) return;
+  redoStack.push(editorSnapshot());
+  restoreEditorSnapshot(undoStack.pop());
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(editorSnapshot());
+  restoreEditorSnapshot(redoStack.pop());
+}
+
 function scheduleRender() {
   clearTimeout(renderTimer);
   renderTimer = setTimeout(renderNow, RENDER_DEBOUNCE_MS);
@@ -293,8 +377,7 @@ async function renderNow() {
   payload = answer;
   drawRendered();
   drawStatus();
-  if (focusId === null) drawPanel(payload.anchor.id);
-  else drawNoteSections();
+  if (!$("problems-popover").classList.contains("hidden")) renderProblemsPopover();
 }
 
 // ---- rendered pane -------------------------------------------------
@@ -378,7 +461,7 @@ function buildLink(node) {
   if (node.moteId) {
     button.style.color = colorOf(node);
     button.title = `${kindOf(node)} · ${node.moteId}`;
-    button.onclick = () => selectMote(node.moteId, { anchor: button });
+    button.onclick = () => Inspector.open(node.moteId, { anchor: button });
     button.oncontextmenu = (event) => {
       event.preventDefault();
       ContextMenu.open(event.clientX, event.clientY,
@@ -488,93 +571,15 @@ function svgPath(d, { fill = "none", stroke = "none" }) {
   return path;
 }
 
-// ---- data panel ----------------------------------------------------
+// ---- problems popover ------------------------------------------------
 
-async function drawPanel(moteId) {
-  if (!moteId) return;
-  const mote = await api.focus(moteId);
-  if (!mote) return;
-  $("panel-dot").style.background = colorOf(mote);
-  $("panel-kind-text").style.color = colorOf(mote);
-  $("panel-kind-text").textContent = kindOf(mote);
-  $("panel-name").textContent = mote.name;
-  $("panel-id").textContent = mote.id;
-  $("panel-back").classList.toggle("hidden", focusId === null);
-
-  drawProperties(mote.properties);
-  drawRelationships(mote.relationships);
-  drawNoteSections();
-}
-
-function drawProperties(properties) {
-  const root = clear($("panel-props"));
-  const keys = Object.keys(properties).filter((key) => key !== "modoc");
-  if (!keys.length) {
-    root.append(el("div", "panel-empty", "No properties."));
-    return;
-  }
-  keys.forEach((key) => {
-    const row = el("div", "prop-row");
-    row.append(el("span", "prop-key", key.replace(/_/g, " ")));
-    const value = properties[key];
-    row.append(el("span", "prop-value", typeof value === "string" ? value : JSON.stringify(value)));
-    root.append(row);
-  });
-}
-
-function drawRelationships(relationships) {
-  const root = clear($("panel-rels"));
-  if (!relationships.length) {
-    root.append(el("div", "panel-empty", "Nothing connected."));
-    return;
-  }
-  relationships.forEach((relationship) => {
-    const row = el("button", "entry-row");
-    row.type = "button";
-    row.append(el("span", "arrow", relationship.outgoing ? "→" : "←"));
-    const dot = el("span", "dot");
-    dot.style.background = colorOf(relationship.other);
-    row.append(dot);
-    row.append(el("span", "label", relationship.other.name));
-    row.append(el("span", "sub", relationship.type));
-    row.onclick = () => selectMote(relationship.other.id);
-    root.append(row);
-  });
-}
-
-/** The two parts of the panel that depend on the note rather than on the
- *  mote in focus, so they refresh on every render whichever mote the
- *  panel is showing. */
-function drawNoteSections() {
-  drawLinked();
-  drawProblems();
-}
-
-function drawLinked() {
-  const root = clear($("panel-linked"));
-  const linked = (payload && payload.linked) || [];
-  if (!linked.length) {
-    root.append(el("div", "panel-empty", "Nothing linked from the text."));
-    return;
-  }
-  linked.forEach((entry) => {
-    const row = el("button", "entry-row");
-    row.type = "button";
-    if (!entry.moteId) row.classList.add("broken");
-    const dot = el("span", "dot");
-    dot.style.background = colorOf({ ...entry, id: entry.moteId });
-    row.append(dot);
-    row.append(el("span", "label", entry.name));
-    row.append(el("span", "sub", `×${entry.count}`));
-    row.onclick = () => (entry.moteId ? selectMote(entry.moteId) : toast(entry.error, true));
-    root.append(row);
-  });
-}
-
-function drawProblems() {
+function renderProblemsPopover() {
   const problems = (payload && payload.diagnostics) || [];
-  $("panel-problems-section").classList.toggle("hidden", !problems.length);
-  const root = clear($("panel-problems"));
+  const root = clear($("problems-popover"));
+  if (!problems.length) {
+    root.append(el("div", "panel-empty", "No problems."));
+    return;
+  }
   problems.forEach((problem) => {
     const row = el("div", "problem");
     row.append(el("div", "where", problem.line ? `line ${problem.line} · ${problem.kind}` : problem.kind));
@@ -583,15 +588,11 @@ function drawProblems() {
   });
 }
 
-function selectMote(moteId, options = {}) {
-  focusId = moteId === payload.anchor.id ? null : moteId;
-  dataOpen = true;
-  applyLayout();
-  drawPanel(moteId);
-  // Mora could read a mote's properties and edit none of them -- the
-  // data panel is a reading surface beside the prose. Editing one is
-  // now the same act here as anywhere else.
-  Inspector.open(moteId, { anchor: options.anchor, newTab: !!options.newTab });
+function toggleProblemsPopover(open) {
+  const popover = $("problems-popover");
+  const next = open ?? popover.classList.contains("hidden");
+  popover.classList.toggle("hidden", !next);
+  if (next) renderProblemsPopover();
 }
 
 // ---- status bar ----------------------------------------------------
@@ -659,7 +660,7 @@ function exportPdf() {
 // ---- notes and saving ----------------------------------------------
 
 
-async function loadNote(id, { preserveFocus = false } = {}) {
+async function loadNote(id) {
   await flushSave();
   closeFindBar();
   const opened = await api.open_note(id ?? null);
@@ -667,8 +668,8 @@ async function loadNote(id, { preserveFocus = false } = {}) {
   noteName = opened.name;
   savedSource = opened.source;
   $("editor").value = opened.source;
+  resetUndoHistory();
   $("note-title").textContent = noteName || "no motes yet";
-  if (!preserveFocus) focusId = null;
   step = 0;
   paintHighlight();
   markDirty();
@@ -960,6 +961,7 @@ function choosePicker(index) {
   const before = editor.value.slice(0, picker.start);
   const after = editor.value.slice(editor.selectionStart);
   const insertion = `\\mote{${row.id}}{${row.name}}`;
+  pushUndoStep();
   editor.value = before + insertion + after;
   editor.selectionStart = editor.selectionEnd = before.length + insertion.length;
   closePicker();
@@ -1095,6 +1097,7 @@ function replaceCurrentMatch() {
   const editor = $("editor");
   const [start, end] = findMatches[findIndex];
   const replacement = $("replace-input").value;
+  pushUndoStep();
   editor.value = editor.value.slice(0, start) + replacement + editor.value.slice(end);
   editor.setSelectionRange(start + replacement.length, start + replacement.length);
   onEditorInput();
@@ -1107,6 +1110,7 @@ function replaceAllMatches() {
   const query = findQuery();
   const replacement = $("replace-input").value;
   const count = findMatches.length;
+  pushUndoStep();
   editor.value = findCaseSensitive
     ? editor.value.split(query).join(replacement)
     : editor.value.replace(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), replacement);
@@ -1153,8 +1157,6 @@ function wireFindBar() {
 function applyLayout() {
   $("source-pane").classList.toggle("hidden", mode === "preview");
   $("preview-pane").classList.toggle("hidden", mode === "source");
-  $("data-pane").classList.toggle("hidden", !dataOpen);
-  $("data-toggle").classList.toggle("on", dataOpen);
   document.querySelectorAll("#modes button").forEach((button) => {
     button.classList.toggle("on", button.dataset.mode === mode);
   });
@@ -1170,10 +1172,21 @@ function setMode(next) {
 function wire() {
   const editor = $("editor");
   editor.addEventListener("input", onEditorInput);
+  editor.addEventListener("beforeinput", markUndoBurst);
   editor.addEventListener("scroll", () => { $("highlight").scrollTop = editor.scrollTop; });
   editor.addEventListener("blur", () => { closePicker(); flushSave(); });
   editor.addEventListener("keydown", (event) => {
     if (onPickerKey(event)) { event.preventDefault(); return; }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) redo(); else undo();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      redo();
+      return;
+    }
   });
   editor.addEventListener("click", updatePicker);
 
@@ -1186,7 +1199,7 @@ function wire() {
       const result = await api.refresh();
       notes = await api.list_notes();
       const dirty = $("editor").value !== savedSource;
-      if (!dirty) await loadNote(noteId, { preserveFocus: true });
+      if (!dirty) await loadNote(noteId);
       const base = result.synced ? "Synced" : "Refreshed";
       toast(dirty ? `${base} (unsaved edits kept).` : `${base} and refreshed.`);
     } catch (e) {
@@ -1196,7 +1209,6 @@ function wire() {
       btn.classList.remove("spinning");
     }
   };
-  $("data-toggle").onclick = () => { dataOpen = !dataOpen; applyLayout(); };
   document.querySelectorAll("#modes button").forEach((button) => {
     button.onclick = () => setMode(button.dataset.mode);
   });
@@ -1226,12 +1238,13 @@ function wire() {
       closeNotesWindow();
     }
   });
-  $("panel-back").onclick = () => { focusId = null; drawPanel(payload.anchor.id); };
-  $("problems-btn").onclick = () => {
-    dataOpen = true;
-    applyLayout();
-    $("panel-problems-section").scrollIntoView({ behavior: "smooth" });
+  $("problems-btn").onclick = (event) => {
+    event.stopPropagation();
+    toggleProblemsPopover();
   };
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#problems-wrap")) toggleProblemsPopover(false);
+  });
 
   $("tick-up").onclick = () => setStep(step + 1);
   $("tick-down").onclick = () => setStep(step - 1);

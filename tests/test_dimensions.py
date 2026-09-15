@@ -120,6 +120,33 @@ def test_a_negative_power_scales_dimensions():
     assert check_equation("frequency == period ** -1", context(units=units)) == []
 
 
+# ---- sin/cos/tan/sqrt ----
+
+def test_sqrt_halves_dimensions():
+    units = {"r1": {"area": "m^2", "side": "m"}}
+    assert check_equation("side == sqrt(area)", context(units=units)) == []
+
+
+def test_a_wrong_sqrt_is_flagged():
+    units = {"r1": {"volume": "m^3", "side": "m"}}
+    problems = check_equation("side == sqrt(volume)", context(units=units))
+    assert len(problems) == 1
+
+
+def test_trig_functions_are_always_dimensionless():
+    # Regardless of what the argument declares -- unlike abs/min/max,
+    # sin/cos/tan don't relay their input's dimension to the output.
+    units = {"r1": {"angle": "deg", "ratio": "ohm"}}
+    problems = check_equation("ratio == sin(angle)", context(units=units))
+    assert any("left side is" in p for p in problems)
+
+
+def test_trig_functions_still_surface_problems_inside_their_argument():
+    units = {"r1": {"bad": "not-a-real-unit"}}
+    problems = check_equation("y == sin(bad)", context(units=units))
+    assert any("not recognized" in p for p in problems)
+
+
 # ---- navigation and aggregation ----
 
 def test_dimensions_are_read_from_the_mote_actually_navigated_to():
@@ -236,8 +263,8 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
         if isinstance(node, ast.Name)
     }
     dispatch_constants = {
-        "NAVIGATION_CALLS", "AGGREGATE_CALLS", "NUMERIC_CALLS",
-        "PREVIOUS_CALL", "PROPERTY_CALL",
+        "NAVIGATION_CALLS", "AGGREGATE_CALLS", "NUMERIC_CALLS", "TRIG_CALLS",
+        "SQRT_CALL", "PREVIOUS_CALL", "PROPERTY_CALL",
     }
     # Every group formula._call() dispatches on must be one this module
     # imported and handles.
@@ -249,7 +276,8 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
         formula.NAVIGATION_CALLS
         | formula.AGGREGATE_CALLS
         | formula.NUMERIC_CALLS
-        | {formula.PREVIOUS_CALL, formula.PROPERTY_CALL}
+        | formula.TRIG_CALLS
+        | {formula.SQRT_CALL, formula.PREVIOUS_CALL, formula.PROPERTY_CALL}
     )
 
 
@@ -265,6 +293,10 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
         "abs": "abs(x)",
         "min": "min(x, 1)",
         "max": "max(x, 1)",
+        "sin": "sin(x)",
+        "cos": "cos(x)",
+        "tan": "tan(x)",
+        "sqrt": "sqrt(x)",
         "prev": "prev(x)",
         "property": "property('a', 'op', 1)",
     }

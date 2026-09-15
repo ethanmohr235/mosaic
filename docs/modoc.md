@@ -168,7 +168,7 @@ A note with a typo in it still renders, with the broken part visibly
 broken. Everything that went wrong -- an unknown command, an unresolved
 reference, an expression that wouldn't evaluate -- is collected as a
 diagnostic (`core/modoc_bind.py::problems`) and reported in one list, the
-same list `monoss modoc check` prints and Mora's Problems panel shows.
+same list `monoss modoc check` prints and Mora's Problems popover shows.
 
 ## Using it
 

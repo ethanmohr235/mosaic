@@ -573,11 +573,11 @@ the window.
 | Pane | |
 |---|---|
 | Source | a textarea over a syntax-highlight layer. `@` opens a mote picker that inserts `\mote{<id>}{<name>}` |
-| Rendered | the note with every macro resolved. Clicking a `\mote` link moves the data panel to it |
-| Data | the anchor mote's properties and relationships, everything linked from the text with reference counts, and any Problems |
+| Rendered | the note with every macro resolved. Clicking a `\mote` link opens the shared floating inspector (`frontend_shared/inspector.js`) on that mote -- the same editing surface every other window uses |
 
-`Source` / `Split` / `Read` choose which panes are shown; `Data` toggles
-the right one.
+`Source` / `Split` / `Read` choose which panes are shown. Mora has no
+docked data panel of its own; a mote's properties and relationships are
+read (and edited) through the inspector, not a side pane.
 
 | Control | Action |
 |---|---|
@@ -586,6 +586,7 @@ the right one.
 | `t+N` stepper | Resolve the whole note against a simulation preview N steps out. The label flips **Real** to **Projected**; nothing is written |
 | **Apply t+N…** | Commit that projection to the graph. Asks first, and is disabled at t+0 |
 | Esc | Close the note menu or the `@` picker |
+| Footer **N problems** | Toggles a popover listing this note's diagnostics |
 
 Save and Apply are two buttons on purpose: saving a note must never be a
 way to write simulation results.
@@ -597,9 +598,9 @@ above, and exists for the same reason -- the half of the app pytest
 cannot reach. It drives a real window against a seeded throwaway garden
 and checks that the note renders, that `\val` and `\mote` resolve (and
 visibly fail when they can't), that both `\graph` forms draw, that a link
-moves the data panel and back returns, that the stepper projects without
-writing, that Save writes only the note, and that no uncaught JS errors
-were logged. The entry points *into* Mora belong to the main window, so
+opens the shared inspector, that the stepper projects without writing,
+that Save writes only the note, and that no uncaught JS errors were
+logged. The entry points *into* Mora belong to the main window, so
 they are checked by `scripts/monarch_smoke_test.py` instead, with `open_mora`
 stubbed -- an automated suite has no business spawning a second app.
 

@@ -258,6 +258,22 @@
 }
 .ins-input.text-area { resize: vertical; min-height: 54px; line-height: 1.5; }
 
+/* A number's declared unit (see core/units.py), shown next to the field
+   it belongs to rather than only inside the mote's raw `units` map. */
+.ins-unit-wrap { display: flex; align-items: center; gap: 5px; }
+.ins-unit-wrap .ins-input { flex: 1; min-width: 0; }
+.ins-unit-badge {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-dim, var(--fg));
+  opacity: 0.75;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  cursor: default;
+}
+
 /* A dict-valued property (a mote's `units` map) is set structurally, not
    typed into -- shown as plain key: value lines rather than an editor. */
 .ins-map {

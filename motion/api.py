@@ -59,6 +59,7 @@ from core import solvers as solvers_repo
 from core import species as species_repo
 from core import sync as sync_repo
 from core.db import get_connection, initialize_database
+from core.units import UNITS_KEY, parse_units_property
 from motion import payload as payload_repo
 
 logger = logging.getLogger(__name__)
@@ -437,8 +438,12 @@ class Api(InspectorApi, CommandBarApi):
         motes, _relationships = self._simulable()
         labels = {m.id: str(m.properties.get("name", m.id[:8])) for m in motes}
         base = {m.id: m.properties for m in motes}
+        units = {
+            m.id: parse_units_property(m.properties.get(UNITS_KEY))
+            for m in motes
+        }
         built = payload_repo.build_lanes(
-            steps, base, labels, limit=limit or payload_repo.MAX_LANES
+            steps, base, labels, units=units, limit=limit or payload_repo.MAX_LANES
         )
         return [lane.to_json() for lane in built]
 

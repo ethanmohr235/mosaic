@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from core.units import (
@@ -8,7 +10,9 @@ from core.units import (
     UnknownUnit,
     convert,
     describe,
+    describe_expression,
     dimension_of,
+    format_unit,
     from_base,
     is_unit,
     list_units,
@@ -58,6 +62,23 @@ def test_describe_prefers_a_familiar_unit_name():
     assert describe(Dimension(length=1, time=-1)) == "m·s⁻¹"
 
 
+def test_describe_expression_gives_caret_notation():
+    # A familiar unit's name doesn't change...
+    assert describe_expression(dimension_of("V")) == "V"
+    # ...but a base-product fallback is caret notation, not superscripts,
+    # so an automatically inferred unit is typed the same way a person
+    # typing a unit into a `units` property by hand would type it.
+    assert describe_expression(Dimension(length=1, time=-1)) == "m*s^-1"
+    assert is_unit(describe_expression(Dimension(length=1, time=-1)))
+
+
+def test_format_unit_renders_caret_notation_as_superscript():
+    assert format_unit("cm^-3") == "cm⁻³"
+    assert format_unit("m*s^-1") == "m·s⁻¹"
+    assert format_unit("kohm") == "kohm"
+    assert format_unit("J/(kg*K)") == "J/(kg·K)"
+
+
 # ---- conversion ----
 
 def test_convert_between_prefixed_units():
@@ -76,6 +97,24 @@ def test_convert_between_non_si_units():
     assert convert(1, "hr", "min") == pytest.approx(60.0)
     assert convert(12, "in", "ft") == pytest.approx(1.0)
     assert convert(1, "bar", "Pa") == pytest.approx(1e5)
+
+
+def test_nuclear_and_radiological_units():
+    assert convert(1, "MeV", "eV") == pytest.approx(1e6)
+    assert to_base(1, "eV") == pytest.approx(1.602176634e-19)
+    assert convert(1, "Ci", "Bq") == pytest.approx(3.7e10)
+    assert convert(1, "GBq", "Bq") == pytest.approx(1e9)
+    assert convert(1, "rem", "Sv") == pytest.approx(0.01)
+    assert convert(1000, "mSv", "Sv") == pytest.approx(1.0)
+    assert dimension_of("Gy") == dimension_of("Sv")
+    assert to_base(1, "barn") == pytest.approx(1e-28)
+    assert to_base(1, "u") == pytest.approx(1.66053906660e-27)
+
+
+def test_degree_converts_to_dimensionless_radians():
+    assert to_base(180, "deg") == pytest.approx(math.pi)
+    assert to_base(90, "deg") == pytest.approx(math.pi / 2)
+    assert dimension_of("deg").is_dimensionless
 
 
 def test_affine_temperature_conversion():
@@ -126,6 +165,14 @@ def test_superscript_exponents_parse():
 
 def test_equivalent_compounds_share_a_dimension():
     assert dimension_of("J/kg") == dimension_of("m^2/s^2")
+
+
+def test_number_density_is_a_compound_not_a_registered_unit():
+    # 1/cm^3 (neutron/particle density) is never registered up front --
+    # the algebraic grammar is what makes it work at all.
+    assert dimension_of("1/cm^3") == Dimension(length=-3)
+    assert dimension_of("cm^-3") == dimension_of("1/cm^3")
+    assert convert(1, "1/cm^3", "1/m^3") == pytest.approx(1e6)
 
 
 def test_compound_scales_compose():

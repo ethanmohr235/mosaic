@@ -33,13 +33,23 @@ from core.formula import (
     AGGREGATE_CALLS,
     NAVIGATION_CALLS,
     NUMERIC_CALLS,
+    SQRT_CALL,
+    TRIG_CALLS,
     PREVIOUS_CALL,
     PROPERTY_CALL,
     FormulaError,
     TICK_NAME,
     parse_equation,
 )
-from core.units import DIMENSIONLESS, Dimension, UnitError, describe, dimension_of
+from core.units import (
+    DIMENSIONLESS,
+    Dimension,
+    UnitError,
+    describe,
+    describe_expression,
+    dimension_of,
+    is_unit,
+)
 
 # A dimension, or None meaning "not declared" -- deliberately distinct
 # from DIMENSIONLESS, which is a positive claim that something is a pure
@@ -148,6 +158,56 @@ def check_equation(text: str, ctx: DimensionContext) -> list[str]:
             f"{describe(right_dim)} -- these are different dimensions"
         )
     return checker.problems
+
+
+def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
+    """A reasonable unit for `key` on `ctx.mote_id`, read off the *other*
+    side of an equation that determines it -- for a solved freedom with
+    no declared unit of its own (see core/simulation.py's write-back).
+
+    Only fires when `key` is the entire left- or right-hand side of the
+    equation (`resistance == voltage / current`): a name buried inside a
+    larger expression doesn't pin down a dimension on its own
+    (`voltage == 2 * resistance` says nothing about resistance in
+    isolation), so that case is left alone rather than guessed at.
+
+    Returns a name that round-trips through core.units.unit() -- the
+    canonical symbol for a familiar dimension (`V`, `N`), or the
+    base-dimension product for one that has no name of its own (`m*s^-1`),
+    both of which core/units.py's compound grammar can parse back. Written
+    in caret notation via describe_expression() rather than describe()'s
+    unicode superscripts, so an automatically inferred unit is typed the
+    same way a person typing one by hand would type it -- core/units.py's
+    format_unit() renders either one with superscripts for display. None
+    means the other side's dimension is unknown, a bare literal,
+    dimensionless (nothing to name), or -- there is no such dimension --
+    not really possible, but checked anyway since a guess that doesn't
+    parse is worse than no guess."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return None
+
+    checker = _Checker(ctx)
+    try:
+        if _is_bare_name(relation.left, key):
+            other = relation.right
+        elif _is_bare_name(relation.right, key):
+            other = relation.left
+        else:
+            return None
+        dimension = checker.dimension(other)
+    except FormulaError:
+        return None
+
+    if dimension is None or _is_literal(dimension) or dimension.is_dimensionless:
+        return None
+    name = describe_expression(dimension)
+    return name if is_unit(name) else None
+
+
+def _is_bare_name(node: ast.AST, key: str) -> bool:
+    return isinstance(node, ast.Name) and node.id == key
 
 
 def _conflict(a: Dim, b: Dim) -> bool:
@@ -328,6 +388,10 @@ class _Checker:
             return self._aggregate(name, node)
         if name in NUMERIC_CALLS:
             return self._combine([self.dimension(a) for a in node.args], name)
+        if name in TRIG_CALLS:
+            return self._trig(name, node)
+        if name == SQRT_CALL:
+            return self._sqrt(node)
         if name == PREVIOUS_CALL:
             # prev(x) is the same quantity as x, one step earlier.
             if len(node.args) != 1 or not isinstance(node.args[0], ast.Name):
@@ -373,6 +437,29 @@ class _Checker:
                 )
                 break
         return known[0]
+
+    def _trig(self, name: str, node: ast.Call) -> Dim:
+        """sin/cos/tan always produce a dimensionless ratio, regardless of
+        what their argument declares -- unlike NUMERIC_CALLS's abs/min/max,
+        whose output shares its input's dimension. Still walks the
+        argument first so a problem inside it (an unrecognized unit, say)
+        is reported rather than silently discarded."""
+        if len(node.args) != 1:
+            raise FormulaError(f"{name}() takes exactly one argument")
+        self.dimension(node.args[0])
+        return DIMENSIONLESS
+
+    def _sqrt(self, node: ast.Call) -> Dim:
+        """sqrt(x) halves x's dimension exponents (sqrt(m^2) == m), the
+        same rule _power() applies for a literal `** 0.5`."""
+        if len(node.args) != 1:
+            raise FormulaError("sqrt() takes exactly one argument")
+        base = self.dimension(node.args[0])
+        if base is None:
+            return None
+        if _is_literal(base):
+            return LITERAL
+        return base * 0.5
 
     def _property(self, node: ast.Call) -> Dim:
         """A property() call's dimension is whatever unit the provider's

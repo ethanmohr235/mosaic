@@ -8,7 +8,7 @@ import pytest
 
 from core import modoc
 from core.modoc_bind import DEFAULT_HORIZON, format_value, problems, resolve
-from core.motes import create_mote, get_mote
+from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 
 
@@ -88,6 +88,43 @@ def test_an_expression_goes_through_the_formula_language(conn, garden):
 
 def test_a_value_can_be_read_off_another_mote(conn, garden):
     assert only_value(resolved(conn, garden, "\\val[Task 0]{progress}")).text == "100"
+
+
+def test_a_plain_property_with_a_declared_unit_shows_it(conn, garden):
+    update_mote(conn, garden, {"team": 4, "units": {"team": "kohm"}})
+    assert only_value(resolved(conn, garden, "\\val{team}")).text == "4 kohm"
+
+
+def test_a_unitless_property_shows_no_unit(conn, garden):
+    assert only_value(resolved(conn, garden, "\\val{team}")).text == "4"
+
+
+def test_a_caret_notation_unit_renders_with_superscripts(conn, garden):
+    update_mote(conn, garden, {"density": 2, "units": {"density": "cm^-3"}})
+    assert only_value(resolved(conn, garden, "\\val{density}")).text == "2 cm⁻³"
+
+
+def test_a_dotted_reference_reads_a_plain_property_in_its_own_unit(conn, garden):
+    # `n.E` must not go through the formula evaluator's base-SI
+    # normalization -- a value declared in eV has to read back as eV,
+    # not as its (tiny) value in joules.
+    neutron = create_mote(conn, {"name": "n", "E": 1, "units": {"E": "eV"}})
+    create_relationship(conn, garden, neutron, "about")
+    assert only_value(resolved(conn, garden, "\\val{n.E}")).text == "1 eV"
+
+
+def test_a_dotted_reference_falls_back_to_the_formula_language(conn, garden):
+    # No mote named "count" exists, so this isn't the fast path -- it
+    # still has to reach the formula language's own dotted syntax
+    # (targets('contains').status is unrelated here, but a role/alias
+    # dotted reference must keep working).
+    result = only_value(resolved(conn, garden, "\\val{Nowhere.progress}"))
+    assert result.value is None and result.error
+
+
+def test_large_and_tiny_numbers_render_in_scientific_notation(conn, garden):
+    update_mote(conn, garden, {"team": 199999999999999.97})
+    assert only_value(resolved(conn, garden, "\\val{team}")).text == "2e14"
 
 
 def test_a_value_anchored_at_a_missing_mote_reports(conn, garden):

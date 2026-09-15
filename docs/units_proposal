@@ -76,7 +76,7 @@ Explicit registration, no dynamic parsing of arbitrary strings -- same disciplin
 
 **Unit entry.** Each registered unit maps to `(dimension, scale, offset=0.0)`: `value_in_base = value * scale + offset`. Offset exists for affine units -- Celsius and Fahrenheit are *not* simple multiples of Kelvin, and need to be called out explicitly rather than silently mishandled as if they were.
 
-**Built-in catalog**, deliberately small and extensible rather than exhaustive: base SI units (`m`, `kg`, `s`, `A`, `K`) plus a modest set of named derived/common units (`ohm`, `V`, `W`, `Hz`, `N`, `Pa`, `J`; common non-SI: `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `degC`, `degF`; pressure: `bar`, `atm`, `psi`). SI prefixes (`k`, `m`, `μ`/`u`, `M`, ...) are generated programmatically at import time for the subset of base/derived units where a prefix makes sense (so `kohm`, `mV`, `MPa` exist without hand-enumerating every prefix × unit combination) -- still fully explicit registration, just done in a loop instead of one line per unit.
+**Built-in catalog**, deliberately small and extensible rather than exhaustive: base SI units (`m`, `kg`, `s`, `A`, `K`) plus a modest set of named derived/common units (`ohm`, `V`, `W`, `Hz`, `N`, `Pa`, `J`; common non-SI: `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `degC`, `degF`, `deg` (angle, dimensionless); pressure: `bar`, `atm`, `psi`). SI prefixes (`k`, `m`, `μ`/`u`, `M`, ...) are generated programmatically at import time for the subset of base/derived units where a prefix makes sense (so `kohm`, `mV`, `MPa` exist without hand-enumerating every prefix × unit combination) -- still fully explicit registration, just done in a loop instead of one line per unit.
 
 **API:**
 

@@ -42,7 +42,7 @@ from core.formula import (
     evaluate_equation,
     relation_operator,
 )
-from core.dimensions import DimensionContext, check_equation
+from core.dimensions import DimensionContext, check_equation, infer_unit
 from core.entities import Relationship
 from core.motes import list_motes, update_mote
 from core.providers import PropertyProvider
@@ -296,7 +296,9 @@ def run_simulation(
         raise SimulationError(str(e)) from e
 
     if case is None:
-        changes = _write_back(conn, view.properties, solved)
+        inferred_units = _infer_missing_units(view, equations, solved, model_cache)
+        properties = _apply_inferred_units(conn, view.properties, inferred_units)
+        changes = _write_back(conn, properties, solved)
     else:
         changes = _changes_for(view.properties, solved)
     run_id = _log_run(
@@ -410,7 +412,10 @@ def run_time_series(
     starting_view = _build_view(running, relationships)
     starting_pairs = _rule_instances(rules, starting_view)
     _validate_units(starting_view, starting_pairs)
-    _split_relations(starting_pairs)  # surfaces an unusable comparison before step 0
+    # Also the equations _infer_missing_units() below reads from -- rules
+    # don't change step-to-step, so the split done here for the pre-flight
+    # check is reused rather than repeated at commit time.
+    starting_equations, _starting_constraints = _split_relations(starting_pairs)
     warnings = _dimension_warnings(
         starting_view, starting_pairs, strict_units, model_cache
     )
@@ -463,6 +468,10 @@ def run_time_series(
     if (commit or save) and steps:
         run_number = _next_run_number(conn)
         if commit:
+            inferred_units = _infer_missing_units(
+                starting_view, starting_equations, cumulative, model_cache
+            )
+            baseline = _apply_inferred_units(conn, baseline, inferred_units)
             _write_back(conn, baseline, cumulative)
         run_id = _log_run(
             conn, run_number, "ok", detail, [s.changes for s in steps],
@@ -1011,20 +1020,85 @@ def check_dimensions(
     cache = model_cache if model_cache is not None else {}
     problems: list[str] = []
     for rule, mote_id in pairs:
-        ctx = DimensionContext(
-            mote_id=mote_id,
-            units=lambda mid: view.units.get(mid, {}),
-            targets=lambda mid, type_: view.out_edges.get((mid, type_), []),
-            sources=lambda mid, type_: view.in_edges.get((mid, type_), []),
-            capability_units=lambda mid, rel, op: _capability_units(view, cache, mid, rel, op),
-            label=lambda mid: _mote_label(view, mid),
-            roles=lambda mid: view.roles.get(mid, {}),
-            neighbors=lambda mid: view.neighbors.get(mid, []),
-            mote_name=lambda mid: view.properties.get(mid, {}).get("name"),
-        )
+        ctx = _dimension_context(view, cache, mote_id)
         for problem in check_equation(rule.equation, ctx):
             problems.append(f"{rule.name} on {_mote_label(view, mote_id)}: {problem}")
     return problems
+
+
+def _dimension_context(
+    view: _GardenView, model_cache: dict[str, PropertyProvider], mote_id: str
+) -> DimensionContext:
+    return DimensionContext(
+        mote_id=mote_id,
+        units=lambda mid: view.units.get(mid, {}),
+        targets=lambda mid, type_: view.out_edges.get((mid, type_), []),
+        sources=lambda mid, type_: view.in_edges.get((mid, type_), []),
+        capability_units=lambda mid, rel, op: _capability_units(view, model_cache, mid, rel, op),
+        label=lambda mid: _mote_label(view, mid),
+        roles=lambda mid: view.roles.get(mid, {}),
+        neighbors=lambda mid: view.neighbors.get(mid, []),
+        mote_name=lambda mid: view.properties.get(mid, {}).get("name"),
+    )
+
+
+def _infer_missing_units(
+    view: _GardenView,
+    equations: list[tuple[rules_repo.Rule, str]],
+    solved: dict[Unknown, float],
+    model_cache: dict[str, PropertyProvider],
+) -> dict[str, dict[str, str]]:
+    """A reasonable unit for every solved freedom that doesn't already
+    declare one, read straight off whichever equation determined it.
+
+    Units are opt-in everywhere else in this module -- a garden that
+    never annotates anything runs exactly as it always has -- but a
+    *freedom* is different: the solver is about to write a number onto
+    it regardless, and if the equation that produced it plainly names a
+    dimension (`resistance == voltage / current`), leaving the result
+    unitless is simply losing information the garden already had. Only
+    ever adds a unit; never overwrites one a mote already declared.
+
+    One rule may not be the whole story for a value the solver backend
+    (rather than the substitution loop) determined from several equations
+    at once, so every equation naming the freedom is tried and the first
+    one with a determinable dimension wins -- good enough for the common
+    case this exists for, and silent (not a guess) everywhere else."""
+    inferred: dict[str, dict[str, str]] = {}
+    for mote_id, key in solved:
+        if view.units.get(mote_id, {}).get(key):
+            continue
+        if key in inferred.get(mote_id, {}):
+            continue
+        for rule, pair_mote_id in equations:
+            if pair_mote_id != mote_id:
+                continue
+            ctx = _dimension_context(view, model_cache, mote_id)
+            unit_name = infer_unit(rule.equation, key, ctx)
+            if unit_name:
+                inferred.setdefault(mote_id, {})[key] = unit_name
+                break
+    return inferred
+
+
+def _apply_inferred_units(
+    conn: sqlite3.Connection,
+    properties: dict[str, dict],
+    inferred: dict[str, dict[str, str]],
+) -> dict[str, dict]:
+    """Merge newly-inferred units into `properties` and persist them, for
+    `_write_back()`'s benefit and the mote's own record alike. Returns an
+    updated properties dict rather than mutating in place, matching every
+    other helper in this module that touches `properties`."""
+    if not inferred:
+        return properties
+    updated = dict(properties)
+    for mote_id, units_by_key in inferred.items():
+        existing = parse_units_property(updated.get(mote_id, {}).get(UNITS_KEY))
+        merged = {**existing, **units_by_key}
+        updated[mote_id] = {**updated.get(mote_id, {}), UNITS_KEY: merged}
+        update_mote(conn, mote_id, {UNITS_KEY: merged})
+    return updated
 
 
 @dataclass(frozen=True)
@@ -1530,7 +1604,14 @@ def _solve_singletons(
         if len(equation.terms) != 1:
             continue
         (unknown, coefficient), = equation.terms.items()
-        if unknown in newly or unknown in known or abs(coefficient) < _TOLERANCE:
+        # Exact zero, not `abs(coefficient) < _TOLERANCE`: a coefficient
+        # is a physical scale factor that may legitimately be far smaller
+        # than `_TOLERANCE` (an elementary charge is ~1.602e-19 in base
+        # units) without being zero -- see core/formula.py's `_prune`,
+        # which no longer treats one as pruned-to-nothing either. Only an
+        # exact 0.0 term never survives pruning, so this is the only value
+        # that would divide-by-zero below.
+        if unknown in newly or unknown in known or coefficient == 0.0:
             continue
         # `+ 0.0` normalizes IEEE negative zero, so a grounded node reads
         # `voltage: 0.0` rather than `-0.0`.

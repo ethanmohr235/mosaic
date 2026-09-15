@@ -51,7 +51,7 @@ from core import kinds as kinds_repo
 from core import rules as rules_repo
 from core import scenarios as scenarios_repo
 from core.entities import Mote, Relationship
-from core.units import UNITS_KEY, parse_units_property
+from core.units import UNITS_KEY, format_unit, parse_units_property
 
 # Node kinds. Deliberately about the simulation rather than the domain --
 # see the module docstring.
@@ -117,7 +117,7 @@ class Node:
             "equation": self.equation,
             "freedoms": list(self.freedoms),
             "values": dict(self.values),
-            "units": dict(self.units),
+            "units": {key: format_unit(value) for key, value in self.units.items()},
         }
 
 
@@ -212,7 +212,7 @@ class Lane:
             "moteId": self.mote_id,
             "moteLabel": self.mote_label,
             "key": self.key,
-            "unit": self.unit,
+            "unit": format_unit(self.unit) if self.unit else self.unit,
             "label": self.label,
             "points": list(self.points),
             "min": min(finite) if finite else None,

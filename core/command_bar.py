@@ -16,11 +16,17 @@ Seven forms, tried in this order (first match wins):
     R1.resistance = 500 ohms property: find-or-create R1, set/create the key,
                               trailing token resolved against core/units.py
     R1.voltage == ...         rule: find-or-create R1, create a rule mote
-                              with that equation, applies_to R1
+                              with that equation, applies_to R1. Any other
+                              Name.prop reference that resolves to exactly
+                              one existing mote is auto-wired to R1 with a
+                              default-type relationship, so the equation
+                              is reachable right away.
     R1 -> R2                  relationship, default type "related_to"
     R1 -> owns -> R2          relationship, explicit type
     R1 : Resistor              species: find-or-create both, instance_of
-    R1                         navigate -- resolves, never creates
+    R1                         navigate -- find-or-create, same as every
+                              other form (a bare name that matches nothing
+                              creates a mote with that name and jumps to it)
 
 A bare mote name is a *name* search (case-insensitive, exact), the same
 "pick one thing you can already see" rule core/formula.py's connected-name
@@ -288,16 +294,22 @@ def _run_rule(conn, anchor_token: str, lhs_prop: str, rhs: str) -> CommandResult
     # Stub every property the equation reads as "" wherever it isn't
     # already set -- purely visual, so `v` shows x and y right away
     # instead of looking untouched until the solver eventually runs.
-    # Nothing is created to hold the other side of a Name.prop reference
-    # that isn't reachable yet; only a mote already resolvable by name
-    # (unambiguously) gets stubbed, same caution unresolved_equation_names
-    # already takes.
+    # Any other Name.prop reference that resolves to exactly one existing
+    # mote is also auto-wired to the anchor (default relationship type,
+    # same as the bare `->` form) so the equation is reachable the moment
+    # the rule is saved -- mirroring the graph panel's one-click "connect"
+    # suggestion, just without the click. A name matching zero or several
+    # motes is left alone; nothing is created for it, same caution
+    # unresolved_equation_names already takes.
     own_props, other_props = _equation_property_refs(equation)
     _stub_properties(conn, anchor_id, own_props)
     for name_token, keys in other_props.items():
         matches = _lookup(conn, name_token)
         if len(matches) == 1:
-            _stub_properties(conn, matches[0].id, keys)
+            other_id = matches[0].id
+            _stub_properties(conn, other_id, keys)
+            if not _connected(conn, anchor_id, other_id):
+                rel_repo.create_relationship(conn, anchor_id, other_id, _DEFAULT_REL_TYPE)
 
     label = _label_for(anchor_token, created)
     message = f"{label}rule saved: {equation}"
@@ -408,8 +420,9 @@ def _run_delete(conn, target: str, confirm: bool) -> CommandResult:
 
 
 def _run_navigate(conn, target: str) -> CommandResult:
-    mote_id = _resolve_one(conn, target, create_if_missing=False)
-    return CommandResult(ok=True, mote_id=mote_id, message=target)
+    mote_id, created = _find_or_create(conn, target)
+    label = f"{_unquote(target)} (new)" if created else target
+    return CommandResult(ok=True, mote_id=mote_id, message=label)
 
 
 # ---- name resolution --------------------------------------------------
@@ -429,6 +442,17 @@ def _lookup(conn: sqlite3.Connection, token: str) -> list[Mote]:
         m for m in motes_repo.list_motes(conn)
         if str(m.properties.get("name", "")).strip().lower() == needle
     ]
+
+
+def _connected(conn: sqlite3.Connection, a_id: str, b_id: str) -> bool:
+    """Whether `a_id` and `b_id` already share a relationship, either
+    direction -- the same "already reachable" test core/formula.py's
+    connected-name resolution applies at evaluation time, checked here so
+    a rule's auto-link step doesn't lay down a duplicate edge."""
+    return (
+        any(r.to_id == b_id for r in rel_repo.list_relationships(conn, from_id=a_id))
+        or any(r.to_id == a_id for r in rel_repo.list_relationships(conn, from_id=b_id))
+    )
 
 
 def _resolve_one(conn, token: str, create_if_missing: bool = False) -> str:

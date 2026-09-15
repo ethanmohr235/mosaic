@@ -22,6 +22,7 @@ from core import links as links_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import species as species_repo
+from core import units as units_repo
 from core.command_bar import run_command, suggest as suggest_command
 from core.reserved import RESERVED_PROPERTIES, RESERVED_RELATIONSHIP_TYPES
 
@@ -334,13 +335,14 @@ class InspectorApi:
         if template is not None and all(s.id != template.id for s in siblings):
             siblings = siblings + [template]
         vocabulary = _enum_vocabulary(siblings)
+        declared_units = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
 
         kinds = {}
         for key, value in mote.properties.items():
             if isinstance(value, bool):
                 kinds[key] = {"kind": "boolean"}
             elif isinstance(value, (int, float)):
-                kinds[key] = {"kind": "number"}
+                kinds[key] = {"kind": "number", **_unit_info(declared_units.get(key), value)}
             elif isinstance(value, str) and motes_repo.get_mote(conn, value) is not None:
                 # A property whose value is another mote's id is a
                 # reference -- the inspector makes it a button that walks
@@ -572,6 +574,26 @@ def _enum_vocabulary(siblings: list) -> dict[str, list[str]]:
             continue
         vocabulary[key] = distinct
     return vocabulary
+
+
+def _unit_info(unit_name: str | None, value) -> dict:
+    """Extra fields the inspector shows next to a numeric value carrying a
+    declared unit: the unit itself, and its base-SI equivalent for a
+    tooltip (`8 ft` -> `2.4384 m`) so a conversion that's already
+    happening invisibly during simulation is visible somewhere too.
+
+    A garden that declares no units, or a bad unit, gets nothing extra
+    back -- this is display only and must never turn a typo in a `units`
+    map into an inspector error."""
+    if not unit_name:
+        return {}
+    display = units_repo.format_unit(unit_name)
+    try:
+        base_value = units_repo.to_base(value, unit_name)
+        base_symbol = units_repo.describe(units_repo.dimension_of(unit_name))
+    except units_repo.UnitError:
+        return {"unit": display}
+    return {"unit": display, "unitBase": f"{base_value:g} {base_symbol}"}
 
 
 def _relationship_types(conn: sqlite3.Connection) -> list[str]:

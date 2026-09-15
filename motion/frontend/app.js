@@ -77,6 +77,11 @@ let activeRule = null;
 let equationSuggestions = {};
 let selectedId = null;
 let selectedRelId = null;   // a clicked edge, mutually exclusive with selectedId
+// The Set every multi-select gesture (shift+click, box-drag) actually
+// mutates; selectedId mirrors it when exactly one mote is selected and
+// goes null otherwise -- see setSelection().
+let selectedIds = new Set();
+let boxState = null;        // { startX, startY, moved, shiftBase } -- a box-select drag in progress
 let connectArmed = false;
 let solver = "linear";
 let steps = DEFAULT_STEPS;
@@ -394,6 +399,7 @@ function setRunState() {
   if (mode === "fast") {
     chip.classList.remove("hidden");
     chip.textContent = fastStatus === "solving" ? "solving…" : fastStatus === "error" ? "error" : "solved";
+    chip.title = fastStatus === "error" && fastError ? fastError : "";
     if (fastStatus === "error") chip.classList.add("replay");
     return;
   }
@@ -640,7 +646,7 @@ function buildBoard(run, scenarioId, isB, runId) {
 
   const surface = document.createElement("div");
   surface.className = "board-surface";
-  surface.onmousedown = onPanDown;
+  surface.onmousedown = (event) => onPanDown(event, isB);
   surface.onwheel = onZoomWheel;
   surface.oncontextmenu = (e) => { if (pan) e.preventDefault(); };
 
@@ -657,6 +663,16 @@ function buildBoard(run, scenarioId, isB, runId) {
   for (const node of board.nodes) {
     world.appendChild(buildNode(node, overlay, moved, run, isB));
   }
+  // Cards now size to their content, so a long mote name can reach past
+  // the width worldExtent() assumed (it only knows NODE_W). Grow the
+  // world to the actual rendered right edge or dragged-off cards get
+  // clipped by the surface's overflow:hidden.
+  let maxRight = extent.w;
+  for (const nodeEl of world.querySelectorAll(".node")) {
+    const p = nodePosition(nodeEl.dataset.id);
+    maxRight = Math.max(maxRight, p.x + nodeEl.offsetWidth + 60);
+  }
+  if (maxRight > extent.w) world.style.width = `${maxRight}px`;
   surface.appendChild(world);
   el.appendChild(surface);
   return el;
@@ -692,11 +708,10 @@ function worldExtent() {
 function buildNode(node, overlay, moved, run, isB) {
   const el = document.createElement("div");
   const p = nodePosition(node.id);
-  el.className = `node ${node.kind}` + (selectedId === node.id ? " on" : "");
+  el.className = `node ${node.kind}` + (selectedIds.has(node.id) ? " on" : "");
   el.dataset.id = node.id;
   el.style.left = `${p.x}px`;
   el.style.top = `${p.y}px`;
-  el.style.width = `${NODE_W}px`;
 
   const top = document.createElement("div");
   top.className = "node-top";
@@ -725,8 +740,8 @@ function buildNode(node, overlay, moved, run, isB) {
       row.className = "node-value";
       row.dataset.key = key;
       row.innerHTML =
-        `<span class="node-num"></span><span class="node-unit"></span><span class="node-key"></span>` +
-        `<span class="node-delta"></span>`;
+        `<span class="node-num"></span><span class="node-unit"></span>` +
+        `<span class="node-delta"></span><span class="node-key"></span>`;
       row.querySelector(".node-num").textContent = fmt(now);
       row.querySelector(".node-unit").textContent = unit;
       row.querySelector(".node-key").textContent = key;
@@ -755,7 +770,11 @@ function buildEdges(extent, sizes, isB) {
   svg.setAttribute("height", extent.h);
 
   const defs = document.createElementNS(NS, "defs");
-  for (const [id, color] of [["mt-arrow", "oklch(0.55 0 0)"], ["mt-arrow-rule", "oklch(0.66 0.09 75)"]]) {
+  for (const [id, color] of [
+    ["mt-arrow", "oklch(0.55 0 0)"],
+    ["mt-arrow-rule", "oklch(0.66 0.09 75)"],
+    ["mt-arrow-selected", "var(--select-rel-edge)"],
+  ]) {
     const marker = document.createElementNS(NS, "marker");
     marker.setAttribute("id", id);
     marker.setAttribute("viewBox", "0 0 8 8");
@@ -822,7 +841,7 @@ function buildEdges(extent, sizes, isB) {
     line.setAttribute("x2", ex);
     line.setAttribute("y2", ey);
     line.setAttribute("stroke", selected
-      ? "var(--accent-bright)"
+      ? "var(--select-rel-edge)"
       : edge.kind === "governs"
         ? "oklch(0.66 0.09 75 / 0.65)"
         : edge.kind === "reads"
@@ -830,7 +849,9 @@ function buildEdges(extent, sizes, isB) {
           : "oklch(0.55 0 0 / 0.8)");
     line.setAttribute("stroke-width", selected ? 2.2 : edge.kind === "relation" ? 1.4 : 1.1);
     if (edge.kind !== "relation") line.setAttribute("stroke-dasharray", "5 4");
-    line.setAttribute("marker-end", edge.kind === "governs" ? "url(#mt-arrow-rule)" : "url(#mt-arrow)");
+    line.setAttribute("marker-end", selected
+      ? "url(#mt-arrow-selected)"
+      : edge.kind === "governs" ? "url(#mt-arrow-rule)" : "url(#mt-arrow)");
     const title = document.createElementNS(NS, "title");
     title.textContent = edge.type;
     line.appendChild(title);
@@ -962,12 +983,11 @@ function pairLanes() {
 
 function buildLane(a, b) {
   const el = document.createElement("div");
-  el.className = "lane" + (selectedId === a.moteId ? " on" : "");
+  el.className = "lane" + (selectedIds.has(a.moteId) ? " on" : "");
   el.dataset.id = a.moteId;
   el.dataset.key = a.key;
   el.onclick = (event) => {
-    selectedRelId = null;
-    selectedId = a.moteId;
+    setSelection([a.moteId]);
     inspectedNodeId = null;
     Inspector.open(a.moteId, { anchor: el, newTab: event.ctrlKey || event.metaKey });
     render();
@@ -1192,6 +1212,7 @@ async function runSimulation() {
 let fastRunTimer = null;
 const FAST_RUN_DEBOUNCE_MS = 400;
 let fastStatus = "solved"; // "solving" | "solved" | "error"
+let fastError = null; // last commit failure, shown on hover over the chip
 
 function scheduleFastRun() {
   if (mode !== "fast") return;
@@ -1202,7 +1223,13 @@ function scheduleFastRun() {
 async function runFastCommit() {
   fastStatus = "solving";
   renderTopbar();
-  const result = await call(api.commit(1, solver, null, "fast"));
+  let result = null;
+  try {
+    result = await api.commit(1, solver, null, "fast");
+  } catch (error) {
+    fastError = String(error && error.message ? error.message : error);
+  }
+  if (result && result.error) fastError = result.error;
   fastStatus = result && !result.error ? "solved" : "error";
   if (result) await refresh();
   else renderTopbar();
@@ -1321,7 +1348,7 @@ function renderRulesPanel() {
     row.querySelector(".card-label").textContent = rule.name;
     row.querySelector(".rule-scope").textContent =
       rule.scope === "each" ? `each · ${rule.anchors.length}` : "once";
-    row.onclick = () => { activeRule = rule.moteId; selectedRelId = null; selectedId = rule.moteId; render(); };
+    row.onclick = () => { activeRule = rule.moteId; setSelection([rule.moteId]); render(); };
     host.appendChild(row);
   }
 
@@ -1537,8 +1564,7 @@ function renderRelationshipInspector() {
     target.textContent = node ? node.label : id;
     target.style.cursor = "pointer";
     target.onclick = (event) => {
-      selectedRelId = null;
-      selectedId = id;
+      setSelection([id]);
       inspectedNodeId = null;
       Inspector.open(id, { anchor: target, newTab: event.ctrlKey || event.metaKey });
       render();
@@ -1583,7 +1609,7 @@ async function addMote() {
   const created = await call(api.create_mote({ name: "New mote" }));
   if (!created) return;
   await refresh();
-  selectedId = created.id;
+  setSelection([created.id]);
   render();
   inspectedNodeId = null;
   Inspector.open(created.id);
@@ -1595,25 +1621,31 @@ async function addRule() {
   toast("Rule mote created — give it an equation, then point it at what it governs with →.");
   await refresh();
   activeRule = created.id;
-  selectedId = created.id;
+  setSelection([created.id]);
   panelTab = "rules";
   render();
 }
 
+/** Deletes every currently selected mote -- a single one for the
+ *  ordinary case, or the whole multi-selection when a box-select or
+ *  shift+click has built one up. */
 async function deleteSelectedMote() {
-  if (!selectedId) return;
-  const node = board.nodes.find((n) => n.id === selectedId);
-  const label = node ? node.label : "this mote";
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  const label = ids.length === 1
+    ? (board.nodes.find((n) => n.id === ids[0])?.label || "this mote")
+    : `${ids.length} motes`;
   if (!window.confirm(`Delete ${label} and all its relationships?`)) return;
-  const id = selectedId;
-  const ok = await call(api.delete_mote(id));
-  if (!ok) return;
-  toast(`${label} deleted.`);
-  delete positions[id];
+  for (const id of ids) {
+    const ok = await call(api.delete_mote(id));
+    if (!ok) continue;
+    delete positions[id];
+    if (activeRule === id) activeRule = null;
+    delete equationSuggestions[id];
+  }
   savePositions();
-  if (activeRule === id) activeRule = null;
-  delete equationSuggestions[id];
-  selectedId = null;
+  toast(`${label} deleted.`);
+  setSelection([]);
   await refresh();
 }
 
@@ -1692,6 +1724,25 @@ async function finishLinkDrag(clientX, clientY) {
 
 // ---- pointer gestures -------------------------------------------------
 
+/** Canonical setter for the mote selection -- keeps selectedId (the
+ *  single-mote convenience the rest of the app reads: connect, delete,
+ *  the inspector leader line) in sync with selectedIds, the Set that
+ *  shift+click and box-select actually build up, and always clears the
+ *  relationship selection, mutually exclusive with mote selection
+ *  everywhere else in the suite. More than one id closes the Inspector
+ *  -- it's a single-mote surface shared across all six windows. */
+function setSelection(ids) {
+  selectedIds = new Set(ids);
+  selectedRelId = null;
+  if (selectedIds.size === 1) {
+    selectedId = [...selectedIds][0];
+  } else {
+    selectedId = null;
+    inspectedNodeId = null;
+    Inspector.close();
+  }
+}
+
 /** The "which values does this card show" submenu, inlined as its own
  *  checklist rather than a real submenu -- ContextMenu only knows flat
  *  lists. Toggling a row reopens the menu at the same point instead of
@@ -1718,6 +1769,12 @@ function onNodeContext(id) {
     const anchorEl = event.currentTarget;
     const openMenu = () => {
       const node = board.nodes.find((n) => n.id === id);
+      // Right-clicking a mote that's already part of the current
+      // multi-selection acts on the whole group for Delete, same as
+      // Monarch's box-select context menu -- but Connect always narrows
+      // to just this one mote, since a relationship only ever has one
+      // source.
+      const groupIds = selectedIds.has(id) && selectedIds.size > 1 ? [...selectedIds] : [id];
       ContextMenu.open(event.clientX, event.clientY, [
         ...ContextMenu.inspectItems(id, anchorEl).map((item) => ({
           ...item,
@@ -1727,10 +1784,14 @@ function onNodeContext(id) {
         node && node.kind === "rule"
           ? { label: "Edit this rule", run: () => { activeRule = id; panelTab = "rules"; render(); } }
           : null,
-        { label: "Connect to\u2026", run: () => { selectedId = id; armConnect(); render(); } },
+        { label: "Connect to\u2026", run: () => { setSelection([id]); armConnect(); render(); } },
         ...(node ? previewMenuItems(node, openMenu) : []),
         "-",
-        { label: "Delete mote", danger: true, run: () => { selectedId = id; return deleteSelectedMote(); } },
+        {
+          label: groupIds.length > 1 ? `Delete ${groupIds.length} motes` : "Delete mote",
+          danger: true,
+          run: () => { setSelection(groupIds); return deleteSelectedMote(); },
+        },
       ]);
     };
     openMenu();
@@ -1740,24 +1801,47 @@ function onNodeContext(id) {
 function onNodeDown(id) {
   return (event) => {
     if (event.button === 1) return;         // middle-drag pans, handled below
+    if (event.button === 2) return;         // right-click only opens the context menu, handled below
     event.preventDefault();
     event.stopPropagation();
     if (connectArmed && selectedId && id !== selectedId) { connectTo(id); return; }
     if (event.ctrlKey) { startLinkDrag(id, event.clientX, event.clientY); return; }
-    const p = nodePosition(id);
-    drag = { id, sx: event.clientX, sy: event.clientY, ox: p.x, oy: p.y, moved: false };
-    selectedRelId = null;
-    selectedId = id;
-    const node = board.nodes.find((n) => n.id === id);
-    if (node && node.kind === "rule") { activeRule = id; panelTab = "rules"; }
-    inspectedNodeId = id;
-    Inspector.open(id, { anchor: event.currentTarget });
-    render();
+    // Shift+click toggles this mote into or out of the current
+    // multi-selection instead of replacing it -- shift means "add to"
+    // everywhere else in the suite (isolate/hide toggles, etc).
+    if (event.shiftKey) {
+      const next = new Set(selectedIds);
+      next.has(id) ? next.delete(id) : next.add(id);
+      setSelection([...next]);
+      if (selectedId) Inspector.open(selectedId, { anchor: event.currentTarget });
+      render();
+      return;
+    }
+    // Dragging a mote that's part of the current multi-selection moves
+    // the whole group together; dragging any other mote (including one
+    // outside a smaller/different selection) only ever moves that one.
+    // Which of those this click actually *selects* is resolved in onUp,
+    // once it's known whether this was a click or a drag -- a plain
+    // click on a mote inside a group collapses the selection down to
+    // just that one, same as everywhere selection already works.
+    const groupIds = selectedIds.has(id) && selectedIds.size > 1 ? [...selectedIds] : [id];
+    const startPositions = new Map(groupIds.map((gid) => [gid, nodePosition(gid)]));
+    drag = { id, sx: event.clientX, sy: event.clientY, moved: false, groupIds, startPositions, anchorEl: event.currentTarget };
   };
 }
 
-function onPanDown(event) {
-  if (event.button === 0) { deselect(); return; }
+function onPanDown(event, isB) {
+  if (event.button === 0) {
+    // Only board A's nodes are ever selectable (see buildNode) -- a
+    // click or box-select drag on board B still just deselects, same as
+    // empty space on board A.
+    if (isB) { deselect(); return; }
+    boxState = {
+      startX: event.clientX, startY: event.clientY, moved: false,
+      shiftBase: event.shiftKey ? [...selectedIds] : null,
+    };
+    return;
+  }
   if (event.button !== 1) return;
   event.preventDefault();
   pan = { sx: event.clientX, sy: event.clientY, ox: layout.panX, oy: layout.panY };
@@ -1768,19 +1852,54 @@ function onPanDown(event) {
  *  reaches here is a click on empty board -- off every mote, as
  *  deselecting expects everywhere else in the suite. */
 function deselect() {
-  if (!selectedId && !selectedRelId) return;
-  selectedId = null;
-  selectedRelId = null;
-  inspectedNodeId = null;
-  Inspector.close();
+  if (!selectedIds.size && !selectedRelId) return;
+  setSelection([]);
   render();
+}
+
+// ---- box-select --------------------------------------------------------
+//
+// A left-drag starting on empty board (not a node) rubber-bands a
+// selection rectangle in screen space, same gesture as Monarch's canvas
+// box-select. #select-box lives outside #boards so renderBoards()'s
+// innerHTML rebuild (every drag-move of a dragged node, every pan
+// settle) never wipes it mid-drag.
+
+function normalizedRect(x1, y1, x2, y2) {
+  return { left: Math.min(x1, x2), top: Math.min(y1, y2), right: Math.max(x1, x2), bottom: Math.max(y1, y2) };
+}
+
+/** Every board-A node whose screen position falls inside a screen-space
+ *  rectangle. Board A's nodes are always the first `.board` in #boards
+ *  (see renderBoards/buildBoard) -- board B, when present, only ever
+ *  mirrors the same mote ids and isn't itself selectable. */
+function hitsInRect(rect) {
+  const hits = [];
+  for (const nodeEl of document.querySelectorAll("#boards .board:first-child .node")) {
+    const r = nodeEl.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom) {
+      hits.push(nodeEl.dataset.id);
+    }
+  }
+  return hits;
+}
+
+function updateSelectBox(rect) {
+  const box = $("select-box");
+  if (!rect) { box.classList.add("hidden"); return; }
+  box.style.left = rect.left + "px";
+  box.style.top = rect.top + "px";
+  box.style.width = (rect.right - rect.left) + "px";
+  box.style.height = (rect.bottom - rect.top) + "px";
+  box.classList.remove("hidden");
 }
 
 /** A click on an edge's hit-line. Mutually exclusive with node selection
  *  -- the inspector shows one or the other -- and always lands on the
  *  Inspector tab, the same as clicking a node. */
 function selectRelationship(relId) {
-  selectedId = null;
+  setSelection([]);
   selectedRelId = relId;
   connectArmed = false;
   $("tool-link").classList.remove("armed");
@@ -1814,7 +1933,15 @@ function applyBoardTransforms() {
   }
   clearTimeout(transformSettleTimer);
   transformSettleTimer = setTimeout(() => {
+    // Mouse-drag panning gets its guaranteed crisp repaint from onUp's
+    // renderBoards() call once the gesture ends. A wheel-driven zoom (or
+    // trackpad pan) never fires an "up" event, so this timeout is the
+    // only place such a gesture's end is ever detected -- without a
+    // renderBoards() here too, wheel zooming was left relying solely on
+    // dropping `.transforming`, which doesn't reliably force the
+    // compositor to re-rasterize text at the new resting scale.
     for (const world of document.querySelectorAll(".board-world")) world.classList.remove("transforming");
+    renderBoards();
   }, 150);
   // The inspected node just moved under this same transform; its own
   // getBoundingClientRect() is already up to date by the time the
@@ -1841,6 +1968,14 @@ function onZoomWheel(event) {
   applyBoardTransforms();
 }
 
+// Below half the usable minimum, a resize collapses the bar shut rather
+// than settling on some odd sliver width -- pulling back out from the
+// edge (where the handle still sits) reopens it at the same minimum.
+function snapSize(value, min, max) {
+  if (value < min / 2) return 0;
+  return Math.max(min, Math.min(max, value));
+}
+
 function onMove(event) {
   if (linkDrag) { updateLinkDrag(event.clientX, event.clientY); return; }
   if (pan) {
@@ -1851,30 +1986,99 @@ function onMove(event) {
   }
   if (resize) {
     if (resize.kind === "rail") {
-      layout.railW = Math.max(180, Math.min(420, resize.orig + (event.clientX - resize.sx)));
+      layout.railW = snapSize(resize.orig + (event.clientX - resize.sx), 180, 420);
     } else if (resize.kind === "panel") {
-      layout.panelW = Math.max(250, Math.min(540, resize.orig - (event.clientX - resize.sx)));
+      layout.panelW = snapSize(resize.orig - (event.clientX - resize.sx), 250, 540);
     } else {
-      layout.dockH = Math.max(140, Math.min(window.innerHeight - 260, resize.orig - (event.clientY - resize.sy)));
+      layout.dockH = snapSize(resize.orig - (event.clientY - resize.sy), 140, window.innerHeight - 260);
     }
     applyLayout();
     return;
   }
   if (scrubbing) { scrubTo(event.clientX); return; }
+  if (boxState) {
+    const dx = event.clientX - boxState.startX;
+    const dy = event.clientY - boxState.startY;
+    if (!boxState.moved && Math.hypot(dx, dy) > 3) boxState.moved = true;
+    if (boxState.moved) {
+      const rect = normalizedRect(boxState.startX, boxState.startY, event.clientX, event.clientY);
+      updateSelectBox(rect);
+      // Live preview only -- toggles classes on the actual node elements
+      // rather than going through setSelection()+render(), which would
+      // rebuild the whole board on every mousemove (see applyBoardTransforms
+      // for why that's avoided for pan/zoom too). The authoritative call is
+      // in onUp.
+      const hits = new Set(hitsInRect(rect));
+      if (boxState.shiftBase) for (const id of boxState.shiftBase) hits.add(id);
+      for (const nodeEl of document.querySelectorAll("#boards .board:first-child .node")) {
+        nodeEl.classList.toggle("on", hits.has(nodeEl.dataset.id));
+      }
+    }
+    return;
+  }
   if (!drag) return;
   const dx = event.clientX - drag.sx;
   const dy = event.clientY - drag.sy;
   if (!drag.moved && Math.hypot(dx, dy) < 3) return;
   drag.moved = true;
-  positions[drag.id] = { x: drag.ox + dx / layout.zoom, y: drag.oy + dy / layout.zoom };
+  // Delta from the primary (grabbed) node's own start position is
+  // applied to every group member's own start position, rather than
+  // snapping each one to the cursor directly -- that would collapse the
+  // whole group onto a single point instead of moving it as one.
+  const wdx = dx / layout.zoom, wdy = dy / layout.zoom;
+  for (const gid of drag.groupIds) {
+    const start = drag.startPositions.get(gid);
+    positions[gid] = { x: start.x + wdx, y: start.y + wdy };
+  }
   renderBoards();
 }
 
 function onUp(event) {
   if (linkDrag) finishLinkDrag(event.clientX, event.clientY);
-  if (drag && drag.moved) savePositions();
+  if (drag) {
+    if (drag.moved) {
+      savePositions();
+    } else {
+      // A plain click (no drag) on a mote inside a multi-selection
+      // collapses the selection down to just that one -- dragging is
+      // what moves the whole group; clicking always picks one.
+      setSelection([drag.id]);
+      const node = board.nodes.find((n) => n.id === drag.id);
+      if (node && node.kind === "rule") { activeRule = drag.id; panelTab = "rules"; }
+      inspectedNodeId = drag.id;
+      Inspector.open(drag.id, { anchor: drag.anchorEl });
+      render();
+    }
+  }
+  if (boxState) {
+    const { moved, startX, startY, shiftBase } = boxState;
+    updateSelectBox(null);
+    if (moved) {
+      // The live preview in onMove has almost certainly already put the
+      // right ids on screen; this is the authoritative final call in
+      // case no mousemove landed exactly on the release point.
+      const rect = normalizedRect(startX, startY, event.clientX, event.clientY);
+      const hits = hitsInRect(rect);
+      setSelection(shiftBase ? [...new Set([...shiftBase, ...hits])] : hits);
+      render();
+    } else {
+      deselect();
+    }
+    boxState = null;
+  }
   if (resize) { saveLayout(); document.querySelectorAll(".active").forEach((el) => el.classList.remove("active")); }
-  if (pan) document.querySelectorAll(".panning").forEach((el) => el.classList.remove("panning"));
+  if (pan) {
+    document.querySelectorAll(".panning").forEach((el) => el.classList.remove("panning"));
+    // The debounced settle timer in applyBoardTransforms clears
+    // `.transforming` ~150ms after the last mousemove, but that alone
+    // doesn't always coax the compositor into a fresh, crisp raster --
+    // text can stay soft until some unrelated click forces a real
+    // render(). Rebuilding the boards' DOM here, once, at the end of
+    // the gesture (not on every mousemove -- see applyBoardTransforms)
+    // guarantees the same clean repaint a click already gets.
+    clearTimeout(transformSettleTimer);
+    renderBoards();
+  }
   drag = null;
   pan = null;
   resize = null;
@@ -1936,7 +2140,8 @@ async function openGardenMenu() {
       menu.classList.add("hidden");
       await call(api.switch_garden(name));
       runA = null; runB = null; lanesA = []; lanesB = []; tick = 0; replayRunId = null;
-      scenario = null; selectedId = null; selectedRelId = null; equationSuggestions = {};
+      scenario = null; equationSuggestions = {};
+      setSelection([]);
       await refresh();
     };
     menu.appendChild(btn);
@@ -2188,7 +2393,7 @@ function wire() {
       if (launcherIsOpen()) { closeLauncher(); return; }
       if (!$("settings-overlay").classList.contains("hidden")) { closeSettings(); return; }
       if (connectArmed) { armConnect(); return; }
-      if (selectedId || selectedRelId) { deselect(); return; }
+      if (selectedIds.size || selectedRelId) { deselect(); return; }
     }
     if (typing) return;
     if ((event.key === "Delete" || event.key === "Backspace") && selectedRelId) {
@@ -2197,7 +2402,7 @@ function wire() {
       if (edge) deleteSelectedRelationship(edge);
       return;
     }
-    if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+    if ((event.key === "Delete" || event.key === "Backspace") && selectedIds.size) {
       event.preventDefault();
       deleteSelectedMote();
       return;
@@ -2228,7 +2433,7 @@ async function refresh() {
   if (firstLoad || gardenChanged) { loadPositions(); loadPreviewKeys(); }
   if (!solver || !board.solvers.includes(solver)) solver = board.solvers[0] || "linear";
   if (!activeRule && board.rules.length) activeRule = board.rules[0].moteId;
-  if (firstLoad && board.focus) selectedId = board.focus;
+  if (firstLoad && board.focus) setSelection([board.focus]);
   render();
   // The scenario picker moves independently of the inspector, and the
   // bridge redirects property writes onto the selected scenario's

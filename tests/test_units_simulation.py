@@ -10,6 +10,7 @@ import pytest
 from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
+from core.scenarios import OVERRIDES, VARIES
 from core.simulation import SimulationError, list_runs, run_simulation, run_time_series
 from core.species import set_species
 
@@ -18,6 +19,14 @@ def add_rule(conn, species_id, name, equation):
     rule_id = create_mote(conn, {"name": name, "equation": equation})
     create_relationship(conn, rule_id, species_id, APPLIES_TO)
     return rule_id
+
+
+def make_scenario(conn, name, target_id, properties):
+    override = create_mote(conn, properties)
+    create_relationship(conn, override, target_id, OVERRIDES)
+    scenario = create_mote(conn, {"name": name})
+    create_relationship(conn, scenario, override, VARIES)
+    return scenario
 
 
 def prop(conn, mote_id, key):
@@ -266,6 +275,123 @@ def test_time_series_reports_warnings_once_not_per_step(conn, mismatched):
 def test_time_series_honours_strict_units(conn, mismatched):
     with pytest.raises(SimulationError, match="dimensional check failed"):
         run_time_series(conn, step_count=2, commit=False, strict_units=True)
+
+
+# ---- a solved freedom with no declared unit gets a reasonable one ----
+
+def test_a_solved_freedom_with_no_unit_is_given_one(conn):
+    # resistance == voltage / current is the entire equation on both
+    # sides, so the solver can name resistance's dimension outright.
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
+    add_rule(conn, species, "Ohm", "resistance == voltage / current")
+    element = create_mote(conn, {
+        "name": "E", "voltage": 10, "current": 2,
+        "units": {"voltage": "V", "current": "A"},
+    })
+    set_species(conn, element, species)
+
+    run_simulation(conn)
+    assert prop(conn, element, "resistance") == pytest.approx(5.0)
+    assert get_mote(conn, element).properties["units"]["resistance"] == "ohm"
+
+
+def test_the_inferred_unit_survives_a_second_run(conn):
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
+    add_rule(conn, species, "Ohm", "resistance == voltage / current")
+    element = create_mote(conn, {
+        "name": "E", "voltage": 10, "current": 2,
+        "units": {"voltage": "V", "current": "A"},
+    })
+    set_species(conn, element, species)
+
+    run_simulation(conn)
+    run_simulation(conn)
+    assert prop(conn, element, "resistance") == pytest.approx(5.0)
+    assert get_mote(conn, element).properties["units"]["resistance"] == "ohm"
+
+
+def test_an_unnamed_dimension_falls_back_to_a_base_unit_product(conn):
+    species = create_mote(conn, {"name": "Trip", "freedoms": "speed"})
+    add_rule(conn, species, "Rate", "speed == distance / time")
+    trip = create_mote(conn, {
+        "name": "T", "distance": 100, "time": 10,
+        "units": {"distance": "m", "time": "s"},
+    })
+    set_species(conn, trip, species)
+
+    run_simulation(conn)
+    assert prop(conn, trip, "speed") == pytest.approx(10.0)
+    assert get_mote(conn, trip).properties["units"]["speed"] == "m*s^-1"
+
+
+def test_a_dimensionless_result_gets_no_unit(conn):
+    species = create_mote(conn, {"name": "Ratio", "freedoms": "fraction"})
+    add_rule(conn, species, "Divide", "fraction == part / whole")
+    element = create_mote(conn, {
+        "name": "R", "part": 1, "whole": 4,
+        "units": {"part": "kg", "whole": "kg"},
+    })
+    set_species(conn, element, species)
+
+    run_simulation(conn)
+    assert prop(conn, element, "fraction") == pytest.approx(0.25)
+    assert "fraction" not in get_mote(conn, element).properties.get("units", {})
+
+
+def test_a_freedom_buried_inside_a_larger_expression_is_not_guessed_at(conn):
+    # resistance never appears alone on either side here, so there is
+    # nothing safe to name it from -- the solve still works.
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
+    add_rule(conn, species, "Doubled", "voltage == 2 * resistance")
+    element = create_mote(conn, {"name": "E", "voltage": 10, "units": {"voltage": "V"}})
+    set_species(conn, element, species)
+
+    run_simulation(conn)
+    assert prop(conn, element, "resistance") == pytest.approx(5.0)
+    assert "resistance" not in get_mote(conn, element).properties.get("units", {})
+
+
+def test_a_declared_unit_is_never_overridden_by_inference(conn):
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
+    add_rule(conn, species, "Ohm", "resistance == voltage / current")
+    element = create_mote(conn, {
+        "name": "E", "voltage": 10, "current": 2,
+        "units": {"voltage": "V", "current": "A", "resistance": "kohm"},
+    })
+    set_species(conn, element, species)
+
+    run_simulation(conn)
+    assert prop(conn, element, "resistance") == pytest.approx(0.005)
+    assert get_mote(conn, element).properties["units"]["resistance"] == "kohm"
+
+
+def test_a_scenario_run_never_persists_an_inferred_unit(conn):
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
+    add_rule(conn, species, "Ohm", "resistance == voltage / current")
+    element = create_mote(conn, {
+        "name": "E", "voltage": 10, "current": 2,
+        "units": {"voltage": "V", "current": "A"},
+    })
+    set_species(conn, element, species)
+    scenario = make_scenario(conn, "Hypothetical", element, {"current": 5})
+
+    run_simulation(conn, scenario=scenario)
+    assert "resistance" not in get_mote(conn, element).properties.get("units", {})
+    assert "resistance" not in get_mote(conn, element).properties
+
+
+def test_an_inferred_unit_is_also_applied_by_a_committed_time_series(conn):
+    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
+    add_rule(conn, species, "Ohm", "resistance == voltage / current")
+    element = create_mote(conn, {
+        "name": "E", "voltage": 10, "current": 2,
+        "units": {"voltage": "V", "current": "A"},
+    })
+    set_species(conn, element, species)
+
+    run_time_series(conn, step_count=1, commit=True)
+    assert prop(conn, element, "resistance") == pytest.approx(5.0)
+    assert get_mote(conn, element).properties["units"]["resistance"] == "ohm"
 
 
 # ---- backward compatibility ----

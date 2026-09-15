@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from core.formula import (
@@ -78,6 +80,24 @@ def test_dividing_by_zero_is_rejected():
         LinearExpr.number(1) / LinearExpr.number(0)
 
 
+def test_dividing_by_a_tiny_but_nonzero_constant_is_not_treated_as_zero():
+    # A neutron mass in kg (~1.6749e-27) is far below the old flat 1e-9
+    # "close enough to zero" threshold, but it's a real divisor, not
+    # float noise -- v = sqrt(2E/m) must actually divide by it.
+    neutron_mass = LinearExpr.number(1.6749e-27)
+    energy = LinearExpr.number(3.204e-13)
+    result = energy / neutron_mass
+    assert result.constant == pytest.approx(3.204e-13 / 1.6749e-27)
+
+
+def test_scaling_by_a_tiny_but_nonzero_factor_keeps_the_term():
+    # Same failure mode as division, in the other primitive that used the
+    # flat threshold: multiplying an unknown by a physically tiny
+    # constant (an eV-to-joule conversion, say) must not erase the term.
+    expr = LinearExpr({("m", "x"): 1.0}, 0.0) * LinearExpr.number(1.602176634e-19)
+    assert expr.terms == {("m", "x"): pytest.approx(1.602176634e-19)}
+
+
 def test_raising_an_unknown_to_a_power_is_rejected():
     with pytest.raises(NonlinearError):
         LinearExpr({("m", "x"): 1.0}, 0.0) ** LinearExpr.number(2)
@@ -132,6 +152,14 @@ def test_count_counts_motes():
 
 def test_arithmetic_with_known_values_is_allowed_to_be_nonlinear():
     expr = evaluate_expression("2 * (100 / 25) ** 0.5", context())
+    assert expr.constant == pytest.approx(4.0)
+
+
+def test_caret_is_accepted_as_exponentiation():
+    # `^` reads as bitwise XOR to Python's own grammar, but as power to
+    # anyone coming from math notation, spreadsheets, or units.py's own
+    # `kg*m/s^2` -- it should mean the same thing here.
+    expr = evaluate_expression("2 * (100 / 25) ^ 0.5", context())
     assert expr.constant == pytest.approx(4.0)
 
 
@@ -280,7 +308,7 @@ def test_attribute_access_on_a_number_is_rejected():
 
 def test_unknown_function_is_rejected():
     with pytest.raises(FormulaError, match="unknown function"):
-        evaluate_expression("sqrt(4)", context())
+        evaluate_expression("log(4)", context())
 
 
 def test_navigation_requires_a_quoted_relationship_type():
@@ -296,6 +324,29 @@ def test_keyword_arguments_are_rejected():
 def test_min_max_reject_unknowns():
     with pytest.raises(NonlinearError):
         evaluate_expression("max(current, 1)", context())
+
+
+# ---- sin/cos/tan/sqrt ----
+
+def test_trig_functions_take_radians():
+    assert evaluate_expression("sin(0)", context()).constant == pytest.approx(0.0)
+    assert evaluate_expression(f"cos({math.pi})", context()).constant == pytest.approx(-1.0)
+    assert evaluate_expression("tan(0)", context()).constant == pytest.approx(0.0)
+
+
+def test_sqrt():
+    assert evaluate_expression("sqrt(9)", context()).constant == pytest.approx(3.0)
+
+
+def test_sqrt_of_a_negative_number_is_rejected():
+    with pytest.raises(FormulaError, match="negative"):
+        evaluate_expression("sqrt(-1)", context())
+
+
+@pytest.mark.parametrize("name", ["sin", "cos", "tan", "sqrt"])
+def test_trig_and_sqrt_defer_on_unknowns(name):
+    with pytest.raises(NonlinearError):
+        evaluate_expression(f"{name}(current)", context())
 
 
 # ---- property() ----

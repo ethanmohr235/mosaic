@@ -50,6 +50,20 @@ def test_value_coerces_through_json(conn):
     assert motes_repo.get_mote(conn, result.mote_id).properties["active"] is True
 
 
+def test_value_accepts_scientific_notation_with_a_unit(conn):
+    result = run_command(conn, "n.m = 1.6749E-27 kg")
+    mote = motes_repo.get_mote(conn, result.mote_id)
+    assert mote.properties["m"] == pytest.approx(1.6749e-27)
+    assert mote.properties["units"] == {"m": "kg"}
+
+
+def test_value_accepts_scientific_notation_without_a_unit(conn):
+    result = run_command(conn, "n.m = 1.6749E-27")
+    mote = motes_repo.get_mote(conn, result.mote_id)
+    assert mote.properties["m"] == pytest.approx(1.6749e-27)
+    assert "units" not in mote.properties
+
+
 def test_second_units_write_merges_rather_than_replaces(conn):
     run_command(conn, "R1.resistance = 500 ohms")
     result = run_command(conn, "R1.voltage = 12 V")
@@ -140,12 +154,14 @@ def test_rule_creates_the_anchor_if_missing(conn):
     assert _name(conn, rels[0].to_id) == "R1"
 
 
-def test_rule_flags_an_unreachable_other_mote(conn):
-    run_command(conn, "R1.resistance = 500 ohms")
-    run_command(conn, "R2.voltage = 5 V")
+def test_rule_auto_links_an_unambiguous_other_mote(conn):
+    r1 = run_command(conn, "R1.resistance = 500 ohms").mote_id
+    r2 = run_command(conn, "R2.voltage = 5 V").mote_id
     result = run_command(conn, "R1.voltage == R2.voltage")
     assert result.ok
-    assert "R2" in result.message and "not yet reachable" in result.message
+    assert "not yet reachable" not in result.message
+    rels = rel_repo.list_relationships(conn, from_id=r1)
+    assert any(r.to_id == r2 for r in rels)
 
 
 def test_rule_does_not_flag_a_connected_mote(conn):
@@ -154,6 +170,20 @@ def test_rule_does_not_flag_a_connected_mote(conn):
     rel_repo.create_relationship(conn, r1, r2, "related_to")
     result = run_command(conn, "R1.x == R2.voltage")
     assert "not yet reachable" not in result.message
+    rels = rel_repo.list_relationships(conn, from_id=r1)
+    assert sum(1 for r in rels if r.to_id == r2) == 1
+
+
+def test_rule_flags_an_unreachable_ambiguous_name(conn):
+    run_command(conn, "R1.resistance = 500 ohms")
+    run_command(conn, "R2.voltage = 5 V")
+    run_command(conn, "R3.voltage = 9 V")
+    motes_repo.update_mote(conn, run_command(conn, "R3").mote_id, {"name": "R2"})
+    result = run_command(conn, "R1.x == R2.voltage")
+    assert result.ok
+    assert "R2" in result.message and "not yet reachable" in result.message
+    rels = rel_repo.list_relationships(conn, from_id=result.mote_id)
+    assert all(r.type == rules_repo.APPLIES_TO for r in rels)
 
 
 def test_rule_stubs_own_properties_as_empty(conn):
@@ -300,10 +330,13 @@ def test_bare_name_navigates_without_creating(conn):
     assert len(motes_repo.list_motes(conn)) == 1
 
 
-def test_bare_unknown_name_does_not_create(conn):
+def test_bare_unknown_name_creates_and_navigates(conn):
     result = run_command(conn, "Nowhere")
-    assert not result.ok
-    assert motes_repo.list_motes(conn) == []
+    assert result.ok
+    motes = motes_repo.list_motes(conn)
+    assert len(motes) == 1
+    assert motes[0].id == result.mote_id
+    assert motes[0].properties.get("name") == "Nowhere"
 
 
 def test_empty_command_is_a_no_op(conn):
