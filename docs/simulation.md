@@ -81,12 +81,14 @@ to both.
 |---|---|
 | `resistance` | A property of the mote the rule is running against. If it is among the mote's [freedoms](#the-three-pieces), it becomes something to solve for; otherwise it must already hold a number. |
 | `turbine.work` | A property of the mote filling the declared role `turbine` (see [Roles](#roles)). A bare name is always a property; a name in this position is always a role. |
+| `R1.current` | A property of a mote *connected* to the anchor -- any relationship type, either direction -- whose own `name` matches `R1`, tried when the identifier isn't a declared role (see [Connected-name references](#connected-name-references)). |
 | `targets('a')` | The motes this one points at via a relationship of type `a`. |
 | `sources('a')` | The motes pointing *at* this one via a relationship of type `a`. |
 | `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached -- unlike an `arity: many` role, which never collapses. |
 | `sum(...)`, `count(...)` | Combine several motes into one value. Required when more than one mote is reached. |
-| `+ - * / **` | Arithmetic. Parentheses work as usual. |
+| `+ - * / **` (`^` also works as exponent) | Arithmetic. Parentheses work as usual. |
 | `abs`, `min`, `max` | Only on values that are already known. |
+| `sin`, `cos`, `tan`, `sqrt` | Also only on known values. `sin`/`cos`/`tan` take radians -- an argument declaring unit `deg` (see [Units](#units) below) arrives already converted; `sqrt` of a negative number is an error. |
 | `t` | The current step's index within a time-based run (0 for the first step). A reserved word -- shadows a property literally named `t` inside a formula specifically, though that property is still ordinary and visible everywhere else. Always 0 in a plain (non-time-based) run. |
 | `prev(x)` | The value `x` had *entering* the current step -- `x` must be a bare property/unknown name on the mote the rule is running against (not `targets(...)`'s result). This is how a rule expresses a recurrence: `balance == prev(balance) * 1.05`. Only meaningful in a time-based run; raises an error otherwise. |
 | `property('rel', 'operation', ...)` | Evaluates `operation` (e.g. `'pressure'`) through the property model of the single mote reached by relationship type `'rel'`, e.g. `property('working_fluid', 'pressure', density, temperature)`. The relationship type and operation must be quoted string literals; the remaining arguments must already be known numbers -- a property model is an opaque function of its inputs, so like `abs`/`min`/`max` this is deferred (retried by the substitution loop) until they are. See "Physical property models" below. |
@@ -367,6 +369,49 @@ is the whole of what makes them strict.
 
 Chained comparisons (`0 <= x <= 1`) are rejected with advice to write
 them as two relations -- which is what they are.
+
+## Connected-name references
+
+A dotted identifier that isn't a declared role can still reach a mote by
+its literal name, as long as that mote is directly wired to the rule's
+anchor -- any relationship type, either direction:
+
+```text
+R1 --relates_to--> R2
+```
+
+```text
+R1.voltage - R2.voltage == current * resistance
+```
+
+This is a shorthand for `targets('relates_to').voltage`, not a
+replacement for it: it exists so a garden wired by hand doesn't need a
+relationship *type* chosen and a role declared just to write one
+reference, and it stops working the moment the relationship is removed
+-- the connection stays the thing that makes a reference legal, exactly
+as it always has. The name it matches is the target mote's own `name`
+property, so it only ever reaches a mote you can already see labelled
+that way on the board.
+
+Two things keep this from becoming a second, looser navigation:
+
+- **A role always wins.** If the identifier is a role declared on the
+  anchor, it resolves as a role (see [Roles](#roles) below) and the name
+  search never runs -- a role is a stated intention and takes precedence
+  over an accidental name collision.
+- **A name must pick exactly one mote.** Two motes connected to the same
+  anchor sharing a name is rejected outright (`'R2' matches 2 motes
+  connected to mote ...`), never silently combined the way a `many` role
+  or `sum()` would. A name is for reaching one specific thing.
+
+An identifier that matches neither a role nor a connected mote's name
+falls through to an ordinary property lookup, and fails exactly as it
+always did if the anchor has no such property either -- so a name that
+exists elsewhere in the garden but isn't wired to this mote is simply
+not visible from here, on purpose. Motion's equation editor detects this
+case (a name that exists in the garden but isn't reachable) and offers
+to draw the missing relationship rather than leaving you to work out
+why the reference fails.
 
 ## Roles
 
@@ -779,6 +824,11 @@ included too -- `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `bar`,
 `degF`, which carry an offset and so can only be used on their own,
 never inside a compound.
 
+Angle is genuinely dimensionless in SI, so there's no separate `rad`:
+an unlabeled number is already radians, exactly what `sin`/`cos`/`tan`
+expect, and `deg` converts into that on the way in like any other unit
+(`angle: 90, units: {"angle": "deg"}` reaches a formula as `π/2`).
+
 ```
 unit convert --value 36 --from km/hr --to m/s
 ```
@@ -803,6 +853,46 @@ treating `kohm` as if it were already ohms would be a silent
 factor-of-1000 error in the answer. A malformed `units` property (not a
 map, or with non-string values) leaves the mote un-annotated instead of
 breaking the run.
+
+### Inference
+
+A **freedom** the solver just determined is different from any other
+property: it is about to be written regardless, and if the equation that
+determined it names a dimension in plain sight, leaving the result
+unitless would throw away information the garden already had. So when a
+freedom has no `units` entry of its own, the solver looks at whichever
+equation determined it and, if that equation reduces to the bare freedom
+on one side (`resistance == voltage / current`), reads a unit straight
+off the dimension of the other side:
+
+```
+resistance:               <- solved, previously undeclared
+voltage:     10
+current:      2
+
+units:  {"voltage": "V", "current": "A"}     <- becomes {..., "resistance": "ohm"}
+```
+
+`resistance` comes out as `5`, in ohms, and the mote's `units` map is
+updated to say so -- both in the same write. A dimension with no name of
+its own (`distance / time`) falls back to the base-SI product, written
+in the same caret notation a person typing a unit by hand would use
+(`m*s^-1`) via `describe_expression()`, rather than the unicode
+superscripts `unit list` and `describe()` use for an error message
+(`m·s⁻¹`) -- so a value the solver named on its own looks exactly like
+one a person named, once `format_unit()` renders either back with
+superscripts for display. Leaving the property silently unnamed would
+be worse than either.
+
+This only ever *adds* a unit, never overrides one a mote already
+declares, and only ever fires when the freedom is the **entire** left-
+or right-hand side of the equation -- `voltage == 2 * resistance` says
+nothing safe about `resistance` in isolation, so a freedom buried inside
+a larger expression is left alone rather than guessed at. Like the
+dimension checker, it stays silent by default: a garden that never
+declares any units contributes no dimensions to infer from, so nothing
+changes for it. A scenario run never triggers this either, for the same
+reason it never writes anything else back to the graph.
 
 ### Checking equations
 
@@ -862,7 +952,7 @@ a rule that doesn't add up.
 - **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration. A solver backend for this shape (`dx/dt` rather than `F(x) == 0`) could join `linear`/`newton` later without changing how a rule is written.
 
   There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. Motion says so rather than implying a clock -- its timeline is labelled in ticks, and the payload carries the axis it is counted in (`motion/payload.py::tick_axis`) so that a real time axis is one place to add rather than a frontend assumption to unpick. An integrator would reach Motion's solver menu by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
-- **A unit for a solved property that never declared one.** The system checks and converts *declared* units; it never infers one. Nor is there per-literal unit syntax in an equation (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with.
+- **Per-literal unit syntax in an equation** (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with. (A solved freedom with no unit of its own *is* now given one -- see [Inference](#inference) above -- but only when it is the entire side of the equation that determined it; anything shapelier still has to be declared.)
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
 - **Species inheritance.** Species are flat.

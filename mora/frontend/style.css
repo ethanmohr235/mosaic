@@ -178,7 +178,7 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 14px; border-bottom: 1px solid var(--hairline);
 }
-.pane-label, .pane-note, .panel-section h2 {
+.pane-label, .pane-note {
   font-family: var(--mono); font-size: 9.5px;
   letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint);
 }
@@ -347,54 +347,19 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
 .figure-error { font-family: var(--mono); font-size: 11px; color: var(--danger); }
 .empty-note { color: var(--faint); font-family: var(--serif); font-style: italic; }
 
-/* ---- data panel ---- */
+/* ---- problems popover ---- */
 
-#data-pane {
-  width: 300px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0;
-  background: var(--panel-bg); border-left: 1px solid var(--border-soft);
+#problems-wrap { position: relative; display: flex; align-items: center; }
+#problems-popover {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+  width: 300px; max-height: 320px; overflow-y: auto;
+  background: var(--panel-bg); border: 1px solid var(--border-soft);
+  border-radius: 8px; padding: 6px 12px; box-shadow: 0 8px 24px oklch(0 0 0 / 0.35);
 }
-#panel-head { padding: 14px 16px 13px; border-bottom: 1px solid var(--hairline); }
-#panel-back { display: block; margin-bottom: 8px; }
-#panel-kind { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
-#panel-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--unknown); }
-#panel-kind-text {
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em;
-  text-transform: uppercase; color: var(--unknown);
-}
-#panel-name { font-family: var(--serif); font-size: 16px; line-height: 1.3; color: var(--fg-bright); }
-#panel-id { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 5px; word-break: break-all; }
-
-#panel-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-.panel-section { padding: 15px 16px 6px; }
-.panel-section:last-child { padding-bottom: 20px; }
-.panel-section h2 { margin: 0 0 10px; font-weight: 400; }
-
-.prop-row {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  padding: 5px 0; border-bottom: 1px solid oklch(1 0 0 / 0.04);
-}
-.prop-key { font-size: 11.5px; color: var(--muted); flex-shrink: 0; }
-.prop-key.reserved { color: var(--accent); }
-.prop-value {
-  font-family: var(--mono); font-size: 11.5px; color: oklch(0.88 0 0);
-  text-align: right; word-break: break-word;
-}
-
-.entry-row {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  background: none; border: none; border-radius: 7px;
-  padding: 6px 8px; margin: 0 -8px; width: calc(100% + 16px);
-  text-align: left; font-size: 12px; color: oklch(0.86 0 0);
-}
-.entry-row:hover { background: var(--panel); border: none; }
-.entry-row .arrow { font-family: var(--mono); font-size: 10px; color: var(--faint); width: 14px; flex-shrink: 0; }
-.entry-row .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--unknown); }
-.entry-row .label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.entry-row .sub { font-family: var(--mono); font-size: 9.5px; color: var(--faint); flex-shrink: 0; }
-.entry-row.broken .label { color: var(--unknown); font-style: italic; }
-.panel-empty { color: var(--faint); font-size: 12px; padding: 2px 0 6px; }
+#problems-popover .panel-empty { color: var(--faint); font-size: 12px; padding: 8px 0; }
 
 .problem { padding: 6px 0; border-bottom: 1px solid oklch(1 0 0 / 0.04); font-size: 11.5px; }
+.problem:last-child { border-bottom: none; }
 .problem .where { font-family: var(--mono); font-size: 9.5px; color: var(--danger); }
 .problem .what { color: var(--muted); }
 
@@ -568,7 +533,7 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
 }
 
 @media print {
-  #topbar, #source-pane, #data-pane, #statusbar, .pane-head,
+  #topbar, #source-pane, #statusbar, .pane-head,
   #notes-overlay, #launcher-overlay, #toast, #picker {
     display: none !important;
   }

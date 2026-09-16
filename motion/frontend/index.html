@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <title>Motion</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="inspector.css">
+<link rel="stylesheet" href="commandbar.css">
+<link rel="stylesheet" href="interval.css">
+<link rel="stylesheet" href="menu.css">
 </head>
 <body>
 
@@ -94,6 +98,7 @@
           <button id="zoom-label" class="tool zoom" type="button" title="Reset zoom and pan">100%</button>
         </div>
         <div id="boards"></div>
+        <div id="select-box" class="hidden"></div>
       </div>
 
       <div id="dock-resize" class="resize-row" role="separator" aria-orientation="horizontal"></div>
@@ -193,6 +198,10 @@
   </div>
 </div>
 
+<script src="menu.js"></script>
+<script src="interval.js"></script>
+<script src="inspector.js"></script>
+<script src="commandbar.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

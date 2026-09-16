@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <title>Monarch</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="inspector.css">
+<link rel="stylesheet" href="commandbar.css">
+<link rel="stylesheet" href="interval.css">
+<link rel="stylesheet" href="menu.css">
 </head>
 <body>
 
@@ -32,8 +36,11 @@
     <div id="garden-menu" class="menu hidden">
       <div id="garden-menu-list"></div>
       <div class="menu-sep"></div>
-      <button id="garden-menu-new" class="menu-item" type="button">+ New garden…</button>
-      <button id="garden-menu-manage" class="menu-item" type="button" title="Manage gardens">Manage gardens…</button>
+      <!-- The same footer every one of the six garden menus carries:
+           switching is this window's business, the gardens themselves
+           are the Gardens window's (gardens_app/). -->
+      <button id="garden-menu-manage" class="menu-item" type="button"
+              title="Create, rename, import, export and sync gardens">Manage gardens…</button>
     </div>
   </div>
 
@@ -41,10 +48,8 @@
     <div class="topbar-menu">
       <button id="file-btn" class="topbar-trigger" type="button" data-menu="file" aria-haspopup="menu" aria-expanded="false">File</button>
       <div id="file-menu" class="menu hidden">
-        <button id="file-new-garden" class="menu-item" type="button">New garden…</button>
-        <button id="file-import-garden" class="menu-item" type="button">Import garden…</button>
+        <button id="file-manage-gardens" class="menu-item" type="button">Manage gardens…</button>
         <div class="menu-sep"></div>
-        <button id="file-export-garden" class="menu-item" type="button">Export garden as JSON…</button>
         <button class="menu-item soon" type="button" data-soon="Export as CSV">Export as CSV<span class="menu-badge">soon</span></button>
         <button class="menu-item soon" type="button" data-soon="Print graph">Print graph…<span class="menu-badge">soon</span></button>
       </div>
@@ -187,44 +192,6 @@
       <div id="detail-resize-handle" title="Drag to resize"></div>
       <button id="close-panel" type="button" title="Close">×</button>
 
-      <div id="detail-single">
-        <div id="detail-type">
-          <span id="detail-dot"></span><span id="detail-type-label"></span>
-        </div>
-        <div id="detail-title"></div>
-        <div id="detail-id"></div>
-
-        <div class="panel-heading">Properties</div>
-        <div id="detail-properties"></div>
-        <div id="detail-add-property">
-          <input type="text" id="detail-new-key" placeholder="key">
-          <input type="text" id="detail-new-value" placeholder="value">
-          <button id="detail-add-property-btn" type="button">Add</button>
-        </div>
-
-        <div class="panel-heading">Species</div>
-        <div id="detail-species"></div>
-        <div id="detail-species-actions">
-          <button id="set-species-btn" type="button" class="ghost">Set species…</button>
-          <button id="set-template-btn" type="button" class="ghost">Make template of…</button>
-          <button id="new-instance-btn" type="button" class="ghost hidden">+ New instance</button>
-        </div>
-        <div id="species-picker-wrap" class="hidden">
-          <input type="text" id="species-picker-input" placeholder="Search for a species…" autocomplete="off">
-          <div id="species-picker-results"></div>
-        </div>
-        <div id="detail-instance-count"></div>
-
-        <div class="panel-heading">Note</div>
-        <button id="open-note-btn" type="button" class="ghost">Write a note…</button>
-
-        <div class="panel-heading">Relationships</div>
-        <div id="detail-relationships"></div>
-        <div id="connect-hint" class="panel-hint">Ctrl+drag to another mote to connect them.</div>
-
-        <button id="delete-mote-btn" type="button" class="danger wide">Delete mote</button>
-      </div>
-
       <div id="detail-multi">
         <div id="detail-multi-count"></div>
         <div class="panel-heading">Species</div>
@@ -285,50 +252,6 @@
   </div>
 </div>
 
-<div id="gardens-overlay" class="hidden">
-  <div id="gardens-modal">
-    <div class="panel-title">Gardens</div>
-    <div id="gardens-list"></div>
-    <div id="gardens-modal-actions">
-      <button id="new-garden-btn" type="button" class="ghost">+ New garden…</button>
-      <div class="spacer"></div>
-      <button id="import-garden-btn" type="button" class="ghost">Import…</button>
-    </div>
-  </div>
-</div>
-
-<div id="sync-overlay" class="hidden">
-  <div id="sync-modal">
-    <div class="panel-title">Sync</div>
-
-    <div id="sync-disabled-body">
-      <p class="settings-note">This garden isn't syncing yet. Choose a folder shared between your devices (Syncthing, Dropbox, iCloud Drive…) to enable it.</p>
-      <button id="sync-enable-btn" type="button" class="primary">Choose folder…</button>
-    </div>
-
-    <div id="sync-enabled-body" class="hidden">
-      <div class="settings-row">
-        <span>Folder</span>
-        <span id="sync-folder-path"></span>
-      </div>
-      <button id="sync-change-folder-btn" type="button" class="ghost">Choose different folder…</button>
-
-      <label class="settings-row">
-        <span>Sync automatically</span>
-        <input type="checkbox" id="sync-auto-checkbox">
-      </label>
-
-      <div id="sync-status-lines" class="settings-note"></div>
-
-      <div id="sync-modal-actions">
-        <button id="sync-now-btn" type="button" class="primary">Sync now</button>
-        <div class="spacer"></div>
-        <button id="sync-disable-btn" type="button" class="danger">Disable sync…</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div id="launcher-overlay" class="hidden">
   <div id="launcher-modal">
     <div id="launcher-input-row">
@@ -349,6 +272,10 @@
 <div id="toast" class="hidden"></div>
 
 <script src="graph.js"></script>
+<script src="menu.js"></script>
+<script src="interval.js"></script>
+<script src="inspector.js"></script>
+<script src="commandbar.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

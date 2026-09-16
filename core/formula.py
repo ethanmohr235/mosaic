@@ -8,6 +8,7 @@ happens to contain no unknowns is simply a number. That means one
 evaluator serves both assignment-style rules and coupled equations.
 """
 import ast
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -28,10 +29,17 @@ _TOLERANCE = 1e-9
 NAVIGATION_CALLS = frozenset({"targets", "sources"})
 AGGREGATE_CALLS = frozenset({"sum", "count"})
 NUMERIC_CALLS = frozenset({"abs", "min", "max"})
+# sin/cos/tan take radians, matching math.sin() -- a value with no declared
+# unit already *is* radians (see units.py's `deg`), and a value declared
+# `deg` arrives here already converted to radians by the time a formula
+# reads it, the same normalization every other unit gets.
+TRIG_CALLS = frozenset({"sin", "cos", "tan"})
+SQRT_CALL = "sqrt"
 PREVIOUS_CALL = "prev"
 PROPERTY_CALL = "property"
 ALLOWED_CALLS = (
-    NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | {PREVIOUS_CALL, PROPERTY_CALL}
+    NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | TRIG_CALLS
+    | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL}
 )
 
 # The current simulation step's index, exposed to formulas as a reserved
@@ -101,7 +109,16 @@ class LinearExpr:
     def __truediv__(self, other: "LinearExpr") -> "LinearExpr":
         if not other.is_constant:
             raise NonlinearError(f"cannot divide by an unknown quantity: {describe(other.terms)}")
-        if abs(other.constant) < _TOLERANCE:
+        # Exact zero, not `abs(x) < _TOLERANCE`: a divisor is a physical
+        # value that may legitimately be tiny in SI base units (a neutron
+        # mass is ~1.6749e-27 kg, an electron charge ~1.6e-19 C) without
+        # being zero. `_TOLERANCE` exists to absorb float rounding noise
+        # in *coefficients* built from small-integer arithmetic (see
+        # `_prune`); applying that same absolute threshold to a divisor's
+        # actual magnitude would reject real division by real quantities
+        # that just happen to live at a subatomic scale. IEEE-754 divides
+        # a merely-tiny float by another cleanly -- only true zero raises.
+        if other.constant == 0.0:
             raise FormulaError("division by zero")
         return self.scaled(1.0 / other.constant)
 
@@ -111,7 +128,12 @@ class LinearExpr:
         return LinearExpr.number(self.constant ** other.constant)
 
     def scaled(self, factor: float) -> "LinearExpr":
-        if abs(factor) < _TOLERANCE:
+        # Exact zero, for the same reason as __truediv__ above: a factor
+        # of e.g. 1.602176634e-19 (an eV-to-joule conversion) is a real,
+        # tiny number, not float noise standing in for zero, and scaling
+        # by it should shrink a term's coefficient rather than erase the
+        # term (and the unknown along with it) from the expression.
+        if factor == 0.0:
             return LinearExpr.number(0.0)
         return LinearExpr(
             {k: v * factor for k, v in self.terms.items()}, self.constant * factor
@@ -126,8 +148,18 @@ def describe(unknowns) -> str:
 
 def _prune(terms: dict[Unknown, float]) -> dict[Unknown, float]:
     """Drop terms whose coefficients cancelled out, so `is_constant` stays
-    honest after e.g. `voltage - voltage`."""
-    return {k: v for k, v in terms.items() if abs(v) > _TOLERANCE}
+    honest after e.g. `voltage - voltage`.
+
+    Exact zero, not `abs(v) < _TOLERANCE`: a coefficient is a physical
+    scale factor (an elementary charge is ~1.602e-19 in base units) that
+    may legitimately be far smaller than `_TOLERANCE` without having
+    cancelled to nothing. `voltage - voltage` cancels to exactly 0.0 in
+    IEEE-754 regardless -- the same value subtracted from itself never
+    leaves rounding residue -- so an absolute floor here buys no real
+    cancellation-noise protection, and it was silently dropping an
+    unknown (and its real coefficient) whenever a rule scaled it by a
+    small unit-conversion constant."""
+    return {k: v for k, v in terms.items() if v != 0.0}
 
 
 # The comparisons a relation may use. `==` is an equation, which the
@@ -142,6 +174,45 @@ _COMPARISONS = {
     ast.Lt: "<",
     ast.Gt: ">",
 }
+
+
+def _rewrite_caret(text: str) -> str:
+    """Rewrite bare `^` to `**` before parsing.
+
+    Everyone arriving from math notation, Excel, or units.py's own
+    compound-unit grammar (`kg*m/s^2`) writes `^` for exponentiation.
+    Python's grammar hands it to bitwise XOR instead -- confusing on its
+    own ("bit XOR is not allowed"), and not fixable by swapping the
+    operator *after* parsing: XOR binds looser than `*`/`/`, so `2*x^2`
+    would already have parsed as `(2*x)^2` by then, not `2*(x**2)` as
+    intended. Doing the rewrite in the source text, before parsing, gets
+    `**`'s correct (tighter) precedence for free. `^` never appears
+    legitimately inside a quoted string in this grammar (the only string
+    literals are call arguments like `targets('contains')`), but the
+    quote-tracking below skips them anyway rather than assuming it."""
+    out = []
+    quote = None
+    for char in text:
+        if quote:
+            out.append(char)
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+            out.append(char)
+        elif char == "^":
+            out.append("**")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def _parse_ast(text: str) -> ast.AST:
+    try:
+        tree = ast.parse(_rewrite_caret(text).strip(), mode="eval")
+    except SyntaxError as e:
+        raise FormulaError(f"could not parse formula {text!r}: {e.msg}") from e
+    return tree.body
 
 
 @dataclass(frozen=True)
@@ -222,12 +293,20 @@ class Context:
     before it enters the linear system. Everything downstream -- the
     substitution loop, both solver backends -- then works in one
     consistent set of units without knowing units exist at all. Defaults
-    to declaring nothing, which is exactly today's behavior."""
+    to declaring nothing, which is exactly today's behavior.
+
+    `neighbors` lists the motes immediately connected to a given mote --
+    any relationship type, either direction -- for connected-name
+    references (`R1.current` reaching a wired-up mote literally named
+    "R1", without a declared role). Defaults to nobody connected, which
+    makes the feature simply absent for a caller that doesn't wire it up
+    (core/modoc.py's `expression_context`, existing tests)."""
     mote_id: str
     properties: Callable[[str], dict]
     unknown_keys: Callable[[str], set[str]]
     targets: Callable[[str, str], list[str]]
     sources: Callable[[str, str], list[str]]
+    neighbors: Callable[[str], list[str]] = lambda mote_id: []
     solved: dict[Unknown, float] = field(default_factory=dict)
     tick: float = 0.0
     previous: Callable[[str], dict] = lambda mote_id: {}
@@ -251,12 +330,7 @@ def parse_equation(text: str) -> Relation:
     Named for the case that existed first and is still the only one the
     solver acts on. `==` asks for values that satisfy it; `<=`, `>=`, `<`
     and `>` only ever assert something about values found elsewhere."""
-    try:
-        tree = ast.parse(text.strip(), mode="eval")
-    except SyntaxError as e:
-        raise FormulaError(f"could not parse formula {text!r}: {e.msg}") from e
-
-    body = tree.body
+    body = _parse_ast(text)
     if not isinstance(body, ast.Compare):
         raise FormulaError(
             f"formula {text!r} is not a relation (expected `lhs == rhs`, or a "
@@ -274,6 +348,32 @@ def parse_equation(text: str) -> Relation:
             f"{', '.join(sorted(_COMPARISONS.values()))}"
         )
     return Relation(body.left, body.comparators[0], operator)
+
+
+def attribute_bases(text: str) -> list[str]:
+    """Every bare identifier used as the left side of a dotted access in
+    `text` (e.g. `["R1", "B"]` for `"R1.voltage == B.x"`), in source
+    order with duplicates removed, without evaluating anything.
+
+    An editor that wants to know what an equation *references* before
+    running it reads this rather than parsing formulas itself --
+    core/simulation.py's `unresolved_equation_names()` is what an
+    unconnected name here turns into: an offer to wire up the missing
+    relationship (docs/simulation.md's "Connected-name references"). A
+    formula that fails to parse simply yields nothing here -- this never
+    raises the parse errors evaluate_equation() would; a checker's job is
+    to inform an editor, not to be a second place a bad formula fails."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return []
+    bases: list[str] = []
+    for side in (relation.left, relation.right):
+        for node in ast.walk(side):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                if node.value.id not in bases:
+                    bases.append(node.value.id)
+    return bases
 
 
 def evaluate_equation(text: str, ctx: Context) -> Equation:
@@ -316,11 +416,7 @@ def evaluate_selection(text: str, ctx: Context) -> list[str]:
 
 
 def _parse_expression(text: str) -> ast.AST:
-    try:
-        tree = ast.parse(text.strip(), mode="eval")
-    except SyntaxError as e:
-        raise FormulaError(f"could not parse formula {text!r}: {e.msg}") from e
-    return tree.body
+    return _parse_ast(text)
 
 
 _BIN_OPS = {
@@ -400,20 +496,56 @@ def _attribute(node: ast.Attribute, ctx: Context):
 
 
 def _role_or_value(node: ast.Attribute, ctx: Context):
-    """Resolve the left-hand side of an attribute access, preferring a
-    declared role. Returns the Role it matched (or None) alongside the
-    value, because arity decides whether one mote collapses to a scalar."""
+    """Resolve the left-hand side of an attribute access: a declared
+    role first, then a mote connected to the anchor by name, then
+    whatever a plain property lookup makes of it (which -- unless it
+    happens to be a MoteSet already -- _attribute() will reject). Returns
+    the Role it matched (or None) alongside the value, because arity
+    decides whether one mote collapses to a scalar; a name match always
+    reaches at most one mote (see _connected_by_name)."""
     if not isinstance(node.value, ast.Name):
         return None, _evaluate(node.value, ctx)
-    role = ctx.roles(ctx.mote_id).get(node.value.id)
-    if role is None:
-        return None, _evaluate(node.value, ctx)
+    identifier = node.value.id
+    role = ctx.roles(ctx.mote_id).get(identifier)
+    if role is not None:
+        mote_ids = ctx.targets(ctx.mote_id, role.name)
+        problem = roles_repo.arity_problem(role, len(mote_ids))
+        if problem is not None:
+            raise FormulaError(f"mote {ctx.mote_id[:8]}: {problem}")
+        return role, MoteSet(mote_ids, role.name)
 
-    mote_ids = ctx.targets(ctx.mote_id, role.name)
-    problem = roles_repo.arity_problem(role, len(mote_ids))
-    if problem is not None:
-        raise FormulaError(f"mote {ctx.mote_id[:8]}: {problem}")
-    return role, MoteSet(mote_ids, role.name)
+    matches = _connected_by_name(ctx, identifier)
+    if matches is not None:
+        return None, MoteSet(matches, identifier)
+
+    return None, _evaluate(node.value, ctx)
+
+
+def _connected_by_name(ctx: Context, name: str) -> list[str] | None:
+    """A mote immediately wired to the anchor -- any relationship type,
+    either direction -- whose `name` property equals `name`. None means
+    "no such neighbor", which sends the caller on to the ordinary
+    property-lookup path (and that path's existing error, if `name`
+    isn't a property of the anchor either).
+
+    Deliberately narrower than a role: this exists so a garden wired by
+    hand doesn't need a role declared for a one-off reference, not to
+    replace targets()/sources() for real navigation -- which is why two
+    connected motes sharing a name is an error rather than a silently
+    collapsed set. A name is meant to pick one specific thing."""
+    matches = [
+        mid for mid in ctx.neighbors(ctx.mote_id)
+        if ctx.properties(mid).get("name") == name
+    ]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise FormulaError(
+            f"'{name}' matches {len(matches)} motes connected to mote "
+            f"{ctx.mote_id[:8]} -- rename one of them, or reach it with "
+            f"targets('relationship-type')"
+        )
+    return matches
 
 
 def _call(node: ast.Call, ctx: Context):
@@ -429,6 +561,10 @@ def _call(node: ast.Call, ctx: Context):
         return _aggregate(name, node, ctx)
     if name in NUMERIC_CALLS:
         return _numeric(name, node, ctx)
+    if name in TRIG_CALLS:
+        return _trig(name, node, ctx)
+    if name == SQRT_CALL:
+        return _sqrt(node, ctx)
     if name == PREVIOUS_CALL:
         return _previous(node, ctx)
     if name == PROPERTY_CALL:
@@ -543,6 +679,31 @@ def _numeric(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
             raise FormulaError("abs() takes exactly one argument")
         return LinearExpr.number(abs(values[0]))
     return LinearExpr.number(min(values) if name == "min" else max(values))
+
+
+_TRIG_FUNCS = {"sin": math.sin, "cos": math.cos, "tan": math.tan}
+
+
+def _trig(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
+    """sin(x)/cos(x)/tan(x) -- deferred, like abs()/min()/max(), until x is
+    a known number rather than an unsolved unknown."""
+    if len(node.args) != 1:
+        raise FormulaError(f"{name}() takes exactly one argument")
+    arg = _as_expr(_evaluate(node.args[0], ctx))
+    if not arg.is_constant:
+        raise NonlinearError(f"{name}() cannot be applied to an unknown quantity")
+    return LinearExpr.number(_TRIG_FUNCS[name](arg.constant))
+
+
+def _sqrt(node: ast.Call, ctx: Context) -> LinearExpr:
+    if len(node.args) != 1:
+        raise FormulaError("sqrt() takes exactly one argument")
+    arg = _as_expr(_evaluate(node.args[0], ctx))
+    if not arg.is_constant:
+        raise NonlinearError("sqrt() cannot be applied to an unknown quantity")
+    if arg.constant < 0:
+        raise FormulaError(f"sqrt() of a negative number ({arg.constant!r})")
+    return LinearExpr.number(math.sqrt(arg.constant))
 
 
 def _normalize(ctx: Context, mote_id: str, key: str, value: float) -> float:

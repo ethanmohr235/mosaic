@@ -88,6 +88,50 @@ def create_garden(name: str) -> str:
     return name
 
 
+def rename_garden(old: str, new: str) -> str:
+    """Rename a garden in place, sidecars and all.
+
+    The .db is only half of a garden on disk: _sync_dir_path() and
+    _auto_sync_path() sit beside it named after it, so a rename that
+    moved only the database would silently strand both -- the renamed
+    garden would come back unsynced, and a later garden reusing the old
+    name would inherit a sync folder that has nothing to do with it.
+    Same reasoning as delete_garden()'s trashing of the sidecars.
+
+    Refused while the garden syncs: core/sync.py keys the shared folder
+    by garden name (_ops_dir is <sync_dir>/<garden>/ops), so renaming
+    here would point this device at a fresh, empty op stream while the
+    other devices kept writing to the old one -- two halves of one
+    garden that never converge again. Turning sync off, renaming, then
+    re-initing is the flow that actually works, and it is better asked
+    for than discovered."""
+    validate_garden_name(new)
+    if not garden_exists(old):
+        raise LookupError(f"No such garden: {old!r}")
+    if garden_exists(new):
+        raise FileExistsError(f"Garden already exists: {new!r}")
+    if get_sync_dir(old) is not None:
+        raise ValueError(
+            f"Garden {old!r} is syncing through a shared folder, which tracks it "
+            "by name. Disable sync, rename, then set sync up again."
+        )
+
+    garden_db_path(old).rename(garden_db_path(new))
+
+    auto_sync = _auto_sync_path(old)
+    if auto_sync.exists():
+        auto_sync.rename(_auto_sync_path(new))
+
+    # The default-garden pointer holds a name, not a path, so a rename
+    # would otherwise leave it aimed at a garden that no longer exists --
+    # which resolve_garden() treats as "never chose one" and quietly
+    # auto-creates an empty `default` for.
+    if get_default_garden() == old:
+        set_default_garden(new)
+
+    return new
+
+
 def _default_garden_config_path() -> Path:
     return db.GARDENS_DIR / ".default_garden"
 

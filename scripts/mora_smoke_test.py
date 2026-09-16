@@ -234,43 +234,22 @@ def run_checks(window):
 
     check("math is typeset by KaTeX, inline and display", math_is_typeset_by_katex)
 
-    def the_panel_starts_on_the_note_mote():
-        assert wait_until(lambda: text_of(window, "#panel-name") == "Atlas Migration"), \
-            f"panel opened on {text_of(window, '#panel-name')!r}"
-        rows = js(window, "document.querySelectorAll('#panel-rels .entry-row').length")
-        assert rows == 4, f"the project's four `contains` relationships should list, got {rows}"
-
-    check("the data panel starts on the note's own mote", the_panel_starts_on_the_note_mote)
-
-    def the_note_source_is_not_shown_as_a_property():
-        keys = js(window, "document.getElementById('panel-props').textContent")
-        assert "modoc" not in keys, "the note's own source should not be listed as a property"
-
-    check("the panel hides the note's `modoc` property", the_note_source_is_not_shown_as_a_property)
-
-    def clicking_a_link_moves_the_panel_and_back_returns():
+    def clicking_a_link_opens_the_shared_inspector():
+        """Mora has no docked data panel any more (frontend_shared/inspector.js
+        is the one editing surface across all six windows) -- a `\\mote` link
+        in the rendered text is now the only way into a mote from here, and
+        it opens the same floating inspector every other window uses."""
         js(window, """
             Array.from(document.querySelectorAll('#rendered .mote-link'))
                 .find(n => n.textContent === 'Rina Kovac').click();
         """)
-        assert wait_until(lambda: text_of(window, "#panel-name") == "Rina Kovac"), \
-            f"panel did not follow the link, showing {text_of(window, '#panel-name')!r}"
-        assert js(window, "!document.getElementById('panel-back').classList.contains('hidden')")
-        click(window, "#panel-back")
-        assert wait_until(lambda: text_of(window, "#panel-name") == "Atlas Migration"), \
-            "back-to-note-mote did not return"
+        assert wait_until(lambda: js(window, "document.querySelectorAll('.ins:not(.hidden)').length") == 1), \
+            "clicking a \\mote link did not open the inspector"
+        assert wait_until(lambda: js(window, "document.querySelector('.ins-name').value") == "Rina Kovac"), \
+            "the inspector should be showing the mote that was clicked"
+        js(window, "Inspector.close();")
 
-    check("a \\mote link navigates the panel, and back returns", clicking_a_link_moves_the_panel_and_back_returns)
-
-    def linked_in_text_counts_references():
-        entries = json.loads(js(window, """
-            JSON.stringify(Array.from(document.querySelectorAll('#panel-linked .entry-row'))
-                .map(n => n.textContent))
-        """))
-        assert any("Rina Kovac" in e and "×1" in e for e in entries), \
-            f"linked-in-text list is wrong: {entries}"
-
-    check("'Linked in text' lists every reference with a count", linked_in_text_counts_references)
+    check("a \\mote link opens the shared inspector", clicking_a_link_opens_the_shared_inspector)
 
     def the_status_bar_counts_the_note():
         assert "mote links" in text_of(window, "#stat-links")
@@ -360,8 +339,9 @@ def run_checks(window):
         """)
         assert wait_until(lambda: text_of(window, "#problems-btn").startswith("1 ")), \
             f"a note with no links still has problems, got {text_of(window, '#problems-btn')!r}"
-        assert "Nothing linked" in text_of(window, "#panel-linked")
-        assert "unknown_command" in text_of(window, "#panel-problems")
+        click(window, "#problems-btn")
+        assert wait_until(lambda: "unknown_command" in text_of(window, "#problems-popover")), \
+            "the problems popover did not list the diagnostic"
         js(window, """
             const editor = document.getElementById('editor');
             editor.value = window.__saved;

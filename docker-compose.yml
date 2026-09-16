@@ -1,0 +1,40 @@
+# Self-hosted sync server (sync_server/) for productized multi-device/
+# multi-user sync -- see core/sync.py's module docstring for the folder-
+# based transport this is a server-backed alternative to, and
+# sync_server/app.py for the API it serves.
+#
+# Usage: put POSTGRES_PASSWORD and MONOSS_SYNC_TOKEN in a .env file next
+# to this compose file (generate a token with:
+# `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`), then
+# `docker compose up -d`. Point a garden at it with:
+# `python cli/main.py sync init "https://<token>@your-host:8080/" [--clone]`
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: monoss_sync
+      POSTGRES_USER: monoss
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a password in .env}
+    volumes:
+      - sync_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monoss"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  sync-server:
+    build:
+      context: .
+      dockerfile: sync_server/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://monoss:${POSTGRES_PASSWORD}@postgres:5432/monoss_sync
+      MONOSS_SYNC_TOKEN: ${MONOSS_SYNC_TOKEN:?generate one with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"}
+    ports:
+      - "8080:8080"
+
+volumes:
+  sync_pgdata:

@@ -1,0 +1,35 @@
+/* The shared right-click menu (frontend_shared/menu.js).
+ *
+ * Deliberately the same weight as the inspector's own surfaces -- a
+ * menu that looked like a different toolkit would undo the point of
+ * having one dropdown across six windows. */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 168px;
+  background: oklch(0.205 0 0 / 0.98);
+  backdrop-filter: blur(12px);
+  border: 1px solid oklch(1 0 0 / 0.13);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 18px 44px rgba(0, 0, 0, 0.5);
+  font-family: var(--sans);
+  color: var(--fg);
+}
+.ctx-menu.hidden { display: none; }
+
+.ctx-item {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ctx-item:hover { background: var(--raised); color: var(--fg-bright); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger:hover { background: oklch(0.3 0.08 25 / 0.35); }
+.ctx-item.disabled { color: var(--faint); cursor: default; }
+.ctx-item.disabled:hover { background: transparent; color: var(--faint); }
+
+.ctx-sep { border-top: 1px solid var(--hairline); margin: 4px 2px; }

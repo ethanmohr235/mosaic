@@ -155,6 +155,7 @@ class MonossGraph {
     this.motes = [];
     this.relationships = [];
     this.speciesIds = new Set();
+    this.ruleIds = new Set();
     this.speciesOf = new Map();   // mote id -> [species id]
     this.nodes = new Map();       // mote id -> {x, y, vx, vy, pinned}
     this.hiddenSpecies = new Set();
@@ -214,6 +215,7 @@ class MonossGraph {
     // kind upstream doesn't change this payload's shape.
     this.kinds = payload.kinds || {};
     this.speciesIds = new Set(idsWithKind(this.kinds, KIND.SPECIES));
+    this.ruleIds = new Set(idsWithKind(this.kinds, KIND.RULE));
     this._moteById = new Map(this.motes.map((m) => [m.id, m]));
     this._invalidateColors();
 
@@ -795,6 +797,12 @@ class MonossGraph {
       if (settled) this.panTarget = null;
     }
     this._draw();
+    // The camera (pan, zoom, the settle-in from panTarget) and the force
+    // layout itself both move a node's screen position every frame, not
+    // only on a drag -- so whatever is anchored to one (the shared
+    // inspector's leader line) needs a chance to follow it here rather
+    // than at the handful of gesture handlers that touch camera.x/y.
+    if (this.callbacks.onCameraMove) this.callbacks.onCameraMove();
     this._scheduleFrame();
   };
 
@@ -1090,6 +1098,12 @@ class MonossGraph {
         ctx.lineTo(node.x, node.y + r);
         ctx.lineTo(node.x - r, node.y);
         ctx.closePath();
+      } else if (this.ruleIds.has(id)) {
+        // Rules are squares -- otherwise a rule created from the command
+        // bar (or anywhere else) is a plain circle same as any mote, and
+        // reads as a stray duplicate instead of the equation it is.
+        const r = radius * 1.1;
+        ctx.rect(node.x - r, node.y - r, r * 2, r * 2);
       } else {
         ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       }
@@ -1420,7 +1434,10 @@ class MonossGraph {
       if (moved) {
         if (this.callbacks.onPositionsChanged) this.callbacks.onPositionsChanged();
       } else if (this.callbacks.onSelect) {
-        this.callbacks.onSelect(id);
+        // The event goes with it: ctrl/cmd-click means "open this in a
+        // second inspector tab" everywhere in the suite, and the canvas
+        // has no DOM element for the host to read the modifier off.
+        this.callbacks.onSelect(id, e);
       }
       return;
     }

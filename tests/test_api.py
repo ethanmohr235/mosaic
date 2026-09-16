@@ -1,25 +1,14 @@
-import json
 import sys
 import webbrowser
 
 import pytest
 
+import api_common
 import monarch.api
 from core import query as q
-from core.gardens import create_garden, garden_exists, get_sync_dir
+from core import sync as sync_repo
+from core.gardens import create_garden, set_auto_sync_enabled
 from monarch.api import Api, _coerce_properties
-
-
-class _StubWindow:
-    """Minimal stand-in for pywebview's window -- just enough of
-    create_file_dialog to test export_garden's own logic without a real
-    native dialog."""
-
-    def __init__(self, path):
-        self._path = path
-
-    def create_file_dialog(self, *args, **kwargs):
-        return self._path
 
 
 @pytest.fixture
@@ -108,106 +97,6 @@ def test_list_species_reports_every_species_in_the_garden(api):
     assert [m["id"] for m in api.list_species()] == [species["id"]]
 
 
-def test_delete_garden_blocks_the_last_garden(api):
-    with pytest.raises(ValueError, match="last garden"):
-        api.delete_garden("test")
-
-
-def test_delete_garden_blocks_the_current_garden(api):
-    create_garden("other")
-    with pytest.raises(ValueError, match="currently in"):
-        api.delete_garden("test")
-    # Blocked, not partially applied.
-    assert "test" in api.list_gardens()
-
-
-def test_delete_garden_succeeds_for_a_non_current_garden(api):
-    create_garden("other")
-    result = api.delete_garden("other")
-    assert result == {"deleted": "other"}
-    assert "other" not in api.list_gardens()
-
-
-def test_restore_garden_brings_a_deleted_garden_back(api):
-    create_garden("other")
-    api.delete_garden("other")
-    assert "other" not in api.list_gardens()
-
-    result = api.restore_garden("other")
-
-    assert result == {"restored": "other"}
-    assert "other" in api.list_gardens()
-
-
-def test_restore_garden_missing_raises(api):
-    with pytest.raises(LookupError):
-        api.restore_garden("never-deleted")
-
-
-def test_default_garden_round_trips_and_clears(api):
-    assert api.get_default_garden() is None
-
-    api.set_default_garden("test")
-    assert api.get_default_garden() == "test"
-
-    api.clear_default_garden()
-    assert api.get_default_garden() is None
-
-
-def test_import_garden_into_new_creates_and_fills_a_garden(api, tmp_path):
-    api.create_mote({"name": "Original"})
-    out = tmp_path / "export.json"
-    api._window = _StubWindow(str(out))
-    api.export_garden_to_file()
-
-    api._window = _StubWindow([str(out)])
-    result = api.import_garden_into_new("imported")
-
-    assert result["motes"] == 1
-    assert garden_exists("imported")
-    # Importing does not switch the caller into the new garden -- the
-    # frontend does that as a separate step.
-    assert api.current_garden() == "test"
-
-    imported = Api("imported")
-    try:
-        names = [m["properties"].get("name") for m in imported.list_motes()]
-    finally:
-        imported.shutdown()
-    assert names == ["Original"]
-
-
-def test_export_garden_to_file_by_name_does_not_disturb_the_current_garden(api, tmp_path):
-    create_garden("other")
-    other_api = Api("other")
-    other_api.create_mote({"name": "OtherMote"})
-    other_api.shutdown()
-
-    api.create_mote({"name": "CurrentMote"})
-    out = tmp_path / "other.json"
-    api._window = _StubWindow(str(out))
-
-    result = api.export_garden_to_file("other")
-
-    assert result["path"] == str(out)
-    assert api.current_garden() == "test"
-    data = json.loads(out.read_text())
-    names = [m["properties"].get("name") for m in data["motes"]]
-    assert names == ["OtherMote"]
-
-
-def test_export_garden_to_file_defaults_to_the_current_garden(api, tmp_path):
-    api.create_mote({"name": "CurrentMote"})
-    out = tmp_path / "test.json"
-    api._window = _StubWindow(str(out))
-
-    api.export_garden_to_file()
-
-    data = json.loads(out.read_text())
-    names = [m["properties"].get("name") for m in data["motes"]]
-    assert names == ["CurrentMote"]
-
-
 def test_whole_garden_still_reports_kinds(api):
     species = api.create_mote({"name": "Node"})
     instance = api.create_mote({"name": "N1"})
@@ -259,42 +148,15 @@ def test_switch_garden_swaps_connection(api):
     assert names == ["InTest"]
 
 
-# ---- sync (Tools -> Sync…, backed by core/sync.py) ----
+# ---- lifecycle sync (open / garden switch / close) ----
+#
+# Enabling and disabling sync is the Gardens window's now
+# (tests/test_gardens_api.py); what is still this window's is when it
+# fires on its own. These point the garden at a folder through
+# core/sync.py directly, the way the Gardens window would have.
 
-def test_choose_sync_folder_cancelled(api):
-    api._window = _StubWindow(None)
-    assert api.choose_sync_folder() == {"cancelled": True}
-
-
-def test_choose_sync_folder_returns_path(api, tmp_path):
-    api._window = _StubWindow(str(tmp_path))
-    assert api.choose_sync_folder() == {"path": str(tmp_path)}
-
-
-def test_enable_sync_points_the_garden_at_the_folder(api, tmp_path):
-    result = api.enable_sync(str(tmp_path))
-    assert result["garden"] == "test"
-    assert get_sync_dir("test") == str(tmp_path)
-
-
-def test_disable_sync_clears_the_folder(api, tmp_path):
-    api.enable_sync(str(tmp_path))
-    api.disable_sync()
-    assert get_sync_dir("test") is None
-
-
-def test_sync_now_pushes_local_changes(api, tmp_path):
-    api.enable_sync(str(tmp_path))
-    api.create_mote({"name": "Alice"})
-    result = api.sync_now()
-    assert result["push"]["pushed"] >= 1
-
-
-def test_sync_status_reports_auto_sync_flag(api, tmp_path):
-    api.enable_sync(str(tmp_path))
-    assert api.sync_status()["auto_sync"] is True
-    api.set_auto_sync(False)
-    assert api.sync_status()["auto_sync"] is False
+def _sync_to(garden: str, folder) -> None:
+    sync_repo.init(garden, str(folder), clone=True)
 
 
 def test_refresh_skips_sync_when_not_configured(api):
@@ -302,7 +164,7 @@ def test_refresh_skips_sync_when_not_configured(api):
 
 
 def test_refresh_syncs_when_configured(api, tmp_path):
-    api.enable_sync(str(tmp_path))
+    _sync_to(api.current_garden(), tmp_path)
     api.create_mote({"name": "Alice"})
     result = api.refresh()
     assert result["synced"] is True
@@ -313,8 +175,8 @@ def test_best_effort_sync_skips_when_auto_sync_disabled(api, tmp_path, monkeypat
     # _best_effort_sync() runs against self._current_garden *after* a
     # switch completes, so exercising the guard on "test" means switching
     # away and back to it, not just switching away.
-    api.enable_sync(str(tmp_path))
-    api.set_auto_sync(False)
+    _sync_to(api.current_garden(), tmp_path)
+    set_auto_sync_enabled(api.current_garden(), False)
     create_garden("other")
 
     calls = []
@@ -326,7 +188,7 @@ def test_best_effort_sync_skips_when_auto_sync_disabled(api, tmp_path, monkeypat
 
 
 def test_best_effort_sync_runs_when_auto_sync_enabled(api, tmp_path, monkeypatch):
-    api.enable_sync(str(tmp_path))
+    _sync_to(api.current_garden(), tmp_path)
     create_garden("other")
 
     calls = []
@@ -342,8 +204,8 @@ def test_shutdown_skips_sync_when_auto_sync_disabled(tmp_path, monkeypatch):
     # teardown calls shutdown() too, which would double-fire this.
     create_garden("shut")
     inst = Api("shut")
-    inst.enable_sync(str(tmp_path))
-    inst.set_auto_sync(False)
+    _sync_to("shut", tmp_path)
+    set_auto_sync_enabled("shut", False)
 
     calls = []
     monkeypatch.setattr(monarch.api.sync_repo, "run", lambda *a, **k: calls.append(1))
@@ -415,17 +277,18 @@ def test_open_with_os_default_prefers_gio_on_linux(monkeypatch):
     # gio detects content-type the same way GTK file managers do; xdg-open
     # uses a cruder heuristic that can disagree and silently land on the
     # wrong app (this is the actual bug that was reported and reproduced).
-    monkeypatch.setattr(monarch.api.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(api_common.platform, "system", lambda: "Linux")
     calls = []
-    monkeypatch.setattr(monarch.api.subprocess, "Popen", lambda args, **kw: calls.append(args) or _FakeProc())
+    monkeypatch.setattr(api_common.subprocess, "Popen",
+                        lambda args, **kw: calls.append(args) or _FakeProc())
 
-    monarch.api._open_with_os_default("/tmp/some/file.py")
+    api_common.open_with_os_default("/tmp/some/file.py")
 
     assert calls == [["gio", "open", "/tmp/some/file.py"]]
 
 
 def test_open_with_os_default_falls_back_to_xdg_open_if_gio_is_missing(monkeypatch):
-    monkeypatch.setattr(monarch.api.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(api_common.platform, "system", lambda: "Linux")
     calls = []
 
     def fake_popen(args, **kwargs):
@@ -434,9 +297,9 @@ def test_open_with_os_default_falls_back_to_xdg_open_if_gio_is_missing(monkeypat
             raise FileNotFoundError()
         return _FakeProc()
 
-    monkeypatch.setattr(monarch.api.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(api_common.subprocess, "Popen", fake_popen)
 
-    monarch.api._open_with_os_default("/tmp/some/file.py")
+    api_common.open_with_os_default("/tmp/some/file.py")
 
     assert calls == [["gio", "open", "/tmp/some/file.py"], ["xdg-open", "/tmp/some/file.py"]]
 

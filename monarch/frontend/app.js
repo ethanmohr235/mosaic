@@ -10,8 +10,6 @@ let focusId = null;
 let payload = { motes: [], relationships: [], kinds: {} };
 let allMotes = [];
 let quickAddSpeciesId = null;
-let speciesPickerTargetId = null;
-let speciesPickerMode = "instance";   // 'instance' (set species) | 'template' (be a template of)
 let searchVisible = [];
 let searchHighlight = -1;
 const searchSpeciesFilter = new Set();
@@ -29,7 +27,6 @@ let openMenuName = null;               // 'garden' | 'file' | 'view' | 'tools' |
 let viewSettings = null;               // this garden's advanced view settings (forces/colors/attractors)
 let activeViewFilterId = null;         // id of the Monolith saved view currently filtering the graph, or null
 let attractorMode = false;             // arranging species attractors -- read-only
-let closeOpenIntervalPanel = null;     // closes whichever interval picker (app.js::intervalField) is currently popped open, if any
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -796,32 +793,44 @@ function setupViewSettings() {
 
 // ---- detail panel ----
 
-async function openDetailPanel(moteId) {
-  const [mote, rels, species, instances] = await Promise.all([
-    call(api.get_mote(moteId)),
-    call(api.mote_relationships(moteId)),
-    call(api.species_of(moteId)),
-    call(api.instances_of(moteId)),
-  ]);
-  if (!mote) return;
+/** One mote goes to the floating inspector (frontend_shared/inspector.js)
+ *  rather than to the docked panel beside the canvas.
+ *
+ *  The docked panel is not gone -- it still holds the two things that
+ *  are about a *selection* rather than a mote: the aggregate editor for
+ *  a box-select, and the relationship views. Those stay here because
+ *  they are Monarch's own instruments. What one mote is, and what may be
+ *  done to it, is the same question in all six windows, and now has the
+ *  same answer in all six. */
+/** Keep the inspector's leader line on the mote it points at as the
+ *  graph's camera pans, zooms, or eases a selection into view -- all of
+ *  which move a node's screen position without any of them being the
+ *  click that opened the panel. Only meaningful when the open mote is
+ *  still an anchor's worth of "on the graph": openDetailPanel's default
+ *  anchor is always graph.screenPositionOf(moteId), so if the inspector
+ *  is showing at all, this is what it's anchored to. */
+function reanchorInspector() {
+  if (!Inspector.isOpen()) return;
+  const id = Inspector.currentId();
+  if (!id || !graph.nodes.has(id)) return;
+  Inspector.updateAnchor(graph.screenPositionOf(id));
+}
 
+async function openDetailPanel(moteId, options = {}) {
   multiSelectIds = null;
-  $("detail-multi").classList.add("hidden");
+  // The docked panel's own modes are put away here directly rather than
+  // through closeDetailPanel(), which also clears the graph's selection
+  // -- and this is being called precisely *because* something was just
+  // selected. Routing through it deselected the mote on the way to
+  // showing it, and closed a relationship panel a moment after opening
+  // one.
+  $("detail-panel").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
   $("detail-relationship-multi").classList.add("hidden");
-  $("detail-single").classList.remove("hidden");
-
-  $("detail-dot").style.background = graph.colorFor(moteId);
-  $("detail-type-label").textContent = kindLabel(mote);
-  $("detail-title").textContent = nodeLabel(mote);
-  $("detail-id").textContent = mote.id;
-
-  renderProperties(mote);
-  renderNoteSection(mote);
-  renderSpeciesSection(mote, species, instances);
-  renderRelationships(moteId, rels);
-  $("detail-panel").classList.remove("hidden");
-  fitAllTextareas();
+  await Inspector.open(moteId, {
+    anchor: options.anchor || graph.screenPositionOf(moteId),
+    newTab: !!options.newTab,
+  });
 }
 
 /** A mote's note is edited in Mora, not here -- .modoc is a document
@@ -829,16 +838,6 @@ async function openDetailPanel(moteId) {
  *  box in a side panel is the wrong instrument for one. So the panel
  *  offers the door rather than the room, and says which side of it the
  *  mote is on. */
-function renderNoteSection(mote) {
-  const button = $("open-note-btn");
-  const has = typeof mote.properties.modoc === "string";
-  button.textContent = has ? "Open note…" : "Write a note…";
-  button.title = has
-    ? "Open this mote's note in Mora"
-    : "Open Mora on this mote and start a note";
-  button.onclick = () => openMora(mote.id);
-}
-
 function openMora(moteId) {
   call(api.open_mora(moteId || null));
   showToast(
@@ -855,11 +854,9 @@ function openMora(moteId) {
  *  make one a special case of the other would tangle both. */
 function renderMultiSelectPanel(ids) {
   multiSelectIds = ids;
-  $("detail-single").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
   $("detail-relationship-multi").classList.add("hidden");
   $("detail-multi").classList.remove("hidden");
-  hideSpeciesPicker();
 
   $("detail-multi-count").textContent = `${ids.length} motes selected`;
 
@@ -902,7 +899,6 @@ function closeDetailPanel() {
   $("detail-panel").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
   $("detail-relationship-multi").classList.add("hidden");
-  hideSpeciesPicker();
   multiSelectIds = null;
   if (graph) graph.select(null);
   updateStatusbar();
@@ -945,11 +941,9 @@ async function openRelationshipPanel(relId) {
 
   graph.selectRelationship(relId);
   multiSelectIds = null;
-  $("detail-single").classList.add("hidden");
   $("detail-multi").classList.add("hidden");
   $("detail-relationship-multi").classList.add("hidden");
   $("detail-relationship").classList.remove("hidden");
-  hideSpeciesPicker();
 
   const from = moteById(rel.from_id);
   const to = moteById(rel.to_id);
@@ -991,11 +985,9 @@ async function openRelationshipPanel(relId) {
  *  renderMultiSelectPanel's relationship to openDetailPanel. */
 function renderMultiRelationshipPanel(ids) {
   multiSelectIds = null;
-  $("detail-single").classList.add("hidden");
   $("detail-multi").classList.add("hidden");
   $("detail-relationship").classList.add("hidden");
   $("detail-relationship-multi").classList.remove("hidden");
-  hideSpeciesPicker();
 
   $("detail-relationship-multi-count").textContent = `${ids.length} relationships selected`;
 
@@ -1079,931 +1071,14 @@ function fitTextarea(field) {
   field.style.height = field.scrollHeight + "px";
 }
 
-function fitAllTextareas() {
-  $("detail-properties").querySelectorAll("textarea").forEach(fitTextarea);
-}
-
-/** Values long enough to wrap get a textarea sized to its content, so a
- *  rule's equation is readable in full instead of scrolling sideways in a
- *  one-line input. Shared by the plain fallback below and the recurrence
- *  picker's raw-rule mode. */
-function plainField(text, onCommit) {
-  const multiline = text.length > 38 || text.includes("\n");
-  const field = document.createElement(multiline ? "textarea" : "input");
-  if (!multiline) field.type = "text";
-  field.value = text;
-
-  if (multiline) {
-    field.rows = 1;
-    field.addEventListener("input", () => fitTextarea(field));
-  }
-  field.addEventListener("change", () => onCommit(field.value));
-  return field;
-}
-
-/** `date` and `provider` get a small picker instead of hand-typed syntax;
- *  every other property keeps the plain text/textarea field. Falls back
- *  to plainField for a value that doesn't parse -- a picker that can't
- *  represent an existing value shouldn't clobber it. */
-function valueField(key, rawValue, onCommit, moteId) {
-  const text = typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue);
-  if (key === "modoc") return noteField(text);
-  if (key === "provider") return providerField(text, onCommit);
-  // By shape, not by name: `date` stopped being a key the engine reads
-  // when a start became an ISO 8601 interval (core/interval.py), so any
-  // property holding one gets the picker -- `when`, `due`, `starts`, or
-  // whatever this garden calls it, repeating or not. A value the picker
-  // can only partly represent -- an UNTIL= rule, a multi-day span --
-  // still gets the picker, just with a raw-text fallback for the one
-  // piece it can't structure-edit (see parseIntervalValue's `simple:
-  // false` branches) rather than losing the picker entirely.
-  if (text !== "") {
-    if (parseIntervalValue(text)) return intervalField(text, onCommit, moteId);
-  }
-  return plainField(text, onCommit);
-}
-
-/** A note's source, summarized and read-only. Every other property is
- *  editable in place; this one is a whole document, and rendering it
- *  into an inline field would both bury the rest of the panel and put a
- *  note one stray keystroke from being overwritten. The row still
- *  deletes like any other -- removing a note is an ordinary property
- *  delete, because that is all it is. */
-function noteField(text) {
-  const lines = text.split("\n").length;
-  const field = plainField(`${lines} line${lines === 1 ? "" : "s"} — edit in Mora`, () => {});
-  field.readOnly = true;
-  field.classList.add("note-summary");
-  field.title = text.slice(0, 400);
-  return field;
-}
-
-/** The "add a property" row's value box (#detail-new-value) has no key
- *  yet, so valueField's shape/key dispatch can't run on it -- there's
- *  nothing typed to sniff. Right-click offers the same picker choice up
- *  front instead (openValueTypeMenu, near the context menu). Swapping the
- *  node rather than the value keeps its id, so the existing add/Enter
- *  handlers keep reading $("detail-new-value").value unchanged -- an
- *  interval field defines that getter too (intervalField, above). */
-function useIntervalForNewValue() {
-  const old = $("detail-new-value");
-  if (old.classList.contains("interval-field")) return;
-  const picker = intervalField(isoOf(new Date()), () => {}, focusId);
-  picker.id = "detail-new-value";
-  old.replaceWith(picker);
-  picker.querySelector(".interval-summary-btn").click();
-}
-
-/** Back to a plain text box, called once a property is actually added --
- *  the picker was only ever for shaping this one value, not a standing
- *  choice for the row. */
-function resetNewValueField() {
-  const old = $("detail-new-value");
-  if (old.tagName === "INPUT") { old.value = ""; return; }
-  const input = document.createElement("input");
-  input.type = "text";
-  input.id = "detail-new-value";
-  input.placeholder = "value";
-  wireNewValueRightClick(input);
-  old.replaceWith(input);
-}
-
-function wireNewValueRightClick(el) {
-  el.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    openValueTypeMenu(e.clientX, e.clientY, (typeId) => {
-      if (typeId === "interval") useIntervalForNewValue();
-    });
-  });
-}
-
-/** A plain text box with the registered providers as completions. Text,
- *  not a <select>: `provider` is an ordinary property like any other and
- *  naming one MonOSS doesn't have yet has to stay possible -- the list
- *  is help, not a constraint. */
-function providerField(text, onCommit) {
-  const field = plainField(text, onCommit);
-  const options = providerOptions();
-  if (options.length === 0) return field;
-
-  const listId = "provider-options";
-  let list = $(listId);
-  if (!list) {
-    list = document.createElement("datalist");
-    list.id = listId;
-    document.body.appendChild(list);
-  }
-  list.innerHTML = "";
-  for (const name of options) {
-    const option = document.createElement("option");
-    option.value = name;
-    list.appendChild(option);
-  }
-  field.setAttribute("list", listId);
-  return field;
-}
-
-// ---- interval picker: constants + pure parse/compose helpers ----
-//
-// core/interval.py owns the real grammar; these mirror just enough of it
-// in JS to drive a picker -- decomposing a value into an editable draft
-// and recomposing one back. Never expanding a recurring value into
-// occurrences, though (core/calendar.py's job, via dateutil -- "no
-// JavaScript reads an RRULE" stays true for *that*). A piece of a value
-// this can't safely decompose (a multi-day span, an UNTIL= rule, two
-// RRULE lines) is marked `simple: false` and kept as raw, editable text
-// instead of being silently rewritten or dropped.
-
-const DAY_CODES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
-const DAY_LABEL = { SU: "Sun", MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat" };
-const DAY_MIN = { SU: "S", MO: "M", TU: "T", WE: "W", TH: "T", FR: "F", SA: "S" };
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const FREQ_UNIT = { DAILY: "day", WEEKLY: "week", MONTHLY: "month", YEARLY: "year" };
-const ISO_DURATION_RE = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/i;
-
-const pad2 = (n) => String(n).padStart(2, "0");
-const isoOf = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
-const minutesOf = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
-const hhmmOf = (total) => {
-  const m = ((total % 1440) + 1440) % 1440;
-  return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
-};
-
-function parseIsoDurationMinutes(text) {
-  const m = ISO_DURATION_RE.exec(String(text || "").trim());
-  if (!m || (!m[1] && !m[2] && !m[3])) return null;
-  return (m[1] ? parseInt(m[1], 10) * 1440 : 0) + (m[2] ? parseInt(m[2], 10) * 60 : 0) + (m[3] ? parseInt(m[3], 10) : 0);
-}
-
-function formatDurationISO(totalMinutes) {
-  const mins = Math.max(1, Math.round(totalMinutes));
-  const h = Math.floor(mins / 60), m = mins % 60;
-  if (h && m) return `PT${h}H${m}M`;
-  if (h) return `PT${h}H`;
-  return `PT${m}M`;
-}
-
-/** The span after "/" decomposed into a same-day end time, when it fits
- *  that shape -- a duration up to 24h, or an explicit end landing on the
- *  same calendar day as the start. Anything else (a multi-day range, a
- *  longer duration, an end on a different day) is `simple: false`: the
- *  picker shows it as raw text instead of silently truncating it the
- *  moment some other control on the row is touched. */
-function decomposeSpan(date, time, allDay, tail) {
-  if (tail === null) return { simple: true, endTime: null };
-  if (allDay) return { simple: false, raw: tail };
-  const durationMinutes = parseIsoDurationMinutes(tail);
-  if (durationMinutes !== null) {
-    if (durationMinutes > 1440) return { simple: false, raw: tail };
-    return { simple: true, endTime: hhmmOf(minutesOf(time || "00:00") + durationMinutes) };
-  }
-  const endTimed = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?$/.exec(tail.trim());
-  if (endTimed && endTimed[1] === date) return { simple: true, endTime: endTimed[2] };
-  return { simple: false, raw: tail };
-}
-
-/** A bare RRULE UNTIL value (`20261209`, `20261209T000000`, or
- *  `20261209T000000Z`) as the date-only string the picker's "ends on"
- *  control edits, or null if it's some other shape entirely. The time
- *  and any UTC `Z` are dropped rather than preserved -- for a weekly
- *  class or task series, the day the repetition stops is the part
- *  anyone actually means, and a bare date is also the one UNTIL form
- *  that never hits dateutil's naive/aware comparison error (see
- *  core/calendar.py::_rule_text, which strips a `Z` for the same
- *  reason on the read side). */
-function decomposeUntilValue(raw) {
-  const m = /^(\d{4})(\d{2})(\d{2})(?:T\d{6}Z?)?$/.exec(raw);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
-}
-
-/** The rule lines beneath the start decomposed into repeat controls, when
- *  there is exactly one RRULE: line and it uses only FREQ/INTERVAL/BYDAY/
- *  COUNT/UNTIL, with at most one of COUNT/UNTIL present (RRULE permits
- *  only one). Any EXDATE:/RDATE:/EXRULE: lines (what Monastery writes
- *  when detaching one occurrence) are preserved verbatim as `otherLines`
- *  and re-appended on every write, never shown or edited here. Two or
- *  more RRULE lines, both COUNT and UNTIL together, or any other
- *  unsupported param, is `simple: false`: the whole rule block becomes
- *  raw, editable text instead of a structured editor that would drop
- *  what it can't parse. */
-function decomposeRuleLines(lines) {
-  const rruleLines = lines.filter((l) => /^RRULE:/i.test(l));
-  const otherLines = lines.filter((l) => !/^RRULE:/i.test(l));
-  if (rruleLines.length === 0) {
-    return { simple: true, freq: "NONE", interval: 1, byday: [], count: null, until: null, otherLines };
-  }
-  if (rruleLines.length > 1) return { simple: false, raw: lines.join("\n") };
-
-  const body = rruleLines[0].slice(rruleLines[0].indexOf(":") + 1);
-  const parts = {};
-  for (const bit of body.split(";")) {
-    const eq = bit.indexOf("=");
-    if (eq === -1) continue;
-    parts[bit.slice(0, eq).toUpperCase()] = bit.slice(eq + 1);
-  }
-  const known = new Set(["FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL"]);
-  const freq = (parts.FREQ || "").toUpperCase();
-  if (
-    Object.keys(parts).some((k) => !known.has(k)) ||
-    !["DAILY", "WEEKLY", "MONTHLY", "YEARLY"].includes(freq) ||
-    (parts.COUNT && parts.UNTIL)
-  ) {
-    return { simple: false, raw: lines.join("\n") };
-  }
-  const until = parts.UNTIL ? decomposeUntilValue(parts.UNTIL) : null;
-  if (parts.UNTIL && until === null) return { simple: false, raw: lines.join("\n") };
-  const interval = parts.INTERVAL ? Math.max(1, parseInt(parts.INTERVAL, 10) || 1) : 1;
-  const byday = parts.BYDAY ? parts.BYDAY.toUpperCase().split(",").filter((c) => DAY_CODES.includes(c)) : [];
-  const count = parts.COUNT ? Math.max(1, parseInt(parts.COUNT, 10) || 1) : null;
-  return { simple: true, freq, interval, byday, count, until, otherLines };
-}
-
-/** Parses an ISO 8601 interval (core/interval.py) into an editable draft:
- *  the start (date/time/allDay), plus `span` and `rule`, each either
- *  structured or a `simple: false` raw-text fallback. Returns null for
- *  anything that isn't an interval at all, so callers fall back to plain
- *  text rather than force a picker onto an unparseable value. */
-function parseIntervalValue(text) {
-  if (text === "") return null;
-  const lines = String(text).split("\n").map((l) => l.trim()).filter((l) => l !== "");
-  if (lines.length === 0) return null;
-  const head = lines[0];
-  const slash = head.indexOf("/");
-  const startText = slash === -1 ? head : head.slice(0, slash);
-  const tail = slash === -1 ? null : head.slice(slash + 1);
-
-  const timed = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?$/.exec(startText);
-  if (!timed && !/^\d{4}-\d{2}-\d{2}$/.test(startText)) return null;
-
-  const date = timed ? timed[1] : startText;
-  const time = timed ? timed[2] : "";
-  const allDay = !timed;
-  return {
-    date, time, allDay,
-    span: decomposeSpan(date, time, allDay, tail),
-    rule: decomposeRuleLines(lines.slice(1)),
-  };
-}
-
-function composeHead(draft) {
-  if (draft.allDay) return draft.date;
-  const start = `${draft.date}T${draft.time || "00:00"}:00`;
-  if (!draft.span.simple) return `${start}/${draft.span.raw}`;
-  if (draft.span.endTime === null) return start;
-  let mins = minutesOf(draft.span.endTime) - minutesOf(draft.time || "00:00");
-  if (mins <= 0) mins += 1440;
-  return `${start}/${formatDurationISO(mins)}`;
-}
-
-function composeRuleLines(rule) {
-  if (!rule.simple) return rule.raw ? rule.raw.split("\n").map((s) => s.trim()).filter(Boolean) : [];
-  const lines = [];
-  if (rule.freq !== "NONE") {
-    const bits = [`FREQ=${rule.freq}`];
-    if (rule.interval > 1) bits.push(`INTERVAL=${rule.interval}`);
-    if (rule.freq === "WEEKLY" && rule.byday.length) bits.push(`BYDAY=${rule.byday.join(",")}`);
-    if (rule.until) bits.push(`UNTIL=${rule.until.replace(/-/g, "")}`);
-    else if (rule.count) bits.push(`COUNT=${rule.count}`);
-    lines.push(`RRULE:${bits.join(";")}`);
-  }
-  return [...lines, ...(rule.otherLines || [])];
-}
-
-function serializeInterval(draft) {
-  return [composeHead(draft), ...composeRuleLines(draft.rule)].join("\n");
-}
-
-function fmtTime12h(hhmm) {
-  const [h, mi] = hhmm.split(":").map(Number);
-  const ap = h >= 12 ? "PM" : "AM";
-  return `${h % 12 === 0 ? 12 : h % 12}:${pad2(mi)} ${ap}`;
-}
-
-function durationLabelFor(startTime, endTime) {
-  let mins = minutesOf(endTime) - minutesOf(startTime || "00:00");
-  if (mins <= 0) mins += 1440;
-  const h = Math.floor(mins / 60), m = mins % 60;
-  return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
-}
-
-function humanRepeat(rule) {
-  const unit = FREQ_UNIT[rule.freq];
-  let s = rule.interval > 1 ? `every ${rule.interval} ${unit}s` : `every ${unit}`;
-  if (rule.freq === "WEEKLY" && rule.byday.length) s += " on " + rule.byday.map((c) => DAY_LABEL[c]).join(", ");
-  if (rule.until) {
-    const dt = new Date(`${rule.until}T00:00`);
-    s += `, until ${MONTH_SHORT[dt.getMonth()]} ${dt.getDate()}, ${dt.getFullYear()}`;
-  } else if (rule.count) {
-    s += `, ${rule.count}×`;
-  }
-  return s;
-}
-
-function humanSummary(draft) {
-  const dt = new Date(`${draft.date}T00:00`);
-  let s = `${MONTH_SHORT[dt.getMonth()]} ${dt.getDate()}, ${dt.getFullYear()}`;
-  if (draft.allDay) {
-    if (!draft.span.simple) s += " · custom span";
-  } else {
-    s += ` · ${fmtTime12h(draft.time || "00:00")}`;
-    if (draft.span.simple && draft.span.endTime) {
-      s += ` – ${fmtTime12h(draft.span.endTime)} (${durationLabelFor(draft.time, draft.span.endTime)})`;
-    } else if (!draft.span.simple) {
-      s += " · custom span";
-    }
-  }
-  if (draft.rule.simple && draft.rule.freq !== "NONE") s += ` · ${humanRepeat(draft.rule)}`;
-  else if (!draft.rule.simple) s += " · custom repeat";
-  return s;
-}
-
-function buildCalendarDays(monthStr, selectedDate, todayStr) {
-  const [y, mo] = monthStr.split("-").map(Number);
-  const first = new Date(y, mo - 1, 1);
-  const start = new Date(y, mo - 1, 1 - first.getDay());
-  const days = [];
-  for (let i = 0; i < 42; i++) {
-    const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
-    const iso = isoOf(dt);
-    days.push({
-      iso, num: dt.getDate(), inMonth: dt.getMonth() === mo - 1,
-      isToday: iso === todayStr, isSelected: iso === selectedDate,
-    });
-  }
-  return days;
-}
-
-/** Drops the interval panel below its summary button, as a fixed-position
- *  popup rather than an inline block -- the calendar grid needs real width
- *  to stay usable, and the inspector panel is user-resizable down to sizes
- *  that would otherwise crush it (see positionMenu, same idea for the
- *  context menu). Nudged back onscreen if it would overflow either edge. */
-function positionIntervalPanel(panel, anchor) {
-  const anchorRect = anchor.getBoundingClientRect();
-  panel.style.left = anchorRect.left + "px";
-  panel.style.top = (anchorRect.bottom + 4) + "px";
-  panel.classList.remove("hidden");
-  const rect = panel.getBoundingClientRect();
-  if (rect.right > window.innerWidth) {
-    panel.style.left = Math.max(8, window.innerWidth - rect.width - 8) + "px";
-  }
-  if (rect.bottom > window.innerHeight) {
-    panel.style.top = Math.max(8, anchorRect.top - rect.height - 4) + "px";
-  }
-}
-
-/** A collapsed summary button that expands into a full calendar grid,
- *  time/end-time, and repeat controls -- Monarch's Observatory design
- *  (docs/ui-setup.md). Defines its own `value` getter/setter so the
- *  revert-on-block call site in renderProperties() (`field.value =
- *  displayedText`) works unmodified, same as a plain <input>.
- *
- *  Writes on every control change rather than only on Done, and always
- *  in the duration form (`start/PT_H_M`) -- this editor doesn't need
- *  core/interval.py's format_like style-preservation, which exists for
- *  Monastery's drag/resize paths where exactly one dimension may change
- *  at a time. moteId is used only by Clear, to rebuild the row the same
- *  way the per-property delete (×) button already does once the value
- *  stops being interval-shaped. */
-function intervalField(rawValue, onCommit, moteId) {
-  let draft = parseIntervalValue(rawValue);
-  let month = draft.date.slice(0, 7);
-  let open = false;
-
-  const wrap = document.createElement("div");
-  wrap.className = "interval-field";
-
-  const summaryBtn = document.createElement("button");
-  summaryBtn.type = "button";
-  summaryBtn.className = "interval-summary-btn";
-
-  const panel = document.createElement("div");
-  panel.className = "interval-panel hidden";
-
-  function divider() {
-    const d = document.createElement("div");
-    d.className = "interval-divider";
-    return d;
-  }
-
-  // ---- calendar ----
-  const calHeader = document.createElement("div");
-  calHeader.className = "interval-cal-header";
-  const prevBtn = document.createElement("button");
-  prevBtn.type = "button"; prevBtn.className = "interval-cal-nav"; prevBtn.textContent = "‹";
-  const monthLabel = document.createElement("span");
-  monthLabel.className = "interval-cal-month";
-  const nextBtn = document.createElement("button");
-  nextBtn.type = "button"; nextBtn.className = "interval-cal-nav"; nextBtn.textContent = "›";
-  calHeader.append(prevBtn, monthLabel, nextBtn);
-
-  const weekdays = document.createElement("div");
-  weekdays.className = "interval-cal-weekdays";
-  for (const c of DAY_CODES) {
-    const s = document.createElement("span");
-    s.textContent = DAY_MIN[c];
-    weekdays.appendChild(s);
-  }
-
-  const grid = document.createElement("div");
-  grid.className = "interval-cal-grid";
-
-  const jumpChips = document.createElement("div");
-  jumpChips.className = "interval-jump-chips";
-  const jumpToday = document.createElement("button");
-  jumpToday.type = "button"; jumpToday.className = "interval-jump-chip"; jumpToday.textContent = "Today";
-  const jumpTomorrow = document.createElement("button");
-  jumpTomorrow.type = "button"; jumpTomorrow.className = "interval-jump-chip"; jumpTomorrow.textContent = "Tomorrow";
-  const jumpNextWeek = document.createElement("button");
-  jumpNextWeek.type = "button"; jumpNextWeek.className = "interval-jump-chip"; jumpNextWeek.textContent = "Next week";
-  jumpChips.append(jumpToday, jumpTomorrow, jumpNextWeek);
-
-  // ---- time / end time ----
-  const timeRow = document.createElement("div");
-  timeRow.className = "interval-time-row";
-  const allDayLabel = document.createElement("label");
-  allDayLabel.className = "picker-checkbox";
-  const allDayCheckbox = document.createElement("input");
-  allDayCheckbox.type = "checkbox";
-  allDayLabel.append(allDayCheckbox, document.createTextNode("All day"));
-  const timeInput = document.createElement("input");
-  timeInput.type = "time";
-  timeRow.append(allDayLabel, timeInput);
-
-  const endRow = document.createElement("div");
-  endRow.className = "interval-end-row";
-
-  // ---- repeat ----
-  // Structured repeat authoring (frequency, weekdays, ends-on/-after)
-  // lives in Monastery now -- it's the calendar app, and it's the one
-  // that reads `recurring` off core/calendar.py's expansion. Monarch
-  // still has to round-trip an existing rule without dropping it, so a
-  // rule is shown and edited as raw RRULE text here rather than losing
-  // the picker's ability to represent one at all.
-  const repeatRow = document.createElement("div");
-  repeatRow.className = "interval-repeat-row";
-  const repeatLabel = document.createElement("span");
-  repeatLabel.className = "interval-row-label";
-  repeatLabel.textContent = "Repeat";
-  repeatRow.append(repeatLabel);
-
-  const repeatDetail = document.createElement("div");
-  repeatDetail.className = "interval-repeat-detail";
-
-  // ---- footer ----
-  const footer = document.createElement("div");
-  footer.className = "interval-footer";
-  const summaryText = document.createElement("div");
-  summaryText.className = "interval-summary-text";
-  const rawValueText = document.createElement("div");
-  rawValueText.className = "interval-raw-value";
-  const footerBtns = document.createElement("div");
-  footerBtns.className = "interval-footer-btns";
-  const clearBtn = document.createElement("button");
-  clearBtn.type = "button"; clearBtn.className = "interval-clear-btn"; clearBtn.textContent = "Clear";
-  const doneBtn = document.createElement("button");
-  doneBtn.type = "button"; doneBtn.className = "interval-done-btn"; doneBtn.textContent = "Done";
-  footerBtns.append(clearBtn, doneBtn);
-  footer.append(summaryText, rawValueText, footerBtns);
-
-  panel.append(
-    calHeader, weekdays, grid, jumpChips,
-    divider(), timeRow, endRow,
-    divider(), repeatRow, repeatDetail,
-    divider(), footer,
-  );
-  wrap.append(summaryBtn, panel);
-
-  // ---- render passes ----
-
-  function commit() {
-    onCommit(serializeInterval(draft));
-    refreshText();
-  }
-
-  function refreshText() {
-    summaryBtn.textContent = humanSummary(draft);
-    summaryText.textContent = humanSummary(draft);
-    rawValueText.textContent = serializeInterval(draft);
-  }
-
-  function renderCalendar() {
-    const [y, mo] = month.split("-").map(Number);
-    monthLabel.textContent = `${MONTH_NAMES[mo - 1]} ${y}`;
-    grid.innerHTML = "";
-    const todayStr = isoOf(new Date());
-    for (const day of buildCalendarDays(month, draft.date, todayStr)) {
-      const cell = document.createElement("button");
-      cell.type = "button";
-      cell.className = "interval-cal-day";
-      cell.textContent = day.num;
-      if (!day.inMonth) cell.classList.add("out");
-      if (day.isToday) cell.classList.add("today");
-      if (day.isSelected) cell.classList.add("selected");
-      cell.addEventListener("click", () => {
-        draft.date = day.iso;
-        month = draft.date.slice(0, 7);
-        renderCalendar();
-        commit();
-      });
-      grid.appendChild(cell);
-    }
-  }
-
-  function renderTimeRow() {
-    allDayCheckbox.checked = draft.allDay;
-    timeInput.value = draft.time || "09:00";
-    timeInput.classList.toggle("hidden", draft.allDay);
-    endRow.classList.toggle("hidden", draft.allDay);
-    renderEndRow();
-  }
-
-  function renderEndRow() {
-    endRow.innerHTML = "";
-    if (draft.allDay) return;
-    if (!draft.span.simple) {
-      const note = document.createElement("div");
-      note.className = "interval-fallback-note";
-      note.textContent = "Custom span — edit as text:";
-      const field = plainField(draft.span.raw, (v) => {
-        draft.span = { simple: false, raw: v };
-        commit();
-      });
-      const reset = document.createElement("button");
-      reset.type = "button"; reset.className = "interval-fallback-reset"; reset.textContent = "Use a simple end time";
-      reset.addEventListener("click", () => {
-        draft.span = { simple: true, endTime: null };
-        renderEndRow();
-        commit();
-      });
-      endRow.append(note, field, reset);
-      return;
-    }
-    if (draft.span.endTime === null) {
-      const addBtn = document.createElement("button");
-      addBtn.type = "button"; addBtn.className = "interval-end-ghost"; addBtn.textContent = "+ Add an end time";
-      addBtn.addEventListener("click", () => {
-        const mins = (minutesOf(draft.time || "09:00") + 60) % 1440;
-        draft.span = { simple: true, endTime: hhmmOf(mins) };
-        renderEndRow();
-        commit();
-      });
-      endRow.appendChild(addBtn);
-      return;
-    }
-    const label = document.createElement("span");
-    label.className = "interval-row-label";
-    label.textContent = "Ends at";
-    const endInput = document.createElement("input");
-    endInput.type = "time";
-    endInput.value = draft.span.endTime;
-    endInput.addEventListener("change", () => {
-      draft.span = { simple: true, endTime: endInput.value || draft.span.endTime };
-      renderEndRow();
-      commit();
-    });
-    const durationLabel = document.createElement("span");
-    durationLabel.className = "interval-end-duration";
-    durationLabel.textContent = durationLabelFor(draft.time, draft.span.endTime);
-    const clear = document.createElement("button");
-    clear.type = "button"; clear.className = "interval-end-clear"; clear.textContent = "×";
-    clear.addEventListener("click", () => {
-      draft.span = { simple: true, endTime: null };
-      renderEndRow();
-      commit();
-    });
-    endRow.append(label, endInput, durationLabel, clear);
-  }
-
-  /** No frequency pills or weekday/ends steppers here any more -- see the
-   *  comment above `repeatRow`. An existing rule is shown as raw RRULE
-   *  text (seeded from composeRuleLines when it's still `simple: true`,
-   *  so switching to text doesn't reformat a rule the user hasn't
-   *  touched), and a fresh one starts from a plain weekly template. */
-  function renderRepeatDetail() {
-    repeatDetail.innerHTML = "";
-    const hasRule = !draft.rule.simple || draft.rule.freq !== "NONE" || (draft.rule.otherLines || []).length > 0;
-    if (!hasRule) {
-      const addBtn = document.createElement("button");
-      addBtn.type = "button"; addBtn.className = "interval-end-ghost"; addBtn.textContent = "+ Add a repeat rule";
-      addBtn.addEventListener("click", () => {
-        draft.rule = { simple: false, raw: "RRULE:FREQ=WEEKLY" };
-        renderRepeatDetail();
-        commit();
-      });
-      repeatDetail.appendChild(addBtn);
-      return;
-    }
-
-    const note = document.createElement("div");
-    note.className = "interval-fallback-note";
-    note.textContent = "Structured repeat editing lives in Monastery now — edit the rule as text here:";
-    const seed = draft.rule.simple ? composeRuleLines(draft.rule).join("\n") : draft.rule.raw;
-    const field = plainField(seed, (v) => {
-      draft.rule = { simple: false, raw: v };
-      commit();
-    });
-    const reset = document.createElement("button");
-    reset.type = "button"; reset.className = "interval-fallback-reset"; reset.textContent = "Remove repeat";
-    reset.addEventListener("click", () => {
-      draft.rule = { simple: true, freq: "NONE", interval: 1, byday: [], count: null, until: null, otherLines: draft.rule.otherLines || [] };
-      renderRepeatDetail();
-      commit();
-    });
-    repeatDetail.append(note, field, reset);
-  }
-
-  function renderAll() {
-    renderCalendar();
-    renderTimeRow();
-    renderRepeatDetail();
-    refreshText();
-  }
-
-  prevBtn.addEventListener("click", () => {
-    const [y, mo] = month.split("-").map(Number);
-    const dt = new Date(y, mo - 2, 1);
-    month = `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}`;
-    renderCalendar();
-  });
-  nextBtn.addEventListener("click", () => {
-    const [y, mo] = month.split("-").map(Number);
-    const dt = new Date(y, mo, 1);
-    month = `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}`;
-    renderCalendar();
-  });
-  const jumpTo = (offsetDays) => {
-    const dt = new Date();
-    dt.setDate(dt.getDate() + offsetDays);
-    draft.date = isoOf(dt);
-    month = draft.date.slice(0, 7);
-    renderCalendar();
-    commit();
-  };
-  jumpToday.addEventListener("click", () => jumpTo(0));
-  jumpTomorrow.addEventListener("click", () => jumpTo(1));
-  jumpNextWeek.addEventListener("click", () => jumpTo(7));
-
-  allDayCheckbox.addEventListener("change", () => {
-    draft.allDay = allDayCheckbox.checked;
-    if (!draft.allDay && !draft.time) draft.time = "09:00";
-    if (draft.allDay) draft.span = { simple: true, endTime: null };
-    renderTimeRow();
-    commit();
-  });
-  timeInput.addEventListener("change", () => {
-    // Moving the start has to move the end with it -- the span is what a
-    // start edit must preserve, not the end's own clock time (which
-    // would otherwise silently shrink or invert the moment the start
-    // crosses it).
-    const oldTime = draft.time || "09:00";
-    const newTime = timeInput.value || "09:00";
-    if (draft.span.simple && draft.span.endTime !== null) {
-      let duration = minutesOf(draft.span.endTime) - minutesOf(oldTime);
-      if (duration <= 0) duration += 1440;
-      draft.span = { simple: true, endTime: hhmmOf(minutesOf(newTime) + duration) };
-    }
-    draft.time = newTime;
-    renderEndRow();
-    commit();
-  });
-
-  function closePanel() {
-    open = false;
-    panel.classList.add("hidden");
-    summaryBtn.classList.remove("open");
-    if (closeOpenIntervalPanel === closePanel) closeOpenIntervalPanel = null;
-  }
-
-  function openPanel() {
-    if (closeOpenIntervalPanel) closeOpenIntervalPanel();
-    open = true;
-    positionIntervalPanel(panel, summaryBtn);
-    summaryBtn.classList.add("open");
-    closeOpenIntervalPanel = closePanel;
-  }
-
-  summaryBtn.addEventListener("click", () => (open ? closePanel() : openPanel()));
-  doneBtn.addEventListener("click", closePanel);
-  clearBtn.addEventListener("click", async () => {
-    if (editBlocked()) return;
-    closePanel();
-    await onCommit("");
-    await openDetailPanel(moteId);
-  });
-
-  renderAll();
-
-  Object.defineProperty(wrap, "value", {
-    get: () => serializeInterval(draft),
-    set(v) {
-      draft = parseIntervalValue(v) || {
-        date: isoOf(new Date()), time: "", allDay: true,
-        span: { simple: true, endTime: null },
-        rule: { simple: true, freq: "NONE", interval: 1, byday: [], count: null, until: null, otherLines: [] },
-      };
-      month = draft.date.slice(0, 7);
-      renderAll();
-    },
-  });
-  return wrap;
-}
 
 function openLink(url) {
   call(api.open_link(url));
 }
 
-function renderProperties(mote) {
-  const container = $("detail-properties");
-  container.innerHTML = "";
-  const entries = Object.entries(mote.properties);
-  if (entries.length === 0) {
-    container.innerHTML = '<div class="empty-note">None</div>';
-    return;
-  }
-  for (const [key, value] of entries) {
-    const row = document.createElement("div");
-    row.className = "detail-row";
-
-    const keyEl = document.createElement("span");
-    keyEl.className = "key";
-    keyEl.textContent = key;
-    keyEl.title = key;
-    maybeAddReservedBadge(keyEl, key, reservedProperties);
-
-    const displayedText = typeof value === "string" ? value : JSON.stringify(value);
-    let currentField;
-    const commitProperty = async (next) => {
-      if (editBlocked()) { currentField.value = displayedText; return; }
-      await call(api.update_mote(mote.id, { [key]: next }));
-      await refocus(focusId, { pan: false });
-      await refreshMoteCache();
-    };
-    const field = valueField(key, value, commitProperty, mote.id);
-    currentField = field;
-
-    const del = document.createElement("button");
-    del.className = "del";
-    del.textContent = "×";
-    del.title = `Delete ${key}`;
-    del.addEventListener("click", async () => {
-      if (editBlocked()) return;
-      await call(api.delete_property(mote.id, key));
-      await refocus(focusId, { pan: false });
-      await openDetailPanel(mote.id);
-    });
-
-    // A property gets a picker by shape once it already holds a value
-    // that fits one (valueField, above); this is how to reach the same
-    // picker before that's true -- an empty box, or one holding plain
-    // text you mean to replace. modoc/provider keep their own dedicated
-    // editors and are left alone; an interval field already has the
-    // picker, so it doesn't need a second way in.
-    if (key !== "modoc" && key !== "provider" && !field.classList.contains("interval-field")) {
-      field.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        openValueTypeMenu(e.clientX, e.clientY, (typeId) => {
-          if (typeId !== "interval") return;
-          const seed = parseIntervalValue(displayedText) ? displayedText : isoOf(new Date());
-          const picker = intervalField(seed, commitProperty, mote.id);
-          currentField.replaceWith(picker);
-          currentField = picker;
-          picker.querySelector(".interval-summary-btn").click();
-        });
-      });
-    }
-
-    // "url" is a reserved property name -- a mote holding one, whether a
-    // web link or a local path, gets a one-click way to launch it via the
-    // OS's default handler instead of only being able to read/edit it.
-    const trailing = [];
-    // "modoc" is a note (docs/modoc.md) -- same one-click-to-follow
-    // treatment "url" gets below, since the row itself is deliberately
-    // only a summary.
-    if (key === "modoc" && typeof value === "string") {
-      const open = document.createElement("button");
-      open.className = "open-link";
-      open.textContent = "↗";
-      open.title = "Open in Mora";
-      open.addEventListener("click", () => openMora(mote.id));
-      trailing.push(open);
-    }
-    if (key === "url" && typeof value === "string" && value.trim()) {
-      const open = document.createElement("button");
-      open.className = "open-link";
-      open.textContent = "↗";
-      open.title = "Open";
-      open.addEventListener("click", () => openLink(value));
-      trailing.push(open);
-    }
-    row.append(keyEl, field, ...trailing, del);
-    container.appendChild(row);
-
-    // On a property-model mote, say what the named provider can actually
-    // compute, right under the box naming it -- the CLI has had `model
-    // capabilities` for this and the app had nothing.
-    if (key === "provider" && typeof value === "string") {
-      const summary = providerSummary(value.trim());
-      if (summary) {
-        const note = document.createElement("div");
-        note.className = "detail-note";
-        note.textContent = summary;
-        container.appendChild(note);
-      }
-    }
-  }
-}
-
-function renderSpeciesSection(mote, species, instances) {
-  const container = $("detail-species");
-  container.innerHTML = "";
-  if (species.length === 0) {
-    container.innerHTML = '<div class="empty-note">Not an instance of anything</div>';
-  }
-  for (const speciesMote of species) {
-    const rel = payload.relationships.find(
-      (r) => r.type === "instance_of" && r.from_id === mote.id && r.to_id === speciesMote.id
-    );
-    const row = document.createElement("div");
-    row.className = "rel-row";
-
-    const label = document.createElement("span");
-    label.className = "rel-other";
-    label.textContent = nodeLabel(speciesMote);
-    label.addEventListener("click", () => selectMote(speciesMote.id));
-
-    const del = document.createElement("button");
-    del.textContent = "×";
-    del.title = "Remove from this species";
-    del.addEventListener("click", async () => {
-      if (editBlocked()) return;
-      if (rel) await call(api.delete_relationship(rel.id));
-      await refocus(focusId, { pan: false });
-      await openDetailPanel(mote.id);
-    });
-
-    row.append(label, del);
-    container.appendChild(row);
-  }
-
-  // Instantiating from a species is offered on the species itself, which
-  // is where you are when you think "I want another one of these".
-  const isSpecies = instances.length > 0 || isKind(mote.id, KIND.SPECIES);
-  $("new-instance-btn").classList.toggle("hidden", !isSpecies);
-  $("detail-instance-count").textContent =
-    instances.length > 0 ? `${instances.length} instance${instances.length === 1 ? "" : "s"}` : "";
-}
-
-function renderRelationships(moteId, rels) {
-  const container = $("detail-relationships");
-  container.innerHTML = "";
-  const shown = rels.filter((r) => r.type !== "instance_of");
-  if (shown.length === 0) {
-    container.innerHTML = '<div class="empty-note">None</div>';
-  }
-  for (const rel of shown) {
-    const otherId = rel.from_id === moteId ? rel.to_id : rel.from_id;
-    const other = moteById(otherId);
-    const row = document.createElement("div");
-    row.className = "rel-row";
-
-    const arrow = document.createElement("span");
-    arrow.className = "arrow";
-    arrow.textContent = rel.from_id === moteId ? "→" : "←";
-
-    const type = document.createElement("span");
-    type.className = "rel-type";
-    type.textContent = rel.type;
-    type.title = "Click to rename";
-    maybeAddReservedBadge(type, rel.type, reservedRelTypes);
-    type.addEventListener("click", async () => {
-      if (await renameRelationshipType(rel)) await openDetailPanel(moteId);
-    });
-
-    const label = document.createElement("span");
-    label.className = "rel-other";
-    label.textContent = other ? nodeLabel(other) : otherId.slice(0, 8) + "…";
-    label.title = otherId;
-    label.addEventListener("click", () => selectMote(otherId));
-
-    const del = document.createElement("button");
-    del.textContent = "×";
-    del.addEventListener("click", async () => {
-      if (await deleteRelationshipAndRefresh(rel)) await openDetailPanel(moteId);
-    });
-
-    row.append(arrow, type, label, del);
-    container.appendChild(row);
-  }
-}
-
 async function selectMote(moteId, opts = {}) {
   await refocus(moteId, opts);
-  await openDetailPanel(moteId);
+  await openDetailPanel(moteId, { newTab: !!opts.newTab });
 }
 
 async function connectNodes(sourceId, targetId) {
@@ -2196,16 +1271,6 @@ function setupQuickAdd() {
     closeQuickAdd();
   });
 
-  // The interval popup (app.js::intervalField) is fixed-positioned outside
-  // its row's flow, but stays put in the DOM as a child of that row -- so
-  // composedPath() still contains it for a click on the summary button or
-  // anywhere inside the panel, and only an actual outside click reaches here.
-  document.addEventListener("click", (e) => {
-    if (!closeOpenIntervalPanel) return;
-    if (e.composedPath().some((el) => el.classList && el.classList.contains("interval-field"))) return;
-    closeOpenIntervalPanel();
-  });
-
   $("create-mote-btn").addEventListener("click", async () => {
     if (editBlocked()) return;
     const props = collectQuickAddProperties();
@@ -2282,92 +1347,6 @@ function setupPickerKeyNav(input, resultsContainer) {
     rows[current].classList.remove("highlighted");
     rows[next].classList.add("highlighted");
     rows[next].scrollIntoView({ block: "nearest" });
-  });
-}
-
-// ---- species picker + new instance ----
-
-function hideSpeciesPicker() {
-  $("species-picker-wrap").classList.add("hidden");
-  $("species-picker-input").value = "";
-  speciesPickerTargetId = null;
-  speciesPickerMode = "instance";
-}
-
-/** One picker, two questions. "Set species…" declares this mote an
- *  instance of the one you pick; "Make template of…" declares it that
- *  species' template instead. Both are "point at a species", so they
- *  share the picker rather than the second growing its own copy of it --
- *  templates previously had no UI at all, reachable only over MCP or by
- *  hand-typing a template_of relationship. */
-function openSpeciesPicker(mode) {
-  if (editBlocked()) return;
-  if (!focusId) return;
-  speciesPickerMode = mode;
-  speciesPickerTargetId = focusId;
-  $("species-picker-input").placeholder =
-    mode === "template" ? "Template of which species?…" : "Search for a species…";
-  $("species-picker-wrap").classList.remove("hidden");
-  renderSpeciesPickerResults("");
-  $("species-picker-input").focus();
-}
-
-function renderSpeciesPickerResults(query) {
-  const container = $("species-picker-results");
-  container.innerHTML = "";
-  const q = (query || "").toLowerCase();
-  const candidates = allMotes
-    .filter((m) => m.id !== speciesPickerTargetId)
-    .filter((m) => !q || nodeLabel(m).toLowerCase().includes(q))
-    .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
-    .slice(0, 40);
-
-  if (candidates.length === 0) {
-    container.innerHTML = '<div class="search-empty">No matches</div>';
-    return;
-  }
-  candidates.forEach((mote, i) => {
-    const row = document.createElement("div");
-    row.className = "search-result-row" + (i === 0 ? " highlighted" : "");
-    row.innerHTML = '<span class="label"></span>';
-    row.querySelector(".label").textContent = nodeLabel(mote);
-    row.addEventListener("mousedown", async (e) => {
-      e.preventDefault();
-      if (editBlocked()) return;
-      const targetId = speciesPickerTargetId;
-      const mode = speciesPickerMode;
-      await call(
-        mode === "template"
-          ? api.set_template(targetId, mote.id)
-          : api.set_species(targetId, mote.id)
-      );
-      hideSpeciesPicker();
-      await refocus(targetId, { pan: false });
-      await openDetailPanel(targetId);
-      showToast(mode === "template" ? "Template set." : "Species set.");
-    });
-    container.appendChild(row);
-  });
-}
-
-function setupSpeciesControls() {
-  $("set-species-btn").addEventListener("click", () => openSpeciesPicker("instance"));
-  $("set-template-btn").addEventListener("click", () => openSpeciesPicker("template"));
-  $("species-picker-input").addEventListener("input", (e) =>
-    renderSpeciesPickerResults(e.target.value)
-  );
-  $("species-picker-input").addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hideSpeciesPicker();
-  });
-  setupPickerKeyNav($("species-picker-input"), $("species-picker-results"));
-
-  $("new-instance-btn").addEventListener("click", async () => {
-    if (editBlocked()) return;
-    if (!focusId) return;
-    const mote = await call(api.create_instance(focusId, {}));
-    await refreshMoteCache();
-    await selectMote(mote.id);
-    showToast("Instance created.");
   });
 }
 
@@ -2595,8 +1574,8 @@ function addMenuItem(menu, label, onClick, { danger = false, disabled = false } 
   menu.appendChild(item);
 }
 
-/** Shared by openContextMenu and openValueTypeMenu: drops the menu at the
- *  click point, then nudges it back onscreen if it would overflow. */
+/** Drops a menu at the click point, then nudges it back onscreen if it
+ *  would overflow. */
 function positionMenu(menu, clientX, clientY) {
   menu.style.left = clientX + "px";
   menu.style.top = clientY + "px";
@@ -2610,32 +1589,30 @@ function positionMenu(menu, clientX, clientY) {
   }
 }
 
-/** A property's value has no stored type -- valueField (above) picks an
- *  editor by shape, which only works once a value already exists to sniff.
- *  This is the other direction: right-click an empty or plain-text value
- *  box to say up front what it should hold. One entry today (the interval
- *  picker); a future property type -- a mote reference, a color -- is
- *  another line here, not a redesign. */
-const VALUE_TYPE_PICKERS = [
-  { id: "interval", label: "Date & time…" },
-];
-
-function openValueTypeMenu(clientX, clientY, onChoose) {
-  closeTopMenus();
-  const menu = $("context-menu");
-  menu.innerHTML = "";
-  for (const t of VALUE_TYPE_PICKERS) {
-    addMenuItem(menu, t.label, () => onChoose(t.id));
-  }
-  positionMenu(menu, clientX, clientY);
-}
-
 async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
   closeTopMenus(); // mutual exclusion with the topbar dropdowns, both ways
   // graph.js may have just replaced the selection with the right-clicked
   // mote (or left an existing multi-selection that includes it) -- the
-  // panel needs to catch up before the menu's actions read graph.selectedIds.
-  if (targetId) await syncSelectionPanel([...graph.selectedIds]);
+  // statusbar and multi-select panel need to catch up before the menu's
+  // actions read graph.selectedIds. Deliberately *not* the full
+  // syncSelectionPanel: that would also swap the inspector to focus this
+  // mote, clobbering whatever tab is already open there before "Inspect
+  // in new tab" ever gets a chance to add one.
+  if (targetId) {
+    updateStatusbar();
+    const ids = [...graph.selectedIds];
+    if (ids.length > 1) {
+      renderMultiSelectPanel(ids);
+    } else if (multiSelectIds) {
+      // Right-click collapsed a previous multi-selection down to just this
+      // one mote -- hide the now-stale aggregate panel without touching
+      // the inspector, which would clobber whatever tab is open there.
+      $("detail-panel").classList.add("hidden");
+      $("detail-relationship").classList.add("hidden");
+      $("detail-relationship-multi").classList.add("hidden");
+      multiSelectIds = null;
+    }
+  }
 
   const menu = $("context-menu");
   menu.innerHTML = "";
@@ -2646,6 +1623,11 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     // (syncSelectionPanel above already reconciled it) acts on the whole
     // selection, matching the precedent Delete already set.
     const ids = graph.selectedIds.has(targetId) ? [...graph.selectedIds] : [targetId];
+    // First, and about this one mote even inside a multi-selection: the
+    // inspector is a single-mote surface, and "in a new tab" is the
+    // gesture ctrl-click used to be before ctrl+drag claimed it here.
+    addMenuItem(menu, "Inspect in new tab",
+                () => Inspector.open(targetId, { newTab: true }));
     addMenuItem(menu, ids.length > 1 ? `Copy ${ids.length} motes` : "Copy", () => copySelection(ids));
     // Mixed pinned/unpinned within a selection reads as "Pin" and pins
     // everything; only once every member is already pinned does it flip
@@ -2861,45 +1843,6 @@ function comingSoon(label) {
   showToast(`${label} isn't built yet.`);
 }
 
-/** Shared by the garden dropdown's "+ New garden…" and the File menu's
- *  "New garden…" -- two entry points to the same action, so they can't
- *  drift. closeGardensModal() is a harmless no-op if the modal isn't the
- *  one open (it's the gardens modal's own #new-garden-btn that also calls
- *  this, and that one *is* inside the modal). */
-async function createGardenFlow() {
-  const name = window.prompt("New garden name:");
-  if (!name) return;
-  await call(api.create_garden(name));
-  await call(api.switch_garden(name));
-  closeGardensModal();
-  await loadGarden(name);
-}
-
-/** Shared by the gardens modal's per-row Export button and the File
- *  menu's "Export garden as JSON…" -- the same action on the same
- *  format, so the File menu points at the real thing rather than a
- *  "soon" stub sitting next to a feature that already works. */
-async function exportGardenFlow(name) {
-  const result = await call(api.export_garden_to_file(name));
-  if (!result.cancelled) showToast(`Exported to ${result.path}`);
-}
-
-/** Shared by the gardens modal's Import button and the File menu's
- *  "Import garden…". Imports always land in a new garden: garden_io
- *  refuses to merge into one that already holds any of the incoming
- *  mote ids (core/garden_io.py), so asking for a name up front is the
- *  honest flow rather than discovering the conflict afterward. */
-async function importGardenFlow() {
-  const name = window.prompt("Import into a new garden named:");
-  if (!name) return;
-  const result = await call(api.import_garden_into_new(name));
-  if (result.cancelled) return;
-  await call(api.switch_garden(result.garden));
-  closeGardensModal();
-  await loadGarden(result.garden);
-  showToast(`Imported ${result.motes} motes, ${result.relationships} relationships.`);
-}
-
 function setupTopMenus() {
   for (const name of ["garden", "file", "view", "tools"]) {
     $(`${name}-btn`).addEventListener("click", () => toggleTopMenu(name));
@@ -2922,208 +1865,24 @@ function setupTopMenus() {
     });
   }
 
-  $("garden-menu-new").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
-  $("garden-menu-manage").addEventListener("click", () => { closeTopMenus(); openGardensModal(); });
-  $("file-new-garden").addEventListener("click", () => { closeTopMenus(); createGardenFlow(); });
-  $("file-import-garden").addEventListener("click", () => { closeTopMenus(); importGardenFlow(); });
-  $("file-export-garden").addEventListener("click", () => {
-    closeTopMenus();
-    exportGardenFlow(currentGarden);
-  });
+  // Both entry points open the same window -- the one all six apps
+  // open, rather than the modal this window used to keep to itself.
+  for (const id of ["garden-menu-manage", "file-manage-gardens"]) {
+    $(id).addEventListener("click", () => { closeTopMenus(); call(api.open_gardens()); });
+  }
   $("view-reset-view").addEventListener("click", () => { closeTopMenus(); resetViewAndUnhideAll(); });
   $("view-toggle-panel").addEventListener("click", () => { closeTopMenus(); toggleControlPanel(); });
 }
 
-// ---- gardens modal ----
-//
-// Reached from the garden dropdown's "Manage gardens…" (and, for New
-// garden specifically, duplicated as a quick entry point in both that
-// dropdown and the File menu) -- a centered modal, not an anchored
-// dropdown, gives Export/Delete room to sit as real per-row buttons
-// instead of being crammed into a narrow menu item.
-
-async function renderGardensList() {
-  const [gardens, defaultGarden] = await Promise.all([
-    call(api.list_gardens()),
-    call(api.get_default_garden()),
-  ]);
-  const container = $("gardens-list");
-  container.innerHTML = "";
-
-  for (const name of gardens) {
-    const isDefault = name === defaultGarden;
-    const row = document.createElement("div");
-    row.className = "garden-row";
-    row.innerHTML =
-      '<span class="check"></span><span class="name"></span>' +
-      '<button type="button" class="linkish star"></button>' +
-      '<button type="button" class="ghost">Export</button>' +
-      '<button type="button" class="danger">Delete</button>';
-    row.querySelector(".check").textContent = name === currentGarden ? "✓" : "";
-    row.querySelector(".name").textContent = name;
-
-    // Whichever garden this points at is what a fresh launch (no
-    // --garden flag, and any MCP/CLI call that omits garden) opens on,
-    // in place of silently auto-creating an empty "default" -- see
-    // core/gardens.py::resolve_garden. Clicking the star on the current
-    // default clears the preference back to that old behavior.
-    const starBtn = row.querySelector(".star");
-    starBtn.textContent = isDefault ? "★" : "☆";
-    starBtn.title = isDefault
-      ? "Default garden -- click to unset"
-      : "Set as default garden";
-    starBtn.classList.toggle("on", isDefault);
-    starBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (isDefault) {
-        await call(api.clear_default_garden());
-      } else {
-        await call(api.set_default_garden(name));
-      }
-      await renderGardensList();
-    });
-
-    row.addEventListener("click", async () => {
-      if (name === currentGarden) return;
-      closeGardensModal();
-      await call(api.switch_garden(name));
-      await loadGarden(name);
-    });
-
-    row.querySelector(".ghost").addEventListener("click", (e) => {
-      e.stopPropagation();
-      exportGardenFlow(name);
-    });
-
-    // Disabled client-side for the same two cases the backend itself
-    // blocks, so the common case never even reaches a rejected-promise
-    // toast -- switching away first (or there being nothing else) is
-    // obvious just from looking at the list.
-    const deleteBtn = row.querySelector(".danger");
-    if (name === currentGarden || gardens.length <= 1) {
-      deleteBtn.disabled = true;
-      deleteBtn.title = name === currentGarden
-        ? "Switch to another garden before deleting this one"
-        : "Can't delete the last garden";
-    } else {
-      deleteBtn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (!window.confirm(`Delete garden '${name}'?`)) return;
-        await call(api.delete_garden(name));
-        await renderGardensList();
-        showUndoToast(`Deleted garden '${name}'.`, async () => {
-          await call(api.restore_garden(name));
-          await renderGardensList();
-          showToast(`Restored garden '${name}'.`);
-        });
-      });
-    }
-
-    container.appendChild(row);
-  }
-}
-
-function openGardensModal() {
-  $("gardens-overlay").classList.remove("hidden");
-  renderGardensList();
-}
-
-function closeGardensModal() {
-  $("gardens-overlay").classList.add("hidden");
-}
-
-function setupGardensModal() {
-  $("gardens-overlay").addEventListener("mousedown", (e) => {
-    if (e.target === $("gardens-overlay")) closeGardensModal();
-  });
-
-  $("new-garden-btn").addEventListener("click", createGardenFlow);
-  $("import-garden-btn").addEventListener("click", importGardenFlow);
-}
-
-// ---- sync modal ----
-//
-// Reached from Tools -> Sync…. core/sync.py already does the real work
-// (push/pull over an append-only oplog, safe for a folder-sync tool like
-// Syncthing/Dropbox/iCloud Drive to carry); this modal just exposes
-// enable/disable, folder choice, manual sync, and the auto-sync flag
-// that gates monarch/api.py's existing lifecycle sync points (open, garden
-// switch, close) -- there's no new timer here, "automatic" means those
-// three call sites, not a background poll.
-
-async function renderSyncModal() {
-  const status = await call(api.sync_status());
-  const enabled = !!status.sync_dir;
-
-  $("sync-disabled-body").classList.toggle("hidden", enabled);
-  $("sync-enabled-body").classList.toggle("hidden", !enabled);
-  if (!enabled) return;
-
-  $("sync-folder-path").textContent = status.sync_dir;
-  $("sync-folder-path").title = status.sync_dir;
-  $("sync-auto-checkbox").checked = status.auto_sync;
-
-  const lines = [`${status.local_ops_pending} of ${status.local_ops} local change(s) not yet pushed.`];
-  lines.push(status.remotes.length
-    ? `${status.remotes.length} other device(s) seen.`
-    : "No other devices seen yet.");
-  $("sync-status-lines").innerHTML = lines.map((l) => `<p>${l}</p>`).join("");
-}
-
-function openSyncModal() {
-  $("sync-overlay").classList.remove("hidden");
-  renderSyncModal();
-}
-
-function closeSyncModal() {
-  $("sync-overlay").classList.add("hidden");
-}
-
-function setupSyncModal() {
-  $("sync-overlay").addEventListener("mousedown", (e) => {
-    if (e.target === $("sync-overlay")) closeSyncModal();
-  });
-
-  const enableFlow = async () => {
-    const picked = await call(api.choose_sync_folder());
-    if (picked.cancelled) return;
-    await call(api.enable_sync(picked.path));
-    await renderSyncModal();
-    showToast("Sync enabled.");
-  };
-  $("sync-enable-btn").addEventListener("click", enableFlow);
-  $("sync-change-folder-btn").addEventListener("click", enableFlow);
-
-  $("sync-auto-checkbox").addEventListener("change", (e) => {
-    call(api.set_auto_sync(e.target.checked));
-  });
-
-  $("sync-now-btn").addEventListener("click", async () => {
-    const btn = $("sync-now-btn");
-    btn.disabled = true;
-    btn.textContent = "Syncing…";
-    try {
-      await call(api.sync_now());
-      showToast("Synced.");
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Sync now";
-    }
-    await renderSyncModal();
-  });
-
-  $("sync-disable-btn").addEventListener("click", async () => {
-    if (!window.confirm("Stop syncing this garden? Your local data is unaffected.")) return;
-    await call(api.disable_sync());
-    await renderSyncModal();
-    showToast("Sync disabled.");
-  });
-}
-
+// Sync moved out of this window with the rest of garden management:
+// it is a property of a garden, not of the window looking at one, and
+// five of the six windows never had it at all. The Gardens window opens
+// straight at this garden's sync settings (api_common.open_gardens's
+// `sync` flag) so the menu item still lands where it used to.
 function setupSync() {
   $("open-sync-btn").addEventListener("click", () => {
     closeTopMenus();
-    openSyncModal();
+    call(api.open_gardens(true));
   });
 }
 
@@ -3164,33 +1923,6 @@ function setupViewControls() {
   });
   $("close-panel").addEventListener("click", closeDetailPanel);
 
-  wireNewValueRightClick($("detail-new-value"));
-
-  $("detail-add-property-btn").addEventListener("click", async () => {
-    if (editBlocked()) return;
-    const key = $("detail-new-key").value.trim();
-    if (!key || !focusId) return;
-    await call(api.update_mote(focusId, { [key]: $("detail-new-value").value }));
-    $("detail-new-key").value = "";
-    resetNewValueField();
-    await refocus(focusId, { pan: false });
-    await openDetailPanel(focusId);
-  });
-
-  // Mirrors quick-add's own Enter-to-submit (setupQuickAdd) -- this is the
-  // same "type key/value, press Enter" gesture, and only one of the two
-  // required a click on its button to actually do anything. Matched by id
-  // rather than tagName so an Enter inside the interval picker's own time
-  // or repeat-count inputs (swapped in via useIntervalForNewValue) edits
-  // that control instead of submitting the row early.
-  $("detail-add-property").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.target.id === "detail-new-key" || e.target === $("detail-new-value"))) {
-      e.preventDefault();
-      $("detail-add-property-btn").click();
-    }
-  });
-
-  $("delete-mote-btn").addEventListener("click", deleteSelection);
   $("delete-selection-btn").addEventListener("click", deleteSelection);
   $("delete-relationship-selection-btn").addEventListener("click", deleteRelationshipSelection);
 }
@@ -3491,10 +2223,7 @@ function setupKeyboard() {
     if (e.key !== "Escape") return;
     if (!$("search-overlay").classList.contains("hidden")) { closeSearch(); return; }
     if (launcherIsOpen()) { closeLauncher(); return; }
-    if (!$("gardens-overlay").classList.contains("hidden")) { closeGardensModal(); return; }
-    if (!$("species-picker-wrap").classList.contains("hidden")) { hideSpeciesPicker(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
-    if (closeOpenIntervalPanel) { closeOpenIntervalPanel(); return; }
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
@@ -3553,6 +2282,22 @@ function providerSummary(name) {
 
 async function init() {
   api = window.pywebview.api;
+  Inspector.install({
+    api,
+    // A write in the panel changes motes the canvas is drawing, and the
+    // panel has no idea how to repaint a force-directed graph.
+    onChanged: () => refocus(focusId, { pan: false }).then(refreshMoteCache),
+    valueEditor: monarchValueEditor,
+    advancedSections: [monarchSpeciesExtras],
+  });
+  CommandBar.install({
+    api,
+    onChanged: () => refocus(focusId, { pan: false }).then(refreshMoteCache),
+    // Landing on a mote here means "recenter the graph on it", not just
+    // opening the panel -- a command bar that finds R1 and leaves it off
+    // in an unfocused corner of the canvas didn't really take you there.
+    onNavigate: (moteId) => refocus(moteId).then(() => Inspector.open(moteId)),
+  });
 
   const reserved = await call(api.reserved_names());
   reservedProperties = new Set(reserved.properties);
@@ -3562,12 +2307,16 @@ async function init() {
 
   graph = new MonossGraph($("graph"), {
     labelFor: nodeLabel,
+    // No ctrl-modifier here: ctrl+drag from a mote draws a relationship,
+    // and a ctrl-click that misses the drag threshold would then land as
+    // "open in a new tab". Right-click -> Inspect in new tab instead.
     onSelect: (id) => selectMote(id),
     onConnect: (sourceId, targetId) => connectNodes(sourceId, targetId),
     onPositionsChanged: savePositions,
     onBoxSelect: updateSelectBox,
     onSelectionChanged: syncSelectionPanel,
     onContextMenu: openContextMenu,
+    onCameraMove: reanchorInspector,
     // graph.js keeps its own copy of the attractor map, so the settings
     // this side persists have to be told where a dragged one landed.
     onAttractorMoved: (id, x, y) => {
@@ -3584,12 +2333,9 @@ async function init() {
   });
   window.graph = graph;
 
-  setupGardensModal();
-  setupSyncModal();
   setupTopMenus();
   setupDetailResize();
   setupQuickAdd();
-  setupSpeciesControls();
   setupSearch();
   setupViewControls();
   setupViewSettings();
@@ -3605,3 +2351,87 @@ async function init() {
 }
 
 window.addEventListener("pywebviewready", init);
+
+
+// ---- Monarch's contributions to the shared inspector ------------------
+
+/** Monarch's own value editors, offered to the shared panel before it
+ *  falls back to its generic ones (frontend_shared/inspector.js). Both
+ *  cases here are about a value the generic editors would flatten into a
+ *  text box, and the list is deliberately short: anything only Monarch
+ *  can edit is a thing the other five windows cannot, which is the
+ *  situation the shared panel exists to end. */
+function monarchValueEditor(data, key, meta, value, commit) {
+  const text = typeof value === "string" ? value : "";
+
+  // A property-model mote's `provider` names something with declared
+  // capabilities, and saying what they are belongs under the box naming
+  // it rather than only over MCP.
+  if (key === "provider" && text.trim()) {
+    const summary = providerSummary(text.trim());
+    if (!summary) return null;
+    const box = document.createElement("div");
+    const input = document.createElement("input");
+    input.className = "ins-input";
+    input.spellcheck = false;
+    input.value = text;
+    input.setAttribute("list", "provider-options");
+    ensureProviderOptions();
+    input.addEventListener("change", () => commit(input.value));
+    const note = document.createElement("div");
+    note.className = "ins-empty";
+    note.style.marginTop = "4px";
+    note.textContent = summary;
+    box.append(input, note);
+    return box;
+  }
+
+  return null;
+}
+
+/** The registered providers, as completions on the `provider` box. A
+ *  datalist rather than a <select>: `provider` is an ordinary property
+ *  and naming one MonOSS doesn't have yet has to stay possible -- the
+ *  list is help, not a constraint. */
+function ensureProviderOptions() {
+  let list = $("provider-options");
+  if (!list) {
+    list = document.createElement("datalist");
+    list.id = "provider-options";
+    document.body.appendChild(list);
+  }
+  list.innerHTML = "";
+  for (const name of providerOptions()) {
+    const option = document.createElement("option");
+    option.value = name;
+    list.appendChild(option);
+  }
+}
+
+/** The species affordance the shared panel has no general form of:
+ *  making another instance of this species. Offered on the species
+ *  itself, which is where you are standing when you think "I want
+ *  another one of these". */
+function monarchSpeciesExtras(data) {
+  if (!data.species.isSpecies) return null;
+  const box = document.createElement("div");
+  const make = document.createElement("button");
+  make.type = "button";
+  make.className = "ins-ghost";
+  make.style.marginTop = "8px";
+  make.textContent = "+ New instance";
+  make.title = "Create a mote of this species, seeded from its template";
+  make.addEventListener("click", async () => {
+    if (editBlocked()) return;
+    const created = await call(api.create_instance(data.id, {}));
+    if (!created) return;
+    await refreshMoteCache();
+    // Focus what you just made, not what you made it from: selectMote
+    // recentres the canvas on it and opens it in the panel, which is
+    // what the old species section's button did too.
+    await selectMote(created.id);
+    showToast("Instance created.");
+  });
+  box.appendChild(make);
+  return box;
+}

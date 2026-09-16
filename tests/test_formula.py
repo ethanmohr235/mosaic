@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from core.formula import (
@@ -5,6 +7,7 @@ from core.formula import (
     FormulaError,
     LinearExpr,
     NonlinearError,
+    attribute_bases,
     evaluate_equation,
     evaluate_expression,
 )
@@ -77,6 +80,24 @@ def test_dividing_by_zero_is_rejected():
         LinearExpr.number(1) / LinearExpr.number(0)
 
 
+def test_dividing_by_a_tiny_but_nonzero_constant_is_not_treated_as_zero():
+    # A neutron mass in kg (~1.6749e-27) is far below the old flat 1e-9
+    # "close enough to zero" threshold, but it's a real divisor, not
+    # float noise -- v = sqrt(2E/m) must actually divide by it.
+    neutron_mass = LinearExpr.number(1.6749e-27)
+    energy = LinearExpr.number(3.204e-13)
+    result = energy / neutron_mass
+    assert result.constant == pytest.approx(3.204e-13 / 1.6749e-27)
+
+
+def test_scaling_by_a_tiny_but_nonzero_factor_keeps_the_term():
+    # Same failure mode as division, in the other primitive that used the
+    # flat threshold: multiplying an unknown by a physically tiny
+    # constant (an eV-to-joule conversion, say) must not erase the term.
+    expr = LinearExpr({("m", "x"): 1.0}, 0.0) * LinearExpr.number(1.602176634e-19)
+    assert expr.terms == {("m", "x"): pytest.approx(1.602176634e-19)}
+
+
 def test_raising_an_unknown_to_a_power_is_rejected():
     with pytest.raises(NonlinearError):
         LinearExpr({("m", "x"): 1.0}, 0.0) ** LinearExpr.number(2)
@@ -131,6 +152,14 @@ def test_count_counts_motes():
 
 def test_arithmetic_with_known_values_is_allowed_to_be_nonlinear():
     expr = evaluate_expression("2 * (100 / 25) ** 0.5", context())
+    assert expr.constant == pytest.approx(4.0)
+
+
+def test_caret_is_accepted_as_exponentiation():
+    # `^` reads as bitwise XOR to Python's own grammar, but as power to
+    # anyone coming from math notation, spreadsheets, or units.py's own
+    # `kg*m/s^2` -- it should mean the same thing here.
+    expr = evaluate_expression("2 * (100 / 25) ^ 0.5", context())
     assert expr.constant == pytest.approx(4.0)
 
 
@@ -279,7 +308,7 @@ def test_attribute_access_on_a_number_is_rejected():
 
 def test_unknown_function_is_rejected():
     with pytest.raises(FormulaError, match="unknown function"):
-        evaluate_expression("sqrt(4)", context())
+        evaluate_expression("log(4)", context())
 
 
 def test_navigation_requires_a_quoted_relationship_type():
@@ -295,6 +324,29 @@ def test_keyword_arguments_are_rejected():
 def test_min_max_reject_unknowns():
     with pytest.raises(NonlinearError):
         evaluate_expression("max(current, 1)", context())
+
+
+# ---- sin/cos/tan/sqrt ----
+
+def test_trig_functions_take_radians():
+    assert evaluate_expression("sin(0)", context()).constant == pytest.approx(0.0)
+    assert evaluate_expression(f"cos({math.pi})", context()).constant == pytest.approx(-1.0)
+    assert evaluate_expression("tan(0)", context()).constant == pytest.approx(0.0)
+
+
+def test_sqrt():
+    assert evaluate_expression("sqrt(9)", context()).constant == pytest.approx(3.0)
+
+
+def test_sqrt_of_a_negative_number_is_rejected():
+    with pytest.raises(FormulaError, match="negative"):
+        evaluate_expression("sqrt(-1)", context())
+
+
+@pytest.mark.parametrize("name", ["sin", "cos", "tan", "sqrt"])
+def test_trig_and_sqrt_defer_on_unknowns(name):
+    with pytest.raises(NonlinearError):
+        evaluate_expression(f"{name}(current)", context())
 
 
 # ---- property() ----
@@ -351,3 +403,83 @@ def test_property_rejects_a_non_numeric_result():
     ctx = context(evaluate_model=lambda *a: "not a number")
     with pytest.raises(FormulaError, match="not a number"):
         evaluate_expression("property('a', 'op', 1)", ctx)
+
+
+# ---- connected-name references ----
+#
+# A dotted identifier that isn't a declared role can still reach a mote
+# connected to the anchor -- any relationship type, either direction --
+# by that mote's `name` property, without targets()/sources() and
+# without a role declaration. See core/formula.py's _connected_by_name.
+
+def _named_context(mote_id, properties, neighbor_map, roles=None):
+    return Context(
+        mote_id=mote_id,
+        properties=lambda mid: properties.get(mid, {}),
+        unknown_keys=lambda mid: set(),
+        targets=lambda mid, t: [],
+        sources=lambda mid, t: [],
+        neighbors=lambda mid: neighbor_map.get(mid, []),
+        roles=lambda mid: (roles or {}).get(mid, {}),
+    )
+
+
+def test_connected_name_resolves_to_a_wired_mote():
+    properties = {"R1": {}, "N1": {"name": "N1", "voltage": 12}}
+    ctx = _named_context("R1", properties, {"R1": ["N1"]})
+    assert evaluate_expression("N1.voltage", ctx).constant == 12.0
+
+
+def test_unconnected_name_does_not_resolve():
+    # N1 is named "N1" but isn't wired to R1, so this falls through to
+    # the ordinary (and here, failing) property lookup -- the same error
+    # an unconnected reference always got.
+    properties = {"R1": {}, "N1": {"name": "N1", "voltage": 12}}
+    ctx = _named_context("R1", properties, {"R1": []})
+    with pytest.raises(FormulaError, match="no property"):
+        evaluate_expression("N1.voltage", ctx)
+
+
+def test_ambiguous_connected_name_is_rejected():
+    properties = {
+        "R1": {},
+        "N1": {"name": "N1", "voltage": 1},
+        "N1b": {"name": "N1", "voltage": 2},
+    }
+    ctx = _named_context("R1", properties, {"R1": ["N1", "N1b"]})
+    with pytest.raises(FormulaError, match="matches 2 motes"):
+        evaluate_expression("N1.voltage", ctx)
+
+
+def test_attribute_bases_lists_dotted_identifiers_in_order():
+    assert attribute_bases("R1.voltage - R2.voltage == current * resistance") == [
+        "R1", "R2",
+    ]
+
+
+def test_attribute_bases_deduplicates():
+    assert attribute_bases("R1.x == R1.y + R1.x") == ["R1"]
+
+
+def test_attribute_bases_ignores_bare_names():
+    # "current" and "resistance" are ordinary properties, not dotted --
+    # only the left side of a `.` counts.
+    assert attribute_bases("current == resistance") == []
+
+
+def test_attribute_bases_of_unparseable_text_is_empty():
+    assert attribute_bases("not an equation") == []
+
+
+def test_declared_role_takes_precedence_over_a_same_named_neighbor():
+    from core.roles import Role
+
+    properties = {"R1": {}, "N1": {"name": "N1", "voltage": 12}}
+    ctx = _named_context(
+        "R1", properties, {"R1": ["N1"]}, roles={"R1": {"N1": Role("N1")}}
+    )
+    # The role's own targets() (empty here) governs, not the neighbor
+    # search -- so this fails the way an unfulfilled role always does,
+    # rather than quietly falling back to the connected-name match.
+    with pytest.raises(FormulaError, match="reaches no mote"):
+        evaluate_expression("N1.voltage", ctx)

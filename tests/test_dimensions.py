@@ -7,17 +7,22 @@ from core import formula
 from core.dimensions import DimensionContext, check_equation
 
 
-def context(mote_id="r1", units=None, targets=None, capability_units=None):
+def context(mote_id="r1", units=None, targets=None, capability_units=None,
+            neighbors=None, names=None):
     """A checker context over plain dicts -- the same testing shape
     core/formula.py's Context is built for."""
     units = units or {}
     targets = targets or {}
+    neighbors = neighbors or {}
+    names = names or {}
     return DimensionContext(
         mote_id=mote_id,
         units=lambda mid: units.get(mid, {}),
         targets=lambda mid, rel: targets.get((mid, rel), []),
         sources=lambda mid, rel: [],
         capability_units=capability_units or (lambda *a: None),
+        neighbors=lambda mid: neighbors.get(mid, []),
+        mote_name=lambda mid: names.get(mid),
     )
 
 
@@ -113,6 +118,33 @@ def test_a_wrong_power_is_flagged():
 def test_a_negative_power_scales_dimensions():
     units = {"r1": {"frequency": "Hz", "period": "s"}}
     assert check_equation("frequency == period ** -1", context(units=units)) == []
+
+
+# ---- sin/cos/tan/sqrt ----
+
+def test_sqrt_halves_dimensions():
+    units = {"r1": {"area": "m^2", "side": "m"}}
+    assert check_equation("side == sqrt(area)", context(units=units)) == []
+
+
+def test_a_wrong_sqrt_is_flagged():
+    units = {"r1": {"volume": "m^3", "side": "m"}}
+    problems = check_equation("side == sqrt(volume)", context(units=units))
+    assert len(problems) == 1
+
+
+def test_trig_functions_are_always_dimensionless():
+    # Regardless of what the argument declares -- unlike abs/min/max,
+    # sin/cos/tan don't relay their input's dimension to the output.
+    units = {"r1": {"angle": "deg", "ratio": "ohm"}}
+    problems = check_equation("ratio == sin(angle)", context(units=units))
+    assert any("left side is" in p for p in problems)
+
+
+def test_trig_functions_still_surface_problems_inside_their_argument():
+    units = {"r1": {"bad": "not-a-real-unit"}}
+    problems = check_equation("y == sin(bad)", context(units=units))
+    assert any("not recognized" in p for p in problems)
 
 
 # ---- navigation and aggregation ----
@@ -231,8 +263,8 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
         if isinstance(node, ast.Name)
     }
     dispatch_constants = {
-        "NAVIGATION_CALLS", "AGGREGATE_CALLS", "NUMERIC_CALLS",
-        "PREVIOUS_CALL", "PROPERTY_CALL",
+        "NAVIGATION_CALLS", "AGGREGATE_CALLS", "NUMERIC_CALLS", "TRIG_CALLS",
+        "SQRT_CALL", "PREVIOUS_CALL", "PROPERTY_CALL",
     }
     # Every group formula._call() dispatches on must be one this module
     # imported and handles.
@@ -244,7 +276,8 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
         formula.NAVIGATION_CALLS
         | formula.AGGREGATE_CALLS
         | formula.NUMERIC_CALLS
-        | {formula.PREVIOUS_CALL, formula.PROPERTY_CALL}
+        | formula.TRIG_CALLS
+        | {formula.SQRT_CALL, formula.PREVIOUS_CALL, formula.PROPERTY_CALL}
     )
 
 
@@ -260,6 +293,10 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
         "abs": "abs(x)",
         "min": "min(x, 1)",
         "max": "max(x, 1)",
+        "sin": "sin(x)",
+        "cos": "cos(x)",
+        "tan": "tan(x)",
+        "sqrt": "sqrt(x)",
         "prev": "prev(x)",
         "property": "property('a', 'op', 1)",
     }
@@ -267,3 +304,28 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
     # No assertion on the result -- the point is that it doesn't raise
     # 'unknown function', which check_equation() would surface.
     check_equation(f"y == {calls[name]}", context(targets={("r1", "a"): ["n1"]}))
+
+
+# ---- connected-name references ----
+
+def test_connected_name_dimension_is_checked_like_a_role():
+    units = {"r1": {"x": "V"}, "n1": {"voltage": "A"}}
+    problems = check_equation(
+        "x == n1.voltage",
+        context(units=units, neighbors={"r1": ["n1"]}, names={"n1": "n1"}),
+    )
+    assert len(problems) == 1
+    assert "different dimensions" in problems[0]
+
+
+def test_ambiguous_connected_name_reports_nothing_here():
+    # An ambiguous name is a resolution problem, not a units problem --
+    # core/formula.py raises the real error at solve time; the checker
+    # only swallows it here, the same way it swallows any other
+    # FormulaError the real evaluator would also reject (see
+    # check_equation's docstring).
+    problems = check_equation(
+        "y == n1.voltage",
+        context(neighbors={"r1": ["n1", "n1b"]}, names={"n1": "n1", "n1b": "n1"}),
+    )
+    assert problems == []

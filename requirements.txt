@@ -1,4 +1,5 @@
 CoolProp
+httpx
 mcp
 numpy
 pytest

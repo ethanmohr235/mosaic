@@ -40,10 +40,13 @@ import threading
 
 import webview
 
+from api_common import CommandBarApi, InspectorApi
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
+from api_common import open_gardens as _open_gardens
 from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
+from api_common import _visible_keys
 from core import derivations as derivations_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo
@@ -56,6 +59,7 @@ from core import solvers as solvers_repo
 from core import species as species_repo
 from core import sync as sync_repo
 from core.db import get_connection, initialize_database
+from core.units import UNITS_KEY, parse_units_property
 from motion import payload as payload_repo
 
 logger = logging.getLogger(__name__)
@@ -145,7 +149,7 @@ def _explanation_payload(explanation) -> dict | None:
     }
 
 
-class Api:
+class Api(InspectorApi, CommandBarApi):
     """Every read re-reads the whole garden, the same choice the other
     windows make (monarch/api.py::focus, monolith/api.py::table):
     Motion is routinely open beside Monarch on the same garden file, and
@@ -224,6 +228,20 @@ class Api:
         self._garden = resolved
         self._best_effort_sync()
         return {"garden": resolved}
+
+    @_synchronized
+    def open_gardens(self, sync: bool = False) -> dict:
+        """Open the shared Gardens window (gardens_app/): create, rename,
+        delete, import, export and sync, for every garden rather than
+        just this one.
+
+        All six windows expose this same method, which is the point --
+        garden management used to exist once, privately, inside
+        Monarch's own modal, so doing any of it from here meant opening
+        Monarch first. Switching which garden *this* window shows stays
+        here (switch_garden above); everything about the gardens
+        themselves is one window all six can open."""
+        return _open_gardens(self._garden, sync=sync)
 
     # ---- the board ----
 
@@ -420,14 +438,19 @@ class Api:
         motes, _relationships = self._simulable()
         labels = {m.id: str(m.properties.get("name", m.id[:8])) for m in motes}
         base = {m.id: m.properties for m in motes}
+        units = {
+            m.id: parse_units_property(m.properties.get(UNITS_KEY))
+            for m in motes
+        }
         built = payload_repo.build_lanes(
-            steps, base, labels, limit=limit or payload_repo.MAX_LANES
+            steps, base, labels, units=units, limit=limit or payload_repo.MAX_LANES
         )
         return [lane.to_json() for lane in built]
 
     @_synchronized
     def commit(
-        self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None
+        self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None,
+        detail: str | None = None,
     ) -> dict:
         """Re-runs step_count ticks (deterministic given the same garden
         and rules) and this time writes the final cumulative result,
@@ -438,10 +461,14 @@ class Api:
 
         Takes no scenario: committing one is refused by the engine, since
         a scenario answers what *would* happen and that is not the
-        garden's state. Use save() to keep a scenario run."""
+        garden's state. Use save() to keep a scenario run.
+
+        `detail` is passed straight through to run_time_series() -- see
+        there. Fast mode passes "fast" so its own auto-commits can be
+        told apart from an ordinary manual commit."""
         result = simulation_repo.run_time_series(
             self._conn, step_count, commit=True, solver=solver,
-            solver_configuration=solver_configuration,
+            solver_configuration=solver_configuration, detail=detail,
         )
         return _time_series_payload(result)
 
@@ -566,6 +593,35 @@ class Api:
     # ---- authoring (Build mode) ----
 
     @_synchronized
+    def check_equation_names(
+        self, mote_id: str, equation: str, scenario: str | None = None
+    ) -> list[dict]:
+        """Names `equation` references that aren't reachable from
+        `mote_id` yet but do match some other mote in the garden --
+        candidates for the equation editor's "connect them?" prompt (see
+        docs/simulation.md's "Connected-name references"). Thin wrapper
+        over core.simulation.unresolved_equation_names(): this bridge
+        shapes an answer, it doesn't decide what one means.
+
+        Called on blur, alongside the equation write itself, so a name
+        that only becomes reachable once wired up here is never
+        second-guessed once the relationship exists."""
+        results = simulation_repo.unresolved_equation_names(
+            self._conn, mote_id, equation, scenario=scenario
+        )
+        labels = {m.id: str(m.properties.get("name", m.id[:8])) for m in motes_repo.list_motes(self._conn)}
+        return [
+            {
+                "name": r["name"],
+                "candidates": [
+                    {"id": cid, "label": labels.get(cid, cid[:8])}
+                    for cid in r["candidates"]
+                ],
+            }
+            for r in results
+        ]
+
+    @_synchronized
     def create_mote(self, raw_properties: dict, id: str | None = None) -> dict:
         mote_id = motes_repo.create_mote(self._conn, _coerce_properties(raw_properties), id=id)
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
@@ -613,3 +669,95 @@ class Api:
     @_synchronized
     def delete_relationship(self, rel_id: str) -> bool:
         return rel_repo.delete_relationship(self._conn, rel_id)
+
+    # ---- the shared inspector, with Motion's two differences ----
+
+    def set_inspector_scenario(self, scenario_id: str | None) -> None:
+        """Told by the frontend whenever the scenario picker moves.
+
+        The inspector is one surface in six windows and knows nothing
+        about scenarios -- only this window has them. Rather than widen
+        its bridge contract with a parameter five apps would always pass
+        None for, Motion remembers which hypothetical is on screen and
+        bends its own two inspector methods around it."""
+        self._inspector_scenario = scenario_id or None
+
+    def _inspector_payload(self, mote_id: str) -> dict | None:
+        """The shared payload, but showing the scenario's values.
+
+        Build mode reads and writes through the same merged view -- see
+        `inspect` -- so that the property a person is looking at and the
+        one their edit lands on are always the same property. The
+        inspector has to obey that too, or a scenario would show the
+        garden's number and silently overwrite the override."""
+        answer = super()._inspector_payload(mote_id)
+        scenario = getattr(self, "_inspector_scenario", None)
+        if answer is None or scenario is None:
+            return answer
+        case = scenarios_repo.get_scenario(self._conn, scenario)
+        answer["properties"] = scenarios_repo.apply(
+            {mote_id: answer["properties"]}, case
+        )[mote_id]
+        answer["keys"] = _visible_keys(answer["properties"])
+        return answer
+
+    @_synchronized
+    def inspector_set_property(self, mote_id: str, key: str, raw_value) -> dict | None:
+        """While a scenario is selected the write is redirected onto that
+        scenario's override mote instead of the mote itself: looking at a
+        hypothetical must never mean overwriting the garden's own state,
+        which is core/scenarios.py's entire point. Same rule the Build
+        mode inspector already followed, now enforced one layer down so
+        every editing affordance the shared panel grew -- add a property,
+        rename a key, toggle a boolean -- inherits it rather than each
+        having to remember."""
+        scenario = getattr(self, "_inspector_scenario", None)
+        target = mote_id
+        if scenario is not None:
+            target = scenarios_repo.get_or_create_override(self._conn, scenario, mote_id)
+        motes_repo.update_mote(self._conn, target, _coerce_properties({key: raw_value}))
+        return self._inspector_payload(mote_id)
+
+    def command_run(self, text: str, confirm: bool = False) -> dict:
+        """While a scenario is selected, the whole command bar is refused
+        rather than risk one of its writing forms landing on the garden
+        itself -- core/command_bar.py has no notion of a scenario
+        override, and inspector_set_property's redirect above is the one
+        place that rule is enforced. Blocking navigation along with the
+        writes is the conservative call: teaching core/command_bar.py
+        which of its five forms are read-only would duplicate its own
+        dispatch logic here just to spare one of them.
+
+        Not @_synchronized: it does no work of its own besides the
+        scenario check, and delegating to CommandBarApi.command_run
+        (which *is* synchronized) from inside an already-held lock would
+        deadlock on self._lock."""
+        if getattr(self, "_inspector_scenario", None) is not None:
+            return {
+                "ok": False, "moteId": None, "needsConfirm": False, "choices": None,
+                "message": "a scenario is active -- edit this mote from the inspector instead",
+            }
+        return super().command_run(text, confirm=confirm)
+
+    @_synchronized
+    def inspector_why(self, mote_id: str, key: str) -> dict | None:
+        """The provenance answer, flattened into lines the shared panel
+        can print without knowing what a derivation is.
+
+        Motion is the only window that can answer this -- it is the one
+        with a solver and a run log -- so api_common.InspectorApi returns
+        None and the other five never draw the control.
+
+        Values are in base SI, which is what the solver worked in, so the
+        numbers beside an equation multiply out."""
+        explanation = derivations_repo.explain(self._conn, mote_id, key)
+        if explanation is None:
+            return None
+
+        lines = [f"{explanation.method}: {explanation.detail or ''}".strip()]
+        for equation in explanation.equations:
+            lines.append(f"{equation.rule_name}: {equation.equation}")
+        for value in explanation.inputs:
+            where = "" if value.mote_id == mote_id else f"{value.mote_id[:8]} "
+            lines.append(f"  reads {where}{value.key} = {value.value}")
+        return {"lines": lines}
