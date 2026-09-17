@@ -1504,7 +1504,12 @@ function setupLauncher() {
 
 async function init() {
   api = window.pywebview.api;
-  Inspector.install({ api, onChanged: () => renderNow(), notesDoor: false });
+  Inspector.install({
+    api,
+    onChanged: () => renderNow(),
+    notesDoor: false,
+    onOpenMora: () => toast("Opening Mora…"),
+  });
   CommandBar.install({
     api,
     onChanged: () => renderNow(),

@@ -2289,6 +2289,7 @@ async function init() {
     onChanged: () => refocus(focusId, { pan: false }).then(refreshMoteCache),
     valueEditor: monarchValueEditor,
     advancedSections: [monarchSpeciesExtras],
+    onOpenMora: () => showToast("Opening Mora…"),
   });
   CommandBar.install({
     api,

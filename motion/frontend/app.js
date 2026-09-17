@@ -2445,7 +2445,11 @@ async function refresh() {
 
 async function init() {
   api = window.pywebview.api;
-  Inspector.install({ api, onChanged: () => { refresh(); scheduleFastRun(); } });
+  Inspector.install({
+    api,
+    onChanged: () => { refresh(); scheduleFastRun(); },
+    onOpenMora: () => toast("Opening Mora…"),
+  });
   CommandBar.install({
     api,
     onChanged: () => { refresh(); scheduleFastRun(); },

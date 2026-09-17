@@ -1566,7 +1566,7 @@ async function launchApp(appId) {
 
 async function init() {
   api = window.pywebview.api;
-  Inspector.install({ api, onChanged: refresh });
+  Inspector.install({ api, onChanged: refresh, onOpenMora: () => toast("Opening Mora…") });
   CommandBar.install({
     api,
     onChanged: refresh,

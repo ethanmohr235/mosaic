@@ -17,7 +17,7 @@
  *
  * Host apps drive it with three calls:
  *
- *   Inspector.install({ api, onChanged })   once, after the bridge is up
+ *   Inspector.install({ api, onChanged, onOpenMora })   once, after the bridge is up
  *   Inspector.open(moteId, { anchor, newTab })
  *   Inspector.close()
  *   Inspector.updateAnchor(anchor)          re-anchor the leader after a pan/zoom
@@ -130,6 +130,7 @@ const Inspector = (() => {
   let extraSections = [];
   let hostEditor = null;
   let notesDoor = true;
+  let onOpenMora = () => {};
 
   let root = null;
   let leader = null;
@@ -165,6 +166,7 @@ const Inspector = (() => {
     hostEditor = options.valueEditor || null;
     // Mora is the room, not a door to it.
     notesDoor = options.notesDoor !== false;
+    onOpenMora = options.onOpenMora || (() => {});
     build();
     restoreGeometry();
     state.advanced = localStorage.getItem(ADVANCED_KEY) === "1";
@@ -430,6 +432,7 @@ const Inspector = (() => {
     });
     els.toggle.addEventListener("click", () => {
       state.advanced = !state.advanced;
+      if (!state.advanced) state.why = {};
       localStorage.setItem(ADVANCED_KEY, state.advanced ? "1" : "0");
       render();
     });
@@ -659,9 +662,19 @@ const Inspector = (() => {
       // the window that renders them. The inspector offers the door
       // rather than pretending a property box is the room.
       controls.push(followButton("Open this note in Mora",
-        () => api.open_app("mora", data.id)));
+        () => openMora(data.id)));
     }
     return controls;
+  }
+
+  /** The one door out of the panel to Mora, from both the ↗ follow
+   *  button and double-clicking the note summary. `onOpenMora` is the
+   *  host's launcher toast ("Opening Mora…") -- this is the same act of
+   *  opening the app, just triggered from inside a mote instead of the
+   *  launcher grid, and should read the same way. */
+  function openMora(moteId) {
+    api.open_app("mora", moteId);
+    onOpenMora();
   }
 
   function followButton(title, action) {
@@ -681,7 +694,7 @@ const Inspector = (() => {
    *  the size of the garden. */
   function valueEditor(data, key, meta, value) {
     if (key === "modoc" && typeof value === "string") {
-      return noteSummary(value, () => bridge(() => api.open_app("mora", data.id)));
+      return noteSummary(value, () => bridge(() => openMora(data.id)));
     }
 
     // By shape, not by key name: `date` stopped being a key the engine
@@ -1127,6 +1140,11 @@ const Inspector = (() => {
   }
 
   async function explain(moteId, key) {
+    if (state.why[key]) {
+      delete state.why[key];
+      render();
+      return;
+    }
     const answer = await bridge(() => api.inspector_why(moteId, key));
     state.why[key] = answer && answer.lines && answer.lines.length
       ? answer.lines.join("\n")
