@@ -203,6 +203,17 @@ def test_the_tick_never_conflicts():
     assert check_equation("height == 10 - speed * t", context(units=units)) == []
 
 
+def test_a_role_qualified_t_keeps_its_real_dimension():
+    # Unlike a bare `t`, `targets('a').t` names another mote's own
+    # property -- it must not go unspecified the way the tick does.
+    units = {"r1": {"rate": "m/s"}, "n1": {"t": "s"}}
+    targets = {("r1", "a"): ["n1"]}
+    problems = check_equation(
+        "rate == targets('a').t", context(units=units, targets=targets)
+    )
+    assert len(problems) == 1
+
+
 # ---- property models ----
 
 def test_a_property_call_takes_its_dimension_from_the_capability():

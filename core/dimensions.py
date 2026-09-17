@@ -245,6 +245,8 @@ class _Checker:
         if isinstance(node, ast.Constant):
             return LITERAL
         if isinstance(node, ast.Name):
+            if node.id == TICK_NAME:
+                return None
             return self._name(self.ctx.mote_id, node.id)
         if isinstance(node, ast.BinOp):
             return self._binary(node)
@@ -257,12 +259,10 @@ class _Checker:
         raise FormulaError(f"{type(node).__name__} is not allowed in a formula")
 
     def _name(self, mote_id: str, key: str) -> Dim:
-        if key == TICK_NAME:
-            # A step index, not a time. Whether a rule means it as a count
-            # or as elapsed seconds is genuinely ambiguous (`height == 10 -
-            # 0.5 * t` in docs/simulation.md reads it as the latter), so it
-            # stays unspecified rather than inventing a false positive.
-            return None
+        # TICK_NAME is handled by callers that reach a *bare* `t` on the
+        # anchor mote (_walk's ast.Name branch, prev()'s bare-name check
+        # below) -- not here, so `targetp3.t` reached through _attribute
+        # still resolves to that mote's real declared unit.
         declared = self.ctx.units(mote_id).get(key)
         if declared is None:
             return None

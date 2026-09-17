@@ -17,7 +17,7 @@ from core.formula import (
 # touching a database.
 PROPERTIES = {
     "R1": {"resistance": 100, "label": "a string"},
-    "N1": {},
+    "N1": {"t": 999},
     "N2": {},
     "N3": {},
 }
@@ -208,6 +208,12 @@ def test_t_shadows_a_same_named_property():
         tick=7.0,
     )
     assert evaluate_expression("t", ctx).constant == 7.0
+
+
+def test_t_qualified_by_a_role_reads_the_real_property_not_the_tick():
+    # Unlike a bare `t`, `targets('a').t` unambiguously names another
+    # mote's real property -- it must not be shadowed by the reserved tick.
+    assert evaluate_expression("targets('a').t", context(tick=7.0)).constant == 999.0
 
 
 def test_prev_reads_the_previous_value():

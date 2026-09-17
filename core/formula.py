@@ -435,6 +435,8 @@ def _evaluate(node: ast.AST, ctx: Context):
     if isinstance(node, ast.Constant):
         return _constant(node)
     if isinstance(node, ast.Name):
+        if node.id == TICK_NAME:
+            return LinearExpr.number(ctx.tick)
         return _lookup(ctx, ctx.mote_id, node.id)
     if isinstance(node, ast.BinOp):
         return _binary(node, ctx)
@@ -731,14 +733,10 @@ def _normalize(ctx: Context, mote_id: str, key: str, value: float) -> float:
 
 
 def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
-    # A reserved word in the formula language, not a per-mote property --
-    # the current simulation step's index, for time-dependent rules
-    # (e.g. `height == 10 - 0.5 * t`). Checked before both the unknowns
-    # and the properties lookup, so a mote with a real property literally
-    # named `t` has it shadowed inside formulas specifically (still an
-    # ordinary, visible property everywhere else in the UI).
-    if key == TICK_NAME:
-        return LinearExpr.number(ctx.tick)
+    # TICK_NAME is only reserved for a bare `t` referring to the anchor
+    # mote (shadowed by the caller in _evaluate, ast.Name branch), not for
+    # `t` reached via a role/relationship (e.g. `targetp3.t`) -- that's
+    # unambiguously a real property of a specific other mote.
     if key in ctx.unknown_keys(mote_id):
         unknown = (mote_id, key)
         if unknown in ctx.solved:
