@@ -230,6 +230,155 @@ def step_payloads(steps: "list[StepResult] | list[RunTick]") -> list[dict]:
     return payloads
 
 
+@dataclass(frozen=True)
+class Solved:
+    """One solve of one garden view -- what every run shape actually wants
+    back, before any of them decides what to do about it.
+
+    `equations`/`constraints` are the relations this solve ran, carried
+    out on the result so a caller needing them again (run_simulation's
+    unit inference) doesn't split the same rules a second time."""
+    values: dict[Unknown, float]
+    equation_count: int
+    unsolved: list[Unknown]
+    constraint_violations: list[str]
+    equations: list[tuple[rules_repo.Rule, str]]
+    constraints: list[tuple[rules_repo.Rule, str]]
+    view: "_GardenView | None" = None
+
+    def value(self, mote_id: str, key: str) -> float | None:
+        """What this solve says one property is, in the mote's own unit.
+
+        A solved value if the run determined one, otherwise whatever the
+        mote already carried -- which is the right answer for a property
+        that is a given rather than a freedom, and the reason a caller
+        reading results does not have to know which it asked for. None
+        where the mote has no such number at all.
+
+        Solved values are converted out of base units here, the same
+        conversion _by_mote() does on the way to the database: a caller
+        reading 4700 for a resistance the mote declares in kohm would be
+        reading the solver's representation rather than the garden's."""
+        if (mote_id, key) in self.values:
+            return _in_declared_units(
+                self.view.properties if self.view else {},
+                mote_id, key, self.values[(mote_id, key)],
+            )
+        stored = (self.view.properties if self.view else {}).get(mote_id, {}).get(key)
+        if isinstance(stored, bool) or not isinstance(stored, (int, float)):
+            return None
+        return float(stored)
+
+    def is_free(self, mote_id: str, key: str) -> bool:
+        """Whether this mote declared that property a freedom -- something
+        the solver is allowed to determine.
+
+        A caller that overrides a freedom (core/sweep.py sweeping one) is
+        pinning it, and pinning is worth saying out loud: the answer under
+        it is 'what if this were so', not 'what the model determines'."""
+        if self.view is None:
+            return False
+        return key in self.view.freedoms.get(mote_id, set())
+
+
+def solve_view(
+    view: _GardenView,
+    pairs: list[tuple[rules_repo.Rule, str]],
+    solver: str = _DEFAULT_SOLVER,
+    solver_configuration: dict | None = None,
+    *,
+    tick: float = 0.0,
+    previous: dict[str, dict] | None = None,
+    strict_constraints: bool = False,
+    log_constraints: bool = True,
+    model_cache: dict[str, PropertyProvider] | None = None,
+    journal: Journal | None = None,
+) -> Solved:
+    """Solve one view once, in memory, writing and logging nothing.
+
+    The five steps every run shape shares: split the relations, substitute
+    whatever comes down to a single unknown, hand the rest to the selected
+    backend, check the constraints, report what stayed unsolved.
+    run_simulation() and run_time_series() differ from each other only in
+    the bookkeeping around this -- what gets logged, what gets written
+    back, and whether a failure ends the run or only the step.
+
+    It is also the entirety of what core/sweep.py needs: a sweep is N of
+    these over N overridden copies of the same garden. That is why this is
+    a function now rather than a third copy of the same six lines.
+
+    Raises SimulationError or SolverError exactly as the steps it calls
+    do. Whether that ends a run is the caller's business, not this one's.
+    """
+    equations, constraints = _split_relations(pairs)
+    if model_cache is None:
+        model_cache = {}
+    values: dict[Unknown, float] = {}
+    reduction = _reduce(
+        view, equations, values, tick=tick, previous=previous,
+        model_cache=model_cache, journal=journal,
+    )
+    values.update(
+        _finish(view, reduction, values, solver, solver_configuration, journal)
+    )
+    violations = _constraint_report(
+        view, constraints, values, strict_constraints,
+        tick=tick, previous=previous, model_cache=model_cache,
+        log=log_constraints,
+    )
+    remainder = reduction.remainder
+    return Solved(
+        values=values,
+        equation_count=len(remainder.open_equations) + len(remainder.deferred),
+        unsolved=_unsolved(view, values),
+        constraint_violations=violations,
+        equations=equations,
+        constraints=constraints,
+        view=view,
+    )
+
+
+def garden_freedoms(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    """Every mote's resolved freedoms: what the solver is allowed to
+    determine, per mote, after a mote's own declaration has replaced
+    whatever its species declare (see _freedoms_for).
+
+    Public because more than one surface now needs to tell a freedom from
+    a given without running anything -- core/sweep.py's callers draw them
+    differently, since sweeping a freedom pins it. Exposed here rather
+    than re-derived there: the resolution rule is subtle enough that a
+    second copy of it would drift."""
+    properties = {m.id: m.properties for m in list_motes(conn)}
+    return _build_view(properties, list_relationships(conn)).freedoms
+
+
+def solve_properties(
+    properties: dict[str, dict],
+    relationships: list[Relationship],
+    rules: list[rules_repo.Rule],
+    solver: str = _DEFAULT_SOLVER,
+    solver_configuration: dict | None = None,
+    *,
+    strict_constraints: bool = False,
+    log_constraints: bool = True,
+    model_cache: dict[str, PropertyProvider] | None = None,
+) -> Solved:
+    """solve_view() from a plain properties dict -- build the view, pair
+    the rules with their instances, solve.
+
+    The entry point for a caller holding a *perturbed* copy of the garden
+    rather than the garden: core/sweep.py, which makes one such copy per
+    point of a sweep and never writes any of them back. Taking properties
+    and relationships as arguments rather than a connection is what keeps
+    that honest -- there is no database here to write to."""
+    view = _build_view(properties, relationships)
+    return solve_view(
+        view, _rule_instances(rules, view), solver, solver_configuration,
+        strict_constraints=strict_constraints, log_constraints=log_constraints,
+        model_cache=model_cache,
+    )
+
+
 def run_simulation(
     conn: sqlite3.Connection,
     solver: str = _DEFAULT_SOLVER,
@@ -271,21 +420,19 @@ def run_simulation(
     case = _resolve_scenario(conn, scenario)
     view = _build_view(scenarios_repo.apply(properties, case), relationships)
     pairs = _rule_instances(rules_repo.list_rules(conn), view)
-    equations, constraints = _split_relations(pairs)
 
     try:
-        solved: dict[Unknown, float] = {}
         model_cache: dict[str, PropertyProvider] = {}
         journal = Journal()
         _validate_units(view, pairs)
         warnings = _dimension_warnings(view, pairs, strict_units, model_cache)
-        reduction = _reduce(view, equations, solved, model_cache=model_cache, journal=journal)
-        solved.update(
-            _finish(view, reduction, solved, solver, solver_configuration, journal)
+        result = solve_view(
+            view, pairs, solver, solver_configuration,
+            strict_constraints=strict_constraints,
+            model_cache=model_cache, journal=journal,
         )
-        violations = _constraint_report(
-            view, constraints, solved, strict_constraints, model_cache=model_cache
-        )
+        solved = result.values
+        violations = result.constraint_violations
     except SimulationError as e:
         _log_run(conn, run_number, "error", str(e), [], committed=False, scenario_id=scenario)
         logger.warning("simulation run #%s failed: %s", run_number, e)
@@ -296,7 +443,7 @@ def run_simulation(
         raise SimulationError(str(e)) from e
 
     if case is None:
-        inferred_units = _infer_missing_units(view, equations, solved, model_cache)
+        inferred_units = _infer_missing_units(view, result.equations, solved, model_cache)
         properties = _apply_inferred_units(conn, view.properties, inferred_units)
         changes = _write_back(conn, properties, solved)
     else:
@@ -306,14 +453,13 @@ def run_simulation(
         committed=case is None, step_journals=[journal], scenario_id=scenario,
     )
     logger.info("simulation run #%s solved %s values", run_number, len(solved))
-    remainder = reduction.remainder
     return SimulationResult(
         run_id=run_id,
         run_number=run_number,
         values=solved,
         changes=changes,
-        equation_count=len(remainder.open_equations) + len(remainder.deferred),
-        unsolved=_unsolved(view, solved),
+        equation_count=result.equation_count,
+        unsolved=result.unsolved,
         dimension_warnings=warnings,
         scenario_id=scenario,
         constraint_violations=violations,
@@ -422,21 +568,17 @@ def run_time_series(
 
     for step in range(step_count):
         view = _build_view(running, relationships)
-        equations, constraints = _split_relations(_rule_instances(rules, view))
+        pairs = _rule_instances(rules, view)
         journal = Journal() if recording else None
         try:
-            solved: dict[Unknown, float] = {}
-            reduction = _reduce(
-                view, equations, solved, tick=float(step), previous=running,
+            result = solve_view(
+                view, pairs, solver, solver_configuration,
+                tick=float(step), previous=running,
+                strict_constraints=strict_constraints,
                 model_cache=model_cache, journal=journal,
             )
-            solved.update(
-                _finish(view, reduction, solved, solver, solver_configuration, journal)
-            )
-            violations = _constraint_report(
-                view, constraints, solved, strict_constraints,
-                tick=float(step), previous=running, model_cache=model_cache,
-            )
+            solved = result.values
+            violations = result.constraint_violations
         except (SimulationError, SolverError) as e:
             failed_at, error = step, str(e)
             logger.warning("simulation preview step %s failed: %s", step, e)
@@ -453,12 +595,10 @@ def run_time_series(
         for mote_id, new_properties in _by_mote(view.properties, solved).items():
             next_running.setdefault(mote_id, {}).update(new_properties)
         running = next_running
-        remainder = reduction.remainder
-        equation_count = len(remainder.open_equations) + len(remainder.deferred)
         steps.append(
             StepResult(
-                step, solved, changes, equation_count,
-                _unsolved(view, solved), violations,
+                step, solved, changes, result.equation_count,
+                result.unsolved, violations,
             )
         )
         if journal is not None:
@@ -751,9 +891,16 @@ def _constraint_report(
     previous: dict[str, dict] | None = None,
     *,
     model_cache: dict[str, PropertyProvider],
+    log: bool = True,
 ) -> list[str]:
     """Shared post-flight for both run shapes -- the constraint mirror of
-    _dimension_warnings(). Advisory unless the caller asks otherwise."""
+    _dimension_warnings(). Advisory unless the caller asks otherwise.
+
+    `log=False` for a caller solving the same garden hundreds of times
+    over (core/sweep.py): a constraint broken across a whole swept range
+    is one fact, and writing it to the log once per point would bury
+    every other line in the file under it. The problems are still
+    returned, which is what a sweep draws."""
     problems = _check_constraints(
         view, pairs, solved, tick, previous, model_cache=model_cache
     )
@@ -761,8 +908,9 @@ def _constraint_report(
         raise SimulationError(
             "constraint check failed:\n  " + "\n  ".join(problems)
         )
-    for problem in problems:
-        logger.warning("constraint: %s", problem)
+    if log:
+        for problem in problems:
+            logger.warning("constraint: %s", problem)
     return problems
 
 

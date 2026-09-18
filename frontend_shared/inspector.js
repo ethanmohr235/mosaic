@@ -1,4 +1,4 @@
-/* The floating mote inspector -- one surface, six windows.
+/* The floating mote inspector -- one surface, seven windows.
  *
  * Every window here shows motes some particular way: Monarch as a graph,
  * Monolith as a table, Monastery as a calendar, Momentum as a board,
@@ -1175,7 +1175,7 @@ const Inspector = (() => {
   }
 
   /** The default is the upper right of whatever window this is, and it
-   *  is the same default in all six -- that sameness is the point, since
+   *  is the same default in all seven -- that sameness is the point, since
    *  it is what makes the panel feel like one surface you keep meeting
    *  rather than six panels that resemble each other. Where you then
    *  drag it is remembered per app: each window is its own origin, so

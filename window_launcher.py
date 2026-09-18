@@ -76,7 +76,7 @@ def launch_window(
     `api` becomes the window's js_api and gets `_window` set on it once
     the window exists (needed for native file dialogs), the same as
     every app.py did by hand before this. `storage_dir` must already be
-    this app's own directory, never shared with another window: all six
+    this app's own directory, never shared with another window: all seven
     apps run at once by design, and clear_http_cache() deletes what is
     under it on startup."""
     clear_http_cache(storage_dir)

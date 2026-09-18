@@ -1,18 +1,18 @@
 # Running the desktop UI
 
-Six native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Seven native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
 (`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
 **Monastery**, the calendar (`run_monastery.py`); **Momentum**, the
 task board and timer (`run_momentum.py`); **Monolith**, the table
-(`run_monolith.py`); and **Motion**, the simulator (`run_motion.py`).
-They share one palette and one set of vendored fonts, so the six read as
-one product.
+(`run_monolith.py`); **Motion**, the simulator (`run_motion.py`); and
+**Moxie**, the graphing utility (`run_moxie.py`). They share one palette
+and one set of vendored fonts, so the seven read as one product.
 
-A seventh window sits beside rather than among them: **Gardens**
+An eighth window sits beside rather than among them: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
-deleted, imported, exported and synced. Any of the six opens it from its
-own garden dropdown ("Manage gardens…"); see below.
+deleted, imported, exported and synced. Any of the seven opens it from
+its own garden dropdown ("Manage gardens…"); see below.
 
 ---
 
@@ -297,7 +297,7 @@ garden export.
 `url` is a reserved property name: give any mote a `url` property (a
 web address or a local file path) and its inspector row gets an
 "Open" (↗) button that launches it via the OS's default handler. In all
-six windows -- the button moved into the shared inspector along with
+seven windows -- the button moved into the shared inspector along with
 everything else about editing one mote, so following a link is no longer
 something only the graph window could do.
 `core/links.py::classify_link` decides which: a web address goes to the
@@ -1067,10 +1067,174 @@ the code.
 
 ---
 
+# Moxie -- the graphing utility
+
+`./run_moxie.py`, or `.venv/bin/python run_moxie.py`.
+
+```
+./run_moxie.py                          # the last garden opened
+./run_moxie.py --garden circuit-example # a specific garden
+./run_moxie.py --focus <mote-id>        # open with that mote plotted
+```
+
+Motion solves the garden as it stands, or forward through time. Neither
+answers the question a model is usually built for -- *how does this
+value move as that one changes* -- because that question's answer is not
+a state. It is a curve.
+
+Moxie draws the curve. Pick a property to sweep and a property to plot,
+and it re-solves the whole garden once per step of the range, in memory.
+**Nothing is written and nothing is logged** -- not a value, not a run
+entry. That is what makes it safe to fire on every frame of a dragged
+slider, and it is the line the window is built around: the only thing
+Moxie ever writes is a saved-plot mote, when asked in so many words. To
+*change* the model you are looking at, use the inspector, which is the
+same panel here as everywhere else.
+
+### The grid
+
+Plots live in a grid, not one at a time. Comparing σ against E with σ
+against Γ is the reason the window exists, and a tab strip cannot do it.
+`＋ plot` adds one; `×` on a plot removes it; clicking a plot makes it
+the active one that the rails and the mode chips act on.
+
+### Picking what to plot
+
+Every mote in the left rail that holds a number is listed, with its
+numeric properties as chips. A chip marked with `·` is one of that
+mote's **freedoms** -- something the solver determines -- and a freedom
+nothing has solved yet is listed too, since in a garden that has never
+been run those are precisely the interesting curves.
+
+| Gesture on a chip | Action |
+|---|---|
+| Click | Plot it as y (click again to remove it) |
+| Alt-click | Sweep it as x |
+| Shift-click | Pin it as a knob |
+| Right-click | All three, plus Inspect / Inspect in new tab |
+
+Either side can be any numeric property of any mote -- there is no rule
+that x must be an input. Sweeping a property the solver would otherwise
+determine is allowed and says so: the plot reports **x pinned**, because
+the answer under it is "what if this were so" rather than "what the
+model determines".
+
+### Series, cases, and what a plot costs
+
+A series is a mote, a property, a scenario and an override. Several
+series differing only in which property they read share **one solve per
+point**, so a plot's cost is *cases* × points rather than series ×
+points. The topbar states the number it works out to rather than
+capping it -- adding a twelfth series should show you what you just
+bought. At the scale MonOSS is built for it is rarely an issue: 201
+solves of the voltage-divider example take about a tenth of a second.
+
+Every sweep runs twice. A coarse pass takes every eighth point and lands
+in about the time of a frame; the rest follows and sharpens it. So
+dragging a knob always redraws immediately rather than freezing and then
+jumping, and a newer request cancels the one still running -- per plot,
+so plots in the grid never cancel each other.
+
+### Knobs
+
+A pinned property becomes a slider in the right rail. Dragging it
+overrides that value for every sweep, and **never writes it to the
+garden**: it is a question, not an edit. Hovering a plot with knobs
+pinned fills the sensitivity panel, which nudges each knob by 5% and
+ranks them by how much they move the plotted value at the cursor -- one
+extra solve per knob, not per point, and local to that x.
+
+### Baselines
+
+The baseline dropdown lists the garden's own **scenarios**
+(`core/scenarios.py`), not a Moxie setting. Choosing one draws its curve
+dashed beside each series and puts the difference in the cursor
+readout. A baseline is therefore a real, named, shareable thing in the
+garden rather than a slider position someone has to remember.
+
+### What the plot tells you it could not do
+
+A point that fails to solve leaves a **gap** -- never a line
+interpolated across a region where the model has no answer -- and the
+failed span is hatched, with the solver's own message on hover. A span
+where the answer breaks one of the garden's own **constraints** (a rule
+whose relation is `<=` rather than `==`) is shaded, and the rule is
+named once in the run rail. That is why there is no "threshold" control:
+a limit on a value is already a thing in MonOSS, every solve checks it,
+and shading where it actually broke stays right even where the bound
+itself moves with the sweep.
+
+### Three modes
+
+* **Sweep** -- one axis, one or more curves. The main event.
+* **Surface** -- one output over *two* swept properties, as a heatmap.
+  A full grid is the square of a sweep, so it draws a coarse grid first
+  (every fourth point of both axes) and refines.
+* **Correlate** -- one dot per mote carrying both named properties, from
+  a single solve. Nothing is swept; the solve is there so a freedom
+  shows its solved value rather than a stale one. Dots are labelled
+  directly, since a scatter has no legend to lean on.
+
+### Axes and colour
+
+Series sharing a dimension share a y axis; a second dimension takes the
+right-hand one; three or more has no honest shared scale and the plot
+normalizes. Commensurability comes from `core/units.py`, so `kohm` and
+`ohm` agree and `ohm` and `volt` do not.
+
+Six series colours, assigned by the series' own identity and never by
+its position, so switching one off never repaints the others. Six is not
+a round number: it is how many marks stay separable on this background
+under every pairwise colour-vision check when any series may overlap any
+other. A seventh series takes the first hue again with a dash pattern --
+a second channel rather than a colour nobody could tell from another.
+
+### Saving
+
+Closing the window keeps the grid, per garden, in its own storage --
+axes, series, knobs and ranges, but never the points, which are
+re-solved on open. **Save as mote** is the durable version: an ordinary
+mote carrying a `plot` property, declared an instance of `Saved Plot`,
+exactly as Monolith saves a view. What it stores is the *specification*
+-- which motes, which keys, which ranges -- and never the numbers, so
+reopening a saved plot re-solves the garden as it stands now. A plot
+embedded in a note therefore cannot go stale the way a pasted number
+does, which is the whole reason to save one.
+
+### Exporting
+
+`csv` writes the points you are looking at; `png` rasterizes the plot's
+own SVG. Both go through a native save dialog. They are for taking an
+answer out of the ecosystem -- inside it, a saved plot mote is the
+better currency.
+
+A seventh window means a seventh port: `moxie/app.py` asks for **42008**,
+falling back to an ephemeral one if taken -- 42007 is the Gardens
+window's, which is easy to miss when counting because Gardens is not in
+`api_common.APPS`. `.webview_data_moxie/` is its own WebKit storage.
+
+### Smoke test
+
+`scripts/moxie_smoke_test.py`, the same instrument as the others. It
+drives a real window against a seeded throwaway garden and checks that a
+sweep draws a curve with the right numbers in it, that it writes nothing
+and logs nothing, that a knob moves the curve without touching the
+garden, that a failed point leaves a gap rather than a line, that the
+grid holds two independent plots, and that saving a plot writes a
+specification rather than points.
+
+```
+.venv/bin/python scripts/moxie_smoke_test.py
+```
+
+Run it alone -- the pywebview window suites interfere with each other.
+
+---
+
 # Gardens -- the garden manager
 
 `./run_gardens.py`, or `.venv/bin/python run_gardens.py`. Also reachable
-from every one of the six windows: the garden dropdown's "Manage
+from every one of the seven windows: the garden dropdown's "Manage
 gardens…" footer, plus Monarch's File menu and its Tools → Sync…, which
 opens it straight at the selected garden's sync settings.
 
@@ -1096,7 +1260,7 @@ a short-lived one and closes it), so both are ordinary operations here.
 
 The cost of being its own process is that it cannot switch the garden of
 the app that opened it. It doesn't try: each row's **Open in** launches
-any of the six windows already on that garden, and an app that is
+any of the seven windows already on that garden, and an app that is
 already running finds a newly created garden in its own switcher, which
 reads the directory every time it opens.
 
@@ -1113,9 +1277,10 @@ reads the directory every time it opens.
 
 ### Ports
 
-42007, after the six windows' 42001-42006, falling back to an ephemeral
-one if taken. `.webview_data_gardens/` is its own WebKit storage. Opening
-it twice is allowed rather than guarded: pywebview cannot raise and focus
+42007, after the first six windows' 42001-42006 and before Moxie's
+42008, falling back to an ephemeral one if taken.
+`.webview_data_gardens/` is its own WebKit storage. Opening it twice is
+allowed rather than guarded: pywebview cannot raise and focus
 a window belonging to another process, so a menu item that silently did
 nothing because the first one was buried would be the worse failure.
 

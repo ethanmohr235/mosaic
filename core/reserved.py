@@ -27,12 +27,13 @@ from core.roles import ROLES_KEY
 from core.rules import APPLIES_TO, EQUATION_KEY, FREEDOMS_KEY
 from core.scenarios import OVERRIDES, VARIES
 from core.species import INSTANCE_OF, TEMPLATE_OF
+from core.sweep import PLOT_KEY
 from core.units import UNITS_KEY
 
 RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
-    ROLES_KEY, MODOC_KEY, QUERY_KEY,
+    ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -79,6 +80,13 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "direction, or the graph itself (instance_of/kind/related), which is "
         "how a query asks about shape and not only about properties. Written "
         "and read in Monolith (run_monolith.py).",
+    PLOT_KEY: "A saved plot: the specification a graph of the garden is "
+        "drawn from, as JSON -- which property is swept and over what range, "
+        "which properties are plotted against it, which scenarios and which "
+        "transient overrides. It holds no computed points, only what to "
+        "compute, so reopening it re-solves the garden as it stands rather "
+        "than showing what it looked like when saved. Written and read in "
+        "Moxie (run_moxie.py); the solving itself is core/sweep.py.",
     "url": "A web address or local file path. core/links.py classifies it "
         "as a URL (has a scheme, or looks like a bare domain) or an "
         "explicit local path ('/', '~', './', '../', or a drive letter) "

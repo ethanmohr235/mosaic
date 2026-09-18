@@ -69,7 +69,7 @@ def species_ids(conn: sqlite3.Connection) -> list[str]:
     a hop limit sees a subset of what Monolith's table lists, and a
     palette claimed from a subset would give the same species two
     colours in two windows. The garden's whole species list is the one
-    answer all six can ask for. Sorted here rather than in each
+    answer all seven can ask for. Sorted here rather than in each
     frontend: the claiming order decides who gets which entry when two
     ids want the same one.
 
@@ -86,7 +86,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 # app id -> (display name, its run_*.py, the flag that opens straight to
 # one mote -- None where that script takes no such flag). The single
 # source both the ⌘J switcher (below) and each app's own frontend read,
-# so a seventh app is one entry here rather than a seventh copy-pasted
+# so an eighth app is one entry here rather than an eighth copy-pasted
 # open_<sibling>() per existing app.
 APPS = {
     "monarch": ("Monarch", REPO_ROOT / "run_monarch.py", None),
@@ -95,6 +95,7 @@ APPS = {
     "momentum": ("Momentum", REPO_ROOT / "run_momentum.py", "--focus"),
     "monolith": ("Monolith", REPO_ROOT / "run_monolith.py", "--view"),
     "motion": ("Motion", REPO_ROOT / "run_motion.py", "--focus"),
+    "moxie": ("Moxie", REPO_ROOT / "run_moxie.py", "--focus"),
 }
 
 
@@ -178,7 +179,7 @@ def open_with_os_default(path: str) -> None:
     launches) takes to return, which observably is not always fast.
 
     Lived in monarch/api.py until the inspector became shared. A `url`
-    property means the same thing in all six windows, so the one window
+    property means the same thing in all seven windows, so the one window
     that could follow one was an accident of where the panel happened to
     be written."""
     system = platform.system()
@@ -220,7 +221,7 @@ _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 class InspectorApi:
     """The mote-editing contract the floating inspector speaks, identical
-    in all six windows.
+    in all seven windows.
 
     The inspector is one surface wherever you are (frontend_shared/
     inspector.js), so it has to find the same methods on every bridge it
@@ -484,7 +485,7 @@ class InspectorApi:
 
 
 class CommandBarApi:
-    """The "/" command bar's bridge, identical in all six windows -- the
+    """The "/" command bar's bridge, identical in all seven windows -- the
     same one-surface argument as InspectorApi just above, applied to
     typing instead of clicking. `frontend_shared/commandbar.js` speaks
     only this one method; the grammar itself (property/rule/freedom/
@@ -515,7 +516,7 @@ class CommandBarApi:
 
 def _label(mote) -> str:
     """A mote's display name: its `name`, or its id when it hasn't got
-    one. The same answer six windows already compute separately, and the
+    one. The same answer seven windows already compute separately, and the
     reason the inspector's payload carries labels for the other end of
     every relationship rather than making the frontend guess."""
     if mote is None:

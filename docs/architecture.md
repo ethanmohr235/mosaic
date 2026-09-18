@@ -57,7 +57,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc` and `query` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query` and `plot` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below), and a task's status or estimate is likewise discovered from what the value looks like (`core/task_candidates.py`). The names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
 
@@ -175,6 +175,62 @@ the inputs -- sizing becomes rating. That is what made moving freedoms
 off the species (see "Simulation" above) a prerequisite rather than a
 convenience: a scenario perturbs motes, so anything it varies must be
 declarable on a mote.
+
+See `docs/simulation.md` for the reference.
+
+# Sweeping
+
+A scenario answers a second question about a garden. `core/sweep.py`
+answers a range of them: solve the whole garden once per step of a
+property's range, and report another property at every step. The answer
+is a curve rather than a state, which is why it is a module beside
+`core/simulation.py` rather than an option on `run_simulation()`, and
+why it has its own window (**Moxie**, `run_moxie.py`).
+
+Sweeping cost nothing structurally, for the same reason scenarios did.
+The run machinery was already driven from a properties dict, so a sweep
+is that dict perturbed N times. What the change *did* require was
+lifting the solve out of its two callers: `run_simulation()` and
+`run_time_series()` had run the same five steps -- split the relations,
+substitute, hand the rest to the backend, check constraints, report the
+unsolved -- differing only in bookkeeping. That body is now
+`solve_view()`, and `solve_properties()` is its properties-dict front
+door. Both existing functions call it; neither changed behaviour.
+
+`solve_properties()` takes properties and relationships rather than a
+connection, and that is the structural version of the rule that matters
+here: **a sweep writes nothing and logs nothing**. There is no database
+in reach to write to. No write-back, no run-log row, no scenario motes
+created and destroyed around the edges — which is what makes it safe to
+run on every frame of a dragged slider, and is the same refusal a
+scenario run makes for the same reason.
+
+Two decisions inside it are worth naming:
+
+**Cases, not series.** A caller asks for *distinct what-ifs* rather than
+distinct curves. Eight curves reading eight properties off one solve are
+one case, so the cost is `cases × steps` rather than `series × steps`.
+Keeping the frontend's notion (a series) out of the engine is what makes
+that collapse expressible at all.
+
+**A failed point is a point.** A solve that fails at one x may succeed at
+the next, so the message is recorded on that point and the sweep
+continues. Constraints ride along the same way: every solve checks them
+anyway, so each point carries the ones its answer broke. A plot can then
+shade where the model actually broke its own rule, rather than reading a
+fixed bound off a constraint and drawing a line that would be wrong
+wherever the bound itself moves.
+
+`read_garden()` returns the whole read as a `Ground`, which every entry
+point accepts in place of a connection -- so a caller can read under
+whatever lock guards its connection and solve outside it. That is not an
+optimization: a sweep that held the connection for its whole run would
+be holding it against the very keystroke meant to cancel it.
+
+`plot` is a reserved property, and a mote carrying one is a saved plot --
+the specification, never the points, so reopening it re-solves the
+garden as it stands. It is `query` (Monolith's saved view) one subject
+over, down to being asked of the property rather than made a kind.
 
 See `docs/simulation.md` for the reference.
 
@@ -636,7 +692,7 @@ Two exclusions are inherited rather than reinvented. Templates and
 scenario overrides are never placed, even when dated, because they hold
 replacement values rather than real data. And a mote is coloured by its
 species through the same palette the graph canvas uses, so it reads the
-same colour in all six windows.
+same colour in all seven windows.
 
 Monastery is a third process on the same terms as Mora, which means the
 same two collisions to avoid: `monastery/app.py::choose_port` asks for
@@ -706,7 +762,7 @@ and the window polls while focused. See `docs/ui-setup.md`.
 
 # Species colour
 
-A mote is coloured by its species, in all six windows, and the rule is
+A mote is coloured by its species, in all seven windows, and the rule is
 one every window carries a copy of rather than one any of them decides.
 
 Hashing a hue out of the species id -- which is what this was -- gave
@@ -733,7 +789,7 @@ it.
 
 # The inspector
 
-One mote, one surface, six windows. Selecting a mote anywhere -- a node
+One mote, one surface, seven windows. Selecting a mote anywhere -- a node
 in Monarch, a row in Monolith, a card in Momentum, a placement in
 Monastery, a link in Mora, a node in Motion -- opens the same floating
 panel, with the same tools in it.
@@ -763,7 +819,7 @@ dropdown, which is separate because what goes *in* it is each window's
 own business and only the look, placement and dismissal are shared.
 
 **Two halves, one contract.** `api_common.py::InspectorApi` is mixed into
-all six `Api` classes and is the whole bridge the panel speaks:
+all seven `Api` classes and is the whole bridge the panel speaks:
 `inspect_mote` plus the `inspector_*` writes. `frontend_shared/
 inspector.js` and `inspector.css` are the panel, symlinked into each
 app's `frontend/` -- pywebview serves each frontend directory as its own
@@ -842,7 +898,7 @@ on the reasoning that Monastery is the window that actually reads a
 `recurring` mote back and so should be the window that authors the rule.
 Monarch's picker was correspondingly reduced to showing an RRULE as raw
 text. Both halves of that argument stopped holding when the inspector
-became one surface in six windows: "edit this date properly" has to work
+became one surface in seven windows: "edit this date properly" has to work
 wherever you are standing. One widget now, one repeat editor inside it,
 two callers.
 

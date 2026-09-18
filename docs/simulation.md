@@ -22,6 +22,11 @@ Programmatically, a single steady-state solve is
 `core.simulation.run_time_series(conn, step_count, commit)` (see "Run
 history" below for its `save` option).
 
+A third question -- how one value moves as another changes -- has an
+answer shaped like a curve rather than like a state, and so has its own
+module and its own window: `core.sweep.run_sweep()`, and **Moxie**
+(`run_moxie.py`). See "Sweeping" below.
+
 ## The three pieces
 
 **Freedoms** are what the solver is allowed to determine, declared via a `freedoms` property:
@@ -667,6 +672,110 @@ and what it would leave missing -- before anything is solved.
   same reading a rule with no equation gets.
 - Scenarios compose with time series: each step reads the perturbed
   state.
+
+## Sweeping
+
+A scenario lets a garden hold a second answer. A **sweep** lets it hold a
+range of them: `core/sweep.py` re-solves the whole garden once per step
+of a property's range and reports another property at every step. That
+is a curve rather than a state, which is why it is a module of its own
+rather than an option on `run_simulation()`.
+
+It has its own window, **Moxie** (`run_moxie.py`, and `docs/ui-setup.md`).
+
+```python
+from core.sweep import Axis, Case, run_sweep
+
+result = run_sweep(
+    conn,
+    Axis(mote_id=source, key="voltage", lo=0, hi=20, steps=200),
+    [Case("base")],
+    [(r1, "current")],
+)
+```
+
+Three shapes, the same machinery three ways:
+
+| Call | Shape |
+|---|---|
+| `run_sweep` | one axis → a line, or several |
+| `run_surface` | two axes → a grid of cells |
+| `run_correlation` | no axis → one dot per mote, from a single solve |
+
+### A sweep writes nothing
+
+No write-back, no run-log row, no scenario motes created and destroyed
+around the edges. A sweep leaves the garden exactly as it found it,
+which is what makes it safe to fire on every frame of a dragged slider.
+This is not a default to be lifted later: the answer to "what would this
+be across that range" is not the garden's state, for the same reason a
+[scenario](#scenarios) run is never committed.
+
+The mechanism is ordinary. `solve_properties()` (in `core/simulation.py`,
+alongside the `solve_view()` that `run_simulation` and `run_time_series`
+both now call) takes a properties **dict** rather than a connection --
+so there is no database in reach to write to. Each point applies the
+scenario, then the case's transient overrides, then the swept value, and
+solves the copy.
+
+### Cases, not series
+
+A `Case` is one what-if evaluated at every point: a scenario, plus
+transient overrides of the form `{mote_id: {key: value}}` that are never
+written anywhere. Several curves that differ only in *which property
+they read* are one case and one solve per step; two that differ in
+scenario or in an override are two.
+
+So the cost of a sweep is `len(cases) * steps`, not `series * steps`,
+and a caller reading eight properties off one solve pays for one. Moxie
+states that number in its run rail rather than capping it.
+
+### Failure is a point, not an end
+
+A solve can fail at one x and succeed at the next -- an equation that
+divides by the swept value at zero, a Newton run that will not converge
+at one end of a range. The failed point carries the solver's own message
+and the sweep continues, because 219 good points and a labelled gap is a
+better answer than an exception. `SweepResult.failures` counts them.
+
+Constraints come back the same way. Every solve checks them anyway, so
+each point carries the ones its answer does not satisfy, and
+`SweepResult.broken_constraints` names each broken rule once. That is
+the honest form of a limit line: rather than reading a fixed bound off a
+rule and drawing it, a plot shades the range where the model actually
+broke its own rule -- which stays right even where the bound itself
+moves with the sweep.
+
+### Pinning a freedom
+
+Nothing stops a sweep varying a property the solver would otherwise
+determine; the override simply wins for that solve. It is worth saying
+out loud, though, because the answer under it is "what if this were so"
+rather than "what the model determines" -- so `SweepResult.pinned` says
+when the swept property was one of its mote's freedoms.
+`simulation.garden_freedoms(conn)` answers the same question without
+running anything.
+
+### Sweeping off a snapshot
+
+`read_garden(conn, scenario_ids)` reads everything a sweep needs in one
+go, and every `run_*` above accepts that `Ground` in place of a
+connection. A caller can therefore read under whatever lock guards its
+connection and solve outside it -- which is what lets Moxie stay
+responsive, since a sweep holding the connection for its whole run would
+also be holding it against the keystroke meant to cancel it. `indices`
+(and `run_surface`'s `stride`) compute a subset of the points, so a
+coarse pass can be drawn before a fine one refines it, and
+`should_cancel` is polled between points.
+
+### Saved plots
+
+`plot` is a reserved property (`core/reserved.py`). A mote carrying one
+is a saved plot: **the specification** -- which motes, which keys, which
+ranges, which scenarios -- and never the points it produced. Reopening
+one therefore re-solves the garden as it stands now, which is the whole
+difference between a saved plot and a screenshot. Written and read in
+Moxie, and shaped exactly like `query`, Monolith's saved view.
 
 ## Dependency queries
 

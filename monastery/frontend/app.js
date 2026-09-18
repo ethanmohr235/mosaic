@@ -1830,6 +1830,15 @@ const LAUNCHER_APPS = [
       <circle cx="29.4" cy="15.3" r="2" fill="var(--accent)"></circle>
     </svg>`,
   },
+  {
+    id: "moxie", name: "Moxie", kind: "graphs",
+    desc: "Sweep one property and graph another against it.",
+    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+      <path d="M7 30 C14.5 30 13.5 11 20 11 C26.5 11 25.5 30 33 30" fill="none"
+            stroke="var(--fg)" stroke-width="2.2" stroke-linecap="round" opacity="0.6"></path>
+      <circle cx="20" cy="11" r="3" fill="var(--accent)"></circle>
+    </svg>`,
+  },
 ];
 const THIS_APP = "monastery";
 

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moxie</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="inspector.css">
+<link rel="stylesheet" href="commandbar.css">
+<link rel="stylesheet" href="interval.css">
+<link rel="stylesheet" href="menu.css">
+</head>
+<body>
+
+<div id="shell">
+
+  <header id="topbar">
+    <div id="brand">
+      <svg width="22" height="22" viewBox="0 0 128 128" aria-hidden="true">
+        <rect width="128" height="128" rx="28" fill="var(--panel)"></rect>
+        <path d="M22 96 C46 96 44 34 64 34 C84 34 82 96 106 96" fill="none"
+              stroke="var(--fg)" stroke-width="7" stroke-linecap="round" opacity="0.6"></path>
+        <circle cx="64" cy="34" r="9" fill="var(--accent)"></circle>
+      </svg>
+      <div id="brand-text">
+        <span id="brand-name">Moxie</span>
+        <span id="brand-sub">MonOSS</span>
+      </div>
+    </div>
+
+    <div class="rule"></div>
+
+    <div class="topbar-menu">
+      <button id="garden-btn" class="topbar-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+        <span id="garden-name">…</span>
+        <span class="caret">⌄</span>
+      </button>
+      <div id="garden-menu" class="menu hidden" role="menu"></div>
+    </div>
+
+    <div id="mode-chips" class="segmented" role="tablist" aria-label="Plot mode"></div>
+
+    <div class="spacer"></div>
+
+    <span id="run-label"></span>
+    <button id="add-plot-btn" class="pill-btn" type="button" title="Add another plot to the grid">＋ plot</button>
+    <button id="save-plot-btn" class="pill-btn" type="button" title="Save this plot as a mote">Save as mote</button>
+    <button id="refresh-btn" class="topbar-trigger icon-btn" type="button" title="Refresh: sync and reload">⟳</button>
+    <button id="switch-app-btn" class="topbar-trigger icon-btn" type="button" title="Switch app (⌘J)">⊞</button>
+  </header>
+
+  <div id="body">
+
+    <aside id="rail">
+      <div class="rail-search">
+        <input type="text" id="mote-search" placeholder="Search motes and properties" autocomplete="off">
+      </div>
+      <div class="rail-head">
+        <span class="rail-title">Plottable motes</span>
+        <span id="mote-count" class="rail-meta"></span>
+      </div>
+      <div id="mote-list" class="rail-list"></div>
+    </aside>
+
+    <main id="centre">
+      <div id="grid"></div>
+    </main>
+
+    <aside id="panel">
+      <div id="panel-body"></div>
+    </aside>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+</div>
+
+<div id="launcher-overlay" class="hidden">
+  <div id="launcher-modal">
+    <div id="launcher-input-row">
+      <span class="launcher-glyph"></span>
+      <input type="text" id="launcher-input" placeholder="Open an app…" autocomplete="off">
+      <kbd>esc</kbd>
+    </div>
+    <div id="launcher-results"></div>
+    <div id="launcher-empty" class="hidden"></div>
+    <div id="launcher-footer">
+      <span>↑↓ select</span><span>↵ open</span>
+      <div class="spacer"></div>
+      <span id="launcher-garden"></span>
+    </div>
+  </div>
+</div>
+
+<script src="menu.js"></script>
+<script src="interval.js"></script>
+<script src="inspector.js"></script>
+<script src="commandbar.js"></script>
+<script src="plot.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
