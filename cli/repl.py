@@ -84,9 +84,9 @@ HELP_TEXT = """
     species template id=<mote_id> species=<species_id>     Make a mote a species' template
     species new species=<species_id> [key=value ...]       New instance, seeded from the template
 
-    modoc render id=<mote_id> [step=<n>]                   Render a mote's note, values resolved
+    modoc render id=<mote_id>                              Render a mote's note, values resolved
     modoc check id=<mote_id>                               Report unresolved links and values
-    modoc values id=<mote_id> [step=<n>]                   Every \\val and what it resolves to
+    modoc values id=<mote_id>                              Every \\val and what it resolves to
     modoc export id=<mote_id> [out=<file>]                 Write the note out as a .modoc file
     modoc import file=<path> [id=<mote_id>]                Read a .modoc file onto a mote
 
@@ -200,7 +200,7 @@ def _handle_modoc(conn, action: str, action_args: dict) -> None:
         return
 
     document = modoc.parse(modoc.read_source(conn, note_id))
-    resolution = resolve_modoc(conn, note_id, document, step=int(action_args.get("step", 0)))
+    resolution = resolve_modoc(conn, note_id, document)
     if action == "check":
         if render.print_diagnostics(document, resolution) == 0:
             print("No problems.")

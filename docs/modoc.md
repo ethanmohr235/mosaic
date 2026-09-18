@@ -11,7 +11,7 @@ cannot go stale the way a number typed into a paragraph does.
     Owned by \mote{Rina Kovac}, due \val{due}, with
     \val{count(targets('contains'))} tasks in scope.
 
-    \graph{targets('contains') by status}
+    \graph{Burndown}
 
 ## Where a note lives
 
@@ -55,7 +55,7 @@ Each on its own line.
 | `\subsection{...}` | section rule |
 | `\begin{itemize}` / `\item ...` / `\end{itemize}` | bulleted list |
 | `\begin{equation}` ... `\end{equation}` | display math |
-| `\graph{...}` | a figure -- see below |
+| `\graph{...}` | a saved Moxie view, drawn here -- see below |
 | blank line | paragraph break |
 
 A wrapped `\item` continues on the next line. A block command's argument
@@ -128,39 +128,69 @@ date. Anything else goes to the same expression language rules use
     \val{count(targets('contains'))}     12
     \val{sum(targets('contains').cost)}  4820
     \val{budget * 1.2}                   48000
-    \val{t}                              the current step
+    \val{t}                              0 -- a note is at no step
     \val{turbine.work}                   a role's part (see core/roles.py)
 
 A `\val` never has freedoms. It reads the state the garden is in; there
 is no solver behind a note to hand a free variable to -- `core/simulation.py::
 expression_context()` clears them for exactly that reason.
 
-### `\graph` -- a figure
+### `\graph` -- a saved Moxie view
 
-Block-level, one per line, in two forms:
+Block-level, one per line, and it takes one thing: the name (or id) of a
+view saved in [Moxie](ui-setup.md#moxie).
 
-    \graph{<expression> over t}          a line, one point per step
-    \graph{<selection> by <property>}    bars, motes grouped and counted
-    \graph[ref]{...}                     either form, anchored elsewhere
+    \graph{Burndown}
+    \graph{Capacity by team}
+    \graph{7f3c1a02-...}              by id, if two views share a name
 
-`over t` evaluates the expression once per step of a simulation preview,
-out to whichever is further: the current `t+N`, or a default eight-step
-horizon (a projection of one point is not a projection). `by` takes
-something that *selects* motes -- `targets('contains')`, `sources('works_on')` --
-and counts them by the value of one property.
+Everything about what the figure *is* -- which properties, which ranges,
+which scenarios, whether it is a line, a surface or a scatter -- lives on
+the view, not in this argument. You design a figure once, in the window
+built for designing figures, and a note refers to it.
 
-## Time
+What is saved is the **specification**, never the points: a view is a
+mote carrying a `plot` property (`core/sweep.py::PLOT_KEY`), and
+rendering a note re-solves it against the garden as it stands
+(`core/plotview.py`). Change a rule, and every note that shows that
+figure is already showing the new one. That is the same promise `\val`
+makes about a number, kept for a curve.
 
-Everything above resolves at a step. `t+0` is the garden as it stands and
-reads as **Real**. Any higher step resolves the note against
-`run_time_series(commit=False)` that far ahead and reads as
-**Projected**: every `\val` moves, both graph forms move with it, and
-nothing is written or logged.
+Two consequences worth stating outright:
 
-Turning a projection into fact is a separate, explicit act -- Mora's
-`Apply t+N…`, which asks first. Saving a note and applying a run are
-deliberately two buttons: a save must never be a way to write simulation
-results.
+* **A figure is a sweep, not a projection.** It varies a *property* --
+  the x axis -- and holds the clock still. Nothing in a note moves with
+  time; see "No clock" below.
+* **One broken rule stops every figure in the garden.** A sweep solves
+  the whole coupled system at each point, so a rule that cannot solve
+  there -- `prev(...)`, which has no previous tick inside a sweep --
+  fails the solve, and the figure says so rather than drawing half of
+  one.
+
+A name that matches no saved view, a view whose specification is
+unreadable, and a range nothing solves across are each a diagnostic and
+a visibly empty figure, never a blank page.
+
+## No clock
+
+Everything above resolves against **the garden as it stands**, and that
+is the only reading a note has. `\val{t}` is 0, because a note is not at
+a step.
+
+This used to be otherwise: notes resolved at `t+N`, Mora carried a
+stepper that flipped **Real** to **Projected**, and an `Apply t+N…`
+button committed the projection to the graph. All of it is gone, and the
+reason is worth keeping written down. A note says what a garden *is*.
+What it will be after N steps is a simulation, which is Motion's window
+(`preview_simulation` / `run_ticks` on the MCP surface); how a value
+moves as another one changes is a sweep, which is Moxie's. A note editor
+that could also run and commit a simulation was holding a lever that
+belonged in another room -- and the projection was never quite the same
+answer as the one the window built for it gave.
+
+A note therefore writes nothing at all, and there is nothing it could
+write. That is a stronger promise than "it asks first", and it needs no
+button to keep.
 
 ## Nothing raises
 
@@ -174,15 +204,15 @@ same list `monoss modoc check` prints and Mora's Problems popover shows.
 
 ### Mora
 
-The editor: `./run_mora.py [--garden <name>] [--note <mote id>]`. Source,
-Rendered and Data panes, a mode switcher, the `t+N` stepper, and `@` to
-insert a link. See `docs/ui-setup.md`.
+The editor: `./run_mora.py [--garden <name>] [--note <mote id>]`. Source
+and Rendered panes, a mode switcher, and `@` to insert a link. See
+`docs/ui-setup.md`.
 
 ### CLI
 
-    monoss modoc render <mote> [--step N]    the note, resolved, as text
+    monoss modoc render <mote>               the note, resolved, as text
     monoss modoc check  <mote>               only what didn't resolve
-    monoss modoc values <mote> [--step N]    every \val, flat
+    monoss modoc values <mote>               every \val, flat
     monoss modoc export <mote> [--out FILE]
     monoss modoc import <FILE> [--mote ID]
 
@@ -190,10 +220,10 @@ The same five exist in the REPL as `modoc <action> id=<mote>`.
 
 ### MCP
 
-`resolve_modoc(mote, step)` returns the source and everything it resolves
-to. Writing a note is ordinary `update_mote` on the `modoc` property;
-there is no separate write tool, and applying a simulation step stays off
-the MCP surface by charter (`docs/architecture.md`).
+`resolve_modoc(mote)` returns the source and everything it resolves to.
+Writing a note is ordinary `update_mote` on the `modoc` property; there
+is no separate write tool. For what the garden will be rather than what
+it is, ask `preview_simulation`.
 
 ## Where the code is
 
@@ -201,8 +231,9 @@ the MCP surface by charter (`docs/architecture.md`).
 | --- | --- |
 | `core/modoc.py` | the grammar. Pure -- no connection, no resolution |
 | `core/modoc_bind.py` | what the macros mean, against a garden |
+| `core/plotview.py` | a saved Moxie view, re-solved for a `\graph` |
 | `core/simulation.py::expression_context` | the evaluation context a `\val` gets |
-| `cli/output.py::print_modoc` | the terminal's renderer |
+| `cli/render.py::print_modoc` | the terminal's renderer |
 | `mora/` | the window: bridge, payload shaping, frontend |
 
 One parser and one resolver, so `monoss modoc render` and Mora can

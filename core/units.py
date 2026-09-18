@@ -502,6 +502,12 @@ for _name, _dimension, _scale in _PREFIXABLE:
 register_unit("min", _TIME, 60.0)
 register_unit("hr", _TIME, 3600.0)
 register_unit("day", _TIME, 86400.0)
+register_unit("d", _TIME, 86400.0)  # common abbreviation for day, e.g. g/d
+register_unit("wk", _TIME, 604800.0)
+# Julian year (365.25 days): the standard astronomical definition, and
+# the one that keeps `yr` an exact multiple of `day` rather than drifting
+# with calendar leap-year rules a formula has no way to apply.
+register_unit("yr", _TIME, 365.25 * 86400.0)
 # Angle: genuinely dimensionless in SI -- a radian is a ratio of two
 # lengths (arc / radius), which is why it needs no dimension of its own,
 # only a scale relative to itself. `deg` is the one non-trivial angle

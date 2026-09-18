@@ -31,10 +31,13 @@
  *   CommandBar.install({ api, onChanged, onNavigate })   once, after the bridge is up
  *   CommandBar.open()                                     also bound to "/" globally
  *
- * onNavigate(moteId) is how a command that resolved or created a mote
- * hands off to whatever this window uses to show it -- normally
+ * onNavigate(moteId, created) is how a command that resolved or created a
+ * mote hands off to whatever this window uses to show it -- normally
  * `Inspector.open`, but a caller is free to do its own thing (Monarch
- * might also want to pan the graph there).
+ * might also want to pan the graph there). `created` is true when this
+ * command is the one that just made the mote, so a caller that places
+ * nodes on a canvas can drop a brand-new one somewhere sensible instead
+ * of wherever a fresh mote defaults to.
  *
  * Kept in frontend_shared/ and symlinked into each app's frontend/, like
  * inspector.js and menu.js; see docs/architecture.md. */
@@ -152,13 +155,17 @@ const CommandBar = (() => {
 
     // Docked at the bottom, the bar now sits right where a middle-drag
     // pans the graph. monarch/frontend/graph.js already guards its own
-    // canvas against X11/GTK's middle-click-paste; the bar needs the same
-    // guard for itself, or a middle click that starts on the box (a real
-    // focused <input>, unlike the canvas) pastes the primary selection
-    // into whatever's typed instead of doing nothing.
-    root.addEventListener("mousedown", (event) => {
+    // canvas against X11/GTK's middle-click-paste, but that guard only
+    // needs to preventDefault() on mousedown (autoscroll is a mousedown-
+    // time action). WebKitGTK's primary-selection paste into an actual
+    // editable element -- which the canvas isn't, but this bar's <input>
+    // is -- fires its paste on mouseup instead, so mousedown alone leaves
+    // it untouched; both need the guard.
+    const blockMiddleClick = (event) => {
       if (event.button === 1) event.preventDefault();
-    });
+    };
+    root.addEventListener("mousedown", blockMiddleClick);
+    root.addEventListener("mouseup", blockMiddleClick);
     input.addEventListener("keydown", onKeydown);
     input.addEventListener("input", () => {
       pendingConfirm = null;
@@ -329,7 +336,7 @@ const CommandBar = (() => {
     setValue("");
     setCandidates(null);
     onChanged();
-    if (result.moteId) onNavigate(result.moteId);
+    if (result.moteId) onNavigate(result.moteId, !!result.created);
     setMessage(result.message, "ok");
     if (clearMessageTimer) clearTimeout(clearMessageTimer);
     clearMessageTimer = setTimeout(() => setMessage(""), 2500);

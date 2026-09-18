@@ -461,17 +461,16 @@ def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[floa
 # ---- notes ----
 
 
-def resolve_modoc(
-    mote: str, step: int = 0, garden: str | None = None
-) -> dict[str, Any]:
+def resolve_modoc(mote: str, garden: str | None = None) -> dict[str, Any]:
     """Read a mote's `modoc` note and everything its macros currently
     resolve to: which mote each `\\mote{...}` points at, what each
-    `\\val{...}` comes to, and each `\\graph{...}`'s series.
+    `\\val{...}` comes to, and the figure each `\\graph{...}` draws.
 
-    `step` 0 reads the garden as stored; a higher step resolves the note
-    against a simulation preview that far ahead, exactly like
-    preview_simulation() and just as nondestructive -- nothing is written
-    or logged either way. Writing a note is ordinary update_mote() on the
+    A note has one reading -- the garden as it stands. It used to take a
+    `step` and resolve against a simulation preview that far ahead; ask
+    preview_simulation() for that instead, which is the tool for what a
+    garden will be rather than what it is. Nothing here writes or logs
+    either way, and writing a note is ordinary update_mote() on the
     `modoc` property; there is no separate write tool.
 
     `diagnostics` is what is wrong with the note (unknown commands,
@@ -479,12 +478,10 @@ def resolve_modoc(
     with _connect(garden) as conn:
         source = modoc_repo.read_source(conn, mote)
         document = modoc_repo.parse(source)
-        resolution = modoc_bind_repo.resolve(conn, mote, document, step=step)
+        resolution = modoc_bind_repo.resolve(conn, mote, document)
         return {
             "source": source,
             "anchorId": resolution.anchor_id,
-            "step": resolution.step,
-            "projected": resolution.projected,
             "links": {ref: dataclasses.asdict(t) for ref, t in resolution.links.items()},
             "values": {
                 node.expression if node.ref is None else f"[{node.ref}]{node.expression}":
@@ -492,7 +489,7 @@ def resolve_modoc(
                 for node in modoc_repo.values(document)
             },
             "graphs": [
-                dataclasses.asdict(resolution.graphs[modoc_repo.graph_key(node)])
+                _figure_summary(node, resolution.graphs[modoc_repo.graph_key(node)])
                 for node in modoc_repo.graphs(document)
             ],
             "diagnostics": [
@@ -500,6 +497,36 @@ def resolve_modoc(
                 for d in modoc_bind_repo.problems(document, resolution)
             ],
         }
+
+
+def _figure_summary(node, figure) -> dict[str, Any]:
+    """One `\\graph{...}`: the saved Moxie view it names, re-solved.
+
+    Summarised rather than dumped whole. A sweep's points are worth
+    sending -- there are at most core/plotview.py::NOTE_POINTS of them
+    per curve, and the shape of a curve is the answer -- but a surface is
+    hundreds of cells that no reader of a note is asking for, so it
+    reports its extent instead of its grid."""
+    summary = {
+        "view": node.view,
+        "name": figure.name,
+        "mode": figure.mode,
+        "viewId": figure.view_id,
+        "x": figure.x_label,
+        "y": figure.y_label,
+        "error": figure.error,
+    }
+    if figure.mode == "surface":
+        summary["grid"] = {"rows": figure.rows, "cols": figure.cols,
+                           "lo": figure.lo, "hi": figure.hi}
+    elif figure.mode == "correlate":
+        summary["dots"] = figure.dots
+    else:
+        summary["series"] = [
+            {"label": s.label, "unit": s.unit, "points": s.points}
+            for s in figure.series
+        ]
+    return summary
 
 
 # ---- provenance and the incidence index ----

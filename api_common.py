@@ -405,6 +405,17 @@ class InspectorApi:
 
     @synchronized
     def inspector_delete_property(self, mote_id: str, key: str) -> dict | None:
+        """Deleting a property that carries a unit also drops its entry
+        in the mote's `units` map -- otherwise the map keeps naming a
+        property that no longer exists, and a later property reusing
+        that key would silently inherit a unit it never declared."""
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is not None:
+            units = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+            if key in units:
+                units = dict(units)
+                del units[key]
+                motes_repo.update_mote(self._conn, mote_id, {units_repo.UNITS_KEY: units})
         motes_repo.delete_property(self._conn, mote_id, key)
         return self._inspector_payload(mote_id)
 
@@ -412,11 +423,23 @@ class InspectorApi:
     def inspector_rename_property(self, mote_id: str, old: str, new: str) -> dict | None:
         """Rename in place, keeping the value. Delete-then-add is what
         the frontend would otherwise have to do, and that loses the value
-        if the second call fails."""
+        if the second call fails.
+
+        A property's entry in the mote's `units` map is keyed by the same
+        name, so a rename that left it behind would silently strip the
+        unit from the renamed property while leaving a stale entry for a
+        key that no longer exists."""
         mote = motes_repo.get_mote(self._conn, mote_id)
-        if mote is None or old not in mote.properties or not new.strip():
+        new = new.strip()
+        if mote is None or old not in mote.properties or not new:
             return self._inspector_payload(mote_id)
-        motes_repo.update_mote(self._conn, mote_id, {new.strip(): mote.properties[old]})
+        updates = {new: mote.properties[old]}
+        units = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+        if old in units:
+            units = dict(units)
+            units[new] = units.pop(old)
+            updates[units_repo.UNITS_KEY] = units
+        motes_repo.update_mote(self._conn, mote_id, updates)
         motes_repo.delete_property(self._conn, mote_id, old)
         return self._inspector_payload(mote_id)
 
@@ -505,6 +528,7 @@ class CommandBarApi:
             "ok": result.ok,
             "message": result.message,
             "moteId": result.mote_id,
+            "created": result.created,
             "needsConfirm": result.needs_confirm,
             "choices": result.choices,
         }

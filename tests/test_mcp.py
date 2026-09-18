@@ -310,7 +310,6 @@ def test_resolve_modoc_returns_the_source_and_what_it_resolves_to():
 
     result = resolve_modoc(project["id"], garden=GARDEN)
     assert result["anchorId"] == project["id"]
-    assert result["projected"] is False
     assert result["values"]["due"]["text"] == "2026-09-30"
     assert result["values"]["count(targets('contains'))"]["text"] == "1"
     assert result["links"]["T0"]["mote_id"] == task["id"]
@@ -326,12 +325,17 @@ def test_resolve_modoc_reports_what_did_not_resolve():
     ]
 
 
-def test_resolve_modoc_at_a_step_projects_without_writing(box):
-    update_mote(box["id"], {"modoc": "Area is \\val{area}."}, GARDEN)
+def test_resolve_modoc_reads_the_garden_without_running_it(box):
+    """It used to take a `step` and resolve against a simulation preview
+    that far ahead. A note reports what the garden is; what it will be is
+    preview_simulation()'s answer, and asking a note for it is gone."""
+    update_mote(box["id"], {"modoc": "Width is \\val{width}."}, GARDEN)
 
-    result = resolve_modoc(box["id"], step=1, garden=GARDEN)
-    assert result["projected"] is True
-    assert result["values"]["area"]["text"] == "12"
+    with pytest.raises(TypeError):
+        resolve_modoc(box["id"], step=1, garden=GARDEN)
+
+    result = resolve_modoc(box["id"], garden=GARDEN)
+    assert result["values"]["width"]["text"] == "3"
     assert "area" not in get_mote(box["id"], GARDEN)["properties"]
     assert list_runs(garden=GARDEN) == []
 

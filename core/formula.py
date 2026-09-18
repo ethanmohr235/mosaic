@@ -44,8 +44,11 @@ NUMERIC_CALLS = frozenset({"abs", "min", "max"})
 # sin/cos/tan take radians, matching math.sin() -- a value with no declared
 # unit already *is* radians (see units.py's `deg`), and a value declared
 # `deg` arrives here already converted to radians by the time a formula
-# reads it, the same normalization every other unit gets.
-TRIG_CALLS = frozenset({"sin", "cos", "tan"})
+# reads it, the same normalization every other unit gets. arcsin/arccos/
+# arctan are their inverses: dimensionless in, radians out -- which is
+# still dimensionless in this system, the same way sin/cos/tan's own
+# output is.
+TRIG_CALLS = frozenset({"sin", "cos", "tan", "arcsin", "arccos", "arctan"})
 # `log` is the natural logarithm, matching math.log(), numpy, and every
 # other scientific-computing default -- the same "follow the stdlib"
 # choice TRIG_CALLS makes about radians. `ln` is an alias for anyone who
@@ -90,17 +93,29 @@ class LinearExpr:
 
     The arithmetic operators enforce linearity structurally: there is no
     way to build a LinearExpr that multiplies two unknowns together.
-    """
+
+    `scale` is the largest magnitude any constant has taken anywhere
+    during this expression's construction -- not just the final
+    `constant`, which may have cancelled back down to something small.
+    A rule mixing base units far apart (kW against MeV, say) routinely
+    produces intermediate values around 1e15; float64 has only ~16
+    significant digits, so two mathematically-equal ways of reaching
+    that same value can differ by more than an absolute epsilon ever
+    anticipates. `scale` lets a consistency check size its tolerance to
+    the computation instead of guessing a single constant for every
+    magnitude (see core/linear_solver.py's `_check_consistency`)."""
     terms: dict[Unknown, float] = field(default_factory=dict)
     constant: float = 0.0
+    scale: float = 0.0
 
     @staticmethod
     def number(value: float) -> "LinearExpr":
-        return LinearExpr({}, float(value))
+        value = float(value)
+        return LinearExpr({}, value, abs(value))
 
     @staticmethod
     def unknown(key: Unknown) -> "LinearExpr":
-        return LinearExpr({key: 1.0}, 0.0)
+        return LinearExpr({key: 1.0}, 0.0, 0.0)
 
     @property
     def is_constant(self) -> bool:
@@ -115,13 +130,15 @@ class LinearExpr:
         terms = dict(self.terms)
         for key, coefficient in other.terms.items():
             terms[key] = terms.get(key, 0.0) + coefficient
-        return LinearExpr(_prune(terms), self.constant + other.constant)
+        constant = self.constant + other.constant
+        scale = max(self.scale, other.scale, abs(constant))
+        return LinearExpr(_prune(terms), constant, scale)
 
     def __sub__(self, other: "LinearExpr") -> "LinearExpr":
         return self + (-other)
 
     def __neg__(self) -> "LinearExpr":
-        return LinearExpr({k: -v for k, v in self.terms.items()}, -self.constant)
+        return LinearExpr({k: -v for k, v in self.terms.items()}, -self.constant, self.scale)
 
     def __mul__(self, other: "LinearExpr") -> "LinearExpr":
         if self.is_constant:
@@ -172,8 +189,10 @@ class LinearExpr:
         # term (and the unknown along with it) from the expression.
         if factor == 0.0:
             return LinearExpr.number(0.0)
+        constant = self.constant * factor
+        scale = max(self.scale * abs(factor), abs(constant))
         return LinearExpr(
-            {k: v * factor for k, v in self.terms.items()}, self.constant * factor
+            {k: v * factor for k, v in self.terms.items()}, constant, scale
         )
 
 
@@ -444,6 +463,7 @@ class Equation:
     constant: float
     source: str = ""
     operator: str = EQUALS
+    scale: float = 0.0
 
     @property
     def is_equation(self) -> bool:
@@ -453,7 +473,7 @@ class Equation:
     def from_difference(
         expr: LinearExpr, source: str = "", operator: str = EQUALS
     ) -> "Equation":
-        return Equation(expr.terms, expr.constant, source, operator)
+        return Equation(expr.terms, expr.constant, source, operator, expr.scale)
 
 
 @dataclass(frozen=True)
@@ -930,18 +950,30 @@ def _numeric(name: str, node: ast.Call, ctx: Context) -> Ratio:
     return Ratio.number(min(values) if name == "min" else max(values))
 
 
-_TRIG_FUNCS = {"sin": math.sin, "cos": math.cos, "tan": math.tan}
+_TRIG_FUNCS = {
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "arcsin": math.asin,
+    "arccos": math.acos,
+    "arctan": math.atan,
+}
+_ARC_TRIG_DOMAIN = {"arcsin", "arccos"}
 
 
 def _trig(name: str, node: ast.Call, ctx: Context) -> Ratio:
-    """sin(x)/cos(x)/tan(x) -- deferred, like abs()/min()/max(), until x is
-    a known number rather than an unsolved unknown."""
+    """sin(x)/cos(x)/tan(x) and their inverses -- deferred, like
+    abs()/min()/max(), until x is a known number rather than an unsolved
+    unknown. arcsin/arccos are only defined for arguments in [-1, 1]."""
     if len(node.args) != 1:
         raise FormulaError(f"{name}() takes exactly one argument")
     arg = _as_ratio(_evaluate(node.args[0], ctx))
     if not arg.is_constant:
         raise NonlinearError(f"{name}() cannot be applied to an unknown quantity")
-    return Ratio.number(_TRIG_FUNCS[name](arg.constant))
+    value = arg.constant
+    if name in _ARC_TRIG_DOMAIN and not -1.0 <= value <= 1.0:
+        raise FormulaError(f"{name}({value!r}) -- the argument must be between -1 and 1")
+    return Ratio.number(_TRIG_FUNCS[name](value))
 
 
 _LOG_FUNCS = {

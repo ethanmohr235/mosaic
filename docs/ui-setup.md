@@ -573,7 +573,7 @@ the window.
 | Pane | |
 |---|---|
 | Source | a textarea over a syntax-highlight layer. `@` opens a mote picker that inserts `\mote{<id>}{<name>}` |
-| Rendered | the note with every macro resolved. Clicking a `\mote` link opens the shared floating inspector (`frontend_shared/inspector.js`) on that mote -- the same editing surface every other window uses |
+| Rendered | the note with every macro resolved. Clicking a `\mote` link opens the shared floating inspector (`frontend_shared/inspector.js`) on that mote -- the same editing surface every other window uses. A `\graph{<saved view>}` draws as a figure, through the same renderer Moxie uses (`frontend_shared/plot.js`) |
 
 `Source` / `Split` / `Read` choose which panes are shown. Mora has no
 docked data panel of its own; a mote's properties and relationships are
@@ -583,13 +583,14 @@ read (and edited) through the inspector, not a side pane.
 |---|---|
 | (autosave) | About a second after typing stops -- and on leaving the source pane, switching note or garden, or closing the window -- the source is written back on its own. The pill reads `edited`, `saving…`, `synced` |
 | Ctrl/Cmd+S, or **Save** | Write now, without waiting for the pause. Same write: the mote's `modoc` property and nothing else |
-| `t+N` stepper | Resolve the whole note against a simulation preview N steps out. The label flips **Real** to **Projected**; nothing is written |
-| **Apply t+N…** | Commit that projection to the graph. Asks first, and is disabled at t+0 |
 | Esc | Close the note menu or the `@` picker |
 | Footer **N problems** | Toggles a popover listing this note's diagnostics |
 
-Save and Apply are two buttons on purpose: saving a note must never be a
-way to write simulation results.
+Mora writes exactly one thing: the `modoc` property. It has no `t+N`
+stepper and no Apply button any more -- a note shows the garden as it
+stands, and moving a garden through time is Motion's window. That makes
+"saving a note can never write simulation results" a fact about the
+window rather than a rule two buttons were keeping.
 
 ### Smoke test
 
@@ -597,8 +598,9 @@ way to write simulation results.
 above, and exists for the same reason -- the half of the app pytest
 cannot reach. It drives a real window against a seeded throwaway garden
 and checks that the note renders, that `\val` and `\mote` resolve (and
-visibly fail when they can't), that both `\graph` forms draw, that a link
-opens the shared inspector, that the stepper projects without writing,
+visibly fail when they can't), that a `\graph` naming a saved Moxie view
+draws and re-solves rather than replaying stored points, that a link
+opens the shared inspector, that the footer offers no clock,
 that Save writes only the note, and that no uncaught JS errors were
 logged. The entry points *into* Mora belong to the main window, so
 they are checked by `scripts/monarch_smoke_test.py` instead, with `open_mora`
@@ -1200,6 +1202,13 @@ exactly as Monolith saves a view. What it stores is the *specification*
 reopening a saved plot re-solves the garden as it stands now. A plot
 embedded in a note therefore cannot go stale the way a pasted number
 does, which is the whole reason to save one.
+
+That is not a figure of speech: a saved view is what `\graph{...}` in a
+.modoc note names. Save a plot here as **Load curve**, write
+`\graph{Load curve}` in Mora, and the note draws it -- re-solved on
+every render, by this same renderer (`frontend_shared/plot.js`), at a
+coarser sampling than this window uses (`core/plotview.py`). Designing a
+figure is Moxie's job; a note refers to one. See `docs/modoc.md`.
 
 ### Exporting
 

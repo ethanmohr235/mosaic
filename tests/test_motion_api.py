@@ -105,6 +105,52 @@ def test_every_run_payload_carries_the_axis_it_is_counted_in(api):
     assert result["axis"] == {"unit": "tick", "label": "ticks", "count": 3}
 
 
+def _seed_mismatched_units(api):
+    """A rule that adds a resistance to a current -- dimensionally wrong,
+    but solvable as bare numbers. Mirrors the `mismatched` fixture in
+    tests/test_units_simulation.py, through the JS-facing Api."""
+    species = api.create_mote({"name": "Element", "freedoms": "total"})
+    rule = api.create_mote({"name": "Bad sum", "equation": "total == resistance + current"})
+    api.create_relationship(rule["id"], species["id"], "applies_to")
+    mote = api.create_mote({
+        "name": "E", "resistance": "1", "current": "2",
+        "units": {"resistance": "ohm", "current": "A", "total": "ohm"},
+    })
+    _set_species(api, mote["id"], species["id"])
+    return mote["id"]
+
+
+def test_strict_units_is_advisory_by_default(api):
+    _seed_mismatched_units(api)
+    result = api.preview(1)
+    assert result["dimension_warnings"]
+
+
+def test_preview_honours_strict_units(api):
+    _seed_mismatched_units(api)
+    with pytest.raises(SimulationError, match="dimensional check failed"):
+        api.preview(1, strict_units=True)
+
+
+def test_commit_honours_strict_units(api):
+    _seed_mismatched_units(api)
+    with pytest.raises(SimulationError, match="dimensional check failed"):
+        api.commit(1, strict_units=True)
+
+
+def test_compare_honours_strict_units(api):
+    mote_id = _seed_mismatched_units(api)
+    scenario = _scenario_over(api, mote_id, current=3)
+    with pytest.raises(SimulationError, match="dimensional check failed"):
+        api.compare(1, "linear", None, scenario, strict_units=True)
+
+
+def test_save_honours_strict_units(api):
+    _seed_mismatched_units(api)
+    with pytest.raises(SimulationError, match="dimensional check failed"):
+        api.save(1, strict_units=True)
+
+
 # ---- run history ----
 
 def test_list_runs_and_get_run_see_a_committed_run(api):

@@ -1320,6 +1320,16 @@ function wire() {
     if (!event.target.closest(".topbar-menu")) closeGardenMenu();
   });
 
+  // X11/GTK's middle-click-paste fires on any focused text control under
+  // the cursor. inspector.js and commandbar.js already guard their own
+  // DOM subtree (frontend_shared/inspector.js) -- this covers the table's
+  // own inputs (cell edits, filter boxes) the same way.
+  document.addEventListener("mousedown", (event) => {
+    if (event.button !== 1) return;
+    const tag = (event.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
+  });
+
   $("add-cond").onclick = (event) => {
     const field = (schema.columns.find((c) => c.field.source === "property") || schema.columns[0]).field;
     const conditions = [...draft.conditions, resetCondition(field)];

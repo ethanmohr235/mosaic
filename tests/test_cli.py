@@ -343,20 +343,22 @@ def test_modoc_import_can_target_an_existing_mote(conn, capsys, note, tmp_path):
     assert read_source(conn, note) == "\\section{Replaced}"
 
 
-def test_modoc_render_at_a_step_never_writes(conn, capsys):
+def test_modoc_render_reads_the_garden_and_never_writes(conn, capsys):
+    """A note has one reading: the garden as it stands. `--step` used to
+    render it against a simulation preview N steps out; that is
+    `preview_simulation`'s question and Motion's window, not a note's."""
     from core.modoc import write_source
     from core.motes import get_mote
 
-    species = create_mote(conn, {"name": "Task", "freedoms": "progress"})
-    rule = create_mote(conn, {"name": "Grow", "equation": "progress == prev(progress) + 10"})
-    create_relationship(conn, rule, species, APPLIES_TO)
     task = create_mote(conn, {"name": "T", "progress": 5})
-    set_species(conn, task, species)
     write_source(conn, task, "\\val{progress}")
 
-    _handle_modoc(conn, parse(["modoc", "render", task, "--step", "4"]))
-    assert "45" in capsys.readouterr().out
+    _handle_modoc(conn, parse(["modoc", "render", task]))
+    assert "5" in capsys.readouterr().out
     assert get_mote(conn, task).properties["progress"] == 5
+
+    with pytest.raises(SystemExit):
+        parse(["modoc", "render", task, "--step", "4"])
 
 
 def test_modoc_rejects_an_unknown_action(conn, capsys, note):

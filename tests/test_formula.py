@@ -529,7 +529,7 @@ def test_attribute_access_on_a_number_is_rejected():
 
 def test_unknown_function_is_rejected():
     with pytest.raises(FormulaError, match="unknown function"):
-        evaluate_expression("arctan(4)", context())
+        evaluate_expression("frobnicate(4)", context())
 
 
 def test_navigation_requires_a_quoted_relationship_type():
@@ -564,10 +564,22 @@ def test_sqrt_of_a_negative_number_is_rejected():
         evaluate_expression("sqrt(-1)", context())
 
 
-@pytest.mark.parametrize("name", ["sin", "cos", "tan", "sqrt"])
+@pytest.mark.parametrize("name", ["sin", "cos", "tan", "arcsin", "arccos", "arctan", "sqrt"])
 def test_trig_and_sqrt_defer_on_unknowns(name):
     with pytest.raises(NonlinearError):
         evaluate_expression(f"{name}(current)", context())
+
+
+def test_arc_trig_functions_invert_their_trig_counterparts():
+    assert evaluate_expression("arcsin(1)", context()).constant == pytest.approx(math.pi / 2)
+    assert evaluate_expression("arccos(-1)", context()).constant == pytest.approx(math.pi)
+    assert evaluate_expression("arctan(1)", context()).constant == pytest.approx(math.pi / 4)
+
+
+@pytest.mark.parametrize("name", ["arcsin", "arccos"])
+def test_arcsin_arccos_reject_arguments_outside_unit_range(name):
+    with pytest.raises(FormulaError, match="between -1 and 1"):
+        evaluate_expression(f"{name}(2)", context())
 
 
 # ---- property() ----

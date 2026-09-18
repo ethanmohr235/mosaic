@@ -1296,65 +1296,18 @@ async function openGardenMenu() {
   menu.classList.remove("hidden");
 }
 
-const LAUNCHER_APPS = [
-  { id: "monarch", name: "Monarch", desc: "Motes and relationships in a live force field." },
-  { id: "mora", name: "Mora", desc: "Write and link long-form .modoc notes." },
-  { id: "monastery", name: "Monastery", desc: "The garden on a calendar." },
-  { id: "momentum", name: "Momentum", desc: "Task board and timer." },
-  { id: "monolith", name: "Monolith", desc: "The garden as a table." },
-  { id: "motion", name: "Motion", desc: "Solve the garden and scrub a run." },
-  { id: "moxie", name: "Moxie", desc: "Graph one property against another." },
-];
-
-let launcherHighlight = 0;
-
-function launcherChoices() { return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP); }
-
-function renderLauncherResults(query) {
-  const q = query.trim().toLowerCase();
-  const list = launcherChoices().filter((a) =>
-    !q || (a.name + " " + a.desc).toLowerCase().includes(q));
-  const host = $("launcher-results");
-  host.textContent = "";
-  list.forEach((app, index) => {
-    const item = document.createElement("div");
-    item.className = `launcher-item${index === launcherHighlight ? " on" : ""}`;
-    const text = document.createElement("div");
-    text.appendChild(Object.assign(document.createElement("div"),
-      { className: "launcher-name", textContent: app.name }));
-    text.appendChild(Object.assign(document.createElement("div"),
-      { className: "launcher-desc", textContent: app.desc }));
-    item.appendChild(text);
-    item.onclick = () => launchApp(app.id);
-    host.appendChild(item);
-  });
-  $("launcher-empty").classList.toggle("hidden", list.length > 0);
-  $("launcher-empty").textContent = list.length ? "" : "No app matches that.";
-  return list;
-}
-
-function launcherIsOpen() { return !$("launcher-overlay").classList.contains("hidden"); }
-
-function openLauncher() {
-  launcherHighlight = 0;
-  $("launcher-garden").textContent = board ? board.garden : "";
-  $("launcher-overlay").classList.remove("hidden");
-  $("launcher-input").value = "";
-  renderLauncherResults("");
-  $("launcher-input").focus();
-}
-
-function closeLauncher() { $("launcher-overlay").classList.add("hidden"); }
-
-async function launchApp(appId) {
-  closeLauncher();
-  const p = plot();
-  const focus = p && p.x ? p.x.mote : null;
-  await call(api.open_app(appId, focus));
-}
-
 function wire() {
   $("garden-btn").onclick = openGardenMenu;
+  // X11/GTK's middle-click-paste fires on any focused text control under
+  // the cursor. inspector.js and commandbar.js already guard their own
+  // DOM subtree (frontend_shared/inspector.js) -- this covers moxie's own
+  // inputs the same way.
+  document.addEventListener("mousedown", (event) => {
+    if (event.button === 1) {
+      const tag = (event.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
+    }
+  });
   document.addEventListener("mousedown", (event) => {
     const menu = $("garden-menu");
     if (!menu.classList.contains("hidden") && !menu.contains(event.target)
@@ -1375,33 +1328,7 @@ function wire() {
     await call(api.refresh());
     await refresh();
   };
-  $("switch-app-btn").onclick = openLauncher;
-
-  $("launcher-input").oninput = (event) => {
-    launcherHighlight = 0;
-    renderLauncherResults(event.target.value);
-  };
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && launcherIsOpen()) { closeLauncher(); return; }
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
-      event.preventDefault();
-      launcherIsOpen() ? closeLauncher() : openLauncher();
-      return;
-    }
-    if (!launcherIsOpen()) return;
-    const list = renderLauncherResults($("launcher-input").value);
-    if (event.key === "ArrowDown") {
-      launcherHighlight = Math.min(list.length - 1, launcherHighlight + 1);
-      renderLauncherResults($("launcher-input").value);
-      event.preventDefault();
-    } else if (event.key === "ArrowUp") {
-      launcherHighlight = Math.max(0, launcherHighlight - 1);
-      renderLauncherResults($("launcher-input").value);
-      event.preventDefault();
-    } else if (event.key === "Enter" && list[launcherHighlight]) {
-      launchApp(list[launcherHighlight].id);
-    }
-  });
+  $("switch-app-btn").onclick = Launcher.open;
 
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
@@ -1476,6 +1403,13 @@ async function init() {
     api,
     onChanged: () => { refresh().then(runAll); },
     onNavigate: (moteId) => Inspector.open(moteId),
+  });
+  Launcher.install({
+    api,
+    thisApp: THIS_APP,
+    getGardenName: () => board ? board.garden : "",
+    getFocus: () => { const p = plot(); return p && p.x ? p.x.mote : null; },
+    onError: (message) => toast(message, true),
   });
   wire();
   await refresh();

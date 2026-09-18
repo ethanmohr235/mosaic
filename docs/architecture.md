@@ -546,6 +546,14 @@ every time the note is read. A due date or a task count in a note is a
 lookup, not a copy, so a note cannot go stale the way a typed-in number
 does. See `docs/modoc.md` for the language.
 
+`\graph{...}` is the same idea for a figure, and is the one macro that
+resolves to something another *window* made: it names a view saved in
+Moxie, and `core/plotview.py` re-solves that view's saved specification
+against the garden as it stands. A note therefore never describes a
+figure of its own -- there is one place a figure is designed, one place
+it is computed (`core/sweep.py`), and one renderer that draws it in both
+windows (`frontend_shared/plot.js`). The note refers.
+
 Storage is one reserved property on an ordinary mote, and that is the
 whole design. A note is not a new object type, and carrying one is
 deliberately **not** a kind (Kinds above): every entry in that table is a
@@ -580,13 +588,16 @@ sees it. `core/simulation.py::expression_context()` builds the context,
 clearing the view's declared unknowns first -- a note *reads state*, and
 a free variable with no solver behind it is useless rather than correct.
 
-Stepping a note forward in time is `run_time_series(commit=False)`, the
-preview that already existed: `t+0` is the garden as stored, `t+N`
-resolves every macro against a projection N steps out, and nothing is
-written or logged either way. Turning a projection into fact stays a
-separate, explicit act (Mora's `Apply t+N…`, which asks first). Saving a
-note and applying a run are two buttons on purpose: a save must never be
-a way to write simulation results.
+**A note has no clock.** Every macro resolves against the garden as it
+stands, and there is no step to ask for. Notes used to resolve at `t+N`
+against `run_time_series(commit=False)`, with Mora carrying a stepper and
+an `Apply t+N…` button that committed the projection; all of it is
+removed. The line it was crossing is the one the windows are divided on:
+a note reports what a garden *is*, Motion is where a garden moves through
+time, and Moxie is where a property is swept. A note editor that could
+also run and commit a simulation held a lever belonging in another room.
+What is left is a stronger promise than "it asks first" -- the note path
+has no write in it at all.
 
 Nothing in the note path raises. A note with a typo still renders with
 the broken part visibly broken, and every failure -- unknown command,
@@ -597,8 +608,8 @@ exists: it was briefly the CLI's own, and Mora promptly reported a note
 with a dangling `\mote{...}` in it as having no problems at all.
 
 `mora/` is the editor (`run_mora.py`) -- a second pywebview window with
-its own garden connection, source/rendered/data panes, and the `t+N`
-stepper. It parses nothing itself: the rendered pane is built from the
+its own garden connection and source/rendered panes. It parses nothing
+itself: the rendered pane is built from the
 tree `core/` produced and `mora/payload.py` shaped, which is why the
 window and `monoss modoc render` cannot come to disagree about what a
 note means. Only the source pane's syntax highlighting runs in

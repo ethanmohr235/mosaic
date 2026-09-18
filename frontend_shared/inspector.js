@@ -485,10 +485,27 @@ const Inspector = (() => {
       els.name.value = data.properties.name ?? "";
     }
 
-    els.body.innerHTML = "";
-    renderProperties(data);
-    renderRelationships(data);
-    if (state.advanced) renderAdvanced(data);
+    // A host's onChanged fires right after a debounced write commits --
+    // Motion's in particular re-fetches and calls this on every commit
+    // (see motion/frontend/app.js's refresh -> Inspector.reload). If that
+    // lands while you're still in the very field that just committed,
+    // rebuilding the body wholesale (innerHTML = "") replaces the input
+    // you're typing in with a fresh, unfocused one and the next keystroke
+    // goes nowhere. Skip the rebuild while focus is inside it; the stored
+    // payload is picked up by the next redraw that isn't mid-edit.
+    if (!bodyHasFocus()) {
+      els.body.innerHTML = "";
+      renderProperties(data);
+      renderRelationships(data);
+      if (state.advanced) renderAdvanced(data);
+    }
+  }
+
+  function bodyHasFocus() {
+    const active = document.activeElement;
+    if (!(active instanceof Node) || !els.body.contains(active)) return false;
+    const tag = (active.tagName || "").toLowerCase();
+    return tag === "input" || tag === "textarea" || tag === "select";
   }
 
   /** The ribbon earns its space only once there is a choice to make.

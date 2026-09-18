@@ -1,0 +1,1 @@
+../../frontend_shared/launcher.js

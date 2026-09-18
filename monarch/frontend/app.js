@@ -2291,6 +2291,15 @@ function providerSummary(name) {
 
 async function init() {
   api = window.pywebview.api;
+  // X11/GTK's middle-click-paste fires on any focused text control under
+  // the cursor. inspector.js and commandbar.js already guard their own
+  // DOM subtree (frontend_shared/inspector.js), and graph.js guards the
+  // canvas itself -- this covers the context menu's own property inputs.
+  document.addEventListener("mousedown", (event) => {
+    if (event.button !== 1) return;
+    const tag = (event.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
+  });
   Inspector.install({
     api,
     // A write in the panel changes motes the canvas is drawing, and the

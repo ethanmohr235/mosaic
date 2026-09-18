@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from core import modoc
 from core import kinds as kinds_repo
+from core import plotview
 from core import species as species_repo
 from core.entities import Mote, Relationship
 from core.modoc_bind import LinkTarget, Resolution, problems
@@ -87,8 +88,6 @@ def note_payload(
     it, and the counts the status bar shows."""
     return {
         "anchor": directory.describe(resolution.anchor_id),
-        "step": resolution.step,
-        "projected": resolution.projected,
         "blocks": [_block(b, resolution, directory) for b in document.blocks],
         "diagnostics": [
             {"line": d.line, "kind": d.kind, "message": d.message}
@@ -119,16 +118,53 @@ def _block(block, resolution: Resolution, directory: Directory) -> dict:
 
 
 def _graph_block(block: modoc.Graph, resolution: Resolution) -> dict:
-    series = resolution.graphs.get(modoc.graph_key(block))
-    spec = block.spec
+    """`\\graph{...}` as the rendered pane draws it: a saved Moxie view,
+    re-solved against the garden as it stands.
+
+    The whole figure travels, points and all, rather than the frontend
+    fetching it after the note lands. A figure is part of what the note
+    *says* -- the same answer `monoss modoc render` prints -- and a
+    second round trip per figure would mean the rendered pane could show
+    a note whose prose and whose curves came from two different reads of
+    the garden."""
+    drawn = resolution.graphs.get(modoc.graph_key(block))
+    if drawn is None:
+        return {"type": "graph", "view": block.view, "mode": "sweep",
+                "error": "unresolved graph"}
+    return {"type": "graph", "view": block.view, **_figure(drawn)}
+
+
+def _figure(figure: plotview.Figure) -> dict:
+    """A core/plotview.py Figure on the wire. Flat and already-reduced:
+    the frontend hands it to the shared plot renderer (frontend_shared/
+    plot.js) and decides nothing about it beyond colour and size."""
     return {
-        "type": "graph",
-        "kind": spec.kind if spec else "",
-        "expression": spec.expression if spec else "",
-        "key": spec.key if spec else None,
-        "labels": series.labels if series else [],
-        "values": series.values if series else [],
-        "error": series.error if series else "unresolved graph",
+        "mode": figure.mode,
+        "name": figure.name,
+        "viewId": figure.view_id,
+        "xLabel": figure.x_label,
+        "yLabel": figure.y_label,
+        "yScale": figure.y_scale,
+        "xLo": figure.x_lo, "xHi": figure.x_hi,
+        "yLo": figure.y_lo, "yHi": figure.y_hi,
+        "bands": [
+            {"label": b.label, "unit": b.unit, "lo": b.lo, "hi": b.hi, "series": b.series}
+            for b in figure.bands
+        ],
+        "series": [
+            {"id": s.id, "label": s.label, "unit": s.unit, "band": s.band,
+             "points": s.points, "ghost": s.ghost}
+            for s in figure.series
+        ],
+        "failed": [{"x0": s.x0, "x1": s.x1, "message": s.message} for s in figure.failed],
+        "violated": [{"x0": s.x0, "x1": s.x1, "message": s.message} for s in figure.violated],
+        "broken": figure.broken,
+        "cells": figure.cells,
+        "rows": figure.rows, "cols": figure.cols,
+        "lo": figure.lo, "hi": figure.hi,
+        "dots": figure.dots,
+        "solves": figure.solves,
+        "error": figure.error,
     }
 
 

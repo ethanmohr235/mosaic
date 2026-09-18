@@ -176,12 +176,10 @@ def build_parser() -> argparse.ArgumentParser:
     modoc_sub = modoc_parser.add_subparsers(dest="action")
     modoc_render = modoc_sub.add_parser("render", help="Render a mote's note, values resolved")
     modoc_render.add_argument("id")
-    modoc_render.add_argument("--step", type=int, default=0, help="Resolve at t+N (a preview; never written)")
     modoc_check = modoc_sub.add_parser("check", help="Report a note's unresolved links and values")
     modoc_check.add_argument("id")
     modoc_values = modoc_sub.add_parser("values", help="Every \\val in a note and what it resolves to")
     modoc_values.add_argument("id")
-    modoc_values.add_argument("--step", type=int, default=0)
     modoc_export = modoc_sub.add_parser("export", help="Write a note out as a .modoc file")
     modoc_export.add_argument("id")
     modoc_export.add_argument("--out", help="File to write (default: <id>.modoc)")
@@ -461,7 +459,7 @@ def _handle_modoc(conn, args) -> None:
         return
 
     document = modoc.parse(modoc.read_source(conn, args.id))
-    resolution = resolve_modoc(conn, args.id, document, step=getattr(args, "step", 0))
+    resolution = resolve_modoc(conn, args.id, document)
     if args.action == "check":
         if render.print_diagnostics(document, resolution) == 0:
             print("No problems.")

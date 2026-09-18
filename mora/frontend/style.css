@@ -50,6 +50,19 @@
   --accent-bright: oklch(0.82 0.11 68);
   --accent-soft: oklch(0.74 0.10 68 / 0.12);
   --danger: oklch(0.65 0.15 25);
+  /* Figures. moxie/frontend/style.css's tokens, copied for the reason
+     the header gives -- a stylesheet one directory over is not
+     fetchable, and a curve must read as the same curve in both
+     windows (frontend_shared/plot.js draws from these names). */
+  --plot-bg: oklch(0.158 0 0);
+  --grid: oklch(1 0 0 / 0.05);
+  --grid-strong: oklch(1 0 0 / 0.16);
+  --series-1: oklch(0.50 0.150 0);
+  --series-2: oklch(0.50 0.100 80);
+  --series-3: oklch(0.62 0.150 140);
+  --series-4: oklch(0.66 0.110 210);
+  --series-5: oklch(0.54 0.150 250);
+  --series-6: oklch(0.66 0.150 290);
   --unknown: oklch(0.62 0 0);
   --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --serif: "IBM Plex Serif", Georgia, serif;
@@ -192,11 +205,23 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
   font-family: var(--mono); font-size: 12.5px; line-height: 1.75;
   padding: 16px 18px; white-space: pre-wrap; word-break: break-word; tab-size: 2;
 }
-#highlight { overflow: hidden; pointer-events: none; color: var(--fg); }
+/* overflow-y: scroll (not auto/hidden) on both, always -- #editor only
+   grows a real scrollbar once a note is tall enough to need one, and if
+   #highlight never reserves that same width, the two disagree about
+   where a wrapped line breaks the moment scrolling kicks in: the
+   textarea's real (correct) caret lands a wrap point earlier than the
+   highlight painted at the fuller width, so the colours drift out of
+   sync with where the caret actually is. Reserving the gutter on both
+   unconditionally keeps their wrap widths identical either way. */
+#highlight {
+  overflow-y: scroll; overflow-x: hidden; pointer-events: none; color: var(--fg);
+  scrollbar-width: none;
+}
+#highlight::-webkit-scrollbar { width: 0; background: transparent; }
 #editor {
   width: 100%; height: 100%; resize: none; border: none; outline: none;
   background: transparent; color: transparent; caret-color: var(--accent-bright);
-  overflow-y: auto;
+  overflow-y: scroll;
 }
 #editor::selection { background: oklch(0.74 0.1 68 / 0.28); }
 .hl-comment { color: var(--faint); font-style: italic; }
@@ -320,30 +345,24 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
 
 .figure {
   margin: 26px 0; padding: 18px 20px 14px;
-  border: 1px solid var(--border-soft); border-radius: 10px; background: var(--source-bg);
+  border: 1px solid var(--border-soft); border-radius: 10px; background: var(--plot-bg);
 }
 .figure-head {
   display: flex; justify-content: space-between; gap: 12px;
   font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--faint); margin-bottom: 15px;
+  text-transform: uppercase; color: var(--faint); margin-bottom: 12px;
 }
 .figure-head .right { text-transform: none; letter-spacing: 0.02em; }
-.bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 9px; }
-.bar-row:last-child { margin-bottom: 0; }
-.bar-label {
-  width: 90px; flex-shrink: 0; font-size: 11px; color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* Positioned and given a height here, measured in app.js: plot.js draws
+   at real pixel coordinates into an absolutely-positioned svg plus an
+   HTML label layer, so the box has to have a size of its own. */
+.figure-body { position: relative; height: 230px; width: 100%; }
+.figure-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px;
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
 }
-.bar-track { flex: 1; height: 8px; background: oklch(1 0 0 / 0.05); border-radius: 3px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.35s ease; }
-.bar-value {
-  width: 28px; text-align: right; font-family: var(--mono); font-size: 11px; color: oklch(0.85 0 0);
-}
-.figure svg { width: 100%; height: 90px; display: block; overflow: visible; }
-.figure-axis {
-  display: flex; justify-content: space-between;
-  font-family: var(--mono); font-size: 9px; color: var(--faint); margin-top: 6px;
-}
+.figure-legend-item { display: flex; align-items: center; gap: 6px; }
+.figure-swatch { width: 10px; height: 2px; border-radius: 1px; }
 .figure-error { font-family: var(--mono); font-size: 11px; color: var(--danger); }
 .empty-note { color: var(--faint); font-family: var(--serif); font-style: italic; }
 
@@ -374,23 +393,6 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
 #statusbar .dot { color: oklch(0.36 0 0); }
 #statusbar .link-button { letter-spacing: 0.02em; }
 #problems-btn.has-problems { color: var(--danger); }
-#tick-label { letter-spacing: 0.1em; text-transform: uppercase; }
-#tick-label.projected { color: var(--accent-bright); }
-
-#stepper {
-  display: flex; align-items: center;
-  border: 1px solid var(--border-soft); border-radius: 6px; overflow: hidden;
-}
-#stepper button {
-  border: none; border-radius: 0; background: oklch(0.19 0 0); color: var(--muted);
-  width: 22px; height: 20px; padding: 0; font-size: 12px; line-height: 1;
-}
-#stepper button:hover { background: var(--raised); }
-#tick-value {
-  min-width: 38px; text-align: center; color: oklch(0.85 0 0);
-  background: oklch(0.17 0 0); height: 20px; line-height: 20px;
-}
-#apply { padding: 3px 9px; font-size: 10.5px; font-family: var(--mono); }
 
 #toast {
   position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%);
@@ -442,78 +444,6 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
   color: var(--faint); font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
 }
 
-/* ---- app switcher (⌘J) ---- */
-
-#launcher-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-  z-index: 70; display: flex; justify-content: center; align-items: flex-start; padding-top: 9vh;
-}
-#launcher-modal {
-  width: 640px; max-width: 90vw; max-height: 72vh;
-  background: oklch(0.185 0 0); border: 1px solid var(--border-soft);
-  border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  display: flex; flex-direction: column; overflow: hidden;
-}
-#launcher-input-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 13px 20px; border-bottom: 1px solid var(--border-soft);
-}
-.launcher-glyph {
-  width: 11px; height: 11px; border: 1.5px solid currentColor;
-  border-radius: 50%; position: relative; flex-shrink: 0; color: var(--muted);
-}
-.launcher-glyph::after {
-  content: ""; position: absolute; width: 5px; height: 1.5px;
-  background: currentColor; bottom: -3px; right: -4px; transform: rotate(45deg);
-}
-#launcher-input {
-  flex: 1; border: none; background: transparent;
-  padding: 0; font-size: 14.5px; font-family: var(--sans); color: var(--fg-bright);
-}
-#launcher-input-row kbd {
-  font-family: var(--mono); font-size: 10.5px; color: var(--faint);
-  border: 1px solid var(--border-soft); border-radius: 5px; padding: 2px 6px;
-}
-#launcher-results {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-  padding: 14px; overflow-y: auto; min-height: 0;
-}
-.launcher-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 13px; border-radius: 12px; border: 1px solid var(--border-soft);
-  background: var(--panel); color: inherit; cursor: pointer;
-  text-decoration: none;
-  transition: background 0.13s ease, border-color 0.13s ease;
-}
-.launcher-card:hover, .launcher-card.highlighted {
-  background: var(--raised); border-color: var(--border);
-}
-.launcher-icon {
-  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
-  background: var(--raised); border: 1px solid var(--border-soft);
-  display: flex; align-items: center; justify-content: center;
-}
-.launcher-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
-.launcher-name-row { display: flex; align-items: baseline; gap: 7px; }
-.launcher-name { font-family: var(--serif); font-size: 14.5px; color: var(--fg-bright); white-space: nowrap; }
-.launcher-kind {
-  font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--faint); white-space: nowrap;
-}
-.launcher-desc { font-size: 11.5px; line-height: 1.35; color: var(--muted); }
-.launcher-key {
-  font-family: var(--mono); font-size: 10px; color: var(--faint);
-  border: 1px solid var(--border-soft); border-radius: 5px; padding: 2px 6px; flex-shrink: 0;
-}
-#launcher-empty {
-  padding: 0 20px 18px; font-size: 12.5px; color: var(--faint); font-family: var(--mono);
-}
-#launcher-footer {
-  display: flex; align-items: center; gap: 14px;
-  padding: 9px 20px; border-top: 1px solid var(--border-soft); background: var(--panel-bg);
-  font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: 0.06em;
-}
-
 /* ---- print / PDF export ----
    The rendered pane is the only thing a print or "save as PDF" should
    produce: everything else here is editor chrome, not the note. Colours
@@ -561,11 +491,25 @@ button:not(.on).ghost { background: transparent; color: var(--muted); }
   .mote-link.broken { color: #777; }
   .val { color: #333; background: #eee; }
   .val.broken { color: #a00; background: #fbe4e4; }
-  .figure { border-color: #ccc; background: #f7f7f7; }
-  .figure-head, .figure-axis, .bar-label { color: #666; }
-  .bar-track { background: #eee; }
-  .bar-fill { background: #888; }
-  .bar-value { color: #333; }
+  /* A figure prints. The renderer reads its ink off these tokens, so
+     redefining them here is the whole of it -- no second code path, and
+     nothing in app.js that has to know about paper. */
+  :root {
+    --plot-bg: #fff;
+    --grid: oklch(0 0 0 / 0.08);
+    --grid-strong: oklch(0 0 0 / 0.30);
+    --muted: #555;
+    --faint: #777;
+    --series-1: oklch(0.45 0.150 0);
+    --series-2: oklch(0.45 0.100 80);
+    --series-3: oklch(0.42 0.150 140);
+    --series-4: oklch(0.46 0.110 210);
+    --series-5: oklch(0.40 0.150 250);
+    --series-6: oklch(0.46 0.150 290);
+  }
+  .figure { border-color: #ccc; background: #fff; break-inside: avoid; }
+  .figure-head { color: #666; }
+  .figure-legend { color: #555; }
   .figure-error { color: #a00; }
   .empty-note { color: #888; }
 }

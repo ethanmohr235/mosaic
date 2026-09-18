@@ -34,8 +34,6 @@
 // the design's versions of both were cut rather than stubbed -- a live
 // green readout that is really a sine wave is worse than an absent one.
 
-const THIS_APP = "motion";
-const LAUNCHER_COLUMNS = 2;     // matches #launcher-results grid-template-columns
 const PLAY_MS = 90;             // one tick per this, while playing
 const NODE_W = 168;             // node card width, in board coordinates
 const NODE_H = 62;              // assumed node height, for edge clipping
@@ -84,10 +82,10 @@ let selectedIds = new Set();
 let boxState = null;        // { startX, startY, moved, shiftBase } -- a box-select drag in progress
 let connectArmed = false;
 let solver = "linear";
+let strictUnits = false;   // promotes a dimensional mismatch from a logged warning to a run-stopping error
 let steps = DEFAULT_STEPS;
 let replayRunId = null;    // set while the dock is showing a logged run rather than a preview
 let toastTimer = null;
-let launcherHighlight = 0;
 let drag = null;
 let pan = null;
 let resize = null;
@@ -273,6 +271,26 @@ function layoutNodes(nodes) {
 
 function nodePosition(id) {
   return positions[id] || { x: 0, y: 0 };
+}
+
+/** Drops a just-created node in the middle of whatever the board is
+ *  currently scrolled/zoomed to, instead of wherever layoutNodes' grid
+ *  would put it -- a mote made from the command bar should land where
+ *  the person is looking, not off past the edge of a panned board.
+ *  Screen -> world is the inverse of board-world's own transform
+ *  (`translate(panX, panY) scale(zoom)`), read off board A's surface
+ *  since that's the one the command bar's edits apply to. Runs before
+ *  `seedPositions` ever sees this id (see CommandBar's onNavigate
+ *  wiring in init()), so the grid layout leaves it alone. */
+function placeInView(id) {
+  const surface = document.querySelector(".board-surface");
+  const w = surface ? surface.clientWidth : 400;
+  const h = surface ? surface.clientHeight : 300;
+  positions[id] = {
+    x: Math.max(0, (w / 2 - layout.panX) / layout.zoom - NODE_W / 2),
+    y: Math.max(0, (h / 2 - layout.panY) / layout.zoom - NODE_H / 2),
+  };
+  savePositions();
 }
 
 /** Seeds any node that has never been placed, leaving dragged ones
@@ -1173,14 +1191,14 @@ async function runSimulation() {
       // asking the engine a question it was never asked.
       if (compareRunA || compareRunB) {
         const [a, b] = await Promise.all([
-          compareRunA ? call(api.run_ticks(compareRunA)) : call(api.preview(steps, solver, null, scenario)),
-          compareRunB ? call(api.run_ticks(compareRunB)) : call(api.preview(steps, solver, null, compareWith)),
+          compareRunA ? call(api.run_ticks(compareRunA)) : call(api.preview(steps, solver, null, scenario, strictUnits)),
+          compareRunB ? call(api.run_ticks(compareRunB)) : call(api.preview(steps, solver, null, compareWith, strictUnits)),
         ]);
         if (!a || !b) return;
         runA = a;
         runB = b;
       } else {
-        const result = await call(api.compare(steps, solver, scenario, compareWith));
+        const result = await call(api.compare(steps, solver, scenario, compareWith, strictUnits));
         if (!result) return;
         runA = result.a;
         runB = result.b;
@@ -1188,7 +1206,7 @@ async function runSimulation() {
       lanesA = (await call(api.lanes(runA.steps))) || [];
       lanesB = (await call(api.lanes(runB.steps))) || [];
     } else {
-      const result = await call(api.preview(steps, solver, null, scenario));
+      const result = await call(api.preview(steps, solver, null, scenario, strictUnits));
       if (!result) return;
       runA = result;
       runB = null;
@@ -1225,7 +1243,7 @@ async function runFastCommit() {
   renderTopbar();
   let result = null;
   try {
-    result = await api.commit(1, solver, null, "fast");
+    result = await api.commit(1, solver, null, "fast", strictUnits);
   } catch (error) {
     fastError = String(error && error.message ? error.message : error);
   }
@@ -1255,7 +1273,7 @@ async function commitRun() {
   if (!runA || tick === 0) return;
   const btn = $("commit-btn");
   btn.disabled = true;
-  const result = await call(api.commit(tick, solver));
+  const result = await call(api.commit(tick, solver, null, null, strictUnits));
   if (result) {
     const last = result.steps[result.steps.length - 1];
     toast(last ? last.summary : `Committed tick ${tick}.`);
@@ -1274,7 +1292,7 @@ async function saveRun() {
   if (!runA) return;
   const btn = $("save-btn");
   btn.disabled = true;
-  const result = await call(api.save(stepCount(), solver, null, scenario));
+  const result = await call(api.save(stepCount(), solver, null, scenario, strictUnits));
   if (!result) { btn.disabled = false; return; }
   toast(result.run_id ? "Run saved for later review." : "Nothing to save.");
   await refresh();
@@ -2099,7 +2117,9 @@ function openSettings() {
     host.appendChild(btn);
   }
   $("steps-value").textContent = String(steps);
-  $("settings-summary").textContent = `${steps} tick${steps === 1 ? "" : "s"} · ${solver}`;
+  $("strict-units-toggle").checked = strictUnits;
+  $("settings-summary").textContent = `${steps} tick${steps === 1 ? "" : "s"} · ${solver}`
+    + (strictUnits ? " · strict units" : "");
   const sc = board.scenarios.find((s) => s.id === scenario);
   $("settings-scenario").textContent = sc ? sc.name : "garden as it stands";
   $("settings-overlay").classList.remove("hidden");
@@ -2158,117 +2178,6 @@ async function openGardenMenu() {
 
 // ---- app switcher (⌘J) -------------------------------------------------
 
-const LAUNCHER_APPS = [
-  {
-    id: "monarch", name: "Monarch", kind: "graph",
-    desc: "Motes and relationships in a live force field.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="12" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></circle>
-      <ellipse cx="20" cy="20" rx="12" ry="4.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6" transform="rotate(-28 20 20)"></ellipse>
-      <circle cx="20" cy="20" r="4" fill="var(--accent)"></circle>
-    </svg>`,
-  },
-  {
-    id: "mora", name: "Mora", kind: "notes",
-    desc: "Write and link long-form .modoc notes.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="9" y="6" width="22" height="28" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="14" y="14" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="20" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="26" width="7" height="1.8" rx="0.9" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
-    id: "monastery", name: "Monastery", kind: "calendar",
-    desc: "Every dated mote on a week or a month.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="9" width="26" height="24" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="7" y="9" width="26" height="7" rx="3" fill="var(--fg)" opacity="0.25"></rect>
-      <rect x="12" y="21" width="6" height="5" rx="1" fill="var(--accent)"></rect>
-      <rect x="22" y="21" width="6" height="5" rx="1" fill="var(--fg)" opacity="0.35"></rect>
-    </svg>`,
-  },
-  {
-    id: "momentum", name: "Momentum", kind: "tasks",
-    desc: "A board, a week and a focus timer over the garden's tasks.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="8" width="9" height="24" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="20" y="8" width="9" height="16" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="9.5" y="11" width="4" height="3" rx="1" fill="var(--accent)"></rect>
-      <rect x="22.5" y="11" width="4" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-    </svg>`,
-  },
-  {
-    id: "monolith", name: "Monolith", kind: "table",
-    desc: "The whole garden as one editable table.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="14" y="7" width="12" height="26" rx="2" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="17" y="12" width="6" height="3" rx="1" fill="var(--accent)"></rect>
-      <rect x="17" y="18" width="6" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-      <rect x="17" y="24" width="6" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-    </svg>`,
-  },
-  {
-    id: "moxie", name: "Moxie", kind: "graphs",
-    desc: "Sweep one property and graph another against it.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <path d="M7 30 C14.5 30 13.5 11 20 11 C26.5 11 25.5 30 33 30" fill="none"
-            stroke="var(--fg)" stroke-width="2.2" stroke-linecap="round" opacity="0.6"></path>
-      <circle cx="20" cy="11" r="3" fill="var(--accent)"></circle>
-    </svg>`,
-  },
-];
-
-function launcherChoices() { return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP); }
-
-function launcherFiltered(query) {
-  const q = query.trim().toLowerCase();
-  const choices = launcherChoices();
-  if (!q) return choices;
-  return choices.filter((a) => (a.name + " " + a.kind + " " + a.desc).toLowerCase().includes(q));
-}
-
-function renderLauncherResults(query) {
-  const list = launcherFiltered(query);
-  launcherHighlight = Math.min(launcherHighlight, Math.max(list.length - 1, 0));
-  const host = $("launcher-results");
-  host.innerHTML = "";
-  list.forEach((app, i) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "launcher-card" + (i === launcherHighlight ? " highlighted" : "");
-    card.innerHTML =
-      `<div class="launcher-icon">${app.icon}</div>` +
-      `<div class="launcher-text">` +
-      `<div class="launcher-name-row"><span class="launcher-name">${app.name}</span>` +
-      `<span class="launcher-kind">${app.kind}</span></div>` +
-      `<div class="launcher-desc">${app.desc}</div></div>` +
-      `<span class="launcher-key">⌘${i + 1}</span>`;
-    card.onclick = () => launchApp(app.id);
-    host.appendChild(card);
-  });
-  $("launcher-empty").classList.toggle("hidden", list.length > 0);
-  $("launcher-empty").textContent = list.length ? "" : "No app matches that.";
-}
-
-function launcherIsOpen() { return !$("launcher-overlay").classList.contains("hidden"); }
-
-function openLauncher() {
-  launcherHighlight = 0;
-  $("launcher-garden").textContent = board ? board.garden : "";
-  $("launcher-overlay").classList.remove("hidden");
-  $("launcher-input").value = "";
-  renderLauncherResults("");
-  $("launcher-input").focus();
-}
-
-function closeLauncher() { $("launcher-overlay").classList.add("hidden"); }
-
-async function launchApp(appId) {
-  closeLauncher();
-  await call(api.open_app(appId, selectedId));
-}
-
 // ---- wiring ------------------------------------------------------------
 
 function wire() {
@@ -2291,6 +2200,7 @@ function wire() {
   $("settings-overlay").onmousedown = (e) => { if (e.target === $("settings-overlay")) closeSettings(); };
   $("steps-dec").onclick = () => { steps = Math.max(1, steps - 5); openSettings(); };
   $("steps-inc").onclick = () => { steps = Math.min(500, steps + 5); openSettings(); };
+  $("strict-units-toggle").onchange = (e) => { strictUnits = e.target.checked; openSettings(); };
 
   $("refresh-btn").onclick = async () => {
     const icon = $("refresh-btn");
@@ -2299,7 +2209,7 @@ function wire() {
     await refresh();
     icon.classList.remove("spinning");
   };
-  $("switch-app-btn").onclick = openLauncher;
+  $("switch-app-btn").onclick = Launcher.open;
 
   $("play-btn").onclick = () => (playing ? stopPlay() : startPlay());
   $("step-back").onclick = () => { stopPlay(); setTick(tick - 1); };
@@ -2362,44 +2272,9 @@ function wire() {
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp);
 
-  $("launcher-overlay").addEventListener("mousedown", (event) => {
-    if (event.target === $("launcher-overlay")) closeLauncher();
-  });
-  $("launcher-input").addEventListener("input", (event) => renderLauncherResults(event.target.value));
-  $("launcher-input").addEventListener("keydown", (event) => {
-    const list = launcherFiltered($("launcher-input").value);
-    if (event.key === "ArrowDown" && launcherHighlight + LAUNCHER_COLUMNS < list.length) {
-      launcherHighlight += LAUNCHER_COLUMNS;
-    } else if (event.key === "ArrowUp" && launcherHighlight - LAUNCHER_COLUMNS >= 0) {
-      launcherHighlight -= LAUNCHER_COLUMNS;
-    } else if (event.key === "ArrowRight" && launcherHighlight + 1 < list.length) {
-      launcherHighlight++;
-    } else if (event.key === "ArrowLeft" && launcherHighlight > 0) {
-      launcherHighlight--;
-    } else if (event.key === "Enter" && list[launcherHighlight]) {
-      launchApp(list[launcherHighlight].id);
-      return;
-    } else {
-      return;
-    }
-    event.preventDefault();
-    renderLauncherResults($("launcher-input").value);
-  });
-
   document.addEventListener("keydown", (event) => {
     const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
-      event.preventDefault();
-      launcherIsOpen() ? closeLauncher() : openLauncher();
-      return;
-    }
-    if ((event.metaKey || event.ctrlKey) && /^[1-5]$/.test(event.key)) {
-      const app = launcherChoices()[Number(event.key) - 1];
-      if (app) { event.preventDefault(); launchApp(app.id); }
-      return;
-    }
     if (event.key === "Escape") {
-      if (launcherIsOpen()) { closeLauncher(); return; }
       if (!$("settings-overlay").classList.contains("hidden")) { closeSettings(); return; }
       if (connectArmed) { armConnect(); return; }
       if (selectedIds.size || selectedRelId) { deselect(); return; }
@@ -2454,6 +2329,17 @@ async function refresh() {
 
 async function init() {
   api = window.pywebview.api;
+  // X11/GTK's middle-click-paste fires on any focused text control under
+  // the cursor. inspector.js and commandbar.js already guard their own
+  // DOM subtree (frontend_shared/inspector.js), and the board's own nodes
+  // already treat button 1 as "pan, don't select" (onNodeDown above) --
+  // this covers motion's own text inputs (the equation editor) the same
+  // way, without touching the pan gesture, which never targets a control.
+  document.addEventListener("mousedown", (event) => {
+    if (event.button !== 1) return;
+    const tag = (event.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
+  });
   Inspector.install({
     api,
     onChanged: () => { refresh(); scheduleFastRun(); },
@@ -2462,7 +2348,18 @@ async function init() {
   CommandBar.install({
     api,
     onChanged: () => { refresh(); scheduleFastRun(); },
-    onNavigate: (moteId) => { inspectedNodeId = null; Inspector.open(moteId); },
+    onNavigate: (moteId, created) => {
+      if (created) placeInView(moteId);
+      inspectedNodeId = null;
+      Inspector.open(moteId);
+    },
+  });
+  Launcher.install({
+    api,
+    thisApp: "motion",
+    getGardenName: () => board ? board.garden : "",
+    getFocus: () => selectedId,
+    onError: (message) => toast(message, true),
   });
   loadLayout();
   applyLayout();

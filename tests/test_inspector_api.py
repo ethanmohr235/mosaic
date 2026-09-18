@@ -206,6 +206,28 @@ def test_rename_a_key_the_mote_lacks_changes_nothing(api, garden):
     assert "something" not in payload["properties"]
 
 
+def test_rename_property_carries_its_unit_along(api, garden):
+    task = garden["tasks"][0]
+    api.inspector_set_property(task, "units", {"priority": "kohm"})
+    payload = api.inspector_rename_property(task, "priority", "urgency")
+    assert payload["properties"]["units"] == {"urgency": "kohm"}
+
+
+def test_rename_property_without_a_unit_leaves_units_map_alone(api, garden):
+    task = garden["tasks"][0]
+    api.inspector_set_property(task, "units", {"estimate": "hr"})
+    payload = api.inspector_rename_property(task, "priority", "urgency")
+    assert payload["properties"]["units"] == {"estimate": "hr"}
+
+
+def test_delete_property_drops_its_unit_entry(api, garden):
+    task = garden["tasks"][0]
+    api.inspector_set_property(task, "units", {"priority": "kohm", "estimate": "hr"})
+    payload = api.inspector_delete_property(task, "priority")
+    assert payload["properties"]["units"] == {"estimate": "hr"}
+    assert "priority" not in payload["properties"]
+
+
 def test_relate_and_unrelate(api, garden):
     person = api.create_mote({"name": "Amara Voss"})["id"]
     task = garden["tasks"][0]

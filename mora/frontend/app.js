@@ -17,7 +17,6 @@ let savedSource = "";
 let payload = null;          // the last render() answer
 let notes = [];              // every note mote in the garden
 let mode = "split";
-let step = 0;
 let renderTimer = null;
 let toastTimer = null;
 let picker = null;           // {start, query, rows, index} while the @ picker is open
@@ -29,6 +28,8 @@ let redoStack = [];
 let undoPending = null;      // pre-edit snapshot for the burst in progress
 let undoTimer = null;
 let applyingUndo = false;    // true while an undo/redo restore is landing
+let figures = [];            // {node, block} per \graph, relaid out on resize
+let figureResizeTimer = null;
 
 const RENDER_DEBOUNCE_MS = 180;
 // Longer than the render debounce on purpose: a render is cheap and
@@ -37,7 +38,6 @@ const RENDER_DEBOUNCE_MS = 180;
 const AUTOSAVE_DEBOUNCE_MS = 900;
 const UNDO_COALESCE_MS = 700;   // a pause this long ends the current undo step
 const UNDO_LIMIT = 200;
-const MAX_STEP = 60;
 const UNKNOWN_COLOR = "oklch(0.62 0 0)";
 
 const $ = (id) => document.getElementById(id);
@@ -58,10 +58,6 @@ function hashString(text) {
   h = Math.imul(h ^ (h >>> 16), 2246822519);
   h = Math.imul(h ^ (h >>> 13), 3266489917);
   return (h ^= h >>> 16) >>> 0;
-}
-
-function hueFor(seed) {
-  return hashString(seed) % 360;
 }
 
 // ---- the species palette ----
@@ -429,13 +425,13 @@ function scheduleRender() {
 
 async function renderNow() {
   if (!noteId) return;
-  // The stepper and the debounce can both fire a render, and a heavier
-  // one (a simulation preview eight steps out) can land after a lighter
+  // Two renders can be in flight at once -- the debounce and an
+  // explicit reload -- and the later request is the one that is right,
   // one it started before. Only the newest answer is allowed to draw.
   const seq = ++renderSeq;
   let answer;
   try {
-    answer = await api.render(noteId, $("editor").value, step);
+    answer = await api.render(noteId, $("editor").value);
   } catch (e) {
     toast(String(e), true);
     return;
@@ -452,11 +448,14 @@ async function renderNow() {
 
 function drawRendered() {
   const root = clear($("rendered"));
+  figures = [];
   if (!payload.blocks.length) {
     root.append(el("p", "empty-note", "Nothing yet. Start with \\section{…}."));
     return;
   }
   payload.blocks.forEach((block) => root.append(buildBlock(block)));
+  // After the tree is in the document, so every figure body has a width.
+  layoutFigures();
 }
 
 function buildBlock(block) {
@@ -551,92 +550,116 @@ function buildValue(node) {
   return chip;
 }
 
+/** A `\graph{...}` block: a view saved in Moxie, re-solved and drawn
+ *  here by the very same renderer Moxie uses (frontend_shared/plot.js).
+ *
+ *  Nothing about *what* the figure is lives in this file. The saved view
+ *  holds the specification, core/plotview.py re-solves it against the
+ *  garden as it stands, and what arrives is already reduced to lines,
+ *  cells or dots. That is the whole reason the macro takes a name rather
+ *  than an expression: there is one place a figure is designed, and a
+ *  note refers to it instead of describing a weaker one of its own.
+ *
+ *  The body is measured rather than sized in CSS, because Plot.render
+ *  draws at real pixel coordinates -- so it is laid out after the note
+ *  is in the document, and again whenever the pane changes width. */
 function buildFigure(block) {
   const figure = el("div", "figure");
   const head = el("div", "figure-head");
-  head.append(el("span", null, figureTitle(block)));
+  head.append(el("span", null, block.name || block.view || "graph"));
   head.append(el("span", "right", figureNote(block)));
   figure.append(head);
 
-  if (block.error && !block.values.length) {
+  if (block.error) {
     figure.append(el("div", "figure-error", block.error));
-  } else if (block.kind === "over_t") {
-    figure.append(buildLineChart(block));
-    const axis = el("div", "figure-axis");
-    axis.append(el("span", null, block.labels[0] || "t+0"));
-    axis.append(el("span", null, block.labels[block.labels.length - 1] || ""));
-    figure.append(axis);
-  } else {
-    block.labels.forEach((label, index) => figure.append(buildBar(block, label, index)));
+    return figure;
+  }
+  const body = el("div", "figure-body");
+  figures.push({ node: body, block });
+  figure.append(body);
+  if (block.mode === "sweep" && block.series.length > 1) {
+    figure.append(buildLegend(block));
   }
   return figure;
 }
 
-function figureTitle(block) {
-  if (block.kind === "by") return `${block.expression} by ${block.key}`;
-  if (block.kind === "over_t") return `${block.expression} over t`;
-  return "graph";
-}
-
 function figureNote(block) {
-  if (block.error && !block.values.length) return "unresolved";
-  if (block.kind === "over_t") {
-    const last = block.values[block.values.length - 1];
-    return `${format(last)} at ${block.labels[block.labels.length - 1]}`;
+  if (block.error) return "unresolved";
+  if (block.mode === "correlate") return `${block.dots.length} motes · one solve`;
+  if (block.mode === "surface") return `${block.cols}×${block.rows} grid · ${block.solves} solves`;
+  return `${block.solves} solves`;
+}
+
+function buildLegend(block) {
+  const legend = el("div", "figure-legend");
+  block.series.forEach((series, index) => {
+    const item = el("span", "figure-legend-item");
+    const swatch = el("span", "figure-swatch");
+    swatch.style.background = seriesColor(index);
+    item.append(swatch, el("span", null, series.label));
+    legend.append(item);
+  });
+  return legend;
+}
+
+/** The palette moxie/frontend/style.css defines, copied for the same
+ *  reason this file copies Monarch's mote colours: a stylesheet one
+ *  directory over is not fetchable, and a curve must read as the same
+ *  curve in both windows. */
+function seriesColor(index) {
+  return `var(--series-${(index % 6) + 1})`;
+}
+
+/** Hand each figure body to the shared renderer at its real size. Called
+ *  after a render lands and on resize; a figure whose pane has no width
+ *  yet (the Source-only view) is skipped rather than drawn at zero. */
+function layoutFigures() {
+  for (const { node, block } of figures) {
+    const width = node.clientWidth;
+    if (!width) continue;
+    Plot.render(node, figureModel(block, width, node.clientHeight));
   }
-  const total = block.values.reduce((a, b) => a + b, 0);
-  return `${format(total)} total`;
 }
 
-function format(value) {
-  if (value === undefined || value === null) return "–";
-  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+function figureModel(block, width, height) {
+  if (block.mode === "surface") {
+    return {
+      mode: "surface", width, height,
+      cells: block.cells.map((c) => ({ col: c.c, row: c.r, x: c.x, y: c.y, v: c.v, error: c.error })),
+      drawnCols: block.cols, drawnRows: block.rows,
+      lo: block.lo, hi: block.hi,
+      xLo: block.xLo, xHi: block.xHi, yLo: block.yLo, yHi: block.yHi,
+      xLabel: block.xLabel, yLabel: block.yLabel,
+    };
+  }
+  if (block.mode === "correlate") {
+    return {
+      mode: "correlate", width, height,
+      dots: block.dots.map((d, index) => ({ ...d, label: d.name, color: seriesColor(index) })),
+      xLo: block.xLo, xHi: block.xHi, yLo: block.yLo, yHi: block.yHi,
+      xLabel: block.xLabel, yLabel: block.yLabel, yScale: block.yScale,
+    };
+  }
+  return {
+    mode: "sweep", width, height,
+    xLo: block.xLo, xHi: block.xHi, xLabel: block.xLabel, yScale: block.yScale,
+    bands: block.bands.length ? block.bands : [{ lo: 0, hi: 1, label: "value", series: [] }],
+    series: block.series.map((series, index) => ({
+      id: series.id, label: series.label, color: seriesColor(index), band: series.band,
+      // A null is a point that did not solve, and stays one: Plot's
+      // segmentsOf() breaks the line there rather than drawing through a
+      // range the model has no answer for.
+      points: pairsToPoints(series.points),
+      ghost: series.ghost.length ? pairsToPoints(series.ghost) : null,
+    })),
+    failedSpans: block.failed,
+    violatedSpans: block.violated,
+    cursor: null,
+  };
 }
 
-function buildBar(block, label, index) {
-  const peak = Math.max(1, ...block.values);
-  const row = el("div", "bar-row");
-  row.append(el("span", "bar-label", label));
-  const track = el("div", "bar-track");
-  const fill = el("div", "bar-fill");
-  fill.style.width = `${(block.values[index] / peak) * 100}%`;
-  fill.style.background = `oklch(0.72 0.12 ${hueFor(label)})`;
-  track.append(fill);
-  row.append(track);
-  row.append(el("span", "bar-value", format(block.values[index])));
-  return row;
-}
-
-/** An SVG path scaled to the series' own range, so a flat projection
- *  reads as flat rather than as noise magnified to fill the box. */
-function buildLineChart(block) {
-  const W = 100;
-  const H = 40;
-  const low = Math.min(...block.values);
-  const high = Math.max(...block.values);
-  const span = high - low || 1;
-  const points = block.values.map((value, index) => {
-    const x = (index / Math.max(1, block.values.length - 1)) * W;
-    const y = H - ((value - low) / span) * (H - 4) - 2;
-    return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(" ");
-
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("preserveAspectRatio", "none");
-  svg.append(svgPath(`${points} L${W},${H} L0,${H} Z`, { fill: "oklch(0.74 0.1 68 / 0.1)" }));
-  svg.append(svgPath(points, { stroke: "oklch(0.74 0.1 68)" }));
-  return svg;
-}
-
-function svgPath(d, { fill = "none", stroke = "none" }) {
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", d);
-  path.setAttribute("fill", fill);
-  path.setAttribute("stroke", stroke);
-  path.setAttribute("stroke-width", "1");
-  path.setAttribute("vector-effect", "non-scaling-stroke");
-  return path;
+function pairsToPoints(pairs) {
+  return pairs.map((pair) => (pair ? { x: pair[0], y: pair[1] } : null));
 }
 
 // ---- problems popover ------------------------------------------------
@@ -678,36 +701,6 @@ function drawStatus() {
   button.textContent = `${problems} problem${problems === 1 ? "" : "s"}`;
   button.classList.toggle("has-problems", problems > 0);
 
-  $("tick-value").textContent = `t+${step}`;
-  $("tick-label").textContent = payload.projected ? "projected" : "real";
-  $("tick-label").classList.toggle("projected", payload.projected);
-  $("apply").textContent = `Apply t+${step}…`;
-  $("apply").disabled = step === 0;
-}
-
-function setStep(next) {
-  step = Math.max(0, Math.min(MAX_STEP, next));
-  renderNow();
-}
-
-async function applyStep() {
-  const message =
-    `Apply t+${step} to the graph?\n\n` +
-    "This writes the projected values onto the motes and logs a simulation run. " +
-    "It does not save the note.";
-  if (!window.confirm(message)) return;
-  try {
-    const result = await api.apply_step(step);
-    if (result.error) {
-      toast(`Stopped at step ${result.failed_at}: ${result.error}`, true);
-    } else {
-      toast(`Applied t+${step} as run #${result.run_number}.`);
-      step = 0;
-    }
-  } catch (e) {
-    toast(String(e), true);
-  }
-  renderNow();
 }
 
 // ---- export ----------------------------------------------------------
@@ -738,7 +731,6 @@ async function loadNote(id) {
   $("editor").value = opened.source;
   resetUndoHistory();
   $("note-title").textContent = noteName || "no motes yet";
-  step = 0;
   paintHighlight();
   markDirty();
   await renderNow();
@@ -1233,12 +1225,25 @@ function applyLayout() {
 function setMode(next) {
   mode = next;
   applyLayout();
+  // The rendered pane just changed width, and a figure is drawn at real
+  // pixel coordinates rather than scaled by CSS.
+  layoutFigures();
 }
 
 // ---- wiring --------------------------------------------------------
 
 function wire() {
+  $("switch-app-btn").addEventListener("click", Launcher.open);
+
   const editor = $("editor");
+  // X11/GTK's middle-click-paste fires on any focused text control under
+  // the cursor -- inspector.js and commandbar.js already guard themselves
+  // against it (see frontend_shared/inspector.js), but the editor is a
+  // plain <textarea> with nothing of its own stopping a stray middle
+  // click from dropping the primary selection into the note.
+  editor.addEventListener("mousedown", (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
   editor.addEventListener("input", onEditorInput);
   editor.addEventListener("beforeinput", markUndoBurst);
   editor.addEventListener("scroll", () => { $("highlight").scrollTop = editor.scrollTop; });
@@ -1314,21 +1319,25 @@ function wire() {
     if (!event.target.closest("#problems-wrap")) toggleProblemsPopover(false);
   });
 
-  $("tick-up").onclick = () => setStep(step + 1);
-  $("tick-down").onclick = () => setStep(step - 1);
-  $("apply").onclick = applyStep;
-
   // Last line of defence: the debounce may still be waiting when the
   // window goes away. pagehide is the one that fires reliably inside
   // pywebview's webview; the write itself is best-effort from here.
   window.addEventListener("pagehide", () => { flushSave(); });
   window.addEventListener("beforeunload", () => { flushSave(); });
 
+  // Figures are the one thing here that does not reflow on its own.
+  // Coalesced, because a dragged window edge fires this continuously and
+  // each frame redraws every curve in the note.
+  window.addEventListener("resize", () => {
+    clearTimeout(figureResizeTimer);
+    figureResizeTimer = setTimeout(layoutFigures, 120);
+  });
+
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".topbar-menu")) closeGardenMenu();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { closeGardenMenu(); closeNotesWindow(); closePicker(); closeLauncher(); closeFindBar(); }
+    if (event.key === "Escape") { closeGardenMenu(); closeNotesWindow(); closePicker(); closeFindBar(); }
     // Window-level rather than scoped to the editor (as this used to be):
     // Save has its own persistent topbar button and dirty-state pill, so
     // Ctrl/Cmd+S reads as "save the note" from anywhere in the window, not
@@ -1341,204 +1350,13 @@ function wire() {
       event.preventDefault();
       openNotesWindow();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "j") {
-      event.preventDefault();
-      openLauncher();
-    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
       openFindBar();
     }
-    if ((event.ctrlKey || event.metaKey) && /^[1-5]$/.test(event.key)) {
-      const app = launcherChoices()[Number(event.key) - 1];
-      if (app) {
-        event.preventDefault();
-        launchApp(app.id);
-      }
-    }
   });
 
-  setupLauncher();
   wireFindBar();
-}
-
-// ---- app switcher (⌘J) ----
-//
-// Every sibling app but this one, in a fixed order -- so "Monastery is
-// ⌘2" holds regardless of what's typed into the filter box. See
-// api_common.py::APPS for the id each maps to on the Python side.
-const LAUNCHER_APPS = [
-  {
-    id: "monarch", name: "Monarch", kind: "graph",
-    desc: "Motes and relationships in a live force field.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="12" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></circle>
-      <ellipse cx="20" cy="20" rx="12" ry="4.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6" transform="rotate(-28 20 20)"></ellipse>
-      <circle cx="20" cy="20" r="4" fill="var(--accent)"></circle>
-    </svg>`,
-  },
-  {
-    id: "mora", name: "Mora", kind: "notes",
-    desc: "Write and link long-form .modoc notes.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="9" y="6" width="22" height="28" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="14" y="14" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="20" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="26" width="7" height="1.8" rx="0.9" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
-    id: "monastery", name: "Monastery", kind: "calendar",
-    desc: "See and schedule a garden's dated motes.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="9" width="26" height="24" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="7" y="15" width="26" height="1.6" fill="var(--fg)" opacity="0.5"></rect>
-      <rect x="12" y="20" width="5" height="5" rx="1" fill="var(--fg)" opacity="0.55"></rect>
-      <rect x="21" y="20" width="5" height="5" rx="1" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
-    id: "momentum", name: "Momentum", kind: "tasks",
-    desc: "Task board, week planner and focus timer.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
-      <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
-      <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
-    id: "monolith", name: "Monolith", kind: "table",
-    desc: "Every mote as a row: query, bulk-edit and link the garden.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="13" y="6" width="14" height="28" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
-      <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-      <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-    </svg>`,
-  },
-  {
-    id: "motion", name: "Motion", kind: "simulation",
-    desc: "Run the garden's rules and scrub the result tick by tick.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="10.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55"></circle>
-      <ellipse cx="20" cy="20" rx="10.5" ry="4" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55" transform="rotate(-28 20 20)"></ellipse>
-      <circle cx="20" cy="20" r="3.2" fill="var(--accent)"></circle>
-      <circle cx="29.4" cy="15.3" r="2" fill="var(--accent)"></circle>
-    </svg>`,
-  },
-  {
-    id: "moxie", name: "Moxie", kind: "graphs",
-    desc: "Sweep one property and graph another against it.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <path d="M7 30 C14.5 30 13.5 11 20 11 C26.5 11 25.5 30 33 30" fill="none"
-            stroke="var(--fg)" stroke-width="2.2" stroke-linecap="round" opacity="0.6"></path>
-      <circle cx="20" cy="11" r="3" fill="var(--accent)"></circle>
-    </svg>`,
-  },
-];
-const THIS_APP = "mora";
-
-let launcherHighlight = 0;
-const LAUNCHER_COLUMNS = 2; // matches #launcher-results grid-template-columns
-
-function launcherChoices() {
-  return LAUNCHER_APPS.filter((a) => a.id !== THIS_APP);
-}
-
-function launcherFiltered(query) {
-  const q = query.trim().toLowerCase();
-  const choices = launcherChoices();
-  if (!q) return choices;
-  return choices.filter((a) => (a.name + " " + a.kind + " " + a.desc).toLowerCase().includes(q));
-}
-
-function renderLauncherResults(query) {
-  const choices = launcherChoices();
-  const list = launcherFiltered(query);
-  launcherHighlight = Math.min(launcherHighlight, Math.max(list.length - 1, 0));
-  const container = $("launcher-results");
-  container.innerHTML = "";
-  list.forEach((app, i) => {
-    const card = document.createElement("a");
-    card.href = "#";
-    card.className = "launcher-card" + (i === launcherHighlight ? " highlighted" : "");
-    card.innerHTML =
-      `<div class="launcher-icon">${app.icon}</div>` +
-      `<div class="launcher-text">` +
-      `<div class="launcher-name-row"><span class="launcher-name">${app.name}</span><span class="launcher-kind">${app.kind}</span></div>` +
-      `<div class="launcher-desc">${app.desc}</div>` +
-      `</div>` +
-      `<span class="launcher-key">⌘${choices.indexOf(app) + 1}</span>`;
-    card.addEventListener("mouseenter", () => { launcherHighlight = i; updateLauncherHighlight(); });
-    card.addEventListener("mousedown", (e) => { e.preventDefault(); launchApp(app.id); });
-    container.appendChild(card);
-  });
-  const empty = $("launcher-empty");
-  if (list.length === 0) {
-    empty.textContent = `no app matches "${query}"`;
-    empty.classList.remove("hidden");
-  } else {
-    empty.classList.add("hidden");
-  }
-}
-
-function updateLauncherHighlight() {
-  document.querySelectorAll("#launcher-results .launcher-card").forEach((card, i) => {
-    card.classList.toggle("highlighted", i === launcherHighlight);
-  });
-}
-
-function openLauncher() {
-  $("launcher-overlay").classList.remove("hidden");
-  $("launcher-input").value = "";
-  $("launcher-garden").textContent = "garden · " + $("garden-name").textContent;
-  launcherHighlight = 0;
-  renderLauncherResults("");
-  $("launcher-input").focus();
-}
-
-function closeLauncher() { $("launcher-overlay").classList.add("hidden"); }
-
-async function launchApp(appId) {
-  closeLauncher();
-  const app = LAUNCHER_APPS.find((a) => a.id === appId);
-  try {
-    await api.open_app(appId);
-  } catch (e) {
-    toast(String(e), true);
-    return;
-  }
-  toast(`Opening ${app.name}…`);
-}
-
-function setupLauncher() {
-  $("switch-app-btn").addEventListener("click", openLauncher);
-  $("launcher-overlay").addEventListener("mousedown", (e) => {
-    if (e.target === $("launcher-overlay")) closeLauncher();
-  });
-  $("launcher-input").addEventListener("input", (e) => renderLauncherResults(e.target.value));
-  $("launcher-input").addEventListener("keydown", (e) => {
-    const list = launcherFiltered($("launcher-input").value);
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (launcherHighlight + LAUNCHER_COLUMNS < list.length) launcherHighlight += LAUNCHER_COLUMNS;
-      updateLauncherHighlight();
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (launcherHighlight - LAUNCHER_COLUMNS >= 0) launcherHighlight -= LAUNCHER_COLUMNS;
-      updateLauncherHighlight();
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      if (launcherHighlight % LAUNCHER_COLUMNS < LAUNCHER_COLUMNS - 1 && launcherHighlight + 1 < list.length) launcherHighlight++;
-      updateLauncherHighlight();
-    } else if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      if (launcherHighlight % LAUNCHER_COLUMNS > 0) launcherHighlight--;
-      updateLauncherHighlight();
-    } else if (e.key === "Enter" && list[launcherHighlight]) {
-      launchApp(list[launcherHighlight].id);
-    }
-  });
 }
 
 async function init() {
@@ -1553,6 +1371,12 @@ async function init() {
     api,
     onChanged: () => renderNow(),
     onNavigate: (moteId) => Inspector.open(moteId),
+  });
+  Launcher.install({
+    api,
+    thisApp: "mora",
+    getGardenName: () => $("garden-name").textContent,
+    onError: (message) => toast(message, true),
   });
   wire();
   applyLayout();

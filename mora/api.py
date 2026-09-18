@@ -14,8 +14,14 @@ worker threads.
 Two lines this bridge does not cross. It holds no knowledge of the
 .modoc language -- parsing is core/modoc.py's, resolving is
 core/modoc_bind.py's, and shaping the answer is mora/payload.py's. And
-it writes exactly two things: a note's source, and a simulation step the
-user explicitly applied. Everything else here reads.
+it writes exactly one thing: a note's source. Everything else here
+reads.
+
+It used to write a second: a simulation step the reader had projected to
+and then applied. That is gone with the `t+N` stepper it belonged to.
+Mora shows the garden as it stands; moving a garden through time is
+Motion's window, and a note that could commit a run was a note editor
+holding a lever that belonged somewhere else.
 """
 import logging
 import threading
@@ -32,14 +38,13 @@ from core import graph as graph_repo
 from core import modoc
 from core import modoc_bind
 from core import motes as motes_repo
-from core import simulation as simulation_repo
+from core import plotview
 from core import sync as sync_repo
 from core.db import get_connection, initialize_database
 from mora import payload as payload_repo
 
 logger = logging.getLogger(__name__)
 
-MAX_STEP = 60
 _SEARCH_LIMIT = 12
 # How long a write waits out a lock held by another process before
 # giving up. Mora is opened *from* Monarch (monarch/api.py::
@@ -48,6 +53,50 @@ _SEARCH_LIMIT = 12
 # mcp_server/server.py sets this. core/db.py stays untouched, so the
 # CLI and the main UI keep their current behavior exactly.
 _BUSY_TIMEOUT_MS = 5000
+
+
+# Whether anything at all has been written to the garden. Counts as well
+# as timestamps, because a delete lowers the count without moving the
+# most recent write.
+_FINGERPRINT_SQL = """
+SELECT (SELECT COUNT(*) FROM mote_properties),
+       (SELECT MAX(updated_at) FROM mote_properties),
+       (SELECT COUNT(*) FROM relationships),
+       (SELECT MAX(updated_at) FROM relationships)
+"""
+
+
+class _Figures:
+    """Every `\\graph{...}` in the open note, drawn once per state of the
+    garden.
+
+    A figure is a saved Moxie view re-solved (core/plotview.py), which is
+    the most expensive thing a note can ask for by a wide margin -- a
+    sweep is dozens of solves and a surface is hundreds. Mora re-resolves
+    the whole note on every pause in typing, and typing does not move the
+    garden, so without this every keystroke would re-run every sweep in
+    the document for an answer that could not have changed.
+
+    Invalidation is the garden's own last write rather than a list of
+    hooks hung off each method that writes. A property edited in the
+    floating inspector, a run applied from the footer, a value that
+    arrived over sync, and an edit made in Monarch while this window sat
+    open all move that fingerprint equally -- and none of them has to
+    remember to say so, which is what a list of hooks would require and
+    would eventually get wrong."""
+
+    def __init__(self) -> None:
+        self._drawn: dict[str, plotview.Figure] = {}
+        self._at: tuple | None = None
+
+    def __call__(self, conn, ref: str, *, motes=None) -> plotview.Figure:
+        fingerprint = tuple(conn.execute(_FINGERPRINT_SQL).fetchone())
+        if fingerprint != self._at:
+            self._drawn.clear()
+            self._at = fingerprint
+        if ref not in self._drawn:
+            self._drawn[ref] = plotview.figure(conn, ref, motes=motes)
+        return self._drawn[ref]
 
 
 class Api(InspectorApi, CommandBarApi):
@@ -65,6 +114,7 @@ class Api(InspectorApi, CommandBarApi):
         self._initial_note = note
         self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
+        self._figures = _Figures()
         self._best_effort_sync()
 
     def _open(self, garden: str):
@@ -132,6 +182,9 @@ class Api(InspectorApi, CommandBarApi):
         self._conn.close()
         self._conn = self._open(resolved)
         self._garden = resolved
+        # A view is named per garden and a mote id means nothing in
+        # another one, so the memo does not travel with the window.
+        self._figures = _Figures()
         self._best_effort_sync()
         return {"garden": resolved}
 
@@ -216,19 +269,21 @@ class Api(InspectorApi, CommandBarApi):
 
     @_synchronized
     def save_note(self, mote_id: str, source: str) -> dict:
-        """Writes the `modoc` property and nothing else -- saving a note
-        must never be a way to write simulation results (that is
-        apply_step, below, and it asks first)."""
+        """Writes the `modoc` property and nothing else. It is the only
+        write this bridge makes."""
         modoc.write_source(self._conn, mote_id, source)
         return {"noteId": mote_id, "saved": True}
 
     @_synchronized
-    def render(self, mote_id: str, source: str, step: int = 0) -> dict:
+    def render(self, mote_id: str, source: str) -> dict:
         """The rendered pane, the data panel's link list and the status
-        bar's counts, for the source as it stands right now."""
-        step = max(0, min(int(step), MAX_STEP))
+        bar's counts, for the source as it stands right now -- against
+        the garden as *it* stands right now, which is the only reading a
+        note has."""
         document = modoc.parse(source)
-        resolution = modoc_bind.resolve(self._conn, mote_id, document, step=step)
+        resolution = modoc_bind.resolve(
+            self._conn, mote_id, document, draw=self._figures,
+        )
         motes, relationships = graph_repo.whole_garden(self._conn)
         directory = payload_repo.Directory.of(motes, relationships)
         return {
@@ -257,30 +312,3 @@ class Api(InspectorApi, CommandBarApi):
         directory = payload_repo.Directory.of(motes, relationships)
         found = motes_repo.search_motes(self._conn, query, limit)
         return [directory.describe(m.id) for m in found]
-
-    # ---- simulation ----
-
-    @_synchronized
-    def apply_step(self, step: int) -> dict:
-        """The one destructive thing in this window, and the only reason
-        it is separate from Save: stepping the clock is a projection until
-        somebody decides it isn't. Commits the same run the reader has
-        been looking at -- run_time_series is deterministic given the same
-        garden, so re-solving it here reproduces exactly those numbers."""
-        step = int(step)
-        if step < 1:
-            raise ValueError("Nothing to apply at t+0 -- that is the garden as it stands.")
-        if step > MAX_STEP:
-            # Same bound render() clamps a preview to. The frontend never
-            # asks past MAX_STEP either (see mora/frontend/app.js), but
-            # this method commits to the graph, so it checks for itself
-            # rather than trusting the caller stayed in range.
-            raise ValueError(f"Can't apply past t+{MAX_STEP} -- that's the simulation preview's own limit.")
-        result = simulation_repo.run_time_series(self._conn, step, commit=True)
-        return {
-            "steps": simulation_repo.step_payloads(result.steps),
-            "failed_at": result.failed_at,
-            "error": result.error,
-            "run_id": result.run_id,
-            "run_number": result.run_number,
-        }

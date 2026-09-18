@@ -111,6 +111,7 @@ class CommandResult:
     mote_id: str | None = None
     needs_confirm: bool = False
     choices: list[dict] | None = None
+    created: bool = False  # whether `mote_id` is a mote this command just made
 
 
 _SUGGEST_LIMIT = 20
@@ -237,7 +238,7 @@ def _run_property(conn, mote_token: str, key: str, value_text: str) -> CommandRe
     label = _label_for(mote_token, created)
     display = f"{value} {unit_name}" if unit_name else str(value)
     return CommandResult(
-        ok=True, mote_id=mote_id,
+        ok=True, mote_id=mote_id, created=created,
         message=f"{label}{'created, ' if created else ''}{key} = {display}",
     )
 
@@ -255,7 +256,7 @@ def _run_units(conn, mote_token: str, key: str, unit_text: str) -> CommandResult
 
     label = _label_for(mote_token, created)
     return CommandResult(
-        ok=True, mote_id=mote_id,
+        ok=True, mote_id=mote_id, created=created,
         message=f"{label}{key} is now in {unit_name}",
     )
 
@@ -275,7 +276,7 @@ def _run_freedom(conn, mote_token: str, key: str) -> CommandResult:
     motes_repo.update_mote(conn, mote_id, {rules_repo.FREEDOMS_KEY: freedoms})
 
     return CommandResult(
-        ok=True, mote_id=mote_id,
+        ok=True, mote_id=mote_id, created=created,
         message=f"{label}{key} is now {verb} for {_unquote(mote_token)}",
     )
 
@@ -334,7 +335,7 @@ def _run_rule(conn, lhs: str, rhs: str) -> CommandResult:
             f"{m['name']} (try `{anchor_token} -> {m['name']}`)" for m in missing
         )
         message += f" -- not yet reachable from {anchor_token}: {hints}"
-    return CommandResult(ok=True, mote_id=rule_id, message=message)
+    return CommandResult(ok=True, mote_id=rule_id, created=True, message=message)
 
 
 def _rule_anchor(relation: str) -> str:
@@ -422,10 +423,10 @@ def _run_relate(conn, from_token: str, rest: str) -> CommandResult:
     to_id, to_created = _find_or_create(conn, to_token)
     rel_repo.create_relationship(conn, from_id, to_id, type_)
 
-    created = [t for t, c in ((from_token, from_created), (to_token, to_created)) if c]
-    note = f" ({', '.join(created)} created)" if created else ""
+    created_tokens = [t for t, c in ((from_token, from_created), (to_token, to_created)) if c]
+    note = f" ({', '.join(created_tokens)} created)" if created_tokens else ""
     return CommandResult(
-        ok=True, mote_id=from_id,
+        ok=True, mote_id=from_id, created=from_created,
         message=f"{from_token} --{type_}--> {to_token}{note}",
     )
 
@@ -441,10 +442,10 @@ def _run_species(conn, mote_token: str, species_token: str) -> CommandResult:
         rel_repo.delete_relationship(conn, rel.id)
     species_repo.set_species(conn, mote_id, species_id)
 
-    created = [t for t, c in ((mote_token, mote_created), (species_token, species_created)) if c]
-    note = f" ({', '.join(created)} created)" if created else ""
+    created_tokens = [t for t, c in ((mote_token, mote_created), (species_token, species_created)) if c]
+    note = f" ({', '.join(created_tokens)} created)" if created_tokens else ""
     return CommandResult(
-        ok=True, mote_id=mote_id,
+        ok=True, mote_id=mote_id, created=mote_created,
         message=f"{mote_token} : {species_token}{note}",
     )
 
@@ -469,7 +470,7 @@ def _run_delete(conn, target: str, confirm: bool) -> CommandResult:
 def _run_navigate(conn, target: str) -> CommandResult:
     mote_id, created = _find_or_create(conn, target)
     label = f"{_unquote(target)} (new)" if created else target
-    return CommandResult(ok=True, mote_id=mote_id, message=label)
+    return CommandResult(ok=True, mote_id=mote_id, created=created, message=label)
 
 
 # ---- name resolution --------------------------------------------------

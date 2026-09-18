@@ -17,6 +17,21 @@ from core.formula import Equation, Unknown, describe
 from core.solvers import Remainder, SingularSystemError, SolverBackend, SolverError
 
 _RESIDUAL_TOLERANCE = 1e-6
+# Relative slack on top of the absolute floor above, sized to the largest
+# magnitude an equation's own arithmetic touched (Equation.scale / a row's
+# LinearExpr.scale) rather than to the equation's value in isolation. A
+# rule mixing far-apart base units (kW against MeV, say) routinely
+# produces intermediate values around 1e15; float64 carries ~16
+# significant digits, so two equal ways of reaching that same value can
+# differ by several times DBL_EPSILON once real arithmetic (not just a
+# single rounding) is involved. 1e-9 is generous next to that noise floor
+# while still catching a genuine contradiction, which disagrees by a
+# fraction of the actual quantity, not a few parts in 1e15.
+_RELATIVE_TOLERANCE = 1e-9
+
+
+def _tolerance(scale: float) -> float:
+    return max(_RESIDUAL_TOLERANCE, abs(scale) * _RELATIVE_TOLERANCE)
 
 
 class LinearSolver(SolverBackend):
@@ -56,7 +71,8 @@ def _matrix_solve(equations: list[Equation]) -> dict[Unknown, float]:
             f"equations. Unknowns: {describe(unknowns)}"
         )
     residual = float(np.abs(matrix @ solution - constants).max())
-    if residual > _RESIDUAL_TOLERANCE:
+    scale = max((e.scale for e in open_equations), default=0.0)
+    if residual > _tolerance(scale):
         raise SolverError(
             f"inconsistent: no values satisfy all {len(open_equations)} equations "
             f"(worst mismatch {residual:.3g}). Unknowns: {describe(unknowns)}"
@@ -68,7 +84,7 @@ def _check_consistency(closed: list[Equation]) -> None:
     """An equation with no unknowns left is either satisfied or a flat
     contradiction between rules."""
     for equation in closed:
-        if abs(equation.constant) > _RESIDUAL_TOLERANCE:
+        if abs(equation.constant) > _tolerance(equation.scale):
             raise SolverError(
                 f"contradictory equation {equation.source!r}: with everything else known "
                 f"it reduces to {equation.constant:.6g} == 0"

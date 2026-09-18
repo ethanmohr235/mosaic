@@ -8,7 +8,6 @@ import pytest
 
 from core.modoc import (
     ABOUT,
-    BY,
     Equation,
     Graph,
     Heading,
@@ -16,7 +15,6 @@ from core.modoc import (
     Link,
     MODOC_KEY,
     Math,
-    OVER_T,
     Paragraph,
     Styled,
     Text,
@@ -91,21 +89,22 @@ def test_comments_are_dropped_but_escaped_percents_survive():
 
 
 def test_graph_is_block_level_only():
-    document = parse("inline \\graph{a over t} stays prose")
+    document = parse("inline \\graph{Load curve} stays prose")
     assert graphs(document) == []
     assert isinstance(document.blocks[0], Paragraph)
 
 
-def test_graph_reads_both_forms():
-    document = parse("\\graph{count(targets('a')) over t}\n\n\\graph{targets('a') by status}")
-    over, by = graphs(document)
-    assert over.spec.kind == OVER_T and over.spec.expression == "count(targets('a'))"
-    assert by.spec.kind == BY and by.spec.key == "status"
+def test_graph_names_a_saved_view():
+    document = parse("\\graph{Load curve}\n\n\\graph{7f3c1a02}")
+    assert graphs(document) == [Graph("Load curve", 1), Graph("7f3c1a02", 3)]
 
 
-def test_graph_takes_an_optional_anchor():
-    document = parse("\\graph[Atlas]{targets('a') by status}")
-    assert graphs(document)[0].ref == "Atlas"
+def test_graph_still_reads_a_name_with_spaces_and_punctuation():
+    """A view is named by a person, not by a grammar. Whatever is between
+    the braces is the name -- the old `... over t` / `... by status`
+    shapes carried meaning here, and nothing does any more."""
+    assert graphs(parse("\\graph{  Current vs. R (bench 2)  }"))[0].view == \
+        "Current vs. R (bench 2)"
 
 
 # ---- inline ----
@@ -151,10 +150,19 @@ def test_a_stray_end_is_reported():
     assert [d.kind for d in document.diagnostics] == ["stray_environment"]
 
 
-def test_an_unreadable_graph_spec_is_reported_and_left_unresolvable():
-    document = parse("\\graph{nonsense}")
+def test_an_empty_graph_is_reported_and_still_a_block():
+    document = parse("\\graph{}")
     assert [d.kind for d in document.diagnostics] == ["bad_graph"]
-    assert graphs(document) == [Graph(None, None, 1)]
+    assert graphs(document) == [Graph("", 1)]
+
+
+def test_a_graph_anchor_is_reported_as_the_old_grammar_it_is():
+    """`\\graph[Atlas]{...}` used to say which mote to evaluate the
+    expression against. A saved view names its own motes, so there is
+    nothing left to anchor -- and saying so beats ignoring it."""
+    document = parse("\\graph[Atlas]{Load curve}")
+    assert [d.kind for d in document.diagnostics] == ["graph_anchor"]
+    assert graphs(document) == [Graph("Load curve", 1)]
 
 
 def test_diagnostics_carry_the_line_they_came_from():
@@ -179,10 +187,12 @@ def test_identical_macros_share_a_resolution_key():
     assert value_key(first) == value_key(second) != value_key(third)
 
 
-def test_graph_keys_distinguish_the_two_forms():
-    document = parse("\\graph{a over t}\n\n\\graph{a by status}")
-    over, by = graphs(document)
-    assert graph_key(over) != graph_key(by)
+def test_two_graphs_of_one_view_share_a_resolution_key():
+    """The same figure twice is one sweep, not two -- see
+    core/modoc_bind.py::resolve."""
+    document = parse("\\graph{Load curve}\n\n\\graph{Load curve}\n\n\\graph{Other}")
+    first, second, third = graphs(document)
+    assert graph_key(first) == graph_key(second) != graph_key(third)
 
 
 def test_word_count_counts_rendered_words_not_markup():

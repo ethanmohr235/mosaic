@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="commandbar.css">
 <link rel="stylesheet" href="interval.css">
 <link rel="stylesheet" href="menu.css">
+<link rel="stylesheet" href="launcher.css">
 </head>
 <body>
 
@@ -73,27 +74,11 @@
   <div id="toast" class="hidden"></div>
 </div>
 
-<div id="launcher-overlay" class="hidden">
-  <div id="launcher-modal">
-    <div id="launcher-input-row">
-      <span class="launcher-glyph"></span>
-      <input type="text" id="launcher-input" placeholder="Open an app…" autocomplete="off">
-      <kbd>esc</kbd>
-    </div>
-    <div id="launcher-results"></div>
-    <div id="launcher-empty" class="hidden"></div>
-    <div id="launcher-footer">
-      <span>↑↓ select</span><span>↵ open</span>
-      <div class="spacer"></div>
-      <span id="launcher-garden"></span>
-    </div>
-  </div>
-</div>
-
 <script src="menu.js"></script>
 <script src="interval.js"></script>
 <script src="inspector.js"></script>
 <script src="commandbar.js"></script>
+<script src="launcher.js"></script>
 <script src="plot.js"></script>
 <script src="app.js"></script>
 </body>

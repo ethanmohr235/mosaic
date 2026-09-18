@@ -299,7 +299,6 @@ def print_model_detail(conn: sqlite3.Connection, model_id: str, *, header: bool)
 # never disagree about -- what a macro means -- neither of them decides.
 
 _WIDTH = 78
-_BAR_WIDTH = 24
 _SPARKS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
 
@@ -339,7 +338,7 @@ def _print_block(block, resolution) -> None:
     elif isinstance(block, modoc.Equation):
         print(f"    {_math_text(block.text)}")
     elif isinstance(block, modoc.Graph):
-        _print_series(resolution.graphs.get(modoc.graph_key(block)))
+        _print_figure(resolution.graphs.get(modoc.graph_key(block)))
 
 
 def _inline_text(nodes, resolution) -> str:
@@ -366,27 +365,51 @@ def _math_text(text: str) -> str:
     return "".join(marker[s.kind] + s.text for s in spans)
 
 
-def _print_series(series) -> None:
-    if series is None or series.error and not series.values:
-        print(f"    [graph: {series.error if series else 'unresolved'}]")
+def _print_figure(figure) -> None:
+    """A saved Moxie view, in a terminal.
+
+    A sparkline per curve rather than a table of points: a figure is a
+    shape before it is numbers, one line of it reads faster than sixty
+    rows, and the endpoints carry the values that a reader would look up
+    anyway. The other two modes have no line to draw -- a surface and a
+    scatter are stated instead."""
+    if figure is None:
+        print("    [graph: unresolved]")
         return
-    if series.kind == modoc.OVER_T:
-        _print_sparkline(series)
+    head = f"    [{figure.name or 'graph'}]"
+    if figure.error:
+        print(f"{head} {figure.error}")
         return
-    width = max((len(label) for label in series.labels), default=0)
-    peak = max(series.values, default=0) or 1
-    for label, value in zip(series.labels, series.values):
-        filled = round(_BAR_WIDTH * value / peak)
-        print(f"    {label:<{width}}  {'#' * filled:<{_BAR_WIDTH}}  {value:g}")
+    print(f"{head} {figure.x_label} → {figure.y_label}")
+    if figure.mode == "correlate":
+        print(f"    {len(figure.dots)} motes, one solve")
+        return
+    if figure.mode == "surface":
+        print(f"    {figure.cols}x{figure.rows} grid, "
+              f"{_number(figure.lo)} to {_number(figure.hi)}")
+        return
+    width = max((len(s.label) for s in figure.series), default=0)
+    for series in figure.series:
+        print(f"    {series.label:<{width}}  {_sparkline(series.points)}")
 
 
-def _print_sparkline(series) -> None:
-    """A projection is a shape before it is a table -- one line of it
-    reads faster than nine rows, and the endpoints carry the numbers."""
-    low, high = min(series.values), max(series.values)
+def _sparkline(points) -> str:
+    """One curve as a row of blocks, with its own endpoints after it.
+    Scaled to the series' own range, so a flat curve reads as flat rather
+    than as noise magnified to fill the row."""
+    values = [p[1] for p in points if p is not None]
+    if not values:
+        return "(nothing solved)"
+    low, high = min(values), max(values)
     span = (high - low) or 1
+    # A point that did not solve is a space, not a low bar: an absent
+    # answer must not read as a small one.
     spark = "".join(
-        _SPARKS[round((v - low) / span * (len(_SPARKS) - 1))] for v in series.values
+        " " if p is None else _SPARKS[round((p[1] - low) / span * (len(_SPARKS) - 1))]
+        for p in points
     )
-    print(f"    {spark}")
-    print(f"    {series.labels[0]} {low:g}  ->  {series.labels[-1]} {series.values[-1]:g}")
+    return f"{spark}  {_number(values[0])} -> {_number(values[-1])}"
+
+
+def _number(value) -> str:
+    return "—" if value is None else f"{value:g}"

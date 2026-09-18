@@ -375,6 +375,7 @@ class Api(InspectorApi, CommandBarApi):
     def preview(
         self, step_count: int = _DEFAULT_STEPS, solver: str = "linear",
         solver_configuration: dict | None = None, scenario: str | None = None,
+        strict_units: bool = False,
     ) -> dict:
         """Runs step_count ticks entirely in memory -- nothing is written
         to this garden. The frontend scrubs through the returned steps
@@ -383,10 +384,16 @@ class Api(InspectorApi, CommandBarApi):
         `scenario` names a mote gathering overrides (see board()): the
         garden is previewed as that scenario would have it. A preview
         writes nothing either way -- the difference is which question is
-        being asked, not whether the answer is kept."""
+        being asked, not whether the answer is kept.
+
+        `strict_units` is the same opt-in core/simulation.py's
+        run_time_series() takes: promotes a dimensional mismatch from a
+        logged warning to a run-stopping error, surfaced to the frontend
+        the same way any other failed preview is."""
         result = simulation_repo.run_time_series(
             self._conn, step_count, commit=False, solver=solver,
             solver_configuration=solver_configuration, scenario=scenario,
+            strict_units=strict_units,
         )
         return _time_series_payload(result)
 
@@ -394,6 +401,7 @@ class Api(InspectorApi, CommandBarApi):
     def compare(
         self, step_count: int = _DEFAULT_STEPS, solver: str = "linear",
         scenario_a: str | None = None, scenario_b: str | None = None,
+        strict_units: bool = False,
     ) -> dict:
         """Two previews of the same garden under two scenarios, for the
         side-by-side boards and the shaded delta band between their
@@ -412,14 +420,14 @@ class Api(InspectorApi, CommandBarApi):
                 "scenario": scenario_a,
                 **_time_series_payload(simulation_repo.run_time_series(
                     self._conn, step_count, commit=False,
-                    solver=solver, scenario=scenario_a,
+                    solver=solver, scenario=scenario_a, strict_units=strict_units,
                 )),
             },
             "b": {
                 "scenario": scenario_b,
                 **_time_series_payload(simulation_repo.run_time_series(
                     self._conn, step_count, commit=False,
-                    solver=solver, scenario=scenario_b,
+                    solver=solver, scenario=scenario_b, strict_units=strict_units,
                 )),
             },
         }
@@ -450,7 +458,7 @@ class Api(InspectorApi, CommandBarApi):
     @_synchronized
     def commit(
         self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None,
-        detail: str | None = None,
+        detail: str | None = None, strict_units: bool = False,
     ) -> dict:
         """Re-runs step_count ticks (deterministic given the same garden
         and rules) and this time writes the final cumulative result,
@@ -469,6 +477,7 @@ class Api(InspectorApi, CommandBarApi):
         result = simulation_repo.run_time_series(
             self._conn, step_count, commit=True, solver=solver,
             solver_configuration=solver_configuration, detail=detail,
+            strict_units=strict_units,
         )
         return _time_series_payload(result)
 
@@ -476,6 +485,7 @@ class Api(InspectorApi, CommandBarApi):
     def save(
         self, step_count: int, solver: str = "linear",
         solver_configuration: dict | None = None, scenario: str | None = None,
+        strict_units: bool = False,
     ) -> dict:
         """Like commit, but never writes the graph -- logs every computed
         tick for later review without any of them becoming the garden's
@@ -487,6 +497,7 @@ class Api(InspectorApi, CommandBarApi):
         result = simulation_repo.run_time_series(
             self._conn, step_count, commit=False, save=True,
             solver=solver, solver_configuration=solver_configuration, scenario=scenario,
+            strict_units=strict_units,
         )
         return _time_series_payload(result)
 

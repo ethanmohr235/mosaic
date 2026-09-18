@@ -7,9 +7,10 @@ values a step produces, and that a preview never writes.
 import pytest
 
 from core import modoc
-from core.modoc_bind import DEFAULT_HORIZON, format_value, problems, resolve
+from core.modoc_bind import format_value, problems, resolve
 from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
+from core.sweep import PLOT_KEY
 
 
 @pytest.fixture
@@ -99,6 +100,13 @@ def test_a_unitless_property_shows_no_unit(conn, garden):
     assert only_value(resolved(conn, garden, "\\val{team}")).text == "4"
 
 
+def test_a_declared_unit_of_1_shows_no_unit(conn, garden):
+    # units: {"team": "1"} tells the solver the property is truly
+    # dimensionless (core/units.py), not that its unit symbol is "1".
+    update_mote(conn, garden, {"team": 4, "units": {"team": "1"}})
+    assert only_value(resolved(conn, garden, "\\val{team}")).text == "4"
+
+
 def test_a_caret_notation_unit_renders_with_superscripts(conn, garden):
     update_mote(conn, garden, {"density": 2, "units": {"density": "cm^-3"}})
     assert only_value(resolved(conn, garden, "\\val{density}")).text == "2 cm⁻³"
@@ -149,32 +157,33 @@ def test_format_value(value, expected):
     assert format_value(value) == expected
 
 
-# ---- stepping ----
+# ---- one reading, and no clock ----
 
-def test_step_zero_is_the_garden_as_stored(conn, garden):
+def test_a_note_reads_the_garden_as_it_stands(conn, garden):
     resolution = resolved(conn, garden, "\\val{sum(targets('contains').progress)}")
-    assert resolution.projected is False
     assert only_value(resolution).text == "300"
 
 
-def test_a_later_step_projects_the_rules_forward(conn, garden):
-    resolution = resolved(conn, garden, "\\val{sum(targets('contains').progress)}", step=3)
-    assert resolution.projected is True
-    assert only_value(resolution).text == "390"
+def test_there_is_no_step_to_resolve_at(conn, garden):
+    """A note says what the garden *is*. Running it forward was a `t+N`
+    preview that lived here and in Mora's footer; both are gone, and the
+    question belongs to Motion. `resolve()` therefore takes no step, and
+    a Resolution has nothing to report about one."""
+    with pytest.raises(TypeError):
+        resolved(conn, garden, "\\val{due}", step=3)
+    assert not hasattr(resolved(conn, garden, "\\val{due}"), "projected")
 
 
-def test_t_is_readable_as_the_step_itself(conn, garden):
-    assert only_value(resolved(conn, garden, "\\val{t}", step=2)).text == "2"
+def test_t_reads_as_zero_because_a_note_has_no_clock(conn, garden):
+    assert only_value(resolved(conn, garden, "\\val{t}")).text == "0"
 
 
-def test_a_preview_never_writes_to_the_graph(conn, garden):
-    before = {m: get_mote(conn, m).properties for m in (garden,)}
-    resolved(conn, garden, "\\val{sum(targets('contains').progress)}", step=5)
-    tasks = [m for m in conn.execute("SELECT id FROM motes").fetchall()]
-    assert {m: get_mote(conn, m).properties for m in (garden,)} == before
-    assert all(
-        get_mote(conn, row["id"]).properties.get("progress") in (None, 100) for row in tasks
-    )
+def test_resolving_a_note_never_writes_to_the_graph(conn, garden):
+    before = {row["id"]: get_mote(conn, row["id"]).properties
+              for row in conn.execute("SELECT id FROM motes").fetchall()}
+    resolved(conn, garden, "\\val{sum(targets('contains').progress)} \\val{t}")
+    assert {row["id"]: get_mote(conn, row["id"]).properties
+            for row in conn.execute("SELECT id FROM motes").fetchall()} == before
 
 
 # ---- the anchor ----
@@ -197,33 +206,64 @@ def test_an_ambiguous_anchor_surfaces_as_a_diagnostic(conn, garden):
 
 
 # ---- graphs ----
+#
+# `\graph{...}` names a view saved in Moxie. What it *draws* is
+# tests/test_plotview.py's subject; what is checked here is only that a
+# note finds the right one, and that a note naming a view that isn't
+# there still renders.
 
-def test_a_by_graph_counts_motes_grouped_by_a_property(conn, garden):
-    (series,) = resolved(conn, garden, "\\graph{targets('contains') by status}").graphs.values()
-    assert (series.labels, series.values) == (["todo", "done"], [2.0, 1.0])
-
-
-def test_a_by_graph_over_a_non_selection_reports(conn, garden):
-    (series,) = resolved(conn, garden, "\\graph{team by status}").graphs.values()
-    assert "does not select motes" in series.error
-
-
-def test_an_over_t_graph_plots_one_point_per_step_to_the_horizon(conn, garden):
-    source = "\\graph{sum(targets('contains').progress) over t}"
-    (series,) = resolved(conn, garden, source).graphs.values()
-    assert series.labels == [f"t+{i}" for i in range(DEFAULT_HORIZON + 1)]
-    assert series.values[:3] == [300.0, 330.0, 360.0]
-
-
-def test_an_over_t_graph_reaches_at_least_as_far_as_the_current_step(conn, garden):
-    source = "\\graph{sum(targets('contains').progress) over t}"
-    (series,) = resolved(conn, garden, source, step=12, horizon=2).graphs.values()
-    assert series.labels[-1] == "t+12"
+@pytest.fixture
+def view(conn, garden):
+    """A saved plot over the same garden. What it draws is
+    tests/test_plotview.py's subject -- this garden's one rule reads
+    `prev(progress)`, which no sweep can answer, so the figures here are
+    about which view a name finds rather than about its curve."""
+    return create_mote(conn, {"name": "Progress curve", PLOT_KEY: {
+        "mode": "sweep",
+        "x": {"mote": garden, "key": "team", "lo": 1.0, "hi": 8.0, "steps": 7},
+        "series": [{"mote": garden, "key": "team", "label": "team"}],
+    }})
 
 
-def test_an_unreadable_graph_spec_resolves_to_an_error_not_a_crash(conn, garden):
-    (series,) = resolved(conn, garden, "\\graph{nonsense}").graphs.values()
-    assert series.error is not None
+def test_a_graph_finds_the_view_it_names(conn, garden, view):
+    (figure,) = resolved(conn, garden, "\\graph{Progress curve}").graphs.values()
+    assert figure.view_id == view
+    assert figure.name == "Progress curve"
+
+
+def test_a_graph_resolves_a_view_by_id_as_well_as_by_name(conn, garden, view):
+    (figure,) = resolved(conn, garden, f"\\graph{{{view}}}").graphs.values()
+    assert figure.view_id == view
+
+
+def test_a_graph_naming_no_saved_view_resolves_to_an_error_not_a_crash(conn, garden):
+    (figure,) = resolved(conn, garden, "\\graph{nonsense}").graphs.values()
+    assert "no saved view" in figure.error
+
+
+def test_a_graph_naming_a_mote_that_carries_no_view_says_so(conn, garden):
+    """"That mote has no view on it" is a different fix from "no such
+    mote", so an id that resolves is told the first rather than the
+    second."""
+    (figure,) = resolved(conn, garden, f"\\graph{{{garden}}}").graphs.values()
+    assert "carries no saved view" in figure.error
+
+
+def test_one_view_named_twice_is_drawn_once(conn, garden, view):
+    """A sweep is the most expensive thing a note can ask for, so two
+    figures of the same view share one resolution."""
+    resolution = resolved(
+        conn, garden, "\\graph{Progress curve}\n\n\\graph{Progress curve}"
+    )
+    assert len(resolution.graphs) == 1
+
+
+def test_a_note_full_of_figures_runs_no_simulation(conn, garden, view):
+    """A `\\graph` varies a property, not the clock. This garden's one
+    rule reads `prev(progress)`, which no simulation-free read can
+    answer -- so a clean resolution is also proof that resolving a note
+    runs no simulation at all."""
+    assert resolved(conn, garden, "\\graph{Progress curve}").diagnostics == []
 
 
 # ---- shared resolution ----
@@ -236,7 +276,7 @@ def test_a_repeated_macro_is_resolved_once(conn, garden):
 # ---- problems ----
 
 def test_problems_gathers_parse_and_resolution_failures_together(conn, garden):
-    document = modoc.parse("\\bogus\n\n\\mote{Nowhere} \\val{nonesuch}\n\n\\graph{nonsense}")
+    document = modoc.parse("\\bogus\n\n\\mote{Nowhere} \\val{nonesuch}\n\n\\graph{}")
     found = problems(document, resolve(conn, garden, document))
     assert [d.kind for d in found] == [
         "unknown_command", "unresolved_link", "unresolved_value", "bad_graph", "unresolved_graph",

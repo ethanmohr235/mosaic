@@ -8,10 +8,11 @@ canonical copy, which is what puts notes inside mote_history, garden
 export and undo for free.
 
 This module is the *language* and nothing else: parsing is pure, takes no
-connection, and resolves nothing. What `\\mote{...}` points at and what
-`\\val{...}` evaluates to are core/modoc_bind.py's business, because
-those are questions about a garden rather than about a note. Keeping them
-apart is what lets the whole grammar be tested with strings.
+connection, and resolves nothing. What `\\mote{...}` points at, what
+`\\val{...}` evaluates to and which saved view `\\graph{...}` draws are
+core/modoc_bind.py's business, because those are questions about a garden
+rather than about a note. Keeping them apart is what lets the whole
+grammar be tested with strings.
 
 Two rules the grammar leans on, both deliberate:
 
@@ -144,26 +145,16 @@ class Equation:
 
 
 @dataclass(frozen=True)
-class GraphSpec:
-    """Either form of `\\graph`. `OVER_T` plots `expression` once per
-    simulation step; `BY` counts the motes `expression` selects, grouped
-    by each one's `key` property."""
-    kind: str
-    expression: str
-    key: str | None = None
-
-
-OVER_T = "over_t"
-BY = "by"
-
-_OVER_T_RE = re.compile(r"^(?P<expr>.+?)\s+over\s+t$", re.IGNORECASE)
-_BY_RE = re.compile(r"^(?P<expr>.+?)\s+by\s+(?P<key>[A-Za-z_][A-Za-z0-9_]*)$", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
 class Graph:
-    spec: GraphSpec | None
-    ref: str | None
+    """`\\graph{Load curve}`: a figure, named rather than described.
+
+    `view` is the name or id of a mote carrying a saved Moxie view
+    (core/sweep.py::PLOT_KEY), and everything about what the figure
+    *is* -- which properties, which ranges, which scenarios, a line or a
+    surface or a scatter -- lives on that mote rather than in this
+    argument. Which mote it names is core/plotview.py's business, for the
+    same reason `\\mote{...}` leaves resolution to core/modoc_bind.py."""
+    view: str
     line: int
 
 
@@ -278,24 +269,33 @@ class _Parser:
         self._flush()
         command, arg = match.group("cmd"), match.group("arg")
         if command == "graph":
-            self.blocks.append(Graph(self._graph_spec(number, arg), match.group("ref"), number))
+            self._feed_graph(number, arg, match.group("ref"))
         else:
             level = 1 if command == "section" else 2
             self.blocks.append(Heading(level, self._inline(number, arg), number))
 
-    def _graph_spec(self, number: int, arg: str) -> GraphSpec | None:
-        arg = arg.strip()
-        over = _OVER_T_RE.match(arg)
-        if over is not None:
-            return GraphSpec(OVER_T, over.group("expr").strip())
-        grouped = _BY_RE.match(arg)
-        if grouped is not None:
-            return GraphSpec(BY, grouped.group("expr").strip(), grouped.group("key"))
-        self.diagnostics.append(Diagnostic(
-            number, "bad_graph",
-            f"\\graph{{{arg}}} is neither `<expression> over t` nor `<selector> by <property>`",
-        ))
-        return None
+    def _feed_graph(self, number: int, arg: str, ref: str | None) -> None:
+        """`\\graph` takes one thing: the saved view to draw.
+
+        It used to take an expression and a shape (`... over t`,
+        `... by status`), and `[ref]` said which mote to evaluate that
+        expression against. A saved view names its own motes, so there is
+        nothing left for an anchor to anchor -- a `[ref]` here is a note
+        written against the old grammar, and saying so is more use than
+        ignoring it."""
+        if ref is not None:
+            self.diagnostics.append(Diagnostic(
+                number, "graph_anchor",
+                f"\\graph[{ref}]{{...}} has no meaning any more -- a saved view "
+                f"names its own motes, so drop the [{ref}]",
+            ))
+        view = arg.strip()
+        if not view:
+            self.diagnostics.append(Diagnostic(
+                number, "bad_graph",
+                "\\graph{} needs the name of a view saved in Moxie",
+            ))
+        self.blocks.append(Graph(view, number))
 
     # -- accumulation --
 
@@ -414,10 +414,7 @@ def value_key(node: Value) -> str:
 
 
 def graph_key(node: Graph) -> str:
-    spec = node.spec
-    if spec is None:
-        return f"{node.ref or ''}\u241f?{node.line}"
-    return f"{node.ref or ''}\u241f{spec.kind}\u241f{spec.expression}\u241f{spec.key or ''}"
+    return node.view
 
 
 def _inlines(document: Document):

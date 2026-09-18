@@ -85,8 +85,9 @@ bare list.
 
 `resolve_modoc(mote, step)` reads a mote's `.modoc` note and everything
 its macros currently resolve to -- which mote each `\mote{...}` points at,
-what each `\val{...}` comes to, each `\graph{...}`'s series, and what
-didn't resolve. `step` behaves exactly like `preview_simulation`'s: 0 is
+what each `\val{...}` comes to, the saved Moxie view each `\graph{...}`
+draws (re-solved, summarised -- a sweep's curves point by point, a
+surface's extent rather than its grid), and what didn't resolve. `step` behaves exactly like `preview_simulation`'s: 0 is
 the garden as stored, higher is a projection that far ahead, and neither
 writes. There is no write tool -- a note is a property, so `update_mote`
 on `modoc` is how you edit one. See `docs/modoc.md`.

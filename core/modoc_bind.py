@@ -3,38 +3,41 @@
 
 core/modoc.py knows what a note *says*; this knows what it *means* right
 now -- which mote a `\\mote{...}` points at, what a `\\val{...}` comes to,
-what a `\\graph{...}` plots. The split is the reason the grammar can be
-tested with strings and this can be tested with a garden.
+which saved view a `\\graph{...}` draws. The split is the reason the
+grammar can be tested with strings and this can be tested with a garden.
 
-Two things it deliberately does not do. It never writes: a note is a
-reader, and stepping the clock forward is a preview
-(`run_time_series(commit=False)`), not a run. And it never raises: every
-failure lands in the returned diagnostics, because a note with one bad
+A `\\graph` is the one macro this module hands straight on: it names a
+view saved in Moxie, and re-solving that view is core/plotview.py's job
+rather than a second, weaker plotter living here. That is the whole
+point of the macro -- there is one place a figure is specified (Moxie),
+one place it is computed (core/sweep.py), and a note only ever refers to
+one.
+
+Two things it deliberately does not do. It never writes, and it never
+runs the clock: a note says what the garden *is*, not what it will be.
+That second one used to be a `t+N` preview living here, and removing it
+is what makes the boundary between the windows honest -- Motion is where
+a garden moves through time, Moxie is where a property is swept, and a
+note reads the state those produce. And it never raises: every failure
+lands in the returned diagnostics, because a note with one bad
 expression in it must still render the other nineteen.
 """
 import json
-import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
 
 from core import modoc
 from core import kinds as kinds_repo
+from core import plotview
 from core.entities import Mote, Relationship
-from core.formula import Context, FormulaError, evaluate_expression, evaluate_selection
+from core.formula import Context, FormulaError, evaluate_expression
 from core.motes import list_motes
 from core.relationships import list_relationships
-from core.simulation import SimulationError, expression_context, run_time_series
+from core.simulation import expression_context
 from core.units import UNITS_KEY, format_unit, parse_units_property
 
-logger = logging.getLogger(__name__)
-
 NAME_KEY = "name"
-# How far `\graph{... over t}` looks ahead when the reader has not
-# stepped the clock themselves. A projection of one point is not a
-# projection; this is the "10 day projection" of the original design,
-# expressed in steps because a step is the only unit a garden has.
-DEFAULT_HORIZON = 8
 
 _PLAIN_PROPERTY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # `\val{n.E}`: a bare "mote.property" reference, one dot, no arithmetic.
@@ -47,8 +50,6 @@ _PLAIN_PROPERTY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _DOTTED_REF_RE = re.compile(
     r"^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$"
 )
-_MISSING = "—"
-
 
 @dataclass(frozen=True)
 class LinkTarget:
@@ -72,108 +73,73 @@ class ValueResult:
 
 
 @dataclass(frozen=True)
-class Series:
-    """One `\\graph`. Both forms reduce to labels + numbers, so a renderer
-    only needs to know whether to draw a line or bars."""
-    kind: str
-    labels: list[str] = field(default_factory=list)
-    values: list[float] = field(default_factory=list)
-    error: str | None = None
-
-
-@dataclass(frozen=True)
 class Resolution:
     anchor_id: str
-    step: int
     links: dict[str, LinkTarget] = field(default_factory=dict)
     values: dict[str, ValueResult] = field(default_factory=dict)
-    graphs: dict[str, Series] = field(default_factory=dict)
+    graphs: dict[str, plotview.Figure] = field(default_factory=dict)
     diagnostics: list[modoc.Diagnostic] = field(default_factory=list)
 
-    @property
-    def projected(self) -> bool:
-        """Whether these numbers are the graph's, or a projection of it."""
-        return self.step > 0
 
+class _Garden:
+    """The garden read once, as every macro in the note will see it.
 
-class _Timeline:
-    """Every mote's properties at each step of one nondestructive preview.
+    One read rather than one per macro: a note with forty `\\val`s in it
+    asks about the same forty motes, and nothing between the first and
+    the last can have changed it. This was a `_Timeline` of one
+    nondestructive simulation preview per step; there are no steps any
+    more, so it is what it always was underneath -- properties,
+    relationships, and a Context built from them."""
 
-    Computed once per resolve(): a note with a `\\val`, a `by` graph and an
-    `over t` graph in it asks about several steps, and running the solver
-    once per question would be both slow and -- if a rule ever stopped
-    being deterministic -- inconsistent between them."""
-
-    def __init__(self, conn: sqlite3.Connection, motes: list[Mote], span: int) -> None:
+    def __init__(self, conn: sqlite3.Connection, motes: list[Mote]) -> None:
         self.relationships: list[Relationship] = list_relationships(conn)
-        baseline = {m.id: dict(m.properties) for m in motes}
-        self.states: list[dict[str, dict]] = [baseline]
-        self.error: str | None = None
-        if span > 0:
-            self._extend(conn, span)
+        self.properties: dict[str, dict] = {m.id: dict(m.properties) for m in motes}
 
-    def _extend(self, conn: sqlite3.Connection, span: int) -> None:
-        try:
-            result = run_time_series(conn, span, commit=False)
-        except (SimulationError, FormulaError, ValueError) as e:
-            self.error = f"simulation preview failed: {e}"
-            logger.warning("modoc preview failed: %s", e)
-            return
-        state = self.states[0]
-        for step in result.steps:
-            state = {mid: dict(props) for mid, props in state.items()}
-            for (mote_id, key), value in step.values.items():
-                state.setdefault(mote_id, {})[key] = value
-            self.states.append(state)
-        if result.error is not None:
-            self.error = f"simulation stopped at step {result.failed_at}: {result.error}"
+    def at(self, mote_id: str) -> dict:
+        return self.properties.get(mote_id, {})
 
-    @property
-    def reach(self) -> int:
-        """The last step actually computed -- a run that failed early
-        still answers for the steps before it did."""
-        return len(self.states) - 1
-
-    def at(self, step: int) -> dict[str, dict]:
-        return self.states[min(step, self.reach)]
-
-    def context(self, step: int, mote_id: str) -> Context:
-        return expression_context(
-            self.at(step), self.relationships, mote_id,
-            tick=float(step), previous=self.at(max(0, step - 1)),
-        )
+    def context(self, mote_id: str) -> Context:
+        return expression_context(self.properties, self.relationships, mote_id)
 
 
 def resolve(
     conn: sqlite3.Connection,
     note_id: str,
     document: modoc.Document,
-    step: int = 0,
-    horizon: int = DEFAULT_HORIZON,
+    draw=None,
 ) -> Resolution:
-    """Everything the note's macros come to at `step`. `step` 0 is the
-    garden as stored; anything higher is a preview that far ahead and is
-    never written back."""
+    """Everything the note's macros come to, against the garden as it
+    stands. There is no other thing they could come to: a note has one
+    reading, which is why nothing here takes a step.
+
+    `draw` stands in for core/plotview.py::figure, and exists for exactly
+    one caller: Mora re-resolves the whole note on every pause in typing,
+    and a sweep is hundreds of solves. A window that knows the garden has
+    not moved since the last keystroke can hand in a memo of its own
+    (mora/api.py::_Figures) rather than this module inventing a cache it
+    has no way to invalidate -- resolve() sees one connection for one
+    call and cannot know what happened between two of them."""
     anchor_id, diagnostics = modoc.anchor(conn, note_id)
     motes = list_motes(conn)
-    span = max(step, horizon if _needs_timeline(document) else 0)
-    timeline = _Timeline(conn, motes, span)
-    if timeline.error is not None:
-        diagnostics.append(modoc.Diagnostic(0, "simulation", timeline.error))
+    garden = _Garden(conn, motes)
 
     links = {
-        node.ref: _link(node.ref, motes, timeline.relationships)
+        node.ref: _link(node.ref, motes, garden.relationships)
         for node in modoc.links(document)
     }
     values = {
-        modoc.value_key(node): _value(node, anchor_id, motes, timeline, step)
+        modoc.value_key(node): _value(node, anchor_id, motes, garden)
         for node in modoc.values(document)
     }
+    # Keyed by the view each one names, so a note that shows the same
+    # figure twice re-solves it once -- and a sweep is the most expensive
+    # thing a note can ask for by some margin.
+    drawing = draw or plotview.figure
     graphs = {
-        modoc.graph_key(node): _graph(node, anchor_id, motes, timeline, step, horizon)
-        for node in modoc.graphs(document)
+        key: drawing(conn, key, motes=motes)
+        for key in dict.fromkeys(modoc.graph_key(n) for n in modoc.graphs(document))
     }
-    return Resolution(anchor_id, step, links, values, graphs, diagnostics)
+    return Resolution(anchor_id, links, values, graphs, diagnostics)
 
 
 def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Diagnostic]:
@@ -201,16 +167,12 @@ def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Dia
                 node.line, "unresolved_value", f"\\val{{{node.expression}}}: {result.error}"
             ))
     for node in modoc.graphs(document):
-        series = resolution.graphs.get(modoc.graph_key(node))
-        if series is not None and series.error:
-            found.append(modoc.Diagnostic(node.line, "unresolved_graph", f"\\graph: {series.error}"))
+        drawn = resolution.graphs.get(modoc.graph_key(node))
+        if drawn is not None and drawn.error:
+            found.append(modoc.Diagnostic(
+                node.line, "unresolved_graph", f"\\graph{{{node.view}}}: {drawn.error}"
+            ))
     return sorted(found, key=lambda d: d.line)
-
-
-def _needs_timeline(document: modoc.Document) -> bool:
-    return any(
-        g.spec is not None and g.spec.kind == modoc.OVER_T for g in modoc.graphs(document)
-    )
 
 
 # --- references ------------------------------------------------------
@@ -269,13 +231,13 @@ def _anchor_for(
 # --- values ----------------------------------------------------------
 
 def _value(
-    node: modoc.Value, anchor_id: str, motes: list[Mote], timeline: _Timeline, step: int
+    node: modoc.Value, anchor_id: str, motes: list[Mote], garden: _Garden
 ) -> ValueResult:
     mote_id, error = _anchor_for(node.ref, anchor_id, motes)
     if mote_id is None:
         return ValueResult(f"?{node.ref}", None, error)
 
-    properties = timeline.at(step).get(mote_id, {})
+    properties = garden.at(mote_id)
     if _PLAIN_PROPERTY_RE.match(node.expression) and node.expression in properties:
         # The fast path, and the reason \val{due} can be a date at all:
         # core/formula.py is numeric by construction, so a plain property
@@ -287,7 +249,7 @@ def _value(
         other_ref, other_key = dotted.groups()
         other, error = _find(other_ref, motes)
         if other is not None:
-            other_properties = timeline.at(step).get(other.id, {})
+            other_properties = garden.at(other.id)
             if other_key in other_properties:
                 return _property_result(other_properties, other_key)
         # No mote named `other_ref` (or it doesn't carry `other_key`) --
@@ -295,7 +257,7 @@ def _value(
         # `role.property` and a name-matched relationship neighbor.
 
     try:
-        number = evaluate_expression(node.expression, timeline.context(step, mote_id)).value()
+        number = evaluate_expression(node.expression, garden.context(mote_id)).value()
     except (FormulaError, ZeroDivisionError) as e:
         return ValueResult(f"?{node.expression}", None, str(e))
     return ValueResult(format_value(number), number)
@@ -311,7 +273,9 @@ def _property_result(properties: dict, key: str) -> ValueResult:
     raw = properties[key]
     unit_name = parse_units_property(properties.get(UNITS_KEY)).get(key)
     text = format_value(raw)
-    if unit_name and isinstance(raw, (int, float)) and not isinstance(raw, bool):
+    # "1" means truly unitless (core/units.py: DIMENSIONLESS with scale 1),
+    # not a unit with the symbol "1" -- nothing to show after the number.
+    if unit_name and unit_name != "1" and isinstance(raw, (int, float)) and not isinstance(raw, bool):
         text = f"{text} {format_unit(unit_name)}"
     return ValueResult(text, raw)
 
@@ -340,51 +304,3 @@ def _format_number(value: float) -> str:
         mantissa, exponent = text.split("e")
         text = f"{mantissa}e{int(exponent)}"
     return text
-
-
-# --- graphs ----------------------------------------------------------
-
-def _graph(
-    node: modoc.Graph, anchor_id: str, motes: list[Mote],
-    timeline: _Timeline, step: int, horizon: int,
-) -> Series:
-    if node.spec is None:
-        return Series("", error="unreadable \\graph specification")
-    mote_id, error = _anchor_for(node.ref, anchor_id, motes)
-    if mote_id is None:
-        return Series(node.spec.kind, error=error)
-    if node.spec.kind == modoc.OVER_T:
-        return _series_over_t(node.spec, mote_id, timeline, max(step, horizon))
-    return _series_by(node.spec, mote_id, timeline, step)
-
-
-def _series_over_t(
-    spec: modoc.GraphSpec, mote_id: str, timeline: _Timeline, span: int
-) -> Series:
-    labels, values = [], []
-    for step in range(min(span, timeline.reach) + 1):
-        try:
-            number = evaluate_expression(spec.expression, timeline.context(step, mote_id)).value()
-        except (FormulaError, ZeroDivisionError) as e:
-            return Series(modoc.OVER_T, labels, values, str(e))
-        labels.append(f"t+{step}")
-        values.append(float(number))
-    return Series(modoc.OVER_T, labels, values, timeline.error)
-
-
-def _series_by(
-    spec: modoc.GraphSpec, mote_id: str, timeline: _Timeline, step: int
-) -> Series:
-    try:
-        selected = evaluate_selection(spec.expression, timeline.context(step, mote_id))
-    except FormulaError as e:
-        return Series(modoc.BY, error=str(e))
-
-    state = timeline.at(step)
-    counts: dict[str, int] = {}
-    for selected_id in selected:
-        label = state.get(selected_id, {}).get(spec.key, _MISSING)
-        counts[format_value(label)] = counts.get(format_value(label), 0) + 1
-
-    ordered = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
-    return Series(modoc.BY, [k for k, _ in ordered], [float(v) for _, v in ordered])

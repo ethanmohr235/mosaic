@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="commandbar.css">
 <link rel="stylesheet" href="interval.css">
 <link rel="stylesheet" href="menu.css">
+<link rel="stylesheet" href="launcher.css">
 </head>
 <body>
 
@@ -171,6 +172,16 @@
           so this axis counts ticks and not seconds.
         </p>
       </div>
+      <div class="settings-group">
+        <label class="settings-toggle">
+          <input id="strict-units-toggle" type="checkbox">
+          <span>Strict units</span>
+        </label>
+        <p class="settings-help">
+          A dimensional mismatch (a rule's equation disagreeing with a mote's declared
+          unit) stops the run as an error instead of only logging a warning.
+        </p>
+      </div>
     </div>
     <div id="settings-foot">
       <span id="settings-summary" class="mono-note"></span>
@@ -181,27 +192,11 @@
   </div>
 </div>
 
-<div id="launcher-overlay" class="hidden">
-  <div id="launcher-modal">
-    <div id="launcher-input-row">
-      <span class="launcher-glyph"></span>
-      <input type="text" id="launcher-input" placeholder="Open an app…" autocomplete="off">
-      <kbd>esc</kbd>
-    </div>
-    <div id="launcher-results"></div>
-    <div id="launcher-empty" class="hidden"></div>
-    <div id="launcher-footer">
-      <span>↑↓ select</span><span>↵ open</span><span>⌘1–5 jump</span>
-      <div class="spacer"></div>
-      <span id="launcher-garden"></span>
-    </div>
-  </div>
-</div>
-
 <script src="menu.js"></script>
 <script src="interval.js"></script>
 <script src="inspector.js"></script>
 <script src="commandbar.js"></script>
+<script src="launcher.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

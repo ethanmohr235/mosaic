@@ -10,8 +10,8 @@ hand after touching mora/:
 
 What it is for is the half of Mora that Python tests cannot reach --
 that the rendered pane really builds from the payload, that a `\\mote`
-link really moves the data panel, that the stepper really flips Real to
-Projected, and that Save really writes only the note. Never touches real
+link really moves the data panel, that a `\\graph` really draws the
+Moxie view it names, and that Save really writes only the note. Never touches real
 data: GARDENS_DIR and the webview storage_path are both a fresh temp
 directory.
 """
@@ -38,8 +38,10 @@ import webview  # noqa: E402  (after GARDENS_DIR is patched, matching app startu
 from core.db import get_connection, initialize_database  # noqa: E402
 from core.gardens import create_garden  # noqa: E402
 from core.modoc import write_source  # noqa: E402
-from core.motes import create_mote, get_mote, search_motes  # noqa: E402
+from core.motes import create_mote, get_mote, search_motes, update_mote  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
+from core.species import set_species  # noqa: E402
+from core.sweep import PLOT_KEY  # noqa: E402
 from mora.api import Api  # noqa: E402
 from mora.app import DEFAULT_HTTP_PORT  # noqa: E402
 from window_launcher import choose_port  # noqa: E402
@@ -60,7 +62,7 @@ NOTE = r"""% a note about the migration
 Owned by \mote{Rina Kovac}, due \val{due}, \val{count(targets('contains'))} tasks
 in scope and \val{sum(targets('contains').progress)} points logged.
 
-\graph{targets('contains') by status}
+\graph{Capacity by team}
 
 \subsection{Throughput}
 Cost grows as $r^{2}$, with a shear modulus of $G = \frac{E}{2(1+\nu)}$.
@@ -69,8 +71,6 @@ Cost grows as $r^{2}$, with a shear modulus of $G = \frac{E}{2(1+\nu)}$.
 \item \mote{Task 0} is \textbf{ahead}.
 \item \mote{Nowhere} is not a mote.
 \end{itemize}
-
-\graph{sum(targets('contains').progress) over t}
 
 \begin{equation}
 \begin{aligned}
@@ -120,13 +120,20 @@ def click(window, selector):
 
 def seed():
     """A project of four tasks whose progress a rule advances, so every
-    macro in NOTE has something real to resolve against."""
+    macro in NOTE has something real to resolve against -- plus a crew
+    whose capacity follows its size, and a Moxie view saved over it, so
+    the note's `\\graph` has a real figure to draw.
+
+    The growth rule is written against `t` rather than `prev(progress)`
+    so that it can be *swept*: a sweep has no previous tick to read, and
+    one rule that cannot solve stops every solve in the garden, saved
+    view included."""
     create_garden(GARDEN)
     conn = get_connection(GARDEN)
     try:
         initialize_database(conn)
         species = create_mote(conn, {"name": "Task", "freedoms": "progress"})
-        rule = create_mote(conn, {"name": "Grow", "equation": "progress == prev(progress) + 10"})
+        rule = create_mote(conn, {"name": "Grow", "equation": "progress == start + 10 * (t + 1)"})
         create_relationship(conn, rule, species, "applies_to")
         create_mote(conn, {"name": "Rina Kovac", "role": "Staff engineer"})
 
@@ -135,14 +142,44 @@ def seed():
         )
         for index, status in enumerate(("todo", "todo", "in progress", "done")):
             task = create_mote(
-                conn, {"name": f"Task {index}", "status": status, "progress": 10 * index}
+                conn,
+                {"name": f"Task {index}", "status": status,
+                 "progress": 10 * index, "start": 10 * index},
             )
             create_relationship(conn, task, species, "instance_of")
             create_relationship(conn, project, task, "contains")
         write_source(conn, project, NOTE)
         ids["project"] = project
+        ids["view"] = _seed_view(conn)
     finally:
         conn.close()
+
+
+def _seed_view(conn):
+    """A crew whose capacity is twelve points a head, and the saved Moxie
+    plot of one against the other. Written as the `plot` property of an
+    ordinary mote, which is exactly what moxie/api.py::save_plot writes --
+    the point being that Mora reads a real saved view, not a shape
+    invented for this test."""
+    crew_species = create_mote(conn, {"name": "Crew", "freedoms": "capacity"})
+    rule = create_mote(conn, {"name": "Throughput", "equation": "capacity == team * 12"})
+    create_relationship(conn, rule, crew_species, "applies_to")
+    crew = create_mote(conn, {
+        "name": "Platform crew", "team": 4,
+        "units": {"capacity": "1", "team": "1"},
+    })
+    set_species(conn, crew, crew_species)
+    # Kept by id rather than looked up by name later: the note's own
+    # \subsection is called Throughput too, and search_motes() matches
+    # property values, so a name lookup would find the note and write an
+    # `equation` onto the project.
+    ids["throughput_rule"] = rule
+    return create_mote(conn, {"name": "Capacity by team", PLOT_KEY: {
+        "mode": "sweep",
+        "x": {"mote": crew, "key": "team", "lo": 1.0, "hi": 8.0, "steps": 200},
+        "series": [{"mote": crew, "key": "capacity", "label": "Platform crew.capacity"}],
+        "knobs": [],
+    }})
 
 
 def run_checks(window):
@@ -202,13 +239,48 @@ def run_checks(window):
 
     check("\\mote resolves by name, and says so when it can't", links_resolve_and_unresolved_ones_are_marked)
 
-    def both_graph_forms_draw():
-        bars = js(window, "document.querySelectorAll('#rendered .figure .bar-row').length")
-        line = js(window, "document.querySelectorAll('#rendered .figure svg path').length")
-        assert bars == 3, f"the `by status` graph should have three bars, got {bars}"
-        assert line == 2, f"the `over t` graph should draw a fill and a line, got {line}"
+    def a_saved_moxie_view_draws_in_the_note():
+        """`\\graph{Capacity by team}` names a view saved in Moxie, and what
+        arrives here is the figure re-solved against the garden as it
+        stands -- drawn by the very renderer Moxie uses
+        (frontend_shared/plot.js), not a second, weaker one."""
+        # `typeof`, not `window.Plot`: plot.js declares `const Plot` at
+        # the top level of a classic script, which is in scope for every
+        # script after it but is not a property of window.
+        assert js(window, "typeof Plot !== 'undefined'"), "plot.js did not load"
+        errors = js(window, "document.querySelectorAll('#rendered .figure-error').length")
+        assert errors == 0, f"the figure did not resolve: {text_of(window, '#rendered .figure-error')!r}"
+        title = text_of(window, "#rendered .figure-head span")
+        assert title == "Capacity by team", f"the figure is not titled by its view: {title!r}"
+        paths = js(window, "document.querySelectorAll('#rendered .figure-body path.series-path').length")
+        assert paths == 1, f"expected one drawn curve, got {paths}"
 
-    check("both \\graph forms draw", both_graph_forms_draw)
+    check("a saved Moxie view draws in the note", a_saved_moxie_view_draws_in_the_note)
+
+    def the_figure_is_the_garden_now_not_the_points_it_was_saved_with():
+        """The whole reason the macro names a view instead of describing
+        one: change the model and the figure follows. Capacity is twelve
+        a head, so doubling the rate doubles the curve's last value."""
+        def last_y():
+            return js(window, """
+                (() => {
+                  const block = payload.blocks.find(b => b.type === 'graph');
+                  const points = block.series[0].points.filter(Boolean);
+                  return points[points.length - 1][1];
+                })()
+            """)
+        before = last_y()
+        conn = _conn()
+        try:
+            update_mote(conn, ids["throughput_rule"], {"equation": "capacity == team * 24"})
+        finally:
+            conn.close()
+        click(window, "#refresh-btn")
+        assert wait_until(lambda: last_y() == before * 2), \
+            f"the figure did not follow the garden: {before} -> {last_y()}"
+
+    check("a figure re-solves rather than replaying saved points",
+          the_figure_is_the_garden_now_not_the_points_it_was_saved_with)
 
     def math_is_typeset_by_katex():
         """The `.katex-html` layer specifically, not the whole node: KaTeX
@@ -260,30 +332,18 @@ def run_checks(window):
 
     check("the status bar counts links, values and problems", the_status_bar_counts_the_note)
 
-    def stepping_projects_without_writing():
-        before = get_mote_progress()
-        click(window, "#tick-up")
-        click(window, "#tick-up")
-        assert wait_until(lambda: text_of(window, "#tick-value") == "t+2")
-        assert wait_until(lambda: text_of(window, "#tick-label") == "projected"), \
-            f"label did not flip, got {text_of(window, '#tick-label')!r}"
-        chips = js(window, """
-            JSON.stringify(Array.from(document.querySelectorAll('#rendered .val'))
-                .map(n => n.textContent))
-        """)
-        assert "140" in json.loads(chips), f"values did not move with t: {chips}"
-        assert get_mote_progress() == before, "a preview must not write to the graph"
+    def the_footer_offers_no_clock():
+        """Mora shows the garden as it stands. The `t+N` stepper and the
+        Apply button that committed its projection are gone -- moving a
+        garden through time is Motion's window, and a note editor holding
+        that lever was the wrong place for it."""
+        for gone in ("stepper", "tick-value", "tick-label", "apply"):
+            assert js(window, f"!document.getElementById({json.dumps(gone)})"), \
+                f"#{gone} is still in the footer"
+        assert js(window, "typeof api.apply_step === 'undefined'"), \
+            "the bridge still exposes apply_step"
 
-    check("the t+N stepper projects and writes nothing", stepping_projects_without_writing)
-
-    def stepping_back_to_zero_says_real():
-        click(window, "#tick-down")
-        click(window, "#tick-down")
-        assert wait_until(lambda: text_of(window, "#tick-label") == "real")
-        assert js(window, "document.getElementById('apply').disabled") is True, \
-            "Apply must be unavailable at t+0 -- there is nothing to apply"
-
-    check("t+0 reads as Real and disables Apply", stepping_back_to_zero_says_real)
+    check("the footer offers no clock", the_footer_offers_no_clock)
 
     def editing_updates_the_rendered_pane():
         js(window, """
@@ -419,23 +479,6 @@ def _conn():
     conn = get_connection(GARDEN)
     initialize_database(conn)
     return conn
-
-
-def get_mote_progress():
-    conn = _conn()
-    try:
-        return sorted(
-            m.properties.get("progress")
-            for m in [get_mote(conn, r) for r in _task_ids(conn)]
-        )
-    finally:
-        conn.close()
-
-
-def _task_ids(conn):
-    from core.relationships import list_relationships
-
-    return [r.to_id for r in list_relationships(conn, from_id=ids["project"], type_="contains")]
 
 
 def drive():
