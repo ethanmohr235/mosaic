@@ -223,20 +223,50 @@ function escapeHtml(text) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// core/modoc.py only ever opens/closes this on a line that is exactly
+// `\begin{equation}` / `\end{equation}` (see _feed_equation), but the
+// highlighter works over raw text rather than parsed lines, so it finds
+// the same spans by matching the pair directly.
+const EQUATION_BLOCK_RE = /\\begin\{equation\}[\s\S]*?\\end\{equation\}/g;
+
+function equationZones(text) {
+  const zones = [];
+  const re = new RegExp(EQUATION_BLOCK_RE.source, "g");
+  let m;
+  while ((m = re.exec(text))) {
+    zones.push([m.index, m.index + m[0].length]);
+  }
+  return zones;
+}
+
+function insideZone(zones, index) {
+  return zones.some(([start, end]) => index >= start && index < end);
+}
+
 /** Ranges may nest: a `$…$` span is coloured as a whole, and the
  *  commands and braces inside it (`\frac`, `{`, `}`) get their own
  *  range layered on top, so an equation reads with the same structure
  *  a `\section{…}` does rather than as one flat token. */
 function syntaxRanges(text) {
   const ranges = [];
+  const zones = equationZones(text);
   const re = new RegExp(HIGHLIGHT_RE.source, "g");
   let m;
   while ((m = re.exec(text))) {
     if (m[1]) {
       ranges.push({ start: m.index, end: m.index + m[0].length, cls: "hl-comment" });
     } else if (m[2]) {
-      const known = KNOWN_COMMANDS.has(m[2].slice(1));
-      ranges.push({ start: m.index, end: m.index + m[0].length, cls: known ? "hl-cmd" : "hl-cmd-unknown" });
+      const name = m[2].slice(1);
+      // Inside \begin{equation}…\end{equation} the parser hands the body
+      // to the same untyped TeX it gives a `$…$` span, so a command like
+      // \frac that only means something in math is not a typo here --
+      // it gets the same free pass \begin/\end already have.
+      if (name !== "begin" && name !== "end" && insideZone(zones, m.index)) {
+        ranges.push({ start: m.index, end: m.index + m[0].length, cls: "hl-math-cmd" });
+      } else {
+        const known = KNOWN_COMMANDS.has(name);
+        ranges.push({ start: m.index, end: m.index + m[0].length, cls: known ? "hl-cmd" : "hl-cmd-unknown" });
+      }
     } else if (m[3]) {
       ranges.push({ start: m.index, end: m.index + m[0].length, cls: "hl-brace" });
     } else {

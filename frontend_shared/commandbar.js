@@ -4,7 +4,9 @@
  * property, if either is new). `R1.resistance units kohm` annotates an
  * existing (or not-yet-set) property with a unit without touching its
  * value. `R1.voltage == R1.current * R1.resistance`
- * writes a rule. `R1.resistance ?` toggles resistance as a freedom of R1
+ * writes a rule; either side can be any expression, so
+ * `beam.I / beam.I0 == 0.1` is a rule too -- it doesn't have to be
+ * arranged as an assignment. `R1.resistance ?` toggles resistance as a freedom of R1
  * (see core/rules.py) -- typing it again un-frees it. `R1 -> R2` and
  * `R1 -> owns -> R2` wire a relationship. `R1 : Resistor` sets a species.
  * `delete R1.resistance` / `delete R1` remove a property or a mote. A
@@ -48,6 +50,7 @@ const CommandBar = (() => {
     "R1.resistance = 500 ohms",
     "R1.resistance units kohm",
     "R1.voltage == R1.current * R1.resistance",
+    "beam.I / beam.I0 == 0.1",
     "R1.resistance ?",
     "R1 -> R2",
     "R1 -> owns -> R2",
@@ -506,12 +509,15 @@ const CommandBar = (() => {
    *  (core/command_bar.py's `_parse_value`/`_resolve_unit` do the real
    *  resolution -- this is just the same "number, then a trailing word"
    *  shape, not a unit-table lookup) so the two read as distinct rather
-   *  than one undifferentiated blob. */
+   *  than one undifferentiated blob. `50%` is the one unit written with
+   *  no space, matching the same exception `_parse_value` makes. */
   function tokenizeValue(value) {
-    const withUnit = /^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(\s+)([A-Za-z]+)$/.exec(value);
+    const withUnit = /^(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:(\s+)([A-Za-z]+|%)|()(%))$/.exec(value);
     if (withUnit) {
-      const [, num, sp, unit] = withUnit;
-      return [{ t: num, c: "num" }, { t: sp }, { t: unit, c: "unit" }];
+      const [, num, sp, unit, pctSp, pct] = withUnit;
+      return [
+        { t: num, c: "num" }, { t: sp ?? pctSp }, { t: unit ?? pct, c: "unit" },
+      ];
     }
     if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)) return [{ t: value, c: "num" }];
     return [{ t: value }];

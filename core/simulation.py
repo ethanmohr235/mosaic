@@ -1644,7 +1644,24 @@ def _finish(
     for deferred in remainder.deferred:
         candidates |= deferred.references
     backend = resolve_solver(solver)(solver_configuration or {})
-    values = backend.solve(remainder, known, candidates, _initial_guess(view))
+    # An iterative backend re-evaluates a deferred rule at each guess
+    # point, so formula evaluation happens again *inside* solve() -- far
+    # from the substitution loop, which is the only other place a
+    # FormulaError can arise and which normalizes it to SimulationError
+    # itself. A guess that walks somewhere arithmetically impossible (`e
+    # ** (-k * x)` overflowing once x goes far enough negative) therefore
+    # used to escape the run loop's `except (SimulationError,
+    # SolverError)` entirely and surface as an unhandled crash. Naming
+    # the solver is the useful part of the message: the rule is fine, the
+    # point this backend wandered to is not.
+    try:
+        values = backend.solve(remainder, known, candidates, _initial_guess(view))
+    except SolverError:
+        raise
+    except FormulaError as e:
+        raise SolverError(
+            f"the {solver!r} solver failed while evaluating a rule: {e}"
+        ) from e
 
     if journal is not None and values:
         origins, inputs = _contributors(reduction, values)

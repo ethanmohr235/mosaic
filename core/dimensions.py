@@ -31,8 +31,10 @@ from dataclasses import dataclass, field
 from core import roles as roles_repo
 from core.formula import (
     AGGREGATE_CALLS,
+    MATH_CONSTANTS,
     NAVIGATION_CALLS,
     NUMERIC_CALLS,
+    LOG_CALLS,
     SQRT_CALL,
     TRIG_CALLS,
     PREVIOUS_CALL,
@@ -247,6 +249,8 @@ class _Checker:
         if isinstance(node, ast.Name):
             if node.id == TICK_NAME:
                 return None
+            if node.id in MATH_CONSTANTS:
+                return LITERAL
             return self._name(self.ctx.mote_id, node.id)
         if isinstance(node, ast.BinOp):
             return self._binary(node)
@@ -259,10 +263,11 @@ class _Checker:
         raise FormulaError(f"{type(node).__name__} is not allowed in a formula")
 
     def _name(self, mote_id: str, key: str) -> Dim:
-        # TICK_NAME is handled by callers that reach a *bare* `t` on the
-        # anchor mote (_walk's ast.Name branch, prev()'s bare-name check
-        # below) -- not here, so `targetp3.t` reached through _attribute
-        # still resolves to that mote's real declared unit.
+        # TICK_NAME and MATH_CONSTANTS are handled by callers that reach a
+        # *bare* `t`/`pi`/`e` on the anchor mote (_walk's ast.Name branch,
+        # prev()'s bare-name check below) -- not here, so `targetp3.t`
+        # reached through _attribute still resolves to that mote's real
+        # declared unit.
         declared = self.ctx.units(mote_id).get(key)
         if declared is None:
             return None
@@ -317,7 +322,7 @@ class _Checker:
     def _power(self, base: Dim, exponent_node: ast.AST) -> Dim:
         """`x ** n` scales x's dimension by n, which requires n to be a
         literal. core/formula.py already refuses a non-constant exponent
-        (LinearExpr.__pow__), so nothing is lost by only handling that."""
+        (Ratio.__pow__), so nothing is lost by only handling that."""
         exponent = _literal_number(exponent_node)
         if base is None or exponent is None:
             return None
@@ -390,6 +395,8 @@ class _Checker:
             return self._combine([self.dimension(a) for a in node.args], name)
         if name in TRIG_CALLS:
             return self._trig(name, node)
+        if name in LOG_CALLS:
+            return self._log(name, node)
         if name == SQRT_CALL:
             return self._sqrt(node)
         if name == PREVIOUS_CALL:
@@ -447,6 +454,27 @@ class _Checker:
         if len(node.args) != 1:
             raise FormulaError(f"{name}() takes exactly one argument")
         self.dimension(node.args[0])
+        return DIMENSIONLESS
+
+    def _log(self, name: str, node: ast.Call) -> Dim:
+        """log/ln/log10/exp take a dimensionless argument and produce a
+        dimensionless result. Stricter than _trig, which lets an angle
+        through whatever it declares: there is no unit in which the
+        logarithm of a length means anything, so a dimensioned argument
+        is a modelling mistake worth reporting rather than a convention
+        worth accommodating."""
+        if len(node.args) != 1:
+            raise FormulaError(f"{name}() takes exactly one argument")
+        argument = self.dimension(node.args[0])
+        if (
+            argument is not None
+            and not _is_literal(argument)
+            and not argument.is_dimensionless
+        ):
+            self.report(
+                f"{name}() takes a dimensionless argument, but its argument is "
+                f"{describe(argument)}"
+            )
         return DIMENSIONLESS
 
     def _sqrt(self, node: ast.Call) -> Dim:

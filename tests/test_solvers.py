@@ -87,6 +87,16 @@ def test_linear_solver_refuses_deferred_equations():
         LinearSolver({}).solve(remainder, {}, {X}, lambda u: 1.0)
 
 
+def test_linear_solver_points_at_the_newton_backend():
+    # The refusal is the one place that knows both that a rule was turned
+    # down for being nonlinear and that another backend would take it, so
+    # it says so rather than leaving the reader to find that out from the
+    # source.
+    d = deferred(lambda guess: Equation({}, 0.0), {X}, rule_name="area", detail="nonlinear")
+    with pytest.raises(SolverError, match="newton"):
+        LinearSolver({}).solve(Remainder([], [d]), {}, {X}, lambda u: 1.0)
+
+
 # ---- NewtonSolver ----
 
 def test_newton_solver_converges_on_a_nonlinear_equation():

@@ -214,6 +214,23 @@ def test_a_role_qualified_t_keeps_its_real_dimension():
     assert len(problems) == 1
 
 
+def test_math_constants_are_treated_as_literals():
+    # pi/e are bare numbers, like a literal `3.14159`, so they stand for
+    # whatever quantity they're compared against rather than reporting a
+    # dimension mismatch.
+    units = {"r1": {"circumference": "m", "radius": "m"}}
+    assert check_equation("circumference == 2 * pi * radius", context(units=units)) == []
+
+
+def test_a_role_qualified_e_keeps_its_real_dimension():
+    units = {"r1": {"voltage": "V"}, "n1": {"e": "s"}}
+    targets = {("r1", "a"): ["n1"]}
+    problems = check_equation(
+        "voltage == targets('a').e", context(units=units, targets=targets)
+    )
+    assert len(problems) == 1
+
+
 # ---- property models ----
 
 def test_a_property_call_takes_its_dimension_from_the_capability():
@@ -275,7 +292,7 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
     }
     dispatch_constants = {
         "NAVIGATION_CALLS", "AGGREGATE_CALLS", "NUMERIC_CALLS", "TRIG_CALLS",
-        "SQRT_CALL", "PREVIOUS_CALL", "PROPERTY_CALL",
+        "LOG_CALLS", "SQRT_CALL", "PREVIOUS_CALL", "PROPERTY_CALL",
     }
     # Every group formula._call() dispatches on must be one this module
     # imported and handles.
@@ -288,6 +305,7 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
         | formula.AGGREGATE_CALLS
         | formula.NUMERIC_CALLS
         | formula.TRIG_CALLS
+        | formula.LOG_CALLS
         | {formula.SQRT_CALL, formula.PREVIOUS_CALL, formula.PROPERTY_CALL}
     )
 
@@ -308,6 +326,10 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
         "cos": "cos(x)",
         "tan": "tan(x)",
         "sqrt": "sqrt(x)",
+        "log": "log(x)",
+        "ln": "ln(x)",
+        "log10": "log10(x)",
+        "exp": "exp(x)",
         "prev": "prev(x)",
         "property": "property('a', 'op', 1)",
     }

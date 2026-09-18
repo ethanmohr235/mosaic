@@ -2,10 +2,22 @@
 """Restricted expression language for simulation rules.
 
 Expressions are parsed with the stdlib `ast` module and walked against a
-strict node whitelist -- never `eval()`. Evaluation produces a LinearExpr
-(a weighted sum of unknowns plus a constant), so an expression that
-happens to contain no unknowns is simply a number. That means one
-evaluator serves both assignment-style rules and coupled equations.
+strict node whitelist -- never `eval()`. Evaluation produces a Ratio: one
+LinearExpr (a weighted sum of unknowns plus a constant) over another, so
+an expression that happens to contain no unknowns is simply a number.
+That means one evaluator serves both assignment-style rules and coupled
+equations.
+
+The denominator is what makes an equation accept the algebra a modeller
+actually writes rather than the arrangement the solver wants. `I / I0 ==
+0.1` is not linear as written -- an unknown sits under a division -- but
+it is *equivalent* to one, and rearranging it by hand (`I == 0.1 * I0`)
+is bookkeeping the engine can do itself. Carrying numerator and
+denominator separately all the way to the relation, then clearing the
+denominator once at the end (see `_clear_denominator`), recovers the
+linear form for every equation that has one, and leaves the genuinely
+nonlinear ones (`x * y == 1`) to defer to a solver backend exactly as
+before.
 """
 import ast
 import math
@@ -34,17 +46,32 @@ NUMERIC_CALLS = frozenset({"abs", "min", "max"})
 # `deg` arrives here already converted to radians by the time a formula
 # reads it, the same normalization every other unit gets.
 TRIG_CALLS = frozenset({"sin", "cos", "tan"})
+# `log` is the natural logarithm, matching math.log(), numpy, and every
+# other scientific-computing default -- the same "follow the stdlib"
+# choice TRIG_CALLS makes about radians. `ln` is an alias for anyone who
+# wants to be explicit about it, and `log10` is there so nobody has to
+# rely on guessing which one `log` meant.
+LOG_CALLS = frozenset({"log", "ln", "log10", "exp"})
 SQRT_CALL = "sqrt"
 PREVIOUS_CALL = "prev"
 PROPERTY_CALL = "property"
 ALLOWED_CALLS = (
-    NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | TRIG_CALLS
+    NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | TRIG_CALLS | LOG_CALLS
     | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL}
 )
 
 # The current simulation step's index, exposed to formulas as a reserved
 # bare name rather than a per-mote property.
 TICK_NAME = "t"
+
+# Common math constants, exposed as reserved bare names the same way
+# TICK_NAME is -- a formula writes `2 * pi * radius` rather than pasting
+# in a truncated decimal. Shadows a property of the same name inside a
+# formula only, exactly like `t`: real-world quantities named `e`
+# (elasticity, voltage) or `pi` are vanishingly unlikely, and a fixed,
+# well-known handful of names is worth the same small shadowing risk `t`
+# already accepts, rather than a per-garden opt-in nobody would find.
+MATH_CONSTANTS: dict[str, float] = {"pi": math.pi, "e": math.e}
 
 
 class FormulaError(ValueError):
@@ -123,9 +150,19 @@ class LinearExpr:
         return self.scaled(1.0 / other.constant)
 
     def __pow__(self, other: "LinearExpr") -> "LinearExpr":
-        if not self.is_constant or not other.is_constant:
-            raise NonlinearError("cannot raise an unknown quantity to a power")
-        return LinearExpr.number(self.constant ** other.constant)
+        # Which side holds the unknown decides what the modeller has to
+        # change, so the message says which rather than blaming the base
+        # for an exponent's unknown -- `e ** (-k)` fails on k, and being
+        # told "an unknown quantity" sends someone looking at `e`.
+        if not other.is_constant:
+            raise NonlinearError(
+                f"cannot raise to an unknown power: {describe(other.terms)}"
+            )
+        if not self.is_constant:
+            raise NonlinearError(
+                f"cannot raise an unknown quantity to a power: {describe(self.terms)}"
+            )
+        return LinearExpr.number(_power(self.constant, other.constant))
 
     def scaled(self, factor: float) -> "LinearExpr":
         # Exact zero, for the same reason as __truediv__ above: a factor
@@ -138,6 +175,173 @@ class LinearExpr:
         return LinearExpr(
             {k: v * factor for k, v in self.terms.items()}, self.constant * factor
         )
+
+
+def _power(base: float, exponent: float) -> float:
+    """`base ** exponent`, with every way float exponentiation can fail
+    turned into a FormulaError.
+
+    There are three, and none of them reached this module's error
+    handling before: OverflowError (an iterative backend probing `e **
+    (-k * x)` walks x far enough negative to blow the float range -- see
+    core/newton_solver.py), ZeroDivisionError (`0 ** -1`), and a
+    *complex* result, which Python returns rather than raises for a
+    negative base under a fractional exponent and which would otherwise
+    flow on into a solver as a number that isn't one. `_log` has wrapped
+    the same failures since it was written; this is that guard on the
+    other numeric operator, so a bad power fails the run with a readable
+    message instead of escaping as a raw arithmetic error."""
+    try:
+        result = base ** exponent
+    except OverflowError as e:
+        raise FormulaError(
+            f"{base:g} ** {exponent:g} is too large to represent"
+        ) from e
+    except ZeroDivisionError as e:
+        raise FormulaError(
+            f"{base:g} ** {exponent:g}: zero to a negative power"
+        ) from e
+    if isinstance(result, complex):
+        raise FormulaError(
+            f"{base:g} ** {exponent:g} is not a real number -- a negative base "
+            f"needs a whole-number exponent"
+        )
+    return result
+
+
+def _one() -> "LinearExpr":
+    return LinearExpr.number(1.0)
+
+
+@dataclass(frozen=True)
+class Ratio:
+    """`numerator / denominator`, each a LinearExpr -- the value every
+    node of an expression evaluates to.
+
+    A plain linear expression is just one with a constant denominator,
+    which is what almost every formula produces and what everything
+    downstream of `evaluate_equation` still sees. The denominator only
+    becomes interesting when an unknown is divided *by*: rather than
+    failing there (the old behavior -- LinearExpr.__truediv__ still does,
+    for anyone holding one directly), the division is carried along
+    symbolically and cleared once, against the relation as a whole.
+
+    The arithmetic keeps the same structural guarantee LinearExpr has:
+    numerator and denominator are each linear, so nothing here can build
+    a polynomial. `x * y` and `x / y * z` still raise NonlinearError from
+    the underlying LinearExpr multiplication -- they are nonlinear in a
+    way no rearrangement fixes, and belong to a solver backend.
+
+    Cancelling a common factor (in `__mul__`, and in `__add__`'s matching
+    denominators) assumes that factor is not zero, the same assumption
+    clearing a denominator makes. Writing `a / x` already asserts x != 0;
+    an equation whose numerator and denominator vanish together (`(x - 1)
+    / (x - 1) == 1`) is degenerate as written, and the engine reads it as
+    the cleared form rather than refusing it.
+    """
+    numerator: LinearExpr
+    denominator: LinearExpr = field(default_factory=_one)
+
+    @staticmethod
+    def number(value: float) -> "Ratio":
+        return Ratio(LinearExpr.number(value))
+
+    @staticmethod
+    def unknown(key: Unknown) -> "Ratio":
+        return Ratio(LinearExpr.unknown(key))
+
+    @property
+    def is_divided(self) -> bool:
+        """Whether an unknown sits under the division bar -- the only case
+        where this is more than a LinearExpr in a wrapper."""
+        return not self.denominator.is_constant
+
+    @property
+    def is_constant(self) -> bool:
+        return self.numerator.is_constant and not self.is_divided
+
+    @property
+    def constant(self) -> float:
+        return self.linear().constant
+
+    @property
+    def terms(self) -> dict[Unknown, float]:
+        return self.linear().terms
+
+    def linear(self) -> LinearExpr:
+        """This value as a plain linear expression, dividing through by a
+        constant denominator. Raises NonlinearError when the denominator
+        still holds an unknown -- a caller that wants a number cannot use
+        one, and `_clear_denominator` is the one place that can."""
+        if self.is_divided:
+            raise NonlinearError(
+                f"cannot divide by an unknown quantity: {describe(self.denominator.terms)}"
+            )
+        return self.numerator / self.denominator
+
+    def value(self) -> float:
+        return self.linear().value()
+
+    def __add__(self, other: "Ratio") -> "Ratio":
+        # Matching denominators add directly. Cross-multiplying them
+        # instead would square the denominator and multiply the two
+        # numerators by the *other's* denominator -- turning `a / x + b /
+        # x`, which is perfectly linear once cleared, into a nonlinear
+        # dead end.
+        if self.denominator == other.denominator:
+            return Ratio(self.numerator + other.numerator, self.denominator)
+        return Ratio(
+            self.numerator * other.denominator + other.numerator * self.denominator,
+            self.denominator * other.denominator,
+        )
+
+    def __sub__(self, other: "Ratio") -> "Ratio":
+        return self + (-other)
+
+    def __neg__(self) -> "Ratio":
+        return Ratio(-self.numerator, self.denominator)
+
+    def __mul__(self, other: "Ratio") -> "Ratio":
+        if self.denominator == other.numerator:
+            return Ratio(self.numerator, other.denominator)
+        if other.denominator == self.numerator:
+            return Ratio(other.numerator, self.denominator)
+        return Ratio(self.numerator * other.numerator, self.denominator * other.denominator)
+
+    def __truediv__(self, other: "Ratio") -> "Ratio":
+        if other.numerator.is_constant and other.numerator.constant == 0.0:
+            raise FormulaError("division by zero")
+        return self * Ratio(other.denominator, other.numerator)
+
+    def __pow__(self, other: "Ratio") -> "Ratio":
+        """A constant to a constant power is a number. An unknown is only
+        allowed the two exponents that stay within this algebra: `x^1`,
+        and `x^-1`, which is the reciprocal the denominator exists for.
+        Anything else (`x^2`) is genuinely nonlinear."""
+        if not other.is_constant:
+            raise NonlinearError(
+                f"cannot raise to an unknown power: {_describe_ratio(other)}"
+            )
+        exponent = other.constant
+        if self.is_constant:
+            return Ratio.number(_power(self.constant, exponent))
+        if exponent == 1.0:
+            return self
+        if exponent == -1.0:
+            return Ratio.number(1.0) / self
+        raise NonlinearError(
+            f"cannot raise an unknown quantity to the power {exponent:g}: "
+            f"{_describe_ratio(self)} -- only ** 1 and ** -1 stay linear"
+        )
+
+
+def _describe_ratio(ratio: "Ratio") -> str:
+    """The unknowns anywhere in a Ratio, for an error message. Reads both
+    sides of the bar rather than calling `linear()`, which would raise on
+    a divided Ratio -- an error path must not fail while explaining an
+    error."""
+    unknowns = set(ratio.numerator.terms) | set(ratio.denominator.terms)
+    return describe(unknowns)
 
 
 def describe(unknowns) -> str:
@@ -265,7 +469,7 @@ class TermList:
     count() -- arithmetic on it is rejected, since collapsing many motes
     into one number silently is exactly the kind of guess that hides
     modelling mistakes."""
-    values: list[LinearExpr]
+    values: list[Ratio]
     label: str
 
 
@@ -385,15 +589,54 @@ def evaluate_equation(text: str, ctx: Context) -> Equation:
     zero, or checked for a sign."""
     relation = parse_equation(text)
     difference = (
-        _as_expr(_evaluate(relation.left, ctx)) - _as_expr(_evaluate(relation.right, ctx))
+        _as_ratio(_evaluate(relation.left, ctx)) - _as_ratio(_evaluate(relation.right, ctx))
     )
-    return Equation.from_difference(difference, source=text, operator=relation.operator)
+    return Equation.from_difference(
+        _clear_denominator(difference, relation.operator, text),
+        source=text,
+        operator=relation.operator,
+    )
+
+
+def _clear_denominator(difference: Ratio, operator: str, text: str) -> LinearExpr:
+    """`n / d <op> 0` reduced to a plain linear `n' <op> 0`.
+
+    With a constant denominator that is just dividing through, which
+    changes nothing about the relation. With an unknown still under the
+    bar, `n / d == 0` is equivalent to `n == 0` for every d that isn't
+    zero -- which is what writing the division asserted in the first
+    place -- and that is what makes `I / I0 == 0.1` solvable without the
+    modeller rearranging it into `I == 0.1 * I0` by hand.
+
+    A *constraint* gets no such treatment: multiplying `a / x <= b`
+    through by x flips the comparison when x is negative, so the answer
+    depends on a sign nothing here knows yet. Deferring (NonlinearError)
+    is right rather than picking one: by the time constraints are checked
+    the unknown is normally solved, the denominator is a number, and the
+    first branch handles it. If it genuinely isn't solved,
+    core/simulation.py reports the constraint as unchecked, which is the
+    honest answer."""
+    if not difference.is_divided:
+        return difference.linear()
+    if operator != EQUALS:
+        raise NonlinearError(
+            f"{text!r} divides by an unknown quantity "
+            f"({describe(difference.denominator.terms)}); whether multiplying through "
+            f"flips {operator} depends on its sign, so this can only be checked once "
+            f"that value is known"
+        )
+    return difference.numerator
 
 
 def evaluate_expression(text: str, ctx: Context) -> LinearExpr:
     """Evaluate a bare (non-equation) expression -- used by tests and by
-    anything that just wants a value."""
-    return _as_expr(_evaluate(_parse_expression(text), ctx))
+    anything that just wants a value.
+
+    A LinearExpr rather than a Ratio: with no relation to clear a
+    denominator against, an unknown left under a division bar has nowhere
+    to go, so `linear()` raises the same NonlinearError this always
+    did."""
+    return _as_ratio(_evaluate(_parse_expression(text), ctx)).linear()
 
 
 def evaluate_selection(text: str, ctx: Context) -> list[str]:
@@ -436,7 +679,9 @@ def _evaluate(node: ast.AST, ctx: Context):
         return _constant(node)
     if isinstance(node, ast.Name):
         if node.id == TICK_NAME:
-            return LinearExpr.number(ctx.tick)
+            return Ratio.number(ctx.tick)
+        if node.id in MATH_CONSTANTS:
+            return Ratio.number(MATH_CONSTANTS[node.id])
         return _lookup(ctx, ctx.mote_id, node.id)
     if isinstance(node, ast.BinOp):
         return _binary(node, ctx)
@@ -449,21 +694,21 @@ def _evaluate(node: ast.AST, ctx: Context):
     raise FormulaError(f"{type(node).__name__} is not allowed in a formula")
 
 
-def _constant(node: ast.Constant) -> LinearExpr:
+def _constant(node: ast.Constant) -> Ratio:
     if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
         raise FormulaError(f"{node.value!r} is not a number")
-    return LinearExpr.number(node.value)
+    return Ratio.number(node.value)
 
 
-def _binary(node: ast.BinOp, ctx: Context) -> LinearExpr:
+def _binary(node: ast.BinOp, ctx: Context) -> Ratio:
     op = _BIN_OPS.get(type(node.op))
     if op is None:
         raise FormulaError(f"operator {type(node.op).__name__} is not allowed in a formula")
-    return op(_as_expr(_evaluate(node.left, ctx)), _as_expr(_evaluate(node.right, ctx)))
+    return op(_as_ratio(_evaluate(node.left, ctx)), _as_ratio(_evaluate(node.right, ctx)))
 
 
-def _unary(node: ast.UnaryOp, ctx: Context) -> LinearExpr:
-    operand = _as_expr(_evaluate(node.operand, ctx))
+def _unary(node: ast.UnaryOp, ctx: Context) -> Ratio:
+    operand = _as_ratio(_evaluate(node.operand, ctx))
     if isinstance(node.op, ast.USub):
         return -operand
     if isinstance(node.op, ast.UAdd):
@@ -565,6 +810,8 @@ def _call(node: ast.Call, ctx: Context):
         return _numeric(name, node, ctx)
     if name in TRIG_CALLS:
         return _trig(name, node, ctx)
+    if name in LOG_CALLS:
+        return _log(name, node, ctx)
     if name == SQRT_CALL:
         return _sqrt(node, ctx)
     if name == PREVIOUS_CALL:
@@ -574,7 +821,7 @@ def _call(node: ast.Call, ctx: Context):
     raise FormulaError(f"unknown function {name!r} in formula")
 
 
-def _previous(node: ast.Call, ctx: Context) -> LinearExpr:
+def _previous(node: ast.Call, ctx: Context) -> Ratio:
     """prev(x) -- the value x had entering the current simulation step,
     for expressing a recurrence (`population == prev(population) *
     growth_rate`). x must be a bare property/unknown name on the current
@@ -592,10 +839,10 @@ def _previous(node: ast.Call, ctx: Context) -> LinearExpr:
     # The previous step's state is kept in the same representation the
     # database uses (declared units), so it needs the same normalization
     # an ordinary property read gets.
-    return LinearExpr.number(_normalize(ctx, ctx.mote_id, key, value))
+    return Ratio.number(_normalize(ctx, ctx.mote_id, key, value))
 
 
-def _property(node: ast.Call, ctx: Context) -> LinearExpr:
+def _property(node: ast.Call, ctx: Context) -> Ratio:
     """property(<relationship type>, <operation>, <arg>, ...) -- reads a
     physical property off the single mote reached by navigating
     <relationship type> from the current mote, via that mote's resolved
@@ -617,7 +864,7 @@ def _property(node: ast.Call, ctx: Context) -> LinearExpr:
     if not isinstance(operation_arg, ast.Constant) or not isinstance(operation_arg.value, str):
         raise FormulaError("property()'s second argument must be an operation name in quotes")
 
-    args = [_as_expr(_evaluate(a, ctx)) for a in value_nodes]
+    args = [_as_ratio(_evaluate(a, ctx)) for a in value_nodes]
     if any(not a.is_constant for a in args):
         raise NonlinearError(
             f"property({operation_arg.value!r}, ...) cannot be evaluated until its "
@@ -631,7 +878,7 @@ def _property(node: ast.Call, ctx: Context) -> LinearExpr:
         raise FormulaError(
             f"property({operation_arg.value!r}, ...) returned {result!r}, which is not a number"
         )
-    return LinearExpr.number(result)
+    return Ratio.number(result)
 
 
 def _navigate(name: str, node: ast.Call, ctx: Context) -> MoteSet:
@@ -652,24 +899,24 @@ def _aggregate(name: str, node: ast.Call, ctx: Context):
 
     if name == "count":
         if isinstance(value, MoteSet):
-            return LinearExpr.number(len(value.mote_ids))
+            return Ratio.number(len(value.mote_ids))
         if isinstance(value, TermList):
-            return LinearExpr.number(len(value.values))
-        return LinearExpr.number(1)
+            return Ratio.number(len(value.values))
+        return Ratio.number(1)
 
     # sum(): a single mote collapses to a scalar upstream, so summing one
     # value (or none) has to keep working -- an unconnected mote should
     # give 0, not an error.
     if isinstance(value, TermList):
-        total = LinearExpr.number(0.0)
+        total = Ratio.number(0.0)
         for item in value.values:
             total = total + item
         return total
-    return _as_expr(value)
+    return _as_ratio(value)
 
 
-def _numeric(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
-    args = [_as_expr(_evaluate(a, ctx)) for a in node.args]
+def _numeric(name: str, node: ast.Call, ctx: Context) -> Ratio:
+    args = [_as_ratio(_evaluate(a, ctx)) for a in node.args]
     if not args:
         raise FormulaError(f"{name}() requires at least one argument")
     if any(not a.is_constant for a in args):
@@ -679,33 +926,66 @@ def _numeric(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
     if name == "abs":
         if len(values) != 1:
             raise FormulaError("abs() takes exactly one argument")
-        return LinearExpr.number(abs(values[0]))
-    return LinearExpr.number(min(values) if name == "min" else max(values))
+        return Ratio.number(abs(values[0]))
+    return Ratio.number(min(values) if name == "min" else max(values))
 
 
 _TRIG_FUNCS = {"sin": math.sin, "cos": math.cos, "tan": math.tan}
 
 
-def _trig(name: str, node: ast.Call, ctx: Context) -> LinearExpr:
+def _trig(name: str, node: ast.Call, ctx: Context) -> Ratio:
     """sin(x)/cos(x)/tan(x) -- deferred, like abs()/min()/max(), until x is
     a known number rather than an unsolved unknown."""
     if len(node.args) != 1:
         raise FormulaError(f"{name}() takes exactly one argument")
-    arg = _as_expr(_evaluate(node.args[0], ctx))
+    arg = _as_ratio(_evaluate(node.args[0], ctx))
     if not arg.is_constant:
         raise NonlinearError(f"{name}() cannot be applied to an unknown quantity")
-    return LinearExpr.number(_TRIG_FUNCS[name](arg.constant))
+    return Ratio.number(_TRIG_FUNCS[name](arg.constant))
 
 
-def _sqrt(node: ast.Call, ctx: Context) -> LinearExpr:
+_LOG_FUNCS = {
+    "log": math.log,
+    "ln": math.log,
+    "log10": math.log10,
+    "exp": math.exp,
+}
+
+
+def _log(name: str, node: ast.Call, ctx: Context) -> Ratio:
+    """log/ln/log10/exp -- deferred, like the trig calls, until the
+    argument is a known number rather than an unsolved unknown.
+
+    These are what let a rule state a relation in whichever direction is
+    the exact one. An attenuation law written `I == I0 * exp(-mxs * x)`
+    has its unknown in an exponent, which no amount of rearranging inside
+    this algebra makes linear -- it needs the iterative `newton` backend.
+    Written the other way round, `mxs * x == -ln(I / I0)`, the same
+    physics is linear in x and the default solver gets it exactly, with
+    no initial guess and no convergence to worry about."""
+    if len(node.args) != 1:
+        raise FormulaError(f"{name}() takes exactly one argument")
+    arg = _as_ratio(_evaluate(node.args[0], ctx))
+    if not arg.is_constant:
+        raise NonlinearError(f"{name}() cannot be applied to an unknown quantity")
+    value = arg.constant
+    if name != "exp" and value <= 0:
+        raise FormulaError(f"{name}() of {value!r} -- the argument must be positive")
+    try:
+        return Ratio.number(_LOG_FUNCS[name](value))
+    except (ValueError, OverflowError) as e:
+        raise FormulaError(f"{name}({value!r}): {e}") from e
+
+
+def _sqrt(node: ast.Call, ctx: Context) -> Ratio:
     if len(node.args) != 1:
         raise FormulaError("sqrt() takes exactly one argument")
-    arg = _as_expr(_evaluate(node.args[0], ctx))
+    arg = _as_ratio(_evaluate(node.args[0], ctx))
     if not arg.is_constant:
         raise NonlinearError("sqrt() cannot be applied to an unknown quantity")
     if arg.constant < 0:
         raise FormulaError(f"sqrt() of a negative number ({arg.constant!r})")
-    return LinearExpr.number(math.sqrt(arg.constant))
+    return Ratio.number(math.sqrt(arg.constant))
 
 
 def _normalize(ctx: Context, mote_id: str, key: str, value: float) -> float:
@@ -732,16 +1012,17 @@ def _normalize(ctx: Context, mote_id: str, key: str, value: float) -> float:
         ) from e
 
 
-def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
-    # TICK_NAME is only reserved for a bare `t` referring to the anchor
-    # mote (shadowed by the caller in _evaluate, ast.Name branch), not for
-    # `t` reached via a role/relationship (e.g. `targetp3.t`) -- that's
-    # unambiguously a real property of a specific other mote.
+def _lookup(ctx: Context, mote_id: str, key: str) -> Ratio:
+    # TICK_NAME and MATH_CONSTANTS are only reserved for a bare `t`/`pi`/`e`
+    # referring to the anchor mote (shadowed by the caller in _evaluate,
+    # ast.Name branch), not for one reached via a role/relationship (e.g.
+    # `targetp3.t`) -- that's unambiguously a real property of a specific
+    # other mote.
     if key in ctx.unknown_keys(mote_id):
         unknown = (mote_id, key)
         if unknown in ctx.solved:
-            return LinearExpr.number(ctx.solved[unknown])
-        return LinearExpr.unknown(unknown)
+            return Ratio.number(ctx.solved[unknown])
+        return Ratio.unknown(unknown)
 
     properties = ctx.properties(mote_id)
     if key not in properties:
@@ -756,11 +1037,11 @@ def _lookup(ctx: Context, mote_id: str, key: str) -> LinearExpr:
         raise FormulaError(
             f"property {key!r} of mote {mote_id[:8]} is {value!r}, which is not a number"
         )
-    return LinearExpr.number(_normalize(ctx, mote_id, key, value))
+    return Ratio.number(_normalize(ctx, mote_id, key, value))
 
 
-def _as_expr(value) -> LinearExpr:
-    if isinstance(value, LinearExpr):
+def _as_ratio(value) -> Ratio:
+    if isinstance(value, Ratio):
         return value
     if isinstance(value, MoteSet):
         raise FormulaError(

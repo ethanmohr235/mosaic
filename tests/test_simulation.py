@@ -194,6 +194,90 @@ def test_assignment_style_rules_need_no_matrix(conn):
     assert prop(conn, box, "area") == pytest.approx(12.0)
 
 
+# ---- unknowns under a division bar ----
+
+def test_ratio_rule_solves_for_the_denominator(conn):
+    """The equation a modeller actually writes. `I / I0 == 0.1` is not
+    linear as written, but it is equivalent to one, and the engine
+    rearranges it rather than making the modeller do it."""
+    beam = create_mote(conn, {"name": "beam", "I": 4.0, "freedoms": "I0"})
+    add_rule(conn, beam, "Stiffness ratio", "I / I0 == 0.1")
+
+    run_simulation(conn)
+    assert prop(conn, beam, "I0") == pytest.approx(40.0)
+
+
+def test_ratio_rule_couples_two_motes_through_the_matrix(conn):
+    """Both sides unknown: cross-multiplying leaves one linear equation
+    in two unknowns, which the second rule closes."""
+    species = create_mote(conn, {"name": "Beam", "freedoms": "I, I0"})
+    add_rule(conn, species, "Ratio", "I / I0 == 0.1")
+    add_rule(conn, species, "Reference", "I0 == 40")
+    beam = create_mote(conn, {"name": "b"})
+    set_species(conn, beam, species)
+
+    run_simulation(conn)
+    assert prop(conn, beam, "I") == pytest.approx(4.0)
+    assert prop(conn, beam, "I0") == pytest.approx(40.0)
+
+
+def test_reciprocal_rule_solves_without_the_newton_backend(conn):
+    # Parallel resistors: 1/R == 1/R1 + 1/R2 with R unknown, on the
+    # default linear solver.
+    species = create_mote(conn, {"name": "Pair", "freedoms": "resistance"})
+    add_rule(conn, species, "Parallel", "1 / resistance == 1 / r1 + 1 / r2")
+    pair = create_mote(conn, {"name": "p", "r1": 100.0, "r2": 100.0})
+    set_species(conn, pair, species)
+
+    run_simulation(conn)
+    assert prop(conn, pair, "resistance") == pytest.approx(50.0)
+
+
+def test_ratio_of_unknowns_across_a_relationship(conn):
+    species = create_mote(conn, {"name": "Stage", "freedoms": "pressure"})
+    add_rule(conn, species, "Ratio", "sources('feeds').pressure / pressure == 0.25")
+    inlet = create_mote(conn, {"name": "inlet", "pressure": 100.0})
+    stage = create_mote(conn, {"name": "s1"})
+    set_species(conn, stage, species)
+    create_relationship(conn, inlet, stage, "feeds")
+
+    run_simulation(conn)
+    assert prop(conn, stage, "pressure") == pytest.approx(400.0)
+
+
+def test_product_of_unknowns_across_the_bar_waits_for_substitution(conn):
+    """Clearing the denominator doesn't make everything linear -- `x / y
+    == z` is a genuine product of unknowns. It defers exactly as it did
+    before, and resolves once the substitution loop has pinned the
+    others down."""
+    species = create_mote(conn, {"name": "S", "freedoms": "x, y, z"})
+    add_rule(conn, species, "ratio", "x / y == z")
+    add_rule(conn, species, "y", "y == 2")
+    add_rule(conn, species, "z", "z == 3")
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+
+    # y and z fall out by substitution, which leaves x / 2 == 3 -- linear.
+    run_simulation(conn)
+    assert prop(conn, mote, "x") == pytest.approx(6.0)
+
+
+def test_cleared_ratio_joins_the_matrix_with_other_equations(conn):
+    """A cleared denominator is an ordinary linear equation, so it can be
+    solved simultaneously with the rest rather than only by
+    substitution."""
+    species = create_mote(conn, {"name": "S", "freedoms": "x, y"})
+    add_rule(conn, species, "ratio", "x / y == 2")
+    add_rule(conn, species, "sum", "x + y == 9")
+    mote = create_mote(conn, {"name": "m"})
+    set_species(conn, mote, species)
+
+    # x - 2y == 0 with x + y == 9 is linear after clearing -- x = 6, y = 3.
+    run_simulation(conn)
+    assert prop(conn, mote, "x") == pytest.approx(6.0)
+    assert prop(conn, mote, "y") == pytest.approx(3.0)
+
+
 # ---- failure modes ----
 
 def test_underdetermined_system_is_reported(conn):
@@ -289,6 +373,24 @@ def test_unknown_solver_name_is_reported(conn):
 
     with pytest.raises(SimulationError, match="no solver registered"):
         run_simulation(conn, solver="bogus")
+
+
+def test_arithmetic_failure_inside_a_solver_is_reported_not_raised_raw(conn):
+    """An iterative backend evaluates rules at each guess point, outside
+    the substitution loop that normalizes FormulaError. An attenuation
+    law seeded far from its root drives `e ** (-k * x)` past the float
+    range; that used to escape run_time_series() as an unhandled
+    OverflowError instead of failing the run."""
+    species = create_mote(conn, {"name": "Beam", "freedoms": ["I", "x"]})
+    add_rule(conn, species, "attenuation", "I == I0 * e ** (-k * x)")
+    add_rule(conn, species, "ratio", "I / I0 == 0.1")
+    mote = create_mote(conn, {"name": "m", "I0": 1.0, "k": 22.6, "I": 1.0, "x": 1.0})
+    set_species(conn, mote, species)
+
+    result = run_time_series(conn, step_count=1, commit=False, solver="newton")
+    assert result.failed_at == 0
+    assert "newton" in result.error
+    assert "too large to represent" in result.error
 
 
 def test_newton_solver_configuration_is_threaded_through(conn):

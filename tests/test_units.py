@@ -19,6 +19,7 @@ from core.units import (
     parse_units_property,
     register_unit,
     to_base,
+    unit,
 )
 
 
@@ -117,6 +118,19 @@ def test_degree_converts_to_dimensionless_radians():
     assert dimension_of("deg").is_dimensionless
 
 
+def test_percent_is_a_scaled_dimensionless_ratio():
+    # `%` carries no dimension, only a factor of 100: a property declared
+    # in `%` stores the number people write and computes on the ratio.
+    assert dimension_of("%").is_dimensionless
+    assert to_base(50, "%") == pytest.approx(0.5)
+    assert from_base(0.5, "%") == pytest.approx(50.0)
+    assert convert(100, "%", "deg") == pytest.approx(180.0 / math.pi)
+    # It combines like any other dimensionless unit, and is not an
+    # alphabetic name, so this also covers the tokenizer accepting it.
+    assert to_base(1, "%/s") == pytest.approx(0.01)
+    assert unit("%/s").dimension == dimension_of("Hz")
+
+
 def test_affine_temperature_conversion():
     # The case that justifies Unit.offset existing at all: treating degC
     # as a plain multiple of K would put freezing at 0 K.
@@ -142,6 +156,20 @@ def test_unknown_unit_is_reported_clearly():
 
 
 # ---- compound unit expressions ----
+
+def test_mol_is_prefixable():
+    assert dimension_of("mol") == Dimension(amount=1)
+    assert to_base(1, "mmol") == pytest.approx(0.001)
+    assert convert(1, "mol", "mmol") == pytest.approx(1000.0)
+
+
+def test_molar_concentration_is_a_compound():
+    # Concentration (mol/m^3, or mol/L via the volume unit) isn't
+    # registered atomically -- the compound grammar composes it from mol
+    # and the existing length/volume units, same as any other quotient.
+    assert dimension_of("mol/L") == Dimension(amount=1) - Dimension(length=3)
+    assert convert(1, "mol/L", "mmol/L") == pytest.approx(1000.0)
+
 
 def test_compound_units_parse():
     assert dimension_of("m/s") == Dimension(length=1, time=-1)

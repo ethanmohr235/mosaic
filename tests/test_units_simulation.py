@@ -455,3 +455,22 @@ def test_a_bad_unit_on_an_unrelated_mote_does_not_fail_the_run(conn, totals):
 
     run_simulation(conn)
     assert prop(conn, tally, "total") == pytest.approx(2.0)
+
+
+def test_a_percentage_is_solved_as_a_ratio_and_written_back_as_a_percent(conn):
+    # The point of `%` being a unit rather than a display convention: the
+    # equation is written on the bare ratio (`out == in * efficiency`),
+    # while both the declared input and the solved output stay in the
+    # percents a person reads.
+    species = create_mote(conn, {"name": "Panel", "freedoms": "output,loss"})
+    add_rule(conn, species, "Output", "output == incident * efficiency")
+    add_rule(conn, species, "Loss", "loss == 1 - efficiency")
+    panel = create_mote(conn, {
+        "name": "P", "incident": 1000, "efficiency": 22.5,
+        "units": {"incident": "W", "output": "W", "efficiency": "%", "loss": "%"},
+    })
+    set_species(conn, panel, species)
+
+    run_simulation(conn)
+    assert prop(conn, panel, "output") == pytest.approx(225.0)
+    assert prop(conn, panel, "loss") == pytest.approx(77.5)

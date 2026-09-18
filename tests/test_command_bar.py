@@ -64,6 +64,22 @@ def test_value_accepts_scientific_notation_without_a_unit(conn):
     assert "units" not in mote.properties
 
 
+def test_percent_value_parses_without_a_space(conn):
+    # Nobody writes `50 %`, so the parser splits a trailing `%` off the
+    # number -- the one unit that doesn't need the separating space.
+    result = run_command(conn, "Cell.efficiency = 22.5%")
+    mote = motes_repo.get_mote(conn, result.mote_id)
+    assert mote.properties["efficiency"] == pytest.approx(22.5)
+    assert mote.properties["units"] == {"efficiency": "%"}
+
+
+def test_percent_value_also_parses_with_a_space(conn):
+    result = run_command(conn, "Cell.efficiency = 22.5 %")
+    mote = motes_repo.get_mote(conn, result.mote_id)
+    assert mote.properties["efficiency"] == pytest.approx(22.5)
+    assert mote.properties["units"] == {"efficiency": "%"}
+
+
 def test_second_units_write_merges_rather_than_replaces(conn):
     run_command(conn, "R1.resistance = 500 ohms")
     result = run_command(conn, "R1.voltage = 12 V")
@@ -222,9 +238,43 @@ def test_rule_mote_is_named_from_the_stripped_equation(conn):
     assert rule.properties["name"] == "Rule: x == y * 2"
 
 
-def test_malformed_rule_left_side_is_rejected(conn):
+def test_rule_left_side_may_be_any_expression(conn):
+    """The reason this bar exists is to type what you mean. `beam.I /
+    beam.I0 == 0.1` is an equation; it shouldn't have to be rearranged
+    into an assignment to be typeable."""
+    result = run_command(conn, "beam.I / beam.I0 == 0.1")
+    assert result.ok
+    rule = motes_repo.get_mote(conn, result.mote_id)
+    assert rule.properties[rules_repo.EQUATION_KEY] == "I / I0 == 0.1"
+    rels = rel_repo.list_relationships(
+        conn, from_id=result.mote_id, type_=rules_repo.APPLIES_TO
+    )
+    assert _name(conn, rels[0].to_id) == "beam"
+
+
+def test_rule_anchor_is_the_first_mote_named(conn):
+    result = run_command(conn, "A.x * 2 == B.y")
+    assert result.ok
+    rels = rel_repo.list_relationships(
+        conn, from_id=result.mote_id, type_=rules_repo.APPLIES_TO
+    )
+    assert _name(conn, rels[0].to_id) == "A"
+    rule = motes_repo.get_mote(conn, result.mote_id)
+    assert rule.properties[rules_repo.EQUATION_KEY] == "x * 2 == B.y"
+
+
+def test_rule_with_no_mote_named_is_rejected(conn):
     result = run_command(conn, "R1 == 5")
     assert not result.ok
+    assert "which mote" in result.message
+
+
+def test_rule_that_does_not_parse_is_rejected_at_the_bar(conn):
+    # Better here than as a rule mote that only fails at the next run.
+    result = run_command(conn, "R1.x == 3 +")
+    assert not result.ok
+    names = {m.properties.get("name") for m in motes_repo.list_motes(conn)}
+    assert not any(str(n).startswith("Rule:") for n in names if n)
 
 
 # ---- freedom form ----

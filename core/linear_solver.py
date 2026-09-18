@@ -5,7 +5,11 @@ loop -- see core/newton_solver.py for a backend that can pick that up
 instead. Moved from core/simulation.py's old _matrix_solve/
 _check_consistency verbatim; only the exception type changed (SolverError
 rather than SimulationError, normalized back to SimulationError by
-core/simulation.py) and the message text is unchanged.
+core/simulation.py). The deferred-equation message has since gained a
+pointer to `newton`: this backend is the only place that knows both that
+a rule was refused for being nonlinear and that another backend would
+take it, so saying so here saves the reader going to the source to find
+out an escape hatch exists.
 """
 import numpy as np
 
@@ -21,7 +25,11 @@ class LinearSolver(SolverBackend):
             first = remainder.deferred[0]
             raise SolverError(
                 f"rule {first.rule_name!r} on mote {first.mote_id[:8]} could not be "
-                f"resolved: {first.detail}"
+                f"resolved: {first.detail}. This is the 'linear' solver, which only "
+                f"handles equations that are linear in their unknowns -- either "
+                f"restate the rule so it is (an attenuation law `I == I0 * exp(-k*x)` "
+                f"becomes `k * x == -ln(I / I0)`), or re-run with solver='newton', "
+                f"which solves it as written from an initial guess"
             )
         return _matrix_solve(remainder.open_equations)
 

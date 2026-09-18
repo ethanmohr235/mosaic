@@ -46,16 +46,18 @@ class IncompatibleUnits(UnitError):
 class Dimension:
     """Exponents over the SI base dimensions this system tracks.
 
-    Five axes, not seven: amount-of-substance and luminous intensity have
-    no use case here yet, and adding them later is two more fields rather
-    than a redesign. Exponents are floats because `**` in a formula
-    accepts a fractional constant exponent.
+    Six axes, not seven: luminous intensity has no use case here yet, and
+    adding it later is one more field rather than a redesign.
+    Amount-of-substance (mol) is included for concentration/reaction-rate
+    models. Exponents are floats because `**` in a formula accepts a
+    fractional constant exponent.
     """
     length: float = 0.0
     mass: float = 0.0
     time: float = 0.0
     current: float = 0.0
     temperature: float = 0.0
+    amount: float = 0.0
 
     def __post_init__(self):
         for field_name in _AXES:
@@ -106,9 +108,10 @@ class Dimension:
         return "*".join(parts) if parts else "dimensionless"
 
 
-_AXES = ("length", "mass", "time", "current", "temperature")
+_AXES = ("length", "mass", "time", "current", "temperature", "amount")
 _AXIS_SYMBOLS = {
     "length": "m", "mass": "kg", "time": "s", "current": "A", "temperature": "K",
+    "amount": "mol",
 }
 _SUPERSCRIPTS = {
     "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
@@ -245,6 +248,11 @@ def convert(value: float, from_name: str, to_name: str) -> float:
 
 _SUPERSCRIPT_VALUES = {v: k for k, v in _SUPERSCRIPTS.items()}
 _OPERATORS = {"*", "·", "/", "^", "(", ")"}
+# Non-alphabetic characters that are nonetheless part of a unit name
+# rather than punctuation: the degree sign in `°C`, the percent sign in
+# `%`. Listing them here is what lets the tokenizer read them as an atom
+# instead of rejecting them as an unexpected character.
+_ATOM_SYMBOLS = {"°", "%"}
 
 
 def _tokenize(text: str) -> list[str]:
@@ -270,9 +278,11 @@ def _tokenize(text: str) -> list[str]:
                 run += text[index]
                 index += 1
             tokens.append(run)
-        elif char.isalpha() or char == "°":
+        elif char.isalpha() or char in _ATOM_SYMBOLS:
             run = ""
-            while index < len(text) and (text[index].isalpha() or text[index] == "°"):
+            while index < len(text) and (
+                text[index].isalpha() or text[index] in _ATOM_SYMBOLS
+            ):
                 run += text[index]
                 index += 1
             tokens.append(run)
@@ -447,6 +457,7 @@ _AREA = Dimension(length=2)
 # only in what they weight (absorbed energy vs. biological effect), not
 # in dimension, so one Dimension covers both.
 _DOSE = Dimension(length=2, time=-2)
+_AMOUNT = Dimension(amount=1)
 
 # Registered under the names that take SI prefixes below. Mass is the odd
 # one out: the SI base unit is the kilogram, but the *prefixable* unit is
@@ -458,6 +469,7 @@ _PREFIXABLE = [
     ("s", _TIME, 1.0),
     ("A", _CURRENT, 1.0),
     ("K", _TEMPERATURE, 1.0),
+    ("mol", _AMOUNT, 1.0),
     ("N", _FORCE, 1.0),
     ("J", _ENERGY, 1.0),
     ("W", _POWER, 1.0),
@@ -499,6 +511,13 @@ register_unit("day", _TIME, 86400.0)
 # only ever be a no-op conversion. `rad` itself is already taken --
 # see the radiological dose unit a few lines below.
 register_unit("deg", DIMENSIONLESS, math.pi / 180.0)
+# Percent is dimensionless for the same reason an angle is: it's a ratio,
+# and its only content is a scale. Declaring a property as `%` means the
+# number stored is a hundred times the bare ratio everything computes in,
+# so `50 %` reaches a formula as `0.5` and a computed `0.5` is written
+# back as `50`. Like every other unit, it converts rather than reformats:
+# nothing downstream needs to know a value was ever a percentage.
+register_unit("%", DIMENSIONLESS, 0.01)
 register_unit("in", _LENGTH, 0.0254)
 register_unit("ft", _LENGTH, 0.3048)
 register_unit("mi", _LENGTH, 1609.344)

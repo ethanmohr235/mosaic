@@ -161,7 +161,20 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
     {"syntax": "sum(...), count(...)", "meaning":
         "Combine several motes' values into one. Required whenever "
         "targets()/sources() reaches more than one mote."},
-    {"syntax": "+ - * / **", "meaning": "Arithmetic. Parentheses work as usual."},
+    {"syntax": "+ - * / **", "meaning":
+        "Arithmetic. Parentheses work as usual. An unknown may sit in a "
+        "denominator -- 'I / I0 == 0.1' is solved as the equivalent "
+        "linear equation, so there's no need to rearrange it by hand."},
+    {"syntax": "pi, e", "meaning":
+        "The math constants (3.14159..., 2.71828...). Reserved words -- "
+        "shadow a property literally named 'pi' or 'e' inside a formula "
+        "only, the same way 't' does."},
+    {"syntax": "log(x), ln(x), log10(x), exp(x)", "meaning":
+        "Logarithms and the exponential. log() and ln() are the natural "
+        "logarithm; log10() is base 10. Only on values that are already "
+        "known -- but writing an exponential law as its logarithm ("
+        "'mxs * x == -ln(I / I0)' rather than 'I == I0 * exp(-mxs * x)') "
+        "makes it linear in x, so the default solver gets it exactly."},
     {"syntax": "abs(x), min(...), max(...)", "meaning":
         "Only on values that are already known by the time they're "
         "evaluated -- deferred otherwise, same as property()."},

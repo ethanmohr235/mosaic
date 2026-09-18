@@ -16,11 +16,18 @@ Seven forms, tried in this order (first match wins):
     R1.resistance = 500 ohms property: find-or-create R1, set/create the key,
                               trailing token resolved against core/units.py
     R1.voltage == ...         rule: find-or-create R1, create a rule mote
-                              with that equation, applies_to R1. Any other
+    beam.I / beam.I0 == 0.1   with that equation, applies_to R1. Any other
                               Name.prop reference that resolves to exactly
                               one existing mote is auto-wired to R1 with a
                               default-type relationship, so the equation
                               is reachable right away.
+
+                              Either side may be any expression the rule
+                              language accepts -- an equation does not
+                              have to be arranged as `Mote.property ==
+                              <the rest>`. The mote the rule is *about*
+                              is the first `Name.` in the line, which is
+                              the same mote the assignment form names.
     R1 -> R2                  relationship, default type "related_to"
     R1 -> owns -> R2          relationship, explicit type
     R1 : Resistor              species: find-or-create both, instance_of
@@ -58,12 +65,18 @@ from core import relationships as rel_repo
 from core import rules as rules_repo
 from core import species as species_repo
 from core import units
+from core.formula import MATH_CONSTANTS, FormulaError, attribute_bases, parse_equation
 from core.entities import Mote
 from core.simulation import unresolved_equation_names
 
 _IDENTIFIER = r"[A-Za-z_]\w*"
 
-_RULE_RE = re.compile(rf"^\s*({_IDENTIFIER})\.({_IDENTIFIER})\s*==\s*(.+?)\s*$")
+# Deliberately not a shape: any `lhs == rhs`, with core/formula.py's own
+# parser deciding whether it is a relation this engine can read. A rule
+# is an *equation*, and which side a modeller writes a quantity on is
+# their business -- `beam.I / beam.I0 == 0.1` says exactly what
+# `beam.I == 0.1 * beam.I0` says (see core/formula.py's Ratio).
+_RULE_RE = re.compile(r"^\s*(.+?)\s*==\s*(.+?)\s*$")
 _FREEDOM_RE = re.compile(r"^\s*(.+?)\.([A-Za-z_]\w*)\s*\?\s*$")
 _UNITS_RE = re.compile(r"^\s*(.+?)\.([A-Za-z_]\w*)\s+units\s+(.+?)\s*$", re.IGNORECASE)
 _PROPERTY_RE = re.compile(r"^\s*(.+?)\.([A-Za-z_]\w*)\s*=\s*(.+?)\s*$")
@@ -181,7 +194,8 @@ def _dispatch(conn: sqlite3.Connection, text: str, confirm: bool) -> CommandResu
         rule_match = _RULE_RE.match(text)
         if not rule_match:
             raise CommandError(
-                "left of '==' must be Mote.property, e.g. R1.voltage == R1.current * R1.resistance"
+                "a rule is `<expression> == <expression>`, "
+                "e.g. R1.voltage == R1.current * R1.resistance"
             )
         return _run_rule(conn, *rule_match.groups())
 
@@ -266,7 +280,9 @@ def _run_freedom(conn, mote_token: str, key: str) -> CommandResult:
     )
 
 
-def _run_rule(conn, anchor_token: str, lhs_prop: str, rhs: str) -> CommandResult:
+def _run_rule(conn, lhs: str, rhs: str) -> CommandResult:
+    full = f"{lhs} == {rhs}"
+    anchor_token = _rule_anchor(full)
     anchor_id, created = _find_or_create(conn, anchor_token)
 
     # `Anchor.prop` inside the equation means "this mote's own prop" once
@@ -276,7 +292,6 @@ def _run_rule(conn, anchor_token: str, lhs_prop: str, rhs: str) -> CommandResult
     # to fail on (Anchor is not its own neighbor). Any *other* Name.prop
     # reference is left alone; it resolves only if that mote is actually
     # wired to Anchor (see the unresolved-names check below).
-    full = f"{anchor_token}.{lhs_prop} == {rhs}"
     self_prefix = re.compile(rf"\b{re.escape(anchor_token)}\.")
     equation = self_prefix.sub("", full)
 
@@ -322,6 +337,37 @@ def _run_rule(conn, anchor_token: str, lhs_prop: str, rhs: str) -> CommandResult
     return CommandResult(ok=True, mote_id=rule_id, message=message)
 
 
+def _rule_anchor(relation: str) -> str:
+    """Which mote a typed rule is *about* -- the first `Name.` in the
+    line, in source order.
+
+    With the left side pinned to `Mote.property` this was simply the
+    thing being assigned to. It still is for that form: the first `Name.`
+    in `R1.voltage == R1.current * R1.resistance` is R1 either way. What
+    changes is that a rule no longer has to be written as an assignment
+    to have an anchor -- `beam.I / beam.I0 == 0.1` is about `beam`, and
+    reading the first mention is both predictable and what someone
+    typing left to right means.
+
+    Rejects a line that mentions no mote at all (`x == 5`): an
+    `applies_to` has to point somewhere, and guessing which mote the
+    person meant is exactly the kind of guess this bar doesn't make.
+    Rejects one core/formula.py can't parse, rather than saving a rule
+    that will only fail later, at the confusing distance of a run."""
+    try:
+        parse_equation(relation)
+    except FormulaError as e:
+        raise CommandError(str(e)) from None
+    bases = attribute_bases(relation)
+    if not bases:
+        raise CommandError(
+            f"{relation!r} doesn't say which mote it is about -- put a mote name "
+            f"in front of one of its properties, e.g. "
+            f"`R1.voltage == R1.current * R1.resistance`"
+        )
+    return bases[0]
+
+
 def _equation_property_refs(equation: str) -> tuple[set[str], dict[str, set[str]]]:
     """Every property `equation` reads, split into the anchor's own (a
     bare identifier -- the anchor's own prefix is already stripped by the
@@ -349,6 +395,7 @@ def _equation_property_refs(equation: str) -> tuple[set[str], dict[str, set[str]
         and id(node) not in attribute_value_ids
         and id(node) not in call_func_ids
         and node.id != "t"  # the reserved tick index, not a property -- core/reserved.py
+        and node.id not in MATH_CONSTANTS  # bare `pi`/`e`, not a property -- core/formula.py
     }
     return own, other
 
@@ -501,6 +548,12 @@ def _parse_value(text: str):
     property boxes elsewhere."""
     text = text.strip()
     head, _, tail = text.rpartition(" ")
+    if not head and text.endswith("%"):
+        # Percent is the one unit nobody writes with a space in front of
+        # it: `50%`, never `50 %`. Splitting it off here keeps the
+        # general rule ("number, space, unit") intact rather than making
+        # every unit suffix-matchable.
+        head, tail = text[:-1], "%"
     if head:
         number = _to_number(head)
         unit_name = _resolve_unit(tail)

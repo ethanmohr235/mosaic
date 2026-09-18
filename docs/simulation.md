@@ -86,7 +86,8 @@ to both.
 | `sources('a')` | The motes pointing *at* this one via a relationship of type `a`. |
 | `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached -- unlike an `arity: many` role, which never collapses. |
 | `sum(...)`, `count(...)` | Combine several motes into one value. Required when more than one mote is reached. |
-| `+ - * / **` (`^` also works as exponent) | Arithmetic. Parentheses work as usual. |
+| `+ - * / **` (`^` also works as exponent) | Arithmetic. Parentheses work as usual. An unknown may appear in a denominator -- see [Writing an equation the way you mean it](#writing-an-equation-the-way-you-mean-it). |
+| `pi`, `e` | The math constants (3.14159..., 2.71828...). Reserved words -- shadow a property literally named `pi` or `e` inside a formula specifically, the same way `t` does. |
 | `abs`, `min`, `max` | Only on values that are already known. |
 | `sin`, `cos`, `tan`, `sqrt` | Also only on known values. `sin`/`cos`/`tan` take radians -- an argument declaring unit `deg` (see [Units](#units) below) arrives already converted; `sqrt` of a negative number is an error. |
 | `t` | The current step's index within a time-based run (0 for the first step). A reserved word -- shadows a property literally named `t` inside a formula specifically, though that property is still ordinary and visible everywhere else. Always 0 in a plain (non-time-based) run. |
@@ -96,6 +97,51 @@ to both.
 Anything else -- indexing, comprehensions, attribute access, `import`, calling arbitrary functions -- is rejected when the formula is parsed. The parser uses Python's `ast` module against a whitelist and never calls `eval`.
 
 ## What the solver can handle
+
+### Writing an equation the way you mean it
+
+An equation does not have to be arranged so the unknowns sit where the
+solver would like them. Divide by one:
+
+```
+I / I0 == 0.1
+```
+
+Nothing about that is linear as written -- `I0` is under a division bar
+-- but it says the same thing as `I == 0.1 * I0`, and the engine does
+that rearrangement rather than asking you to. Each side of a relation is
+carried as a numerator over a denominator, and the denominator is
+cleared once, against the relation as a whole. So all of these are
+ordinary linear equations here, solvable by the default `linear` solver:
+
+```
+I / I0         == 0.1
+1 / resistance == 1 / r1 + 1 / r2      <- resistors in parallel
+sources('feeds').pressure / pressure == 0.25
+mass / volume  == density
+x ^ -1         == 4
+```
+
+Two caveats, both of which follow from what the algebra can and can't
+promise:
+
+- **It cannot make a genuine nonlinearity go away.** `x / y == z`, with
+  all three unknown, clears to `x == z * y` -- still a product of two
+  unknowns. That defers to the substitution loop and then to the selected
+  solver, exactly as it did before.
+- **A constraint with an unknown denominator waits.** Multiplying
+  `a / x <= b` through by `x` flips the comparison when `x` is negative,
+  so it is not cleared. By the time constraints are checked the unknown
+  is normally solved and the denominator is just a number; if it genuinely
+  isn't, the constraint is reported as **not checked** rather than
+  guessed at.
+
+Writing `a / x` asserts that `x` isn't zero, and clearing the denominator
+takes you at your word. Dividing by a literal zero is still an error, and
+an equation whose numerator and denominator vanish together (`(x - 1) /
+(x - 1) == 1`) is read as the cleared form rather than refused.
+
+### The two stages
 
 Solving runs in two stages:
 
@@ -125,9 +171,10 @@ The engine refuses to guess. All of these stop the run with a message naming the
 - **underdetermined** -- more unknowns than independent equations. Usually a missing rule or a missing reference point (a circuit needs a ground).
 - **inconsistent** -- no values satisfy every equation at once.
 - **contradictory** -- two rules demand different values for the same thing.
-- **could not be resolved** -- an equation stayed nonlinear in its unknowns and the `linear` solver was selected.
+- **could not be resolved** -- an equation stayed nonlinear in its unknowns and the `linear` solver was selected. The message names `newton` as the alternative, and suggests restating the rule where a linear form exists (an attenuation law `I == I0 * exp(-k*x)` is `k * x == -ln(I / I0)`, which is exact and needs no starting guess).
 - **did not converge** / **stalled** -- the `newton` solver ran out of iterations, or backtracking couldn't improve the residual further, without reaching `tolerance`.
 - **singular system** -- the `newton` solver's final Jacobian didn't independently constrain every unknown (the nonlinear analog of underdetermined).
+- **failed while evaluating a rule** -- an iterative solver's guess reached a point where the arithmetic itself is impossible: a power too large to represent, zero to a negative power, or a negative base under a fractional exponent. The rule is usually fine and the starting guess is not -- `e ** (-k * x)` overflows once x is driven far enough negative, so seed the unknown near its expected value.
 
 Being overdetermined is *not* an error, as long as the extra equations agree. This is normal: in any circuit, one of the Kirchhoff current equations is always implied by the others.
 
@@ -828,6 +875,14 @@ Angle is genuinely dimensionless in SI, so there's no separate `rad`:
 an unlabeled number is already radians, exactly what `sin`/`cos`/`tan`
 expect, and `deg` converts into that on the way in like any other unit
 (`angle: 90, units: {"angle": "deg"}` reaches a formula as `π/2`).
+
+`%` is dimensionless for the same reason -- it's a ratio, and its only
+content is the factor of 100. A property declared in `%` stores the
+number a person reads and computes on the bare ratio
+(`efficiency: 22.5, units: {"efficiency": "%"}` reaches a formula as
+`0.225`), and a solved `0.775` is written back as `77.5`. In the command
+bar it's the one unit written with no space before it: `P.efficiency =
+22.5%` (`22.5 %` works too).
 
 ```
 unit convert --value 36 --from km/hr --to m/s
