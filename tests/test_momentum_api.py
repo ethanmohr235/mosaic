@@ -153,6 +153,16 @@ def test_scheduling_reuses_the_binding_a_task_already_carries(api):
     assert "date" not in properties
 
 
+def test_scheduling_only_writes_a_binding_the_board_is_showing(api, board):
+    """The board is bound to `scheduled`, not the garden's dominant
+    `date` -- a drop should fill in the property the board displays,
+    never invent one it isn't even bound to."""
+    api.schedule(board["backfill"], "2026-08-26", bindings=["scheduled"])
+    properties = get_mote(api._conn, board["backfill"]).properties
+    assert "scheduled" in properties
+    assert "date" not in properties
+
+
 def test_an_estimate_becomes_the_span_the_calendar_draws(api, board):
     """One write to one key: the span rides inside the value, so
     scheduling no longer has to decide whether it may also touch a

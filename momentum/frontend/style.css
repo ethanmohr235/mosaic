@@ -173,19 +173,18 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 #chip-time:hover { background: var(--raised); }
 #chip-time.running { background: var(--accent-soft); color: var(--accent-bright); }
 
-#rail-toggle {
-  background: transparent; border: 1px solid var(--border-soft); border-radius: 8px;
-  padding: 5px 10px; color: oklch(0.6 0 0); font-size: 12px; flex-shrink: 0;
-}
-#rail-toggle.on { color: var(--fg); background: var(--panel); }
-
 /* ---- body ---- */
 
 #body { flex: 1; display: flex; min-height: 0; }
 
+.resize-col {
+  width: 5px; flex-shrink: 0; cursor: col-resize; background: var(--border-soft); z-index: 6;
+}
+.resize-col:hover, .resize-col.active { background: var(--accent); }
+
 #rail {
   width: 216px; flex-shrink: 0; background: var(--rail-bg);
-  border-right: 1px solid var(--border-soft); overflow-y: auto;
+  border-right: 1px solid var(--border-soft); overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 2px; padding-bottom: 14px;
 }
 .rail-section { padding: 12px 14px 8px; border-bottom: 1px solid var(--hairline); }

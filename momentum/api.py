@@ -634,15 +634,19 @@ class Api(InspectorApi, CommandBarApi):
 
         The mote's own, if it already carries one of the active bindings
         -- rescheduling should move the date you can see, not leave it
-        standing and add a second one beside it. Otherwise the key this
-        garden already organizes itself by, and only failing that the
-        fallback. A garden that says `due` goes on saying `due`.
+        standing and add a second one beside it. Otherwise the most-used
+        of the bindings the board is currently showing -- a drop should
+        fill in a property the board is already bound to, never invent
+        one the board isn't even displaying. Only a board with no active
+        bindings at all falls back to the global fallback key.
         """
         for binding in keys.bindings:
             if calendar_repo.parse_date_value(mote.properties.get(binding)) is not None:
                 return binding
-        defaults = calendar_repo.default_bindings(motes)
-        return defaults[0] if defaults else FALLBACK_BINDING
+        if keys.bindings:
+            counts = calendar_repo.binding_counts(motes)
+            return sorted(keys.bindings, key=lambda k: (-counts.get(k, 0), k))[0]
+        return FALLBACK_BINDING
 
     def _place_in_earliest_slot(
         self, mote: Mote, binding: str, day: date, minutes: float,

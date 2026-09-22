@@ -21,7 +21,8 @@ let anchor = null;           // Date; any day of the week shown in Days
 let selectedId = null;
 let panel = null;            // the last focus() answer
 let activeId = null;         // which mote the timer is running against
-let railOpen = true;
+let railW = 216;             // the rail's width, in px -- 0 means pulled shut
+let railResize = null;       // { sx, orig } while the rail's edge is being dragged
 let toastTimer = null;
 let pollTimer = null;
 let tickTimer = null;
@@ -884,7 +885,6 @@ function render() {
   $("board-view").classList.toggle("hidden", tab !== "board");
   $("days-view").classList.toggle("hidden", tab !== "days");
   $("focus-view").classList.toggle("hidden", tab !== "focus");
-  $("rail").classList.toggle("hidden", !railOpen);
   // Only the week has a range to step through -- the board and focus
   // tabs have nothing for prev/next/today to mean.
   $("nav").classList.toggle("hidden", tab !== "days");
@@ -1248,6 +1248,65 @@ function closeGardenMenu() {
   $("garden-btn").setAttribute("aria-expanded", "false");
 }
 
+// ---- rail width ------------------------------------------------------
+//
+// Pulled open or shut from its own right edge, the way Monastery's and
+// Motion's rails work, rather than through a button elsewhere in the topbar.
+
+function railWidthKey() { return "momentum.railW"; }
+
+function loadRailWidth() {
+  try {
+    const raw = window.localStorage.getItem(railWidthKey());
+    if (raw !== null) railW = Math.max(0, parseInt(raw, 10) || 0);
+  } catch (error) {
+    // A window that cannot remember its rail width just uses the default.
+  }
+}
+
+function saveRailWidth() {
+  try {
+    window.localStorage.setItem(railWidthKey(), String(railW));
+  } catch (error) {
+    // Not fatal -- see loadRailWidth.
+  }
+}
+
+function applyRailWidth() {
+  $("rail").style.width = `${railW}px`;
+}
+
+// Below half the usable minimum, a resize collapses the rail shut rather
+// than settling on some odd sliver width -- pulling back out from the
+// edge (where the handle still sits) reopens it at the same minimum.
+function snapRailWidth(value) {
+  const min = 180, max = 420;
+  if (value < min / 2) return 0;
+  return Math.max(min, Math.min(max, value));
+}
+
+function onRailResizeDown(event) {
+  event.preventDefault();
+  $("rail-resize").classList.add("active");
+  railResize = { sx: event.clientX, orig: railW };
+  window.addEventListener("pointermove", onRailResizeMove);
+  window.addEventListener("pointerup", onRailResizeUp);
+}
+
+function onRailResizeMove(event) {
+  if (!railResize) return;
+  railW = snapRailWidth(railResize.orig + (event.clientX - railResize.sx));
+  applyRailWidth();
+}
+
+function onRailResizeUp() {
+  window.removeEventListener("pointermove", onRailResizeMove);
+  window.removeEventListener("pointerup", onRailResizeUp);
+  $("rail-resize").classList.remove("active");
+  railResize = null;
+  saveRailWidth();
+}
+
 // ---- wiring --------------------------------------------------------
 
 function wire() {
@@ -1265,11 +1324,7 @@ function wire() {
     b.onclick = () => setTab(b.dataset.tab);
   });
 
-  $("rail-toggle").onclick = () => {
-    railOpen = !railOpen;
-    $("rail-toggle").classList.toggle("on", railOpen);
-    render();
-  };
+  $("rail-resize").onpointerdown = onRailResizeDown;
 
   $("work-start-input").onchange = saveWorkingHours;
   $("work-end-input").onchange = saveWorkingHours;
@@ -1538,6 +1593,8 @@ async function init() {
   anchor = new Date();
   keyChoice = loadKeys();
   loadTimerPrefs();
+  loadRailWidth();
+  applyRailWidth();
   wire();
   $("garden-name").textContent = await api.current_garden();
   await refresh();
