@@ -66,6 +66,14 @@ FALLBACK_BINDING = "scheduled"
 # task and the rectangle Monastery draws for it are the same length.
 DEFAULT_SLOT_MINUTES = 60
 
+# Marks a placement the person chose by dragging, rather than one this
+# window invented to fill a gap. An ordinary property, not a reserved
+# binding name -- the same footing SUBTASKS_KEY stands on in
+# momentum/payload.py. auto_schedule() will not move a pinned task, and
+# rolling an overdue task forward clears it: today is not the day it
+# was pinned for.
+PINNED_KEY = "pinned"
+
 # How low a logged session is allowed to push a task's remaining
 # estimate while the task is still open. An estimate hitting exactly
 # zero without the task itself being marked done reads as "nothing
@@ -397,6 +405,7 @@ class Api(InspectorApi, CommandBarApi):
 
         start = datetime.fromisoformat(window_start).date()
         end = datetime.fromisoformat(window_end).date()
+        self._roll_forward_overdue(tasks, visible, excluded, keys, settings)
         self._auto_place(tasks, visible, excluded, keys, settings, start, end)
         cards = [payload_repo.card_payload(m, directory, keys) for m in tasks]
 
@@ -700,6 +709,52 @@ class Api(InspectorApi, CommandBarApi):
         mote.properties[binding] = written
         return start, full
 
+    def _roll_forward_overdue(
+        self, tasks: list[Mote], visible: list[Mote], excluded: set[str],
+        keys: payload_repo.Keys, settings: dict,
+    ) -> None:
+        """Move every open, single-day task still dated before today onto
+        today -- the day-boundary half of Sunsama's flow, done on read
+        the same way _auto_place() is rather than behind a button,
+        because a task nobody moves off of a day that already passed
+        would otherwise just sit there unseen.
+
+        Scoped to `tasks` rather than the drawn window: an overdue task
+        from last week has to catch up even when the person is looking
+        at next week, or it would only ever be fixed by opening the one
+        week it fell behind in.
+
+        The same two guards _auto_place() applies -- a declared
+        multi-day span is a booking, not a slipped placement, and a
+        done task has no work left to catch up. A recurring placement
+        is skipped too: its anchor date being in the past is normal,
+        not overdue -- the series is still producing fresh occurrences
+        every week. `PINNED_KEY` is cleared first: a drag pinned a task
+        to *that* day, and today is not it.
+        """
+        today = date.today()
+        for mote in tasks:
+            if keys.status and payload_repo.is_done_value(mote.properties.get(keys.status)):
+                continue
+            for binding in keys.bindings:
+                existing = interval_repo.parse(mote.properties.get(binding))
+                if existing is None:
+                    continue
+                day = existing.start.date()
+                is_booking = existing.all_day and \
+                    existing.span > timedelta(days=interval_repo.DEFAULT_ALL_DAY_DAYS)
+                if day < today and not is_booking and not existing.rule_lines:
+                    minutes = candidates_repo.parse_estimate_value(
+                        mote.properties.get(keys.estimate) if keys.estimate else None
+                    ) or DEFAULT_SLOT_MINUTES
+                    if PINNED_KEY in mote.properties:
+                        motes_repo.delete_property(self._conn, mote.id, PINNED_KEY)
+                        mote.properties.pop(PINNED_KEY, None)
+                    self._place_in_earliest_slot(
+                        mote, binding, today, minutes, visible, excluded, keys, settings
+                    )
+                break
+
     def _auto_place(
         self, tasks: list[Mote], visible: list[Mote], excluded: set[str],
         keys: payload_repo.Keys, settings: dict,
@@ -777,10 +832,101 @@ class Api(InspectorApi, CommandBarApi):
         start, full = self._place_in_earliest_slot(
             mote, binding, target_day, minutes, visible, excluded, keys, settings
         )
+        # A drag is the one action that means "I chose this exact time" --
+        # auto_schedule() leaves a pinned task alone even to resolve a
+        # conflict elsewhere.
+        motes_repo.update_mote(self._conn, mote_id, {PINNED_KEY: True})
 
         panel = self._panel(mote_id, keys)
         return {**(panel or {}), "slotFull": full, "binding": binding,
                 "start": start.isoformat()}
+
+    @_synchronized
+    def auto_schedule(
+        self, window_start: str, window_end: str,
+        status_key=None, priority_key=None, estimate_key=None, bindings=None,
+    ) -> dict:
+        """The Auto-schedule button: resolve every overlap it can inside
+        the drawn week without moving a task the person pinned by
+        dragging.
+
+        Conflicts are found across every active binding at once with
+        calendar_repo.conflicts() -- the same reading
+        _place_in_earliest_slot() already trusts for "is this gap
+        free", so a task collides with a lecture dated under a
+        different binding exactly as readily as it collides with
+        another task. Only open tasks are considered; a done task or a
+        Monastery-only mote with no task reading is never something
+        this button moves, though it still counts as busy.
+
+        Unpinned tasks caught in a conflict are re-placed one at a
+        time, earliest start first, each against the *current* state
+        of everyone else -- _place_in_earliest_slot() keeps `visible`
+        mutated in place, so a three-way pileup fans out into three
+        clear slots in one pass rather than needing pairwise
+        resolution. A pinned task is left exactly where it was. What
+        comes back in `unresolved` is whatever still collides after
+        that pass -- a pinned task nothing could move around it, or
+        simply more open work on one day than working hours can hold,
+        since _place_in_earliest_slot() places at the start of the day
+        rather than refusing when a day is already full.
+        """
+        visible, tasks, excluded, keys, _ = self._garden_state(
+            status_key=status_key, priority_key=priority_key,
+            estimate_key=estimate_key, bindings=bindings,
+        )
+        settings = self._settings(tasks)
+        start = datetime.fromisoformat(window_start)
+        end = datetime.fromisoformat(window_end)
+        task_bindings = list(keys.bindings) or [FALLBACK_BINDING]
+        open_tasks = {
+            m.id: m for m in tasks
+            if not (keys.status and payload_repo.is_done_value(m.properties.get(keys.status)))
+        }
+
+        def open_conflicts() -> list[tuple[calendar_repo.Occurrence, calendar_repo.Occurrence]]:
+            pairs = calendar_repo.conflicts(
+                visible, bindings=task_bindings, window_start=start, window_end=end,
+                exclude_ids=excluded,
+            )
+            return [
+                (a, b) for a, b in pairs
+                if a.mote.id in open_tasks and b.mote.id in open_tasks
+            ]
+
+        def current_binding(mote: Mote) -> str | None:
+            return next(
+                (b for b in task_bindings if interval_repo.parse(mote.properties.get(b)) is not None),
+                None,
+            )
+
+        involved = {o.mote.id for pair in open_conflicts() for o in pair}
+        movable = [
+            open_tasks[mid] for mid in involved if PINNED_KEY not in open_tasks[mid].properties
+        ]
+        movable.sort(key=lambda m: interval_repo.parse(m.properties[current_binding(m)]).start)
+
+        moved = []
+        for mote in movable:
+            binding = current_binding(mote)
+            existing = interval_repo.parse(mote.properties[binding])
+            minutes = candidates_repo.parse_estimate_value(
+                mote.properties.get(keys.estimate) if keys.estimate else None
+            ) or round(existing.span.total_seconds() / 60) or DEFAULT_SLOT_MINUTES
+            before = existing.start
+            when, _ = self._place_in_earliest_slot(
+                mote, binding, existing.start.date(), minutes, visible, excluded, keys, settings
+            )
+            if when != before:
+                moved.append({"id": mote.id, "name": payload_repo.name_of(mote), "start": when.isoformat()})
+
+        unresolved_ids = sorted({o.mote.id for pair in open_conflicts() for o in pair})
+        return {
+            "moved": moved,
+            "unresolved": [
+                {"id": mid, "name": payload_repo.name_of(open_tasks[mid])} for mid in unresolved_ids
+            ],
+        }
 
     @_synchronized
     def unschedule(self, mote_id: str, bindings=None) -> dict | None:
@@ -795,6 +941,8 @@ class Api(InspectorApi, CommandBarApi):
         for binding in keys.bindings:
             if calendar_repo.parse_date_value(mote.properties.get(binding)) is not None:
                 motes_repo.delete_property(self._conn, mote_id, binding)
+        if PINNED_KEY in mote.properties:
+            motes_repo.delete_property(self._conn, mote_id, PINNED_KEY)
         return self._panel(mote_id, keys)
 
     # ---- the timer ----

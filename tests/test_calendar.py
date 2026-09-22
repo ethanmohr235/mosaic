@@ -10,6 +10,7 @@ from core.calendar import (
     DEFAULT_TIMED_MINUTES,
     Occurrence,
     binding_counts,
+    conflicts,
     default_bindings,
     detached_properties,
     earliest_free_slot,
@@ -524,6 +525,70 @@ def test_something_longer_than_the_working_day_never_fits():
     assert earliest_free_slot(
         [], day=date(2026, 8, 26), duration=timedelta(hours=9), bindings=["when"],
     ) is None
+
+
+# ---- finding conflicts ----
+#
+# What the Auto-schedule button asks first: which placements collide.
+# Reads occurrences() the same as earliest_free_slot() does, so a
+# collision here means exactly what a rectangle drawn on top of another
+# rectangle means in Monastery.
+
+def test_two_motes_with_no_overlap_have_no_conflicts():
+    motes = [
+        _mote({"when": "2026-08-26 09:00/PT1H"}, id="a"),
+        _mote({"when": "2026-08-26 10:00/PT1H"}, id="b"),
+    ]
+    assert conflicts(motes, bindings=["when"], window_start=WEEK_START, window_end=WEEK_END) == []
+
+
+def test_two_overlapping_motes_are_reported_as_a_pair():
+    a = _mote({"when": "2026-08-26 09:00/PT1H"}, id="a")
+    b = _mote({"when": "2026-08-26 09:30/PT1H"}, id="b")
+    found = conflicts([a, b], bindings=["when"], window_start=WEEK_START, window_end=WEEK_END)
+    assert len(found) == 1
+    assert {found[0][0].mote.id, found[0][1].mote.id} == {"a", "b"}
+
+
+def test_a_conflict_can_span_two_different_bindings():
+    """A task `due` at the same time as a meeting `when` collides with it
+    just as readily as two tasks would -- there is no second notion of
+    busy for events versus tasks."""
+    task = _mote({"due": "2026-08-26 09:00/PT1H"}, id="task")
+    meeting = _mote({"when": "2026-08-26 09:15/PT1H"}, id="meeting")
+    found = conflicts(
+        [task, meeting], bindings=["due", "when"], window_start=WEEK_START, window_end=WEEK_END,
+    )
+    assert len(found) == 1
+
+
+def test_all_day_placements_never_conflict():
+    """A task due Thursday marks the day rather than occupying it, the
+    same rule earliest_free_slot() applies to busy time."""
+    motes = [
+        _mote({"due": "2026-08-26"}, id="a"),
+        _mote({"due": "2026-08-26"}, id="b"),
+    ]
+    assert conflicts(motes, bindings=["due"], window_start=WEEK_START, window_end=WEEK_END) == []
+
+
+def test_three_overlapping_motes_report_every_pair():
+    a = _mote({"when": "2026-08-26 09:00/PT2H"}, id="a")
+    b = _mote({"when": "2026-08-26 09:30/PT2H"}, id="b")
+    c = _mote({"when": "2026-08-26 10:30/PT2H"}, id="c")
+    found = conflicts([a, b, c], bindings=["when"], window_start=WEEK_START, window_end=WEEK_END)
+    pairs = {frozenset((x.mote.id, y.mote.id)) for x, y in found}
+    assert pairs == {frozenset(("a", "b")), frozenset(("b", "c")), frozenset(("a", "c"))}
+
+
+def test_excluded_motes_are_never_part_of_a_conflict():
+    a = _mote({"when": "2026-08-26 09:00/PT1H"}, id="a")
+    b = _mote({"when": "2026-08-26 09:30/PT1H"}, id="b")
+    found = conflicts(
+        [a, b], bindings=["when"], window_start=WEEK_START, window_end=WEEK_END,
+        exclude_ids={"b"},
+    )
+    assert found == []
 
 
 def test_the_working_window_is_the_callers_to_decide():

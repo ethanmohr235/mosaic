@@ -309,6 +309,49 @@ def earliest_free_slot(
     return cursor if cursor + duration <= window_end else None
 
 
+def conflicts(
+    motes: list[Mote],
+    *,
+    bindings: list[str],
+    window_start: datetime,
+    window_end: datetime,
+    exclude_ids: set[str] | None = None,
+) -> list[tuple[Occurrence, Occurrence]]:
+    """Every pair of timed placements in the window that overlap.
+
+    Pure, like everything above it: occurrences in, pairs out, so a
+    caller can both count collisions for a toast and know exactly who
+    is in each one. All-day placements are excluded for the same reason
+    `earliest_free_slot` never treats them as busy -- a task `due`
+    Thursday marks the day rather than occupying an hour of it, so it
+    cannot conflict with anything.
+
+    A sweep over occurrences sorted by start, the same walk
+    `earliest_free_slot` does across one day's busy list, but here
+    every open occurrence is compared against whichever earlier ones
+    have not yet ended -- one pair per actual overlap, not one entry
+    per participant.
+    """
+    timed = sorted(
+        (o for o in occurrences(
+            motes, bindings=bindings,
+            window_start=window_start, window_end=window_end,
+            exclude_ids=exclude_ids,
+        ) if not o.all_day),
+        key=lambda o: (o.start, o.end),
+    )
+
+    found: list[tuple[Occurrence, Occurrence]] = []
+    open_occurrences: list[Occurrence] = []
+    for occurrence in timed:
+        open_occurrences = [o for o in open_occurrences if o.end > occurrence.start]
+        for other in open_occurrences:
+            if other.mote.id != occurrence.mote.id:
+                found.append((other, occurrence))
+        open_occurrences.append(occurrence)
+    return found
+
+
 def is_calendar_value(value) -> bool:
     """Whether a property value is one the calendar reads structurally,
     rather than user data the detail panel should list plainly. Used only

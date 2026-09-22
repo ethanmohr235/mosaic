@@ -23,6 +23,23 @@ WEEK_START = "2026-08-24T00:00:00"
 WEEK_END = "2026-08-31T00:00:00"
 
 
+def _freeze_today(monkeypatch, day):
+    """Pin momentum.api's notion of "today" to a day inside this file's
+    fixed August week, so _roll_forward_overdue() does not read that
+    week as overdue simply because real time has since moved past it --
+    the tests below are about _auto_place()/scheduling, not rollover."""
+    from datetime import date as real_date
+
+    import momentum.api as momentum_api
+
+    class _FrozenDate(real_date):
+        @classmethod
+        def today(cls):
+            return real_date.fromisoformat(day)
+
+    monkeypatch.setattr(momentum_api, "date", _FrozenDate)
+
+
 @pytest.fixture
 def api():
     create_garden("test-momentum")
@@ -227,7 +244,22 @@ def test_unscheduling_puts_a_task_back_in_the_pool(api, board):
     assert "Backfill dry run" in {c["name"] for c in api.days(WEEK_START, WEEK_END)["pool"]}
 
 
-def test_a_scheduled_task_lands_on_its_day_in_the_week(api, board):
+def test_scheduling_pins_the_placement(api, board):
+    """A drag is the one action that says "I chose this exact time" --
+    auto_schedule() has to be able to tell that placement apart from one
+    it invented itself."""
+    api.schedule(board["backfill"], "2026-08-26")
+    assert get_mote(api._conn, board["backfill"]).properties["pinned"] is True
+
+
+def test_unscheduling_clears_the_pin(api, board):
+    api.schedule(board["backfill"], "2026-08-26")
+    api.unschedule(board["backfill"])
+    assert "pinned" not in get_mote(api._conn, board["backfill"]).properties
+
+
+def test_a_scheduled_task_lands_on_its_day_in_the_week(api, board, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-24")
     api.schedule(board["backfill"], "2026-08-26")
     days = {d["day"]: [c["name"] for c in d["cards"]] for d in api.days(WEEK_START, WEEK_END)["days"]}
     assert "Backfill dry run" in days["2026-08-26"]
@@ -367,11 +399,12 @@ def test_a_task_already_done_is_not_closed_out_twice(api):
 
 # ---- auto-placement of a bare date ----
 
-def test_a_bare_date_is_placed_in_the_earliest_free_slot_by_the_days_view(api, board):
+def test_a_bare_date_is_placed_in_the_earliest_free_slot_by_the_days_view(api, board, monkeypatch):
     """A mote whose date was set with nothing else -- through the MCP
     tools, say, not a drag in this window -- still lands at a real time
     once the days view is read, the same earliest gap a drag would find.
     The standup holds 09:00-09:30, so this lands right after it."""
+    _freeze_today(monkeypatch, "2026-08-24")
     task = create_mote(api._conn, {
         "name": "Set elsewhere", "estimate": "1h", "date": "2026-08-26",
     })
@@ -400,10 +433,11 @@ def test_a_bare_date_outside_the_window_is_left_alone(api, board):
     assert get_mote(api._conn, later).properties["date"] == "2027-03-04"
 
 
-def test_a_finished_task_is_not_given_a_slot(api, board):
+def test_a_finished_task_is_not_given_a_slot(api, board, monkeypatch):
     """A done task has no work left to find a gap for, and placing one
     would spend the morning's room on it -- pushing the open task that
     shares its day later down the day."""
+    _freeze_today(monkeypatch, "2026-08-24")
     create_mote(api._conn, {
         "name": "Old finished", "status": "done", "estimate": "1h", "date": "2026-08-27",
     })
@@ -426,9 +460,10 @@ def test_a_closing_session_is_not_back_dated_off_today(api):
     assert [s["day"] for s in logged] == [date.today().strftime("%Y-%m-%d")]
 
 
-def test_a_timed_placement_is_left_alone(api, board):
+def test_a_timed_placement_is_left_alone(api, board, monkeypatch):
     """Only a bare, all-day date is auto-placed -- a task already given a
     real time (by a drag, or written by hand) keeps it."""
+    _freeze_today(monkeypatch, "2026-08-24")
     api.schedule(board["backfill"], "2026-08-27")
     before = get_mote(api._conn, board["backfill"]).properties["date"]
     api.days(WEEK_START, WEEK_END)
@@ -440,6 +475,115 @@ def test_the_focus_queue_is_what_is_scheduled_for_today(api, board):
 
     api.schedule(board["backfill"], date.today().isoformat())
     assert "Backfill dry run" in {c["name"] for c in api.focus_tab()["queue"]}
+
+
+# ---- rolling forward and auto-scheduling ----
+
+def test_an_overdue_open_task_rolls_forward_to_today(api, board, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-27")
+    task = create_mote(api._conn, {
+        "name": "Slipped", "status": "todo", "estimate": "1h", "date": "2026-08-24",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, task).properties["date"].startswith("2026-08-27")
+
+
+def test_a_finished_overdue_task_is_left_where_it_was(api, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-27")
+    task = create_mote(api._conn, {
+        "name": "Already done", "status": "done", "estimate": "1h", "date": "2020-01-01",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, task).properties["date"] == "2020-01-01"
+
+
+def test_a_multi_day_booking_never_rolls_forward(api, monkeypatch):
+    """A three-day conference dated last week is not a slipped task --
+    rolling it onto today would delete what the span said."""
+    _freeze_today(monkeypatch, "2026-08-27")
+    booking = create_mote(api._conn, {
+        "name": "Conference", "status": "todo", "date": "2026-08-24/2026-08-26",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, booking).properties["date"] == "2026-08-24/2026-08-26"
+
+
+def test_a_recurring_placement_never_rolls_forward(api, monkeypatch):
+    """A weekly standup anchored last month is not overdue -- the series
+    is still producing this week's occurrence on its own."""
+    _freeze_today(monkeypatch, "2026-08-27")
+    series = create_mote(api._conn, {
+        "name": "Weekly sync", "status": "todo", "estimate": "30m",
+        "date": "2026-08-03T09:00/PT30M\nRRULE:FREQ=WEEKLY",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, series).properties["date"] == \
+        "2026-08-03T09:00/PT30M\nRRULE:FREQ=WEEKLY"
+
+
+def test_rolling_forward_clears_the_pin(api, board, monkeypatch):
+    """Today is not the day a drag pinned this task to."""
+    _freeze_today(monkeypatch, "2026-08-24")
+    api.schedule(board["backfill"], "2026-08-24")
+    _freeze_today(monkeypatch, "2026-08-27")
+    api.days(WEEK_START, WEEK_END)
+    assert "pinned" not in get_mote(api._conn, board["backfill"]).properties
+
+
+def test_auto_schedule_untangles_a_three_way_pileup(api, monkeypatch):
+    from datetime import datetime
+
+    from core.calendar import conflicts as calendar_conflicts
+    from core.entities import Mote
+
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    a = create_mote(conn, {"name": "A", "status": "todo", "estimate": "1h", "date": "2026-08-26 09:00"})
+    b = create_mote(conn, {"name": "B", "status": "todo", "estimate": "1h", "date": "2026-08-26 09:15"})
+    c = create_mote(conn, {"name": "C", "status": "todo", "estimate": "1h", "date": "2026-08-26 09:30"})
+
+    answer = api.auto_schedule(WEEK_START, WEEK_END)
+    assert answer["unresolved"] == []
+    assert {m["name"] for m in answer["moved"]} <= {"A", "B", "C"}
+
+    motes = [Mote(properties=get_mote(conn, mid).properties, id=mid) for mid in (a, b, c)]
+    remaining = calendar_conflicts(
+        motes, bindings=["date"],
+        window_start=datetime.fromisoformat(WEEK_START), window_end=datetime.fromisoformat(WEEK_END),
+    )
+    assert remaining == []
+
+
+def test_auto_schedule_never_moves_a_pinned_task(api, board, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    api.schedule(board["backfill"], "2026-08-26")  # pins 09:30-12:30 (standup ends 09:30)
+    pinned_before = get_mote(conn, board["backfill"]).properties["date"]
+    overlapping = create_mote(conn, {
+        "name": "Collides", "status": "todo", "estimate": "1h", "date": "2026-08-26 10:00",
+    })
+    answer = api.auto_schedule(WEEK_START, WEEK_END)
+    assert get_mote(conn, board["backfill"]).properties["date"] == pinned_before
+    assert any(m["name"] == "Collides" for m in answer["moved"])
+
+
+def test_auto_schedule_reports_two_pinned_tasks_it_cannot_move(api, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    a = create_mote(conn, {"name": "A", "status": "todo", "estimate": "1h"})
+    b = create_mote(conn, {"name": "B", "status": "todo", "estimate": "1h"})
+    api.schedule(a, "2026-08-26")
+    api.schedule(b, "2026-08-26")  # both land at the same earliest slot in turn
+    # Force them onto the same time by hand, as if pinned there directly.
+    from core.motes import update_mote
+    binding = next(
+        k for k in get_mote(conn, a).properties if k not in ("name", "status", "estimate", "pinned")
+    )
+    update_mote(conn, b, {binding: get_mote(conn, a).properties[binding]})
+
+    answer = api.auto_schedule(WEEK_START, WEEK_END)
+    assert {m["id"] for m in answer["unresolved"]} == {a, b}
+    assert answer["moved"] == []
 
 
 # ---- editing ----
