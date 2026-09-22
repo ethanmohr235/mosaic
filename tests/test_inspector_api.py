@@ -73,7 +73,24 @@ def test_label_falls_back_to_id_without_a_name(api):
 def test_template_supplies_the_hints_this_mote_is_missing(api, garden):
     payload = api.inspect_mote(garden["tasks"][0])
     # The template has status, priority and owner; this mote lacks owner.
-    assert payload["hints"] == ["owner"]
+    assert payload["hints"] == [{"key": "owner", "value": ""}]
+
+
+def test_a_hint_carries_the_templates_actual_value(api, garden):
+    """Picking a hint should reproduce what create_instance() would have
+    seeded at creation, not leave the property empty."""
+    species = api.create_mote({"name": "Widget"})["id"]
+    template = api.create_mote({"name": "Widget template", "status": "todo"})["id"]
+    api.set_template(template, species)
+    mote = api.create_mote({"name": "Gizmo"})["id"]
+    api.set_species(mote, species)
+
+    payload = api.inspect_mote(mote)
+    assert payload["hints"] == [{"key": "status", "value": "todo"}]
+
+    hint = payload["hints"][0]
+    payload = api.inspector_set_property(mote, hint["key"], hint["value"])
+    assert payload["properties"]["status"] == "todo"
 
 
 def test_a_species_without_a_template_offers_no_hints(api):

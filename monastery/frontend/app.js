@@ -19,9 +19,9 @@ let payload = null;          // the last calendar() answer
 let bindings = null;         // null until the first answer; then string[]
 let hiddenSpecies = new Set();
 let selectedId = null;
-let panel = null;            // the last focus() answer
 let draft = null;            // {dateKey, start, end, allDay, days, speciesId, rows, rule, left, top}
-let railOpen = true;
+let railW = 214;             // the bindings rail's width, in px -- 0 means pulled shut
+let railResize = null;       // { sx, orig } while the rail's edge is being dragged
 let toastTimer = null;
 let pollTimer = null;
 let refreshSeq = 0;          // guards against two refreshes landing out of order
@@ -161,15 +161,6 @@ function adoptPalette(ids) {
   if (ids) speciesSlots = claimSlots(ids);
 }
 
-/** A mote's colour: its species' palette entry, brighter if it is itself
- *  a species, grey if it has no type at all. */
-function colorOf(entry) {
-  if (!entry) return UNKNOWN_COLOR;
-  if ((entry.kinds || []).includes("species")) return paletteColor(slotOf(entry.id || ""), true);
-  if (!entry.speciesId) return UNKNOWN_COLOR;
-  return paletteColor(slotOf(entry.speciesId), false);
-}
-
 /** The palette entry behind a mote's colour, for the places that need to
  *  build a translucent variant of it rather than the colour itself. */
 function paletteOf(entry) {
@@ -196,15 +187,6 @@ function eventTint(entry, selected) {
     border: `oklch(${face} / ${selected ? 0.85 : 0.32})`,
     color: `oklch(${face})`,
   };
-}
-
-/** What a mote *is*: the kinds core says it is, else its species, else
- *  plain "mote". The same order monarch/frontend/app.js::kindLabel uses. */
-function kindOf(entry) {
-  if (!entry) return "mote";
-  const kinds = entry.kinds || [];
-  if (kinds.length) return kinds.map((k) => k.replace(/_/g, " ")).join(" · ");
-  return entry.speciesName || "mote";
 }
 
 // ---- dates ---------------------------------------------------------
@@ -386,8 +368,6 @@ function drawTopbar() {
   document.querySelectorAll("#modes button").forEach((b) => {
     b.classList.toggle("on", b.dataset.view === view);
   });
-  $("rail-toggle").classList.toggle("on", railOpen);
-  $("rail").classList.toggle("hidden", !railOpen);
 }
 
 function rangeTitle() {
@@ -831,6 +811,66 @@ function chipFor(o, dayKey) {
   return node;
 }
 
+// ---- bindings rail width --------------------------------------------
+//
+// Pulled open or shut from its own right edge, the way Motion's rail
+// works, rather than through a button elsewhere in the topbar.
+
+function railWidthKey() { return "monastery.railW"; }
+
+function loadRailWidth() {
+  try {
+    const raw = window.localStorage.getItem(railWidthKey());
+    if (raw !== null) railW = Math.max(0, parseInt(raw, 10) || 0);
+  } catch (error) {
+    // A window that cannot remember its rail width just uses the default.
+  }
+}
+
+function saveRailWidth() {
+  try {
+    window.localStorage.setItem(railWidthKey(), String(railW));
+  } catch (error) {
+    // Not fatal -- see loadRailWidth.
+  }
+}
+
+function applyRailWidth() {
+  $("rail").style.width = `${railW}px`;
+}
+
+// Below half the usable minimum, a resize collapses the rail shut
+// rather than settling on some odd sliver width -- pulling back out
+// from the edge (where the handle still sits) reopens it at the same
+// minimum, matching Motion's rail.
+function snapRailWidth(value) {
+  const min = 180, max = 420;
+  if (value < min / 2) return 0;
+  return Math.max(min, Math.min(max, value));
+}
+
+function onRailResizeDown(event) {
+  event.preventDefault();
+  $("rail-resize").classList.add("active");
+  railResize = { sx: event.clientX, orig: railW };
+  window.addEventListener("pointermove", onRailResizeMove);
+  window.addEventListener("pointerup", onRailResizeUp);
+}
+
+function onRailResizeMove(event) {
+  if (!railResize) return;
+  railW = snapRailWidth(railResize.orig + (event.clientX - railResize.sx));
+  applyRailWidth();
+}
+
+function onRailResizeUp() {
+  window.removeEventListener("pointermove", onRailResizeMove);
+  window.removeEventListener("pointerup", onRailResizeUp);
+  $("rail-resize").classList.remove("active");
+  railResize = null;
+  saveRailWidth();
+}
+
 // ---- dragging ------------------------------------------------------
 //
 // One pointer layer for every gesture on the grid: moving a placement,
@@ -1091,13 +1131,9 @@ async function commitPlacement(o, start, end) {
   if (scope === "occurrence") {
     selectedId = answer.id;
     selectedKey = null;
-    panel = answer;
     toast(`${answer.name} split off from its series.`);
-  } else if (selectedId === o.id) {
-    panel = answer;
   }
   await refresh();
-  drawPanel();
 }
 
 // ---- this occurrence, or the series? -------------------------------
@@ -1112,7 +1148,7 @@ function askScope(o) {
   return new Promise((resolve) => {
     chooser = { name: o.name, resolve };
     // Every way of asking this -- a drop, the × on a rectangle, the
-    // panel's Delete -- happens inside a click that is still on its way
+    // Delete key -- happens inside a click that is still on its way
     // to the document handler below, where it would read as "clicked
     // away" and cancel the very thing being asked about. The timer runs
     // after that click has been delivered.
@@ -1147,7 +1183,7 @@ function drawChooser() {
 
 // ---- deleting ------------------------------------------------------
 
-/** The placement the panel and the keyboard act on: the one that was
+/** The placement the keyboard and the × button act on: the one that was
  *  clicked, else any of the selected mote's that is on screen. */
 function selectedOccurrence() {
   if (!payload || !selectedId) return null;
@@ -1165,7 +1201,7 @@ async function deleteOccurrence(o) {
     "Could not delete that mote.",
   );
   if (answer === null) return;
-  if (answer.scope === "series" && selectedId === o.id) closePanel();
+  if (answer.scope === "series" && selectedId === o.id) deselect();
   await refresh();
   toast(
     answer.scope === "occurrence"
@@ -1196,7 +1232,7 @@ function drawStatus() {
     : "no bindings active";
 }
 
-// ---- detail panel ----
+// ---- selection ----
 
 async function select(moteId, occurrenceKey, options = {}) {
   selectedId = moteId;
@@ -1205,74 +1241,15 @@ async function select(moteId, occurrenceKey, options = {}) {
   // you meant.
   selectedKey = occurrenceKey || null;
   closeDraft();
-  panel = await call(api.focus(moteId), "Could not read that mote.");
-  drawPanel();
   draw();
-  // The docked panel stays for the things a *placement* has and a mote
-  // does not -- which occurrence was clicked, moving it, detaching it --
-  // while the mote itself opens in the shared inspector.
   await Inspector.open(moteId, { anchor: options.anchor, newTab: !!options.newTab });
 }
 
-function closePanel() {
+function deselect() {
   selectedId = null;
   selectedKey = null;
-  panel = null;
   Inspector.close();
-  $("panel").classList.add("hidden");
   draw();
-}
-
-function drawPanel() {
-  const node = $("panel");
-  if (!panel) { node.classList.add("hidden"); return; }
-  node.classList.remove("hidden");
-
-  $("panel-dot").style.background = colorOf(panel);
-  $("panel-kind-text").style.color = colorOf(panel);
-  $("panel-kind-text").textContent = kindOf(panel);
-  $("panel-name").textContent = panel.name;
-  $("panel-id").textContent = panel.id;
-
-  const placed = clear($("panel-placed"));
-  const occurrence = selectedOccurrence();
-  $("panel-delete").classList.toggle("hidden", !occurrence);
-  if (occurrence) {
-    const row = el("div", "placed-by");
-    row.append(el("span", "key", occurrence.binding));
-    row.append(el("span", "eq", "="));
-    row.append(el("span", "val", String(panel.properties[occurrence.binding] ?? "")));
-    placed.append(row);
-  } else {
-    placed.append(el("div", "panel-empty", "Not placed in this range."));
-  }
-
-  const props = clear($("panel-props"));
-  const keys = Object.keys(panel.properties).sort();
-  if (!keys.length) props.append(el("div", "panel-empty", "No properties."));
-  keys.forEach((key) => {
-    const row = el("div", "prop-row");
-    const label = el("span", "prop-key", key.replace(/_/g, " "));
-    if ((panel.calendarKeys || []).includes(key)) label.classList.add("reserved");
-    row.append(label);
-    const value = panel.properties[key];
-    row.append(el("span", "prop-val", typeof value === "string" ? value : JSON.stringify(value)));
-    props.append(row);
-  });
-
-  const rels = clear($("panel-rels"));
-  if (!panel.relationships.length) rels.append(el("div", "panel-empty", "No relationships."));
-  panel.relationships.forEach((r) => {
-    const row = button("rel-row");
-    row.append(el("span", "rel-arrow", r.outgoing ? "→" : "←"));
-    const dot = el("span", "rel-dot");
-    dot.style.background = colorOf(r.other);
-    row.append(dot);
-    row.append(el("span", "rel-name", r.other.name));
-    row.append(el("span", "rel-type", r.type.replace(/_/g, " ")));
-    row.onclick = () => select(r.other.id);
-    rels.append(row);
-  });
 }
 
 // ---- the draft popover ----
@@ -1293,8 +1270,6 @@ function openDraftAt(point, dateKey, minutes, endMinutes, days) {
 
   selectedId = null;
   selectedKey = null;
-  panel = null;
-  $("panel").classList.add("hidden");
 
   draft = {
     dateKey,
@@ -1302,8 +1277,6 @@ function openDraftAt(point, dateKey, minutes, endMinutes, days) {
     days: Math.max(1, days || 1),
     start: start === null ? "" : fmtMinutes(start),
     end: start === null ? "" : fmtMinutes(end),
-    speciesId: null,
-    rows: [],
     rule: { freq: "NONE", interval: 1, byday: [], count: null, until: null },
     left,
     top,
@@ -1351,45 +1324,6 @@ function drawDraft() {
   $("draft-times").classList.toggle("hidden", draft.allDay);
   $("draft-duration").textContent = draftDuration();
   drawRepeat();
-
-  const species = clear($("draft-species"));
-  const list = payload ? payload.species : [];
-  if (!list.length) {
-    species.append(el("div", "panel-empty", "No species yet — this will be a plain mote."));
-  }
-  list.forEach((s) => {
-    const chip = button("species-chip");
-    const dot = el("span", "species-dot");
-    const color = paletteColor(slotOf(s.id), false);
-    dot.style.background = color;
-    chip.append(dot);
-    chip.append(el("span", null, s.name));
-    if (draft.speciesId === s.id) chip.style.borderColor = color;
-    chip.onclick = () => {
-      draft.speciesId = draft.speciesId === s.id ? null : s.id;
-      drawDraft();
-    };
-    species.append(chip);
-  });
-
-  const rows = clear($("draft-rows"));
-  draft.rows.forEach((row, index) => {
-    const line = el("div", "draft-line draft-row");
-    const key = el("input", "k");
-    key.type = "text";
-    key.placeholder = "key";
-    key.value = row.key;
-    key.oninput = () => { draft.rows[index].key = key.value; };
-    const value = el("input", "v");
-    value.type = "text";
-    value.placeholder = "value";
-    value.value = row.value;
-    value.oninput = () => { draft.rows[index].value = value.value; };
-    const remove = button("icon-button", "×");
-    remove.onclick = () => { draft.rows.splice(index, 1); drawDraft(); };
-    line.append(key, value, remove);
-    rows.append(line);
-  });
 }
 
 /** The repeat controls, drawn by the shared interval widget
@@ -1493,10 +1427,6 @@ function draftProperties() {
   const repeatLines = composeRepeatLines(draft.rule);
   if (repeatLines.length) properties.date = [properties.date, ...repeatLines].join("\n");
 
-  draft.rows.forEach((row) => {
-    const key = row.key.trim();
-    if (key) properties[key] = row.value;
-  });
   return properties;
 }
 
@@ -1506,15 +1436,13 @@ async function createFromDraft() {
   if (properties === null) { toast("That start time isn't readable — try 09:15.", true); return; }
   if (!properties.date) { toast("A new mote needs a date.", true); return; }
 
-  const speciesId = draft.speciesId;
-  const created = await call(api.create_mote(properties, speciesId), "Could not create that mote.");
+  const created = await call(api.create_mote(properties), "Could not create that mote.");
   if (created === null) return;
   closeDraft();
   await refresh();
   selectedId = created.id;
-  panel = created;
-  drawPanel();
   draw();
+  await Inspector.open(created.id);
   toast(`${created.name} created — placed by date.`);
 }
 
@@ -1555,7 +1483,7 @@ async function openGardenMenu() {
       $("garden-name").textContent = answer.garden;
       bindings = null;
       hiddenSpecies = new Set();
-      closePanel();
+      deselect();
       closeDraft();
       await refresh();
     };
@@ -1638,7 +1566,7 @@ function wire() {
   document.querySelectorAll("#modes button").forEach((b) => {
     b.onclick = () => setView(b.dataset.view);
   });
-  $("rail-toggle").onclick = () => { railOpen = !railOpen; draw(); };
+  $("rail-resize").onpointerdown = onRailResizeDown;
   $("garden-btn").onclick = openGardenMenu;
   $("switch-app-btn").onclick = openLauncher;
   $("launcher-overlay").addEventListener("mousedown", (event) => {
@@ -1682,13 +1610,6 @@ function wire() {
     }
   };
 
-  $("panel-close").onclick = closePanel;
-  $("panel-delete").onclick = (event) => {
-    lastPointer = { x: event.clientX, y: event.clientY };
-    const occurrence = selectedOccurrence();
-    if (occurrence) deleteOccurrence(occurrence);
-  };
-
   $("chooser-one").onclick = () => answerChooser("occurrence");
   $("chooser-all").onclick = () => answerChooser("series");
   $("chooser-cancel").onclick = () => answerChooser(null);
@@ -1697,7 +1618,6 @@ function wire() {
     draft.allDay = !draft.allDay;
     drawDraft();
   };
-  $("draft-add-row").onclick = () => { draft.rows.push({ key: "", value: "" }); drawDraft(); };
   $("draft-cancel").onclick = () => { closeDraft(); draw(); };
   $("draft-create").onclick = createFromDraft;
   ["draft-start", "draft-end"].forEach((id) => {
@@ -1754,7 +1674,7 @@ function wire() {
       closeLauncher();
       if (chooser) answerChooser(null);
       else if (draft) { closeDraft(); draw(); }
-      else if (selectedId) closePanel();
+      else if (selectedId) deselect();
       return;
     }
     // Not while typing into the draft -- these are navigation, and a
@@ -1929,6 +1849,8 @@ async function init() {
     onNavigate: (moteId) => Inspector.open(moteId),
   });
   anchor = new Date();
+  loadRailWidth();
+  applyRailWidth();
   wire();
   $("garden-name").textContent = await api.current_garden();
   await refresh();

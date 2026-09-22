@@ -26,7 +26,12 @@
   max-width: calc(100vw - 16px);
   background: var(--panel-bg); border: 1px solid var(--border-soft);
   border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45); z-index: 20;
+  /* Above the shared inspector panel (frontend_shared/inspector.css,
+     z-index: 60) it's now portalled onto <body> out of (interval.js,
+     openPanel) -- 20 predates that panel and was never raised to clear
+     it. Below the context menu (frontend_shared/menu.css, 70), which
+     should still win if both are ever open at once. */
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45); z-index: 65;
 }
 
 .interval-divider { border-top: 1px solid var(--border-soft); margin: 2px 0; }

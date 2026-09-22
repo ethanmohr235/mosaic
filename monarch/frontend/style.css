@@ -420,24 +420,12 @@ main { flex: 1; min-height: 0; display: flex; }
   position: absolute; left: 16px; bottom: 16px; z-index: 5;
   display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
 }
-#quick-add {
-  width: 310px; background: oklch(0.185 0 0);
-  border: 1px solid var(--border-soft); border-radius: 14px; padding: 15px;
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 26px 60px rgba(0, 0, 0, 0.55);
-}
-/* "New mote here" (right-click on empty canvas) opens the form near the
-   click instead of always at the bottom-left corner -- fixed positioning
-   escapes #quick-add-wrap's own flex flow, same idea as #context-menu. */
-#quick-add.floating {
-  position: fixed; top: 0; left: 0; /* overridden inline per-open */
-}
 #quick-add-btn {
   width: 46px; height: 46px; border-radius: 50%; padding: 0;
   background: var(--accent); border: none; color: oklch(0.16 0 0);
   font-size: 22px; line-height: 1;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
 }
-#species-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 
 .chip {
   display: flex; align-items: center; gap: 6px;
@@ -446,12 +434,6 @@ main { flex: 1; min-height: 0; display: flex; }
 }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; }
 .chip .dot.square { border-radius: 2px; }
-.prop-row { display: flex; gap: 6px; margin-bottom: 7px; }
-.prop-row input:first-child { width: 92px; flex-shrink: 0; }
-.prop-row input { flex: 1; min-width: 0; padding: 6px 8px; font-size: 12px; }
-.prop-row button { padding: 0; width: 24px; flex-shrink: 0; background: transparent; color: var(--danger); border-color: var(--danger); }
-.row-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
-.row-actions .ghost { border-style: dashed; font-size: 12px; padding: 6px 10px; }
 
 /* ---- detail panel ---- */
 

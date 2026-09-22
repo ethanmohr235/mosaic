@@ -560,18 +560,21 @@ def _visible_keys(properties: dict) -> list[str]:
     return ordinary + reserved
 
 
-def _template_hints(template, properties: dict) -> list[str]:
+def _template_hints(template, properties: dict) -> list[dict]:
     """The design's "Person usually has role, email, team" chips, sourced
     from the species' template instead of a hardcoded table: the template
     is already the mote whose properties new instances start from, so the
     keys it has and this mote lacks are exactly the ones this mote is
-    missing. A species without a template offers no hints, which is
-    honest -- nothing in the garden has said what this kind of mote
-    usually carries."""
+    missing. Carries the template's value alongside each key so picking a
+    hint reproduces what create_instance() would have seeded at creation,
+    rather than leaving the property empty for the user to fill in by
+    hand. A species without a template offers no hints, which is honest --
+    nothing in the garden has said what this kind of mote usually carries."""
     if template is None:
         return []
-    return sorted(k for k in template.properties
+    keys = sorted(k for k in template.properties
                   if k != "name" and k not in properties and k not in RESERVED_PROPERTIES)
+    return [{"key": k, "value": template.properties[k]} for k in keys]
 
 
 def _enum_vocabulary(siblings: list) -> dict[str, list[str]]:

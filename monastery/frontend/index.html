@@ -57,7 +57,6 @@
       <button type="button" data-view="month">Month</button>
     </div>
 
-    <button id="rail-toggle" class="on" type="button">Bindings</button>
     <button id="refresh-btn" class="topbar-trigger icon-btn" type="button" title="Refresh: sync and reload">⟳</button>
     <button id="switch-app-btn" class="topbar-trigger icon-btn" type="button" title="Switch app (⌘J)">⊞</button>
   </header>
@@ -81,6 +80,8 @@
         <div id="species-rows"></div>
       </div>
     </aside>
+
+    <div id="rail-resize" class="resize-col" role="separator" aria-orientation="vertical"></div>
 
     <main id="cal">
 
@@ -116,7 +117,6 @@
           <span id="draft-title">New mote</span>
           <span id="draft-anchor"></span>
         </div>
-        <div id="draft-species"></div>
         <input id="draft-name" type="text" placeholder="name" spellcheck="false">
         <div class="draft-line">
           <input id="draft-date" type="text" spellcheck="false">
@@ -133,9 +133,7 @@
           <div id="draft-freq-pills"></div>
         </div>
         <div id="draft-repeat-detail"></div>
-        <div id="draft-rows"></div>
         <div id="draft-foot">
-          <button id="draft-add-row" class="dashed" type="button">+ add property</button>
           <div class="spacer"></div>
           <button id="draft-cancel" class="ghost" type="button">Cancel</button>
           <button id="draft-create" class="primary" type="button">Create</button>
@@ -144,35 +142,6 @@
 
       <div id="toast" class="hidden"></div>
     </main>
-
-    <aside id="panel" class="hidden">
-      <div id="panel-head">
-        <div id="panel-top">
-          <div id="panel-kind">
-            <span id="panel-dot"></span>
-            <span id="panel-kind-text">mote</span>
-          </div>
-          <button id="panel-delete" class="panel-delete hidden" type="button">Delete</button>
-          <button id="panel-close" class="close-button" type="button" title="Close">×</button>
-        </div>
-        <div id="panel-name">…</div>
-        <div id="panel-id"></div>
-      </div>
-      <div id="panel-scroll">
-        <section class="panel-section" id="panel-placed-section">
-          <h2>Placed by</h2>
-          <div id="panel-placed"></div>
-        </section>
-        <section class="panel-section">
-          <h2>Properties</h2>
-          <div id="panel-props"></div>
-        </section>
-        <section class="panel-section">
-          <h2>Relationships</h2>
-          <div id="panel-rels"></div>
-        </section>
-      </div>
-    </aside>
 
   </div>
 

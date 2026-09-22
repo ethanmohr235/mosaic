@@ -9,7 +9,6 @@ let currentGarden = null;
 let focusId = null;
 let payload = { motes: [], relationships: [], kinds: {} };
 let allMotes = [];
-let quickAddSpeciesId = null;
 let searchVisible = [];
 let searchHighlight = -1;
 const searchSpeciesFilter = new Set();
@@ -18,7 +17,6 @@ let multiSelectIds = null;             // non-null while the aggregate panel is 
 let clipboard = null;                  // array of {sourceId, properties, offset} from Copy
 let clipboardRelationships = null;     // every relationship touching a copied mote, original ids
 let pasteRepeatCount = 0;              // steps repeated Ctrl+V pastes apart so they don't stack
-let contextMenuWorldPos = null;        // world coords the context menu was opened at
 let reservedProperties = new Set();    // property keys recognized by convention (core/reserved.py)
 let reservedRelTypes = new Set();      // relationship types recognized by convention
 let reservedMeanings = {};             // reserved name -> what it means, for tooltips
@@ -735,7 +733,6 @@ function enterAttractorMode() {
   attractorMode = true;
   graph.setAttractorMode(true);
   closeDetailPanel();
-  closeQuickAdd();
   hideContextMenu();
   if (viewSettingsOpen()) renderViewSettings();
   else openViewSettings();
@@ -1136,189 +1133,24 @@ async function deleteSelection() {
   );
 }
 
-// ---- quick add (with species templates) ----
+// ---- new mote ----
 
-function renderSpeciesChips() {
-  const container = $("species-chips");
-  container.innerHTML = "";
-  const rows = speciesRows().filter((r) => r.id !== "__none__");
-
-  const blank = document.createElement("button");
-  blank.type = "button";
-  blank.className = "chip" + (quickAddSpeciesId === null ? " on" : "");
-  blank.style.borderColor = quickAddSpeciesId === null ? "var(--accent)" : "var(--border)";
-  blank.textContent = "Blank";
-  blank.addEventListener("click", () => { quickAddSpeciesId = null; renderSpeciesChips(); resetQuickAddRows(); });
-  container.appendChild(blank);
-
-  for (const row of rows) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.dataset.speciesId = row.id;
-    chip.style.borderColor = quickAddSpeciesId === row.id ? row.color : "var(--border)";
-    chip.innerHTML = `<span class="dot" style="background:${row.color}"></span><span></span>`;
-    chip.querySelector("span:last-child").textContent = row.label;
-    chip.addEventListener("click", () => selectQuickAddSpecies(row.id));
-    container.appendChild(chip);
-  }
-}
-
-/** Picking a species pre-fills the form from its template, so making the
- *  tenth resistor is picking a chip and typing one number. */
-async function selectQuickAddSpecies(speciesId) {
-  quickAddSpeciesId = speciesId;
-  renderSpeciesChips();
-  const template = await call(api.template_for(speciesId));
-  const rowsEl = $("quick-add-rows");
-  rowsEl.innerHTML = "";
-  const entries = template ? Object.entries(template.properties) : [["name", ""]];
-  for (const [key, value] of entries) {
-    addQuickAddRow(key, typeof value === "string" ? value : JSON.stringify(value));
-  }
-  if (entries.length === 0) addQuickAddRow("name", "");
-}
-
-function addQuickAddRow(key = "", value = "") {
-  const row = document.createElement("div");
-  row.className = "prop-row";
-  const keyInput = document.createElement("input");
-  keyInput.placeholder = "key";
-  keyInput.value = key;
-  const valueInput = document.createElement("input");
-  valueInput.placeholder = "value";
-  valueInput.value = value;
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.textContent = "×";
-  remove.addEventListener("click", () => row.remove());
-  row.append(keyInput, valueInput, remove);
-  $("quick-add-rows").appendChild(row);
-}
-
-function resetQuickAddRows() {
-  $("quick-add-rows").innerHTML = "";
-  addQuickAddRow("name", "");
-}
-
-function collectQuickAddProperties() {
-  const props = {};
-  for (const row of $("quick-add-rows").querySelectorAll(".prop-row")) {
-    const [keyInput, valueInput] = row.querySelectorAll("input");
-    if (keyInput.value.trim()) props[keyInput.value.trim()] = valueInput.value;
-  }
-  return props;
-}
-
-/** Shared close path for the quick-add panel -- the toggle button, Esc, a
- *  click outside it, and a successful create all funnel through here. */
-function closeQuickAdd() {
-  $("quick-add").classList.add("hidden");
-  $("quick-add-btn").textContent = "+";
-  contextMenuWorldPos = null; // closing without creating cancels any pending placement
-}
-
-function setupQuickAdd() {
-  resetQuickAddRows();
-  $("quick-add-btn").addEventListener("click", () => {
-    if (editBlocked()) return;
-    const panel = $("quick-add");
-    if (!panel.classList.contains("hidden")) { closeQuickAdd(); return; }
-    panel.classList.remove("hidden");
-    $("quick-add-btn").textContent = "×";
-    // The ordinary + button always opens at its usual bottom-left spot,
-    // even if a right-click left the panel floating near the cursor.
-    panel.classList.remove("floating");
-    panel.style.left = "";
-    panel.style.top = "";
-    renderSpeciesChips();
-  });
-
-  $("add-property-row").addEventListener("click", () => addQuickAddRow());
-
-  // Enter creates the mote instead of requiring a click on the Create
-  // button, as long as focus is on one of the panel's own text inputs
-  // (so it doesn't fire from, say, a button that happens to have focus).
-  $("quick-add").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target.tagName === "INPUT") {
-      e.preventDefault();
-      $("create-mote-btn").click();
-    }
-  });
-
-  // Matches the context menu's own dismiss-on-outside-click pattern.
-  // Clicks on the toggle button are excluded since its own handler above
-  // already opens/closes the panel; clicks inside the context menu are
-  // excluded too, since "New mote here" is itself the click that opens
-  // this panel and would otherwise immediately close it again on the
-  // same bubble.
-  //
-  // Uses composedPath() rather than a live .contains(e.target) check:
-  // a property row's × button removes its own row, and a species chip
-  // click rebuilds the whole chip strip (renderSpeciesChips()'s
-  // innerHTML = "") -- both detach e.target from the tree before this
-  // listener runs, which would make a live .contains() check wrongly
-  // see the click as "outside". composedPath() is captured at dispatch
-  // time and isn't affected by DOM mutations that happen while bubbling.
-  document.addEventListener("click", (e) => {
-    if ($("quick-add").classList.contains("hidden")) return;
-    const path = e.composedPath();
-    if (
-      path.includes($("quick-add")) ||
-      path.includes($("quick-add-btn")) ||
-      path.includes($("context-menu"))
-    ) return;
-    closeQuickAdd();
-  });
-
-  $("create-mote-btn").addEventListener("click", async () => {
-    if (editBlocked()) return;
-    const props = collectQuickAddProperties();
-    const mote = quickAddSpeciesId
-      ? await call(api.create_instance(quickAddSpeciesId, props))
-      : await call(api.create_mote(props));
-    // "New mote here" (right-click on empty canvas) remembers the click's
-    // world position so the mote lands under the cursor instead of at its
-    // usual hash-seeded spot; the ordinary + button leaves this unset.
-    const placeAt = contextMenuWorldPos;
-    closeQuickAdd();
-    resetQuickAddRows();
-    await refreshMoteCache();
-    await selectMote(mote.id, { pan: !placeAt });
-    if (placeAt) {
-      graph.placeAt(mote.id, placeAt.x, placeAt.y);
-      savePositions();
-    }
-    showToast("Mote created.");
-  });
-}
-
-/** Opens the existing quick-add panel (so species/template selection stays
- *  in one place) but remembers where the click happened, so the mote it
- *  produces lands there instead of at its usual hash-seeded spot -- and
- *  floats the form itself near the click too, rather than leaving it
- *  pinned at the bottom-left corner where it's awkward to reach after
- *  right-clicking somewhere else on a large graph. */
-function openQuickAddAt(worldX, worldY, clientX, clientY) {
+/** Creates a blank mote and hands off to the Inspector immediately --
+ *  species, template defaults (via its hint chips) and every other
+ *  property are the Inspector's job from here. `placeAt`, when given, is
+ *  the world position a right-click ("New mote here") remembered, so the
+ *  mote lands under the cursor instead of at its usual hash-seeded spot;
+ *  the ordinary + button leaves it unset and pans to the new mote instead. */
+async function createMote(placeAt) {
   if (editBlocked()) return;
-  contextMenuWorldPos = { x: worldX, y: worldY };
-  const panel = $("quick-add");
-  panel.classList.remove("hidden");
-  panel.classList.add("floating");
-  panel.style.left = clientX + "px";
-  panel.style.top = clientY + "px";
-  $("quick-add-btn").textContent = "×";
-  renderSpeciesChips();
-
-  // Clamp into the viewport the same way the context menu does, once the
-  // panel has real dimensions to measure.
-  const rect = panel.getBoundingClientRect();
-  if (rect.right > window.innerWidth) {
-    panel.style.left = Math.max(8, window.innerWidth - rect.width - 8) + "px";
+  const mote = await call(api.create_mote({}));
+  await refreshMoteCache();
+  if (placeAt) {
+    graph.placeAt(mote.id, placeAt.x, placeAt.y);
+    savePositions();
   }
-  if (rect.bottom > window.innerHeight) {
-    panel.style.top = Math.max(8, window.innerHeight - rect.height - 8) + "px";
-  }
+  await selectMote(mote.id, { pan: !placeAt });
+  showToast("Mote created.");
 }
 
 /** Arrow-key highlight + Enter-to-choose for a type-to-filter result list
@@ -1643,7 +1475,7 @@ async function openContextMenu(clientX, clientY, targetId, worldX, worldY) {
     menu.appendChild(sep);
     addMenuItem(menu, "Delete", () => deleteSelection(), { danger: true });
   } else {
-    addMenuItem(menu, "New mote here", () => openQuickAddAt(worldX, worldY, clientX, clientY));
+    addMenuItem(menu, "New mote here", () => createMote({ x: worldX, y: worldY }));
     const pasteLabel = clipboard && clipboard.length > 1 ? `Paste ${clipboard.length} motes` : "Paste";
     addMenuItem(menu, pasteLabel, () => pasteAt(worldX, worldY), { disabled: !clipboard });
   }
@@ -2105,8 +1937,8 @@ function setupLauncher() {
 
 
 /** True while a text input/textarea has focus -- Del/Backspace and arrow
- *  keys must not hijack normal text editing inside the detail panel or
- *  quick-add's property fields. */
+ *  keys must not hijack normal text editing inside the detail panel's
+ *  property fields. */
 // ---- arrow-key navigation ----
 //
 // Each arrow key selects whichever visible neighbor sits closest to that
@@ -2234,7 +2066,6 @@ function setupKeyboard() {
     if (launcherIsOpen()) { closeLauncher(); return; }
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (openMenuName) { closeTopMenus(); return; }
-    if (!$("quick-add").classList.contains("hidden")) { closeQuickAdd(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
     // Leaving attractor mode is a smaller step than closing the panel it
     // lives in, so it comes first -- one Esc puts the graph back to
@@ -2354,7 +2185,7 @@ async function init() {
 
   setupTopMenus();
   setupDetailResize();
-  setupQuickAdd();
+  $("quick-add-btn").addEventListener("click", () => createMote(null));
   setupSearch();
   setupViewControls();
   setupViewSettings();

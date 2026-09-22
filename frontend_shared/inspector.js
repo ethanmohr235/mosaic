@@ -275,12 +275,14 @@ const Inspector = (() => {
   }
 
   function close() {
+    IntervalPicker.closeOpen();
     state.open = false;
     state.picking = false;
     render();
   }
 
   function closeTab(index) {
+    IntervalPicker.closeOpen();
     if (index < 0 || index >= state.stack.length) return;
     state.stack.splice(index, 1);
     if (!state.stack.length) {
@@ -493,7 +495,7 @@ const Inspector = (() => {
     // you're typing in with a fresh, unfocused one and the next keystroke
     // goes nowhere. Skip the rebuild while focus is inside it; the stored
     // payload is picked up by the next redraw that isn't mid-edit.
-    if (!bodyHasFocus()) {
+    if (!bodyHasFocus() && !IntervalPicker.isOpen()) {
       els.body.innerHTML = "";
       renderProperties(data);
       renderRelationships(data);
@@ -546,6 +548,7 @@ const Inspector = (() => {
       button.addEventListener("mousedown", (event) => {
         event.stopPropagation();
         if (index === state.active) return;
+        IntervalPicker.closeOpen();
         state.active = index;
         state.picking = false;
         state.why = {};
@@ -632,6 +635,7 @@ const Inspector = (() => {
       ? hostEditor(data, key, meta, value, (next) => writeProperty(key, next, { immediate: true }))
       : null;
     holder.appendChild(custom || valueEditor(data, key, meta, value));
+    if (!custom) wireValueTypeMenu(data, key, meta, value, holder);
 
     row.append(keyEl, holder);
     for (const control of trailingControls(data, key, value)) row.appendChild(control);
@@ -658,6 +662,42 @@ const Inspector = (() => {
       structural(() => api.inspector_delete_property(data.id, key), `${key} removed`));
     row.appendChild(remove);
     return row;
+  }
+
+  /** A property's value has no stored type -- valueEditor (below) picks
+   *  an editor by shape, which only works once a value already exists to
+   *  sniff. This is the other direction: right-click an empty or
+   *  plain-text value to say up front what it should hold. One entry
+   *  today (the interval picker, moved here from Monarch's own inspector
+   *  when the panel was shared -- docs/architecture.md); a future
+   *  property type is another item here, not a redesign. Skipped for
+   *  values that already have a dedicated editor (modoc, enum, ref, map,
+   *  boolean, number) or are already interval-shaped, since those either
+   *  have no business becoming a date or already are one. */
+  function wireValueTypeMenu(data, key, meta, value, holder) {
+    if (key === "modoc") return;
+    if (["enum", "ref", "map", "boolean", "number"].includes(meta.kind)) return;
+    const asText = typeof value === "string" ? value : "";
+    if (asText && IntervalPicker.parse(asText)) return;
+
+    holder.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      ContextMenu.open(event.clientX, event.clientY, [
+        {
+          label: "Date & time…",
+          run: () => {
+            const seed = (asText && IntervalPicker.parse(asText)) ? asText : IntervalPicker.isoOf(new Date());
+            holder.innerHTML = "";
+            const picker = IntervalPicker.field(seed, (next) => writeProperty(key, next, { immediate: true }), {
+              onClear: () => structural(
+                () => api.inspector_set_property(data.id, key, ""), `${key} cleared`),
+            });
+            holder.appendChild(picker);
+            picker.querySelector(".interval-summary-btn")?.click();
+          },
+        },
+      ]);
+    });
   }
 
   /** The one-click follow buttons some reserved keys earn.
@@ -938,14 +978,14 @@ const Inspector = (() => {
     label.textContent = `${data.species.label || "this"} usually has`;
     row.appendChild(label);
 
-    for (const key of data.hints) {
+    for (const { key, value } of data.hints) {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "ins-chip";
       chip.textContent = `+ ${key}`;
-      chip.title = `Add ${key}, empty`;
+      chip.title = `Add ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`;
       chip.addEventListener("click", () =>
-        structural(() => api.inspector_set_property(data.id, key, ""), `${key} added`));
+        structural(() => api.inspector_set_property(data.id, key, value), `${key} added`));
       row.appendChild(chip);
     }
     return row;

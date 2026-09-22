@@ -526,7 +526,17 @@ const IntervalPicker = (() => {
     summaryBtn.className = "interval-summary-btn";
 
     const panel = document.createElement("div");
-    panel.className = "interval-panel hidden";
+    // Also "interval-field": while open, this panel is promoted to a
+    // direct child of <body> (see openPanel) so its `position: fixed`
+    // measures against the viewport rather than getting clipped/
+    // repositioned by an ancestor's backdrop-filter (the shared
+    // inspector's glass panel has one -- frontend_shared/inspector.css
+    // -- and that establishes a containing block for fixed descendants,
+    // which is why the calendar used to only show up, half-cut-off, near
+    // wherever the inspector happened to be). Carrying this class onto
+    // the panel too keeps the module's outside-click composedPath()
+    // check (above) matching once it's no longer inside `wrap`.
+    panel.className = "interval-panel interval-field hidden";
 
     function divider() {
       const d = document.createElement("div");
@@ -825,6 +835,9 @@ const IntervalPicker = (() => {
       window.removeEventListener("resize", reposition);
       window.removeEventListener("scroll", reposition, true);
       if (moveWatcher) { moveWatcher.disconnect(); moveWatcher = null; }
+      // Undo the openPanel portal: put it back next to summaryBtn so a
+      // closed field leaves nothing dangling off <body>.
+      if (panel.parentNode === document.body) wrap.appendChild(panel);
     }
 
     function reposition() {
@@ -837,6 +850,12 @@ const IntervalPicker = (() => {
       if (openPicker) openPicker();
       open = true;
       summaryBtn.classList.add("open");
+      // Promote out of `wrap` to escape any ancestor's backdrop-filter/
+      // transform/filter -- each establishes a containing block for
+      // `position: fixed` descendants, so left in place this panel would
+      // position and clip against the nearest one of those (the shared
+      // inspector panel, in practice) instead of the viewport.
+      document.body.appendChild(panel);
       positionIntervalPanel(panel, summaryBtn);
       openPicker = closePanel;
       // Anything that can move the field under the popup: the window

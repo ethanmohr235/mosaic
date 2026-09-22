@@ -332,46 +332,49 @@ def run_checks(window):
 
     check("a species toggle filters the grid", hiding_a_species_filters_the_grid)
 
-    def clicking_an_event_opens_the_panel():
+    def clicking_an_event_opens_the_inspector():
         js(window, """
             Array.from(document.querySelectorAll('.event'))
                 .find(e => e.querySelector('.event-name').textContent === 'Schema translation').click();
         """)
-        assert wait_until(lambda: text_of(window, "#panel-name") == "Schema translation"), \
-            f"the panel did not open, showing {text_of(window, '#panel-name')!r}"
-        assert text_of(window, "#panel-kind-text") == "Task", \
-            f"the panel should name the species, got {text_of(window, '#panel-kind-text')!r}"
+        assert wait_until(lambda: js(window, "(document.querySelector('.ins .ins-name') || {}).value") == "Schema translation"), \
+            "the shared inspector did not open on the clicked mote"
+        assert text_of(window, ".ins .ins-species") == "Task", \
+            f"the inspector should name the species, got {text_of(window, '.ins .ins-species')!r}"
 
-    check("clicking an event opens its mote in the panel", clicking_an_event_opens_the_panel)
+    check("clicking an event opens its mote in the inspector", clicking_an_event_opens_the_inspector)
 
-    def the_panel_says_which_property_placed_it():
-        placed = text_of(window, "#panel-placed")
-        assert "starts" in placed, f"the panel must name the binding, got {placed!r}"
+    def the_inspector_lists_properties_and_relationships():
+        # Property keys/values live in <input>/<select> elements, not
+        # plain text, so read their .value rather than textContent.
+        keys = js(window, """
+            Array.from(document.querySelectorAll('.ins .ins-key')).map(k => k.value)
+        """)
+        assert "status" in keys, f"properties missing 'status': {keys!r}"
+        values = js(window, """
+            Array.from(document.querySelectorAll('.ins .ins-row input, .ins .ins-row select, .ins .ins-row textarea'))
+                .map(v => v.value)
+        """)
+        assert "in progress" in values, f"'in progress' value missing: {values!r}"
+        assert count(window, ".ins .ins-rel") == 1, "the instance_of relationship should list"
 
-    check("the panel says which property placed the mote", the_panel_says_which_property_placed_it)
+    check("the inspector lists properties and relationships",
+          the_inspector_lists_properties_and_relationships)
 
-    def the_panel_lists_properties_and_relationships():
-        props = text_of(window, "#panel-props")
-        assert "status" in props and "in progress" in props, f"properties missing: {props!r}"
-        assert count(window, "#panel-rels .rel-row") == 1, "the instance_of relationship should list"
+    def a_relationship_navigates_the_inspector():
+        click(window, ".ins .ins-rel .ins-rel-other")
+        assert wait_until(lambda: js(window, "(document.querySelector('.ins .ins-name') || {}).value") == "Task"), \
+            "clicking the relationship did not move the inspector"
 
-    check("the panel lists properties and relationships",
-          the_panel_lists_properties_and_relationships)
+    check("clicking a relationship navigates the inspector", a_relationship_navigates_the_inspector)
 
-    def a_relationship_navigates_the_panel():
-        click(window, "#panel-rels .rel-row")
-        assert wait_until(lambda: text_of(window, "#panel-name") == "Task"), \
-            f"clicking the relationship did not move the panel, got {text_of(window, '#panel-name')!r}"
-
-    check("clicking a relationship navigates the panel", a_relationship_navigates_the_panel)
-
-    def escape_closes_the_panel():
+    def escape_closes_the_inspector():
         js(window, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));")
         assert wait_until(
-            lambda: js(window, "document.getElementById('panel').classList.contains('hidden')")
-        ), "Escape did not close the panel"
+            lambda: js(window, "document.querySelector('.ins').classList.contains('hidden')")
+        ), "Escape did not close the inspector"
 
-    check("Escape closes the detail panel", escape_closes_the_panel)
+    check("Escape closes the inspector", escape_closes_the_inspector)
 
     def the_month_view_draws_a_full_grid():
         click(window, "#modes button[data-view='month']")
@@ -716,19 +719,19 @@ def run_checks(window):
     check("dragging one occurrence of a series can move the whole series",
           dragging_a_series_asks_and_then_moves_all_of_it)
 
-    def the_panels_delete_asks_about_a_series_too():
-        """The other way in. Its click reaches the same document handler
-        the chooser has to survive, so this is not the × check twice."""
+    def the_delete_key_asks_about_a_series_too():
+        """The other way in: the keyboard, not the rectangle's × -- so
+        this is not the × check twice."""
         js(window, """
             Array.from(document.querySelectorAll('.event'))
                 .find(e => e.querySelector('.event-name').textContent === 'Daily sync').click();
         """)
-        assert wait_until(lambda: text_of(window, "#panel-name") == "Daily sync"), \
+        assert wait_until(lambda: js(window, "(document.querySelector('.ins .ins-name') || {}).value") == "Daily sync"), \
             "clicking the event did not select it"
-        click(window, "#panel-delete")
+        js(window, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete'}));")
         assert wait_until(lambda: not js(
             window, "document.getElementById('chooser').classList.contains('hidden')"
-        )), "the panel's Delete must ask which occurrence it meant"
+        )), "the Delete key must ask which occurrence it meant"
         click(window, "#chooser-one")
         assert wait_until(lambda: _daily_syncs(window) == 4), \
             f"four occurrences should remain, got {_daily_syncs(window)}"
@@ -737,8 +740,8 @@ def run_checks(window):
         click(window, "#toast .toast-action")
         assert wait_until(lambda: _daily_syncs(window) == 5), "undo did not restore it"
 
-    check("the panel's Delete asks about a series as well",
-          the_panels_delete_asks_about_a_series_too)
+    check("the Delete key asks about a series as well",
+          the_delete_key_asks_about_a_series_too)
 
     def dragging_a_month_chip_moves_it_by_a_day():
         """A month cell is a day, so a chip moves by whole days -- and
@@ -778,7 +781,7 @@ def run_checks(window):
             Array.from(document.querySelectorAll('.event'))
                 .find(e => e.querySelector('.event-name').textContent === 'Retro').click();
         """)
-        assert wait_until(lambda: text_of(window, "#panel-name") == "Retro"), \
+        assert wait_until(lambda: js(window, "(document.querySelector('.ins .ins-name') || {}).value") == "Retro"), \
             "clicking the event did not select it"
         js(window, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete'}));")
         assert wait_until(
