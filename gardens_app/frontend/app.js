@@ -17,6 +17,7 @@ let selected = null;     // garden name, or null when nothing is selected
 let sync = null;         // the selected garden's api.sync_status(), lazily
 let toastTimer = null;
 let promptResolve = null;   // the open prompt modal's resolver, if any
+let promptValidate = nameProblem;  // whichever check submitPrompt() runs
 let confirmResolve = null;
 
 const $ = (id) => document.getElementById(id);
@@ -232,6 +233,14 @@ function renderDetail() {
   renderSync();
 }
 
+/** The token in a server URL is a bearer credential, not a bearer of
+ *  the human's attention -- shown as-is it's one screen-share or
+ *  screenshot away from a leaked secret, so this window never displays
+ *  it. A folder path has no such thing to hide. */
+function maskSyncTarget(target) {
+  return target.startsWith("http") ? target.replace(/\/\/[^@]*@/, "//•••@") : target;
+}
+
 function renderSync() {
   const garden = current();
   if (!garden) return;
@@ -240,7 +249,8 @@ function renderSync() {
   $("sync-on").classList.toggle("hidden", !on);
   if (!on || !sync) return;
 
-  $("sync-folder").textContent = sync.sync_dir;
+  $("sync-folder-label").textContent = sync.sync_dir.startsWith("http") ? "Server" : "Folder";
+  $("sync-folder").textContent = maskSyncTarget(sync.sync_dir);
   $("sync-auto").checked = !!sync.auto_sync;
 
   // The two numbers worth showing: what this device has written but not
@@ -260,16 +270,25 @@ function renderSync() {
 // system dialog in the middle of a dark window. These two are the same
 // questions in the window's own type.
 
-function askName({ title, note, value = "", okLabel = "Create" }) {
+function askName({
+  title,
+  note,
+  value = "",
+  okLabel = "Create",
+  placeholder = "garden-name",
+  validate = nameProblem,
+}) {
   $("prompt-title").textContent = title;
   $("prompt-note").textContent = note;
   $("prompt-error").classList.add("hidden");
   $("prompt-ok").textContent = okLabel;
   const input = $("prompt-input");
   input.value = value;
+  input.placeholder = placeholder;
   // What a rename started from: submitPrompt() treats that one name as
   // free rather than as a collision with the garden being renamed.
   input.dataset.original = value;
+  promptValidate = validate;
   $("prompt-overlay").classList.remove("hidden");
   input.focus();
   input.select();
@@ -293,6 +312,16 @@ function nameProblem(name) {
     return "Use 1–64 letters, digits, hyphen or underscore.";
   }
   if (gardens.some((g) => g.name === name)) return `‘${name}’ already exists.`;
+  return null;
+}
+
+/** Loose on purpose -- core/sync.py::init is the real authority on what
+ *  it'll accept as a remote target, and rejects it with a toast if not.
+ *  This just catches the empty field and the obviously-not-a-URL typo
+ *  (a folder path pasted here, say) before the round trip. */
+function urlProblem(url) {
+  if (!url) return "A server needs a URL.";
+  if (!/^https?:\/\//.test(url)) return "Paste the server URL, starting with https://.";
   return null;
 }
 
@@ -416,6 +445,24 @@ async function chooseFolder() {
   toast(`‘${garden.name}’ now syncs through ${picked.path}`);
 }
 
+async function connectServer() {
+  const garden = current();
+  if (!garden) return;
+  const url = await askName({
+    title: garden.sync_dir ? `Change ‘${garden.name}’ sync server` : "Connect to a sync server",
+    note: "The server URL from `docker compose up`, including its token: http://<token>@host:8080/ (or https:// behind a TLS proxy).",
+    value: garden.sync_dir && garden.sync_dir.startsWith("http") ? garden.sync_dir : "",
+    okLabel: "Connect",
+    placeholder: "http://<token>@host:8080/",
+    validate: urlProblem,
+  });
+  if (url === null) return;
+  if (!(await call(api.enable_sync(garden.name, url)))) return;
+  await refresh();
+  await select(garden.name);
+  toast(`‘${garden.name}’ now syncs through ${maskSyncTarget(url)}.`);
+}
+
 async function syncNow() {
   const garden = current();
   if (!garden) return;
@@ -445,7 +492,9 @@ function wire() {
   $("delete-btn").onclick = deleteGarden;
 
   $("sync-enable").onclick = chooseFolder;
+  $("sync-enable-server").onclick = connectServer;
   $("sync-change").onclick = chooseFolder;
+  $("sync-change-server").onclick = connectServer;
   $("sync-now").onclick = syncNow;
   $("sync-disable").onclick = stopSync;
   $("sync-auto").onchange = async (event) => {
@@ -482,7 +531,7 @@ function submitPrompt() {
   const name = $("prompt-input").value.trim();
   // Renaming to the name it already has is a no-op, not a collision --
   // nameProblem() only knows the list, so the exception lives here.
-  const problem = name === $("prompt-input").dataset.original ? null : nameProblem(name);
+  const problem = name === $("prompt-input").dataset.original ? null : promptValidate(name);
   if (problem) {
     $("prompt-error").textContent = problem;
     $("prompt-error").classList.remove("hidden");

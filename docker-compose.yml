@@ -7,10 +7,13 @@
 # to this compose file (generate a token with:
 # `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`), then
 # `docker compose up -d`. Point a garden at it with:
-# `python cli/main.py sync init "https://<token>@your-host:8080/" [--clone]`
+# `python cli/main.py sync init "http://<token>@your-host:8080/" [--clone]`
+# (the container speaks plain HTTP; put a TLS-terminating reverse proxy in
+# front and use https:// instead if it's reachable over an untrusted network)
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: monoss_sync
       POSTGRES_USER: monoss
@@ -27,12 +30,13 @@ services:
     build:
       context: .
       dockerfile: sync_server/Dockerfile
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://monoss:${POSTGRES_PASSWORD}@postgres:5432/monoss_sync
-      MONOSS_SYNC_TOKEN: ${MONOSS_SYNC_TOKEN:?generate one with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"}
+      MONOSS_SYNC_TOKEN: "${MONOSS_SYNC_TOKEN:?generate one with python3 -c \"import secrets; print(secrets.token_urlsafe(32))\"}"
     ports:
       - "8080:8080"
 
