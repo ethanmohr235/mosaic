@@ -19,7 +19,6 @@ let keyChoice = null;             // {status, priority, estimate, bindings} once
 let data = null;             // the last answer for the current tab
 let anchor = null;           // Date; any day of the week shown in Days
 let selectedId = null;
-let panel = null;            // the last focus() answer
 let activeId = null;         // which mote the timer is running against
 let railW = 216;             // the rail's width, in px -- 0 means pulled shut
 let railResize = null;       // { sx, orig } while the rail's edge is being dragged
@@ -709,8 +708,8 @@ function renderFocus() {
   const queue = clear($("queue-cards"));
   (data.queue || []).forEach((card) => {
     // In the queue a click picks what the timer is about, rather than
-    // opening the panel -- that is the one thing this list is for -- so
-    // it is not a drag source either.
+    // opening the Inspector -- that is the one thing this list is for --
+    // so it is not a drag source either.
     const node = cardNode(card, true, false);
     node.onclick = () => { activeId = card.id; render(); };
     if (card.id === (activeCard() || {}).id) node.classList.add("selected");
@@ -789,92 +788,6 @@ function subRow(sub, index, moteId) {
   return row;
 }
 
-// ---- rendering: the panel ------------------------------------------
-
-function renderPanel() {
-  const node = $("panel");
-  if (!panel) { node.classList.add("hidden"); return; }
-  node.classList.remove("hidden");
-
-  const color = colorOf(panel);
-  $("panel-dot").style.background = color;
-  $("panel-kind-text").style.color = color;
-  $("panel-kind-text").textContent = kindOf(panel);
-  $("panel-name").textContent = panel.name;
-  $("panel-id").textContent = panel.id;
-
-  // Status pills come from the board's own columns, so the panel offers
-  // exactly the statuses this garden uses -- not a list this file made up.
-  const statuses = clear($("panel-statuses"));
-  const available = boardStatuses();
-  $("panel-status-section").classList.toggle("hidden", !keyChoice || !keyChoice.status);
-  available.forEach((status) => {
-    const pill = button("pill" + (panel.status === status ? " on" : ""), status);
-    pill.onclick = () => setStatus(panel.id, panel.status === status ? null : status);
-    statuses.append(pill);
-  });
-
-  const sched = clear($("panel-sched"));
-  if (panel.scheduled) {
-    const row = el("div", "sched-row");
-    row.append(el("span", "k", panel.scheduled.binding));
-    row.append(el("span", "eq", "="));
-    row.append(el("span", "v", panel.scheduled.start.replace("T", " ")));
-    row.append(el("div", "spacer"));
-    const clearBtn = button("close-button", "×");
-    clearBtn.title = "Unschedule";
-    clearBtn.onclick = () => unschedule(panel.id);
-    row.append(clearBtn);
-    sched.append(row);
-  } else {
-    sched.append(el("div", "sched-row none", "not scheduled"));
-  }
-
-  const props = clear($("panel-props"));
-  const entries = Object.entries(panel.properties || {});
-  if (!entries.length) props.append(el("div", "empty", "no properties"));
-  entries.forEach(([key, value]) => {
-    const isTaskKey = (panel.taskKeys || []).includes(key);
-    const row = el("div", "prop-row" + (isTaskKey ? " task-key" : ""));
-    row.append(el("span", "k", key));
-    row.append(el("span", "v", typeof value === "object" ? JSON.stringify(value) : String(value)));
-    props.append(row);
-  });
-
-  const subs = clear($("panel-subs"));
-  if (!panel.subtasks.length) subs.append(el("div", "empty", "none yet"));
-  panel.subtasks.forEach((sub, index) => subs.append(subRow(sub, index, panel.id)));
-
-  const rels = clear($("panel-rels"));
-  if (!panel.relationships.length) rels.append(el("div", "empty", "none"));
-  panel.relationships.forEach((rel) => {
-    const row = button("rel-row");
-    row.append(el("span", "arrow", rel.outgoing ? "→" : "←"));
-    const dot = el("span", "dot");
-    dot.style.background = colorOf(rel.other);
-    row.append(dot);
-    row.append(el("span", "name", rel.other.name));
-    row.append(el("span", "type", rel.type.replace(/_/g, " ")));
-    row.onclick = () => select(rel.other.id);
-    rels.append(row);
-  });
-}
-
-function boardStatuses() {
-  // The board knows the garden's statuses; the other two tabs do not,
-  // so they fall back to whatever is already on screen plus the mote's
-  // own. Nothing invents a vocabulary -- see core/task_candidates.py.
-  if (data && data.columns) {
-    return data.columns.filter((c) => c.key !== null).map((c) => c.key);
-  }
-  const found = new Set();
-  const lists = [(data && data.pool) || [], (data && data.queue) || []];
-  ((data && data.days) || []).forEach((d) => lists.push(d.cards));
-  lists.flat().forEach((c) => { if (c.status) found.add(c.status); });
-  if (panel && panel.status) found.add(panel.status);
-  return [...found];
-}
-
 // ---- rendering: the chrome -----------------------------------------
 
 function render() {
@@ -888,13 +801,13 @@ function render() {
   // Only the week has a range to step through -- the board and focus
   // tabs have nothing for prev/next/today to mean.
   $("nav").classList.toggle("hidden", tab !== "days");
+  $("auto-schedule-btn").classList.toggle("hidden", tab !== "days");
 
   if (tab === "board") renderBoard();
   else if (tab === "days") renderDays();
   else renderFocus();
 
   renderRail();
-  renderPanel();
   renderChrome();
   renderTimer();
 }
@@ -965,9 +878,6 @@ function renderTimer() {
 
 // ---- actions -------------------------------------------------------
 
-/** The one delete path -- the panel's own button and the card's context
- *  menu both call this, rather than the second growing an inline copy of
- *  the first. */
 async function deleteMote(moteId, name = "That mote") {
   const ok = await call(api.delete_mote(moteId), "Could not delete that mote.");
   if (!ok) return;
@@ -978,12 +888,8 @@ async function deleteMote(moteId, name = "That mote") {
 
 async function select(moteId, options = {}) {
   selectedId = moteId;
-  if (!moteId) { panel = null; Inspector.close(); render(); return; }
-  panel = await call(api.focus(moteId), "Could not read that mote.");
+  if (!moteId) { Inspector.close(); render(); return; }
   render();
-  // The docked panel keeps what is Momentum's own -- status pills drawn
-  // from the board's own columns, subtasks, scheduling -- and the mote
-  // itself goes to the surface every window shares.
   await Inspector.open(moteId, { anchor: options.anchor, newTab: !!options.newTab });
 }
 
@@ -997,7 +903,6 @@ async function moveTo(moteId, status) {
     api.set_status(moteId, keyChoice.status, status, estimateArg), "Could not set that status.",
   );
   if (answer === null) return;
-  if (selectedId === moteId) panel = answer;
   toast(`${answer.name} → ${status}`);
   refresh();
 }
@@ -1006,7 +911,6 @@ async function completeTask(moteId) {
   const [statusArg, , estimateArg] = keyArgs();
   const answer = await call(api.complete_task(moteId, statusArg, estimateArg), "Could not complete that task.");
   if (answer === null) return;
-  if (selectedId === moteId) panel = answer;
   toast(`${answer.name} marked complete.`);
   refresh();
 }
@@ -1014,7 +918,6 @@ async function completeTask(moteId) {
 async function scheduleOn(moteId, day) {
   const answer = await call(api.schedule(moteId, day, ...keyArgs()), "Could not schedule that.");
   if (answer === null) return;
-  if (selectedId === moteId) panel = answer;
   const when = answer.start ? answer.start.replace("T", " ").slice(0, 16) : day;
   if (answer.slotFull) {
     toast(`${answer.name} → ${when} — that day is already full, so it went at the start.`);
@@ -1037,19 +940,22 @@ async function saveWorkingHours() {
 async function unschedule(moteId) {
   const answer = await call(api.unschedule(moteId, keyChoice ? keyChoice.bindings : null), "Could not unschedule that.");
   if (answer === null) return;
-  if (selectedId === moteId) panel = answer;
   toast(`${answer.name} — back in the pool.`);
   refresh();
 }
 
-async function setStatus(moteId, status) {
-  if (!keyChoice || !keyChoice.status) return;
-  const [, , estimateArg] = keyArgs();
+async function autoSchedule() {
+  const [start, end] = visibleRange();
   const answer = await call(
-    api.set_status(moteId, keyChoice.status, status, estimateArg), "Could not set that status.",
+    api.auto_schedule(isoLocal(start), isoLocal(end), ...keyArgs()), "Could not auto-schedule this week.",
   );
   if (answer === null) return;
-  panel = answer;
+  const moved = answer.moved.length;
+  const left = answer.unresolved.length;
+  const movedPart = `Moved ${moved} task${moved === 1 ? "" : "s"}.`;
+  toast(left
+    ? `${movedPart} ${left} conflict${left === 1 ? "" : "s"} left — pinned, or no room left in the day.`
+    : `${movedPart} No conflicts left.`);
   refresh();
 }
 
@@ -1063,8 +969,8 @@ async function createTask(name, status) {
   if (answer === null) { render(); return; }
   toast(`${answer.name} created.`);
   selectedId = answer.id;
-  panel = answer;
   refresh();
+  await Inspector.open(answer.id);
 }
 
 // ---- the timer -----------------------------------------------------
@@ -1227,7 +1133,7 @@ async function openGardenMenu() {
       // for this one mean nothing there -- let Python guess afresh.
       keyChoice = null;
       selectedId = null;
-      panel = null;
+      Inspector.close();
       refresh();
     };
     menu.append(item);
@@ -1375,6 +1281,8 @@ function wire() {
     refresh();
   };
 
+  $("auto-schedule-btn").onclick = autoSchedule;
+
   $("chip-time").onclick = toggleTimer;
   $("run-btn").onclick = toggleTimer;
   $("reset-btn").onclick = resetTimer;
@@ -1382,24 +1290,6 @@ function wire() {
   $("complete-btn").onclick = () => completeSession();
   $("duration-input").onchange = (event) => setSessionMinutes(Number(event.target.value));
   $("stopwatch-toggle").onchange = (event) => setStopwatch(event.target.checked);
-
-  $("panel-close").onclick = () => select(null);
-  $("panel-focus").onclick = () => {
-    if (!panel) return;
-    activeId = panel.id;
-    setTab("focus");
-  };
-  $("panel-delete").onclick = () => panel && deleteMote(panel.id, panel.name);
-  $("panel-add-sub").onclick = async () => {
-    if (!panel) return;
-    const text = window.prompt("Subtask");
-    if (!text || !text.trim()) return;
-    const answer = await call(api.add_subtask(panel.id, text.trim()), "Could not add that subtask.");
-    if (answer === null) return;
-    panel = answer;
-    render();
-    refresh();
-  };
 
   window.addEventListener("keydown", (event) => {
     const typing = event.target instanceof HTMLInputElement;

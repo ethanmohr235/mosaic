@@ -61,6 +61,7 @@
       <button id="chip-time" type="button" title="Start or pause the timer">25:00</button>
     </div>
 
+    <button id="auto-schedule-btn" class="topbar-trigger icon-btn hidden" type="button" title="Auto-schedule: resolve overlaps in this week">⇄</button>
     <button id="refresh-btn" class="topbar-trigger icon-btn" type="button" title="Refresh: sync and reload">⟳</button>
     <button id="switch-app-btn" class="topbar-trigger icon-btn" type="button" title="Switch app (⌘J)">⊞</button>
   </header>
@@ -183,47 +184,6 @@
 
       <div id="toast" class="hidden"></div>
     </main>
-
-    <aside id="panel" class="hidden">
-      <div id="panel-head">
-        <div id="panel-top">
-          <div id="panel-kind">
-            <span id="panel-dot"></span>
-            <span id="panel-kind-text">mote</span>
-          </div>
-          <button id="panel-delete" class="panel-delete" type="button">Delete</button>
-          <button id="panel-close" class="close-button" type="button" title="Close">×</button>
-        </div>
-        <div id="panel-name">…</div>
-        <div id="panel-id"></div>
-      </div>
-      <div id="panel-scroll">
-        <section class="panel-section" id="panel-status-section">
-          <h2>Status</h2>
-          <div id="panel-statuses"></div>
-        </section>
-        <section class="panel-section" id="panel-sched-section">
-          <h2>Scheduled</h2>
-          <div id="panel-sched"></div>
-        </section>
-        <section class="panel-section">
-          <h2>Properties</h2>
-          <div id="panel-props"></div>
-        </section>
-        <section class="panel-section" id="panel-subs-section">
-          <h2>Subtasks</h2>
-          <div id="panel-subs"></div>
-          <button id="panel-add-sub" class="dashed" type="button">+ add subtask</button>
-        </section>
-        <section class="panel-section">
-          <h2>Relationships</h2>
-          <div id="panel-rels"></div>
-        </section>
-        <div id="panel-actions">
-          <button id="panel-focus" class="primary" type="button">Focus on this mote</button>
-        </div>
-      </div>
-    </aside>
 
   </div>
 
