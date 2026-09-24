@@ -1035,3 +1035,52 @@ Motion is a sixth process on the same terms as the other four:
 ephemeral port, and `.webview_data_motion/` is its own WebKit storage.
 A commit made here is not observed by an open Monarch until it refetches
 -- the same rule every adapter lives under. See `docs/ui-setup.md`.
+
+# Annotations
+
+A sticky note is commentary about a view of the graph, not data in it.
+`core/annotations.py` stores one in a garden's own `annotations` table
+(`core/db.py`) -- deliberately its own table, not a mote: an annotation
+must never appear in `list_motes()`/`neighborhood()`/species queries,
+and creating, moving, editing or deleting one never touches
+`core/motes.py`, `core/oplog.py` or `core/sync.py`. Annotations are
+local-only for now -- nothing about them replicates across devices --
+which falls out for free from never writing an oplog row rather than
+from any special-casing in `core/sync.py`.
+
+An annotation's `anchor_mode` is `"world"` (a fixed point in the graph's
+own coordinate space, panning and zooming with it) or `"mote"` (an
+offset from a mote's position, so the note tracks it if the mote moves).
+A mote-anchored annotation's `mote_id` carries no foreign key, on
+purpose, mirroring `simulation_changes`' own no-FK-on-`mote_id`
+precedent: deleting the mote it's anchored to must neither cascade the
+note away nor block the delete, so the row is left to outlive it,
+orphaned rather than destroyed. `frontend_shared/annotations.js` treats
+that as best-effort -- it resolves a live mote-anchored note through
+`graph.nodes`, and falls back to redrawing at the note's last stored
+offset, flagged, once the mote is gone.
+
+`type` and a JSON `data` column exist so a future annotation kind
+(a highlight, a callout arrow, freehand ink) can reuse the same table
+and the same frontend contract rather than forcing a schema change --
+sticky notes are the only kind actually built. `frontend_shared/
+annotations.js` is symlinked in like `undo.js`, but its integration
+runs the other way: it does not own the canvas or any event listener
+itself. The host graph (`monarch/frontend/graph.js` today) calls into
+it from its own render loop and pointer handlers, the same way
+`attractorMode` is a flag/behavior *on* the Graph instance rather than
+a module that reaches in from outside -- `Annotations.draw(ctx)` inside
+the same world-space transform the nodes are drawn in, and `Annotations
+.onMouseDown/onMouseMove/onMouseUp` given first refusal on a gesture
+while `graph.annotateMode` is on. Monarch is the only app wired up to
+it so far; the module makes no Monarch-specific assumption beyond the
+coordinate-transform contract (`_worldAt`/`_worldToScreen`/`camera
+.scale`/`nodes`) another app's own hand-written canvas graph would need
+to expose the same way to adopt it.
+
+Undo/redo (`core/undo.py`'s `UndoManager`) covers annotations the same
+as motes and relationships -- session-only and in-memory either way, so
+wiring one more mutation kind into it added no new coupling to sync or
+the oplog. A note drag pushes through `UndoManager.push`'s existing
+`coalesce_key` support, the same mechanism a property edit's keystrokes
+were already built to use, so a whole drag gesture undoes in one step.

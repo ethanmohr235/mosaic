@@ -279,24 +279,44 @@ def run_checks(window):
     check("cancelling a delete keeps the garden", cancelling_a_delete_keeps_the_garden)
 
     def sync_starts_off_and_can_be_turned_on():
+        # Reaching a real sync server is core/sync.py's job, covered with
+        # a live one (tests/test_sync.py, tests/test_gardens_api.py) --
+        # this only proves the window's own wiring: the button opens the
+        # name modal, the URL that comes back reaches enable_sync(), and
+        # the on-state actually shows what sync_status() reports for it.
+        # api.enable_sync/sync_status are stubbed for exactly that reason,
+        # the same way choose_sync_folder used to be stubbed for the
+        # native dialog it would otherwise have popped.
         select_row(window, "alpha")
         assert js(window, "!document.getElementById('sync-off').classList.contains('hidden')"), (
-            "a garden with no sync folder should show the off state"
+            "a garden with no sync server should show the off state"
         )
 
-        folder = _TMP / "shared"
-        folder.mkdir(exist_ok=True)
-        js(window, f"""
-            api.choose_sync_folder = () => Promise.resolve({{path: {json.dumps(str(folder))}}});
+        server_url = "http://smoke-token@example.test:8080/"
+        js(window, """
+            window.__smokeSyncDir = null;
+            api.enable_sync = (name, url) => {
+                window.__smokeSyncDir = url;
+                return Promise.resolve({garden: name, sync_dir: url, cloned: false});
+            };
+            api.disable_sync = (name) => {
+                window.__smokeSyncDir = null;
+                return Promise.resolve({garden: name, sync_dir: null});
+            };
+            api.sync_status = (name) => Promise.resolve({
+                device_id: 'smoke', sync_dir: window.__smokeSyncDir, local_ops: 0,
+                local_ops_pushed: 0, local_ops_pending: 0, remotes: [],
+            });
         """)
         click(window, "#sync-enable")
+        time.sleep(0.4)
+        answer_prompt(window, server_url)
         assert wait_until(
             lambda: js(window, "!document.getElementById('sync-on').classList.contains('hidden')"),
             timeout=6,
-        ), "choosing a folder should switch the section to the on state"
-        assert text(window, "#sync-folder") == str(folder)
-        assert js(window, "document.querySelectorAll('.sync-dot').length") >= 1, (
-            "a syncing garden should be marked in the list"
+        ), "connecting to a server should switch the section to the on state"
+        assert text(window, "#sync-folder") == "http://•••@example.test:8080/", (
+            "the server URL should show with its token masked"
         )
 
         click(window, "#sync-disable")

@@ -236,9 +236,9 @@ function renderDetail() {
 /** The token in a server URL is a bearer credential, not a bearer of
  *  the human's attention -- shown as-is it's one screen-share or
  *  screenshot away from a leaked secret, so this window never displays
- *  it. A folder path has no such thing to hide. */
+ *  it. */
 function maskSyncTarget(target) {
-  return target.startsWith("http") ? target.replace(/\/\/[^@]*@/, "//•••@") : target;
+  return target.replace(/\/\/[^@]*@/, "//•••@");
 }
 
 function renderSync() {
@@ -249,12 +249,11 @@ function renderSync() {
   $("sync-on").classList.toggle("hidden", !on);
   if (!on || !sync) return;
 
-  $("sync-folder-label").textContent = sync.sync_dir.startsWith("http") ? "Server" : "Folder";
   $("sync-folder").textContent = maskSyncTarget(sync.sync_dir);
   $("sync-auto").checked = !!sync.auto_sync;
 
   // The two numbers worth showing: what this device has written but not
-  // handed to the folder yet, and how many other devices have ever
+  // yet pushed to the server, and how many other devices have ever
   // written into it. Both come straight from core/sync.py::status.
   const pending = sync.local_ops_pending;
   const remotes = (sync.remotes || []).length;
@@ -376,7 +375,7 @@ async function renameGarden() {
   const name = await askName({
     title: `Rename ‘${garden.name}’`,
     note: garden.sync_dir
-      ? "This garden syncs through a shared folder, which tracks it by name — stop syncing first."
+      ? "This garden syncs through a sync server, which tracks it by name — stop syncing first."
       : "Every window already open on this garden keeps its own file handle, so rename before reopening them.",
     value: garden.name,
     okLabel: "Rename",
@@ -434,24 +433,13 @@ async function importGarden() {
 
 // ---- sync actions ---------------------------------------------------
 
-async function chooseFolder() {
-  const garden = current();
-  if (!garden) return;
-  const picked = await call(api.choose_sync_folder());
-  if (!picked || picked.cancelled) return;
-  if (!(await call(api.enable_sync(garden.name, picked.path)))) return;
-  await refresh();
-  await select(garden.name);
-  toast(`‘${garden.name}’ now syncs through ${picked.path}`);
-}
-
 async function connectServer() {
   const garden = current();
   if (!garden) return;
   const url = await askName({
     title: garden.sync_dir ? `Change ‘${garden.name}’ sync server` : "Connect to a sync server",
     note: "The server URL from `docker compose up`, including its token: http://<token>@host:8080/ (or https:// behind a TLS proxy).",
-    value: garden.sync_dir && garden.sync_dir.startsWith("http") ? garden.sync_dir : "",
+    value: garden.sync_dir || "",
     okLabel: "Connect",
     placeholder: "http://<token>@host:8080/",
     validate: urlProblem,
@@ -491,10 +479,8 @@ function wire() {
   $("export-btn").onclick = exportGarden;
   $("delete-btn").onclick = deleteGarden;
 
-  $("sync-enable").onclick = chooseFolder;
-  $("sync-enable-server").onclick = connectServer;
-  $("sync-change").onclick = chooseFolder;
-  $("sync-change-server").onclick = connectServer;
+  $("sync-enable").onclick = connectServer;
+  $("sync-change").onclick = connectServer;
   $("sync-now").onclick = syncNow;
   $("sync-disable").onclick = stopSync;
   $("sync-auto").onchange = async (event) => {

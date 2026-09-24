@@ -100,19 +100,17 @@ def export_garden(garden: str | None = None) -> dict[str, Any]:
 
 # ---- multi-device sync ----
 #
-# A garden syncs either through a shared folder (whatever a tool like
-# Syncthing/Dropbox/iCloud Drive keeps identical across devices) or
-# through a self-hosted sync server (sync_server/) -- pass a local path
-# or an `https://<token>@host/path` URL to sync_init. See core/sync.py.
+# A garden syncs through a self-hosted sync server (sync_server/) -- pass
+# its `http(s)://<token>@host:port/` URL to sync_init. See core/sync.py.
 # sync_init points a garden at one; the others read/write that garden's
 # own change log through it.
 
 
 def sync_init(sync_dir: str, garden: str | None = None, clone: bool = False) -> dict[str, Any]:
-    """Point a garden at a shared sync folder or sync server. If that
-    target already holds sync history for this garden and the garden
-    doesn't exist locally yet, pass clone=True to materialize it from
-    that history -- otherwise this refuses, rather than silently
+    """Point a garden at a sync server (its http(s)://<token>@host:port/
+    URL). If that target already holds sync history for this garden and
+    the garden doesn't exist locally yet, pass clone=True to materialize
+    it from that history -- otherwise this refuses, rather than silently
     creating an empty garden that would then diverge from history you
     clearly meant to join."""
     name = garden or gardens_repo.get_default_garden() or DEFAULT_GARDEN
@@ -130,7 +128,7 @@ def sync_push(garden: str | None = None, resend: bool = False) -> dict[str, Any]
 
 
 def sync_pull(garden: str | None = None) -> dict[str, Any]:
-    """Apply other devices' changes from the sync folder. `skipped`
+    """Apply other devices' changes from the sync server. `skipped`
     lists anything not applied as-is and why: "shadowed" means a local
     edit was already newer (last-write-wins, per property); "delete_won"
     means the entity this change targets was already deleted locally."""
@@ -145,7 +143,7 @@ def sync_run(garden: str | None = None, resend: bool = False) -> dict[str, Any]:
 
 
 def sync_status(garden: str | None = None) -> dict[str, Any]:
-    """This garden's sync configuration and progress: the folder it
+    """This garden's sync configuration and progress: the server it
     syncs through, how many local changes are still unpushed, and how
     far each other known device's changes have been applied."""
     with _connect(garden) as conn:

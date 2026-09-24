@@ -138,31 +138,32 @@ def test_resolve_garden_none_falls_back_when_preferred_deleted():
 
 # ---- sync-dir pointer survives delete/restore, but not a fresh re-create ----
 #
-# get_sync_dir/set_sync_dir (core/gardens.py) point a garden at a shared
-# folder for core/sync.py. Deleting a garden trashes its .db by renaming it
-# aside; the sync-dir pointer must travel with it, otherwise a later,
-# unrelated garden created under the same name would silently inherit it
-# and start pushing/pulling through a shared folder that has nothing to do
-# with it.
+# get_sync_dir/set_sync_dir (core/gardens.py) point a garden at a sync
+# server for core/sync.py -- just an opaque string here, since this layer
+# doesn't care what it contains. Deleting a garden trashes its .db by
+# renaming it aside; the sync-dir pointer must travel with it, otherwise a
+# later, unrelated garden created under the same name would silently
+# inherit it and start pushing/pulling through a sync server that has
+# nothing to do with it.
 
 def test_delete_garden_trashes_the_sync_dir_pointer_too():
     create_garden("work")
-    set_sync_dir("work", "/shared/work")
+    set_sync_dir("work", "http://token@host/work")
     delete_garden("work")
     assert get_sync_dir("work") is None
 
 
 def test_restore_garden_brings_the_sync_dir_pointer_back():
     create_garden("work")
-    set_sync_dir("work", "/shared/work")
+    set_sync_dir("work", "http://token@host/work")
     delete_garden("work")
     restore_garden("work")
-    assert get_sync_dir("work") == "/shared/work"
+    assert get_sync_dir("work") == "http://token@host/work"
 
 
 def test_a_fresh_garden_does_not_inherit_a_deleted_namesakes_sync_dir():
     create_garden("work")
-    set_sync_dir("work", "/shared/work")
+    set_sync_dir("work", "http://token@host/work")
     delete_garden("work")
     create_garden("work")
     assert get_sync_dir("work") is None
@@ -170,7 +171,7 @@ def test_a_fresh_garden_does_not_inherit_a_deleted_namesakes_sync_dir():
 
 def test_clear_sync_dir_removes_it():
     create_garden("work")
-    set_sync_dir("work", "/shared/work")
+    set_sync_dir("work", "http://token@host/work")
     clear_sync_dir("work")
     assert get_sync_dir("work") is None
 
@@ -279,8 +280,8 @@ def test_rename_garden_missing_raises():
 
 
 def test_rename_garden_refuses_while_the_garden_syncs(tmp_path):
-    # core/sync.py keys the shared folder by garden name, so renaming
-    # here would point this device at an empty op stream while the other
+    # The sync server keys a garden's ops by its name, so renaming here
+    # would point this device at an empty op stream while the other
     # devices kept writing to the old one.
     create_garden("work")
     set_sync_dir("work", str(tmp_path))

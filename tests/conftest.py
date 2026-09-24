@@ -61,8 +61,7 @@ def live_sync_server():
     base URL to hand straight to core/sync.py as a sync_dir.
 
     Fresh per call (own container, own port) so two tests never share
-    history through reusing the same garden name -- the same isolation
-    a fresh tmp_path folder already gives the local-folder transport.
+    history through reusing the same garden name.
     """
     import os
 
@@ -105,16 +104,13 @@ def live_sync_server():
                 os.environ["MONOSS_SYNC_TOKEN"] = prior_token
 
 
-@pytest.fixture(params=["folder", "server"])
-def sync_dir(request, tmp_path):
-    """Yields either a local folder path or a live sync-server base URL,
-    letting a test written once exercise both transports identically --
-    core/sync.py's push()/pull()/init() branch on
-    sync_remote.is_remote() but share every merge/conflict/replay code
-    path either way, so the same assertions should hold under both."""
-    if request.param == "folder":
-        yield tmp_path / "shared"
-        return
+@pytest.fixture
+def sync_dir():
+    """A live sync-server base URL -- the only transport core/sync.py
+    speaks. Kept as its own fixture (rather than inlining
+    live_sync_server() into every test) so every test in test_sync.py
+    that takes a `sync_dir` argument skips uniformly when Docker isn't
+    reachable, instead of each one repeating that check."""
     if not DOCKER_AVAILABLE:
         pytest.skip("Docker not available for testcontainers")
     with live_sync_server() as base_url:

@@ -1,13 +1,12 @@
-"""Thin HTTP client for the sync_server transport (sync_server/app.py),
-used by core/sync.py wherever it would otherwise touch a local sync
-folder. No merge/conflict logic here -- push()/pull()/init() in
-core/sync.py call these functions exactly where they'd write/list/read
-`.jsonl` files, and stay unaware of which transport supplied the ops.
+"""Thin HTTP client for the sync_server transport (sync_server/app.py) --
+the only sync transport core/sync.py speaks. push()/pull()/init() there
+call straight through to the functions below wherever they'd write/list/
+read `.jsonl` files under an older, since-removed folder transport.
 
 The auth token travels embedded in the sync_dir URL's userinfo
 (`https://<token>@host/path`), the same way a git remote carries
 credentials -- so core/gardens.py's set_sync_dir/get_sync_dir need no
-schema change: a remote sync_dir is still just one opaque string.
+schema change: a sync_dir is still just one opaque string.
 """
 from pathlib import Path
 from typing import Any
@@ -16,10 +15,6 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 _TIMEOUT = 30.0
-
-
-def is_remote(sync_dir: str | Path) -> bool:
-    return str(sync_dir).startswith(("http://", "https://"))
 
 
 def _split(sync_dir: str) -> tuple[str, str | None]:
@@ -32,7 +27,14 @@ def _split(sync_dir: str) -> tuple[str, str | None]:
     return base.rstrip("/"), parts.username
 
 
-def _client(sync_dir: str) -> httpx.Client:
+def _client(sync_dir: str | Path) -> httpx.Client:
+    sync_dir = str(sync_dir)
+    if not sync_dir.startswith(("http://", "https://")):
+        raise ValueError(
+            f"{sync_dir!r} is not a sync server URL -- point this garden at a "
+            "sync server instead (docker compose up, then `sync init "
+            '"http://<token>@host:8080/"`)'
+        )
     base, token = _split(sync_dir)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     return httpx.Client(base_url=base, headers=headers, timeout=_TIMEOUT)

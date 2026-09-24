@@ -1,7 +1,6 @@
-# Self-hosted sync server (sync_server/) for productized multi-device/
-# multi-user sync -- see core/sync.py's module docstring for the folder-
-# based transport this is a server-backed alternative to, and
-# sync_server/app.py for the API it serves.
+# Self-hosted sync server (sync_server/) for multi-device sync -- the
+# only sync transport MonOSS speaks (see core/sync.py's module docstring),
+# and sync_server/app.py for the API it serves.
 #
 # Usage: put POSTGRES_PASSWORD and MONOSS_SYNC_TOKEN in a .env file next
 # to this compose file (generate a token with:

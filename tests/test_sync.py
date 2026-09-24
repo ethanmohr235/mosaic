@@ -3,15 +3,10 @@ gardens/ directory (so it gets its own database and its own device_id),
 and both point core/sync.py at one shared `sync_dir` standing in for
 whatever two real machines would actually sync through.
 
-Every test below is parametrized over both transports via the `sync_dir`
-fixture (tests/conftest.py): a local tmp folder standing in for a real
-Syncthing/Dropbox/iCloud folder, and a live sync_server (sync_server/)
-backed by a real ephemeral Postgres, standing in for a real deployment.
-core/sync.py's push()/pull()/init() branch on which one they were given,
-but share every merge/conflict/replay code path regardless -- so the
-same assertions hold under both, which is the direct proof that swapping
-transports doesn't change sync's behavior. The server param is skipped
-automatically where Docker isn't available to run testcontainers.
+Every test below gets its `sync_dir` from the fixture of that name
+(tests/conftest.py): a live sync_server (sync_server/) backed by a real
+ephemeral Postgres, standing in for a real deployment. That fixture is
+skipped automatically where Docker isn't available to run testcontainers.
 
 core.device.get_device_id() and every core.gardens.py/core.db.py path
 read core.db.GARDENS_DIR fresh on every call, so switching which

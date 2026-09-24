@@ -101,11 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     # in main() the same way `garden` itself is.
     sync_parser = subparsers.add_parser("sync", help="Sync a garden between devices")
     sync_sub = sync_parser.add_subparsers(dest="action")
-    sync_init = sync_sub.add_parser("init", help="Point this garden at a shared sync folder or sync server")
+    sync_init = sync_sub.add_parser("init", help="Point this garden at a sync server")
     sync_init.add_argument(
-        "folder",
-        help="Path to the shared folder (e.g. a Syncthing/Dropbox/iCloud folder), "
-             "or an https://<token>@host/path sync server URL",
+        "url",
+        help="The sync server's URL, as http(s)://<token>@host:port/ "
+             "(see docker-compose.yml for running one)",
     )
     sync_init.add_argument(
         "--clone", action="store_true",
@@ -340,11 +340,11 @@ def _handle_garden(args) -> None:
 
 
 def _handle_sync_init(garden: str, args) -> None:
-    result = sync_repo.init(garden, args.folder, clone=args.clone)
+    result = sync_repo.init(garden, args.url, clone=args.clone)
     if result["cloned"]:
-        print(f"Garden {garden!r} synced to {args.folder} (cloned existing history)")
+        print(f"Garden {garden!r} synced to {args.url} (cloned existing history)")
     else:
-        print(f"Garden {garden!r} now syncs through {args.folder}")
+        print(f"Garden {garden!r} now syncs through {args.url}")
 
 
 def _print_sync_notes(skipped: list[dict]) -> None:
@@ -370,9 +370,9 @@ def _handle_sync(conn, garden: str, args) -> None:
     elif args.action == "status":
         result = sync_repo.status(conn, garden)
         if result["sync_dir"] is None:
-            print(f"Garden {garden!r} is not syncing -- run `sync init <folder>` first")
+            print(f"Garden {garden!r} is not syncing -- run `sync init <url>` first")
             return
-        print(f"Sync folder: {result['sync_dir']}")
+        print(f"Sync server: {result['sync_dir']}")
         print(f"Local changes: {result['local_ops']} total, {result['local_ops_pending']} not yet pushed")
         if not result["remotes"]:
             print("No other device has synced with this garden yet.")

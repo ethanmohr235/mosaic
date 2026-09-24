@@ -40,7 +40,7 @@ def delete_garden(name: str) -> None:
     # The sync-dir pointer (set_sync_dir) is trashed alongside the .db,
     # not left behind -- otherwise a brand-new, unrelated garden later
     # created under this same name would silently inherit it and start
-    # pushing/pulling through a shared folder that has nothing to do with
+    # pushing/pulling through a sync server that has nothing to do with
     # it. restore_garden() below brings it back with the rest.
     sync_dir = _sync_dir_path(name)
     if sync_dir.exists():
@@ -95,16 +95,15 @@ def rename_garden(old: str, new: str) -> str:
     _auto_sync_path() sit beside it named after it, so a rename that
     moved only the database would silently strand both -- the renamed
     garden would come back unsynced, and a later garden reusing the old
-    name would inherit a sync folder that has nothing to do with it.
+    name would inherit a sync server that has nothing to do with it.
     Same reasoning as delete_garden()'s trashing of the sidecars.
 
-    Refused while the garden syncs: core/sync.py keys the shared folder
-    by garden name (_ops_dir is <sync_dir>/<garden>/ops), so renaming
-    here would point this device at a fresh, empty op stream while the
-    other devices kept writing to the old one -- two halves of one
-    garden that never converge again. Turning sync off, renaming, then
-    re-initing is the flow that actually works, and it is better asked
-    for than discovered."""
+    Refused while the garden syncs: the sync server keys a garden's ops
+    by its name, so renaming here would point this device at a fresh,
+    empty op stream while the other devices kept writing to the old one
+    -- two halves of one garden that never converge again. Turning sync
+    off, renaming, then re-initing is the flow that actually works, and
+    it is better asked for than discovered."""
     validate_garden_name(new)
     if not garden_exists(old):
         raise LookupError(f"No such garden: {old!r}")
@@ -112,7 +111,7 @@ def rename_garden(old: str, new: str) -> str:
         raise FileExistsError(f"Garden already exists: {new!r}")
     if get_sync_dir(old) is not None:
         raise ValueError(
-            f"Garden {old!r} is syncing through a shared folder, which tracks it "
+            f"Garden {old!r} is syncing through a sync server, which tracks it "
             "by name. Disable sync, rename, then set sync up again."
         )
 
@@ -168,8 +167,8 @@ def _sync_dir_trash_path(name: str) -> Path:
 
 
 def get_sync_dir(name: str) -> str | None:
-    """The folder this garden syncs through (core/sync.py), or None if
-    `sync init` has never been run for it. Per garden, not per device --
+    """The sync server URL this garden syncs through (core/sync.py), or
+    None if `sync init` has never been run for it. Per garden, not per device --
     a pointer file beside the garden's own .db, same pattern as
     _default_garden_config_path() above."""
     path = _sync_dir_path(name)

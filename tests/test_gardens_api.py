@@ -2,7 +2,7 @@
 
 Most of this moved here from tests/test_api.py, where it tested the same
 verbs inside Monarch -- creating, deleting, restoring, importing and
-exporting a garden, and pointing one at a sync folder. Two things
+exporting a garden, and pointing one at a sync server. Two things
 changed in the move and are tested as such: delete no longer refuses the
 last or the current garden (this window is open on none), and rename is
 new.
@@ -115,8 +115,8 @@ def test_rename_garden_moves_it_and_keeps_its_contents(api):
     assert row["motes"] == 1
 
 
-def test_rename_garden_refuses_while_it_syncs(api, tmp_path):
-    api.enable_sync("test", str(tmp_path))
+def test_rename_garden_refuses_while_it_syncs(api, sync_dir):
+    api.enable_sync("test", sync_dir)
     with pytest.raises(ValueError, match="syncing"):
         api.rename_garden("test", "renamed")
     assert garden_exists("test")
@@ -191,22 +191,22 @@ def test_a_failed_import_does_not_leave_the_new_garden_behind(api, tmp_path):
 
 # ---- sync, per garden ----
 
-def test_enable_sync_points_one_garden_at_a_folder(api, tmp_path):
+def test_enable_sync_points_one_garden_at_a_server(api, sync_dir):
     create_garden("other")
-    api.enable_sync("test", str(tmp_path))
+    api.enable_sync("test", sync_dir)
 
-    assert get_sync_dir("test") == str(tmp_path)
+    assert get_sync_dir("test") == sync_dir
     assert get_sync_dir("other") is None
 
 
-def test_disable_sync_clears_it(api, tmp_path):
-    api.enable_sync("test", str(tmp_path))
+def test_disable_sync_clears_it(api, sync_dir):
+    api.enable_sync("test", sync_dir)
     assert api.disable_sync("test") == {"garden": "test", "sync_dir": None}
     assert get_sync_dir("test") is None
 
 
-def test_auto_sync_round_trips(api, tmp_path):
-    api.enable_sync("test", str(tmp_path))
+def test_auto_sync_round_trips(api, sync_dir):
+    api.enable_sync("test", sync_dir)
     assert api.sync_status("test")["auto_sync"] is True
 
     api.set_auto_sync("test", False)
@@ -214,19 +214,14 @@ def test_auto_sync_round_trips(api, tmp_path):
     assert api.sync_status("test")["auto_sync"] is False
 
 
-def test_sync_now_pushes_that_garden(api, tmp_path):
+def test_sync_now_pushes_that_garden(api, sync_dir):
     # Written before sync is turned on: an app bridge pushes on shutdown
     # when the garden already has a sync dir (its _best_effort_sync), and
     # there would then be nothing left for this call to prove.
     _fill("test", "Alice")
-    api.enable_sync("test", str(tmp_path))
+    api.enable_sync("test", sync_dir)
     result = api.sync_now("test")
     assert result["push"]["pushed"] >= 1
-
-
-def test_choose_sync_folder_cancelled(api):
-    api._window = _StubWindow(None)
-    assert api.choose_sync_folder() == {"cancelled": True}
 
 
 # ---- opening an app ----

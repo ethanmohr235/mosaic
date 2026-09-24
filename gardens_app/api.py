@@ -197,12 +197,12 @@ class Api:
 
     # ---- sync ----
     #
-    # The same folder-sync controls Monarch carried in Tools -> Sync,
-    # except per garden rather than for whichever one that window
-    # happened to be open on. core/sync.py does the real work; this is
-    # enable/disable, folder choice, a manual run, and the auto-sync
-    # flag that gates each app's lifecycle sync points (open, garden
-    # switch, close) -- "automatic" means those call sites, not a timer.
+    # The same sync controls Monarch carried in Tools -> Sync, except per
+    # garden rather than for whichever one that window happened to be
+    # open on. core/sync.py does the real work; this is enable/disable,
+    # a manual run, and the auto-sync flag that gates each app's
+    # lifecycle sync points (open, garden switch, close) -- "automatic"
+    # means those call sites, not a timer.
 
     @_synchronized
     def sync_status(self, name: str) -> dict:
@@ -215,18 +215,11 @@ class Api:
         return status
 
     @_synchronized
-    def choose_sync_folder(self) -> dict:
-        path = self._window.create_file_dialog(webview.FileDialog.FOLDER)
-        if not path:
-            return {"cancelled": True}
-        return {"path": path if isinstance(path, str) else path[0]}
-
-    @_synchronized
-    def enable_sync(self, name: str, folder: str) -> dict:
+    def enable_sync(self, name: str, url: str) -> dict:
         # clone=True is always safe here: the only thing it covers is
         # "the garden doesn't exist locally yet," which can't be true of
         # one this window just listed.
-        return sync_repo.init(name, folder, clone=True)
+        return sync_repo.init(name, url, clone=True)
 
     @_synchronized
     def disable_sync(self, name: str) -> dict:

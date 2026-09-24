@@ -74,22 +74,18 @@
         <div class="section-title">Sync</div>
 
         <div id="sync-off">
-          <p class="note">This garden isn’t syncing. Point it at a folder shared
-          between your devices (Syncthing, Dropbox, iCloud Drive…), or at a
-          sync server (<code>docker compose up</code>), and every window on
-          it converges through an append-only log.</p>
-          <div class="button-row">
-            <button id="sync-enable" class="pill-btn" type="button">Choose folder…</button>
-            <button id="sync-enable-server" class="pill-btn" type="button">Connect to server…</button>
-          </div>
+          <p class="note">This garden isn’t syncing. Point it at your
+          self-hosted sync server (<code>docker compose up</code>, see
+          docker-compose.yml) and every window on it converges through an
+          append-only log.</p>
+          <button id="sync-enable" class="pill-btn" type="button">Connect to server…</button>
         </div>
 
         <div id="sync-on" class="hidden">
           <div class="field-row">
-            <span id="sync-folder-label" class="field-label">Folder</span>
+            <span class="field-label">Server</span>
             <span id="sync-folder" class="field-value mono-note"></span>
             <button id="sync-change" class="pill-btn" type="button">Change…</button>
-            <button id="sync-change-server" class="pill-btn" type="button">Server…</button>
           </div>
           <label class="field-row">
             <span class="field-label">Sync automatically</span>

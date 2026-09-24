@@ -573,8 +573,7 @@ def test_preview_simulation_is_quiet_when_constraints_hold(box):
 # other tools here do.
 
 
-def test_sync_init_then_status_reports_the_folder(tmp_path):
-    sync_dir = str(tmp_path / "shared")
+def test_sync_init_then_status_reports_the_server(sync_dir):
     result = sync_init(sync_dir, GARDEN)
     assert result["garden"] == GARDEN
     assert result["cloned"] is False
@@ -584,23 +583,23 @@ def test_sync_init_then_status_reports_the_folder(tmp_path):
     assert status["remotes"] == []
 
 
-def test_sync_push_then_status_shows_nothing_pending(tmp_path):
+def test_sync_push_then_status_shows_nothing_pending(sync_dir):
     create_mote({"name": "Alice"}, GARDEN)
-    sync_init(str(tmp_path / "shared"), GARDEN)
+    sync_init(sync_dir, GARDEN)
 
     pushed = sync_push(GARDEN)
     assert pushed["pushed"] == 1
     assert sync_status(GARDEN)["local_ops_pending"] == 0
 
 
-def test_sync_pull_with_no_other_device_is_a_noop(tmp_path):
-    sync_init(str(tmp_path / "shared"), GARDEN)
+def test_sync_pull_with_no_other_device_is_a_noop(sync_dir):
+    sync_init(sync_dir, GARDEN)
     assert sync_pull(GARDEN) == {"applied": 0, "skipped": []}
 
 
-def test_sync_run_pushes_and_pulls_in_one_call(tmp_path):
+def test_sync_run_pushes_and_pulls_in_one_call(sync_dir):
     create_mote({"name": "Alice"}, GARDEN)
-    sync_init(str(tmp_path / "shared"), GARDEN)
+    sync_init(sync_dir, GARDEN)
 
     result = sync_run(GARDEN)
     assert result["push"]["pushed"] == 1
