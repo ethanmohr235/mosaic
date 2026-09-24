@@ -177,6 +177,7 @@ class MonossGraph {
     this.colors = { ...DEFAULT_COLORS, species: {} };
     this.attractors = {};          // species id (or __none__) -> {x, y}
     this.attractorMode = false;    // arranging attractors: read-only, no editing gestures
+    this.annotateMode = false;     // placing/editing sticky notes (frontend_shared/annotations.js)
     this.hoverAttractorId = null;
     this._moteById = new Map();
     this._colorCache = new Map();  // mote id -> colour, dropped whenever data or settings change
@@ -363,6 +364,21 @@ class MonossGraph {
       });
     }
     return points;
+  }
+
+  /** Mirrors setAttractorMode: any half-finished gesture from before the
+   *  switch would otherwise finish in the other mode's rules. Mutually
+   *  exclusive with attractor mode is app.js's job (enterAnnotateMode/
+   *  enterAttractorMode), not this method's -- it only clears this mode's
+   *  own gesture state. */
+  setAnnotateMode(active) {
+    this.annotateMode = !!active;
+    this.dragState = null;
+    this.connectState = null;
+    this.connectSourceId = null;
+    this.boxState = null;
+    this.hoverId = null;
+    this.canvas.style.cursor = "default";
   }
 
   setAttractorMode(active) {
@@ -927,7 +943,12 @@ class MonossGraph {
     this._drawEdges(ctx, bg, neighbours);
     this._drawNodes(ctx, labelBg, neighbours);
     if (this.attractorMode) this._drawAttractors(ctx, labelBg);
+    // Both world- and mote-anchored notes are world coordinates, so they
+    // belong inside this transform like the nodes above -- drawn whenever
+    // any exist, not just while actively placing/editing one.
+    if (Annotations.hasNotes()) Annotations.draw(ctx);
     ctx.restore();
+    Annotations.tick();
 
     // Attractor mode fences off the viewport, in the relationship blue:
     // it means "what you're looking at isn't the ordinary editable
@@ -1269,6 +1290,15 @@ class MonossGraph {
     }
     if (e.button !== 0) return; // right button is handled by contextmenu
 
+    // Annotate mode owns the left button outright too, same reasoning as
+    // attractor mode below: placing/dragging/editing a note must not also
+    // drag a node or start a box-select underneath it. Middle-click pan
+    // (handled above) and wheel-zoom stay live either way.
+    if (this.annotateMode) {
+      Annotations.onMouseDown(e);
+      return;
+    }
+
     // Attractor mode owns the left button outright: you either grab a
     // handle or you do nothing. No node drag, no connect, no box-select --
     // being unable to change the graph from here is the point of the mode.
@@ -1316,6 +1346,13 @@ class MonossGraph {
   };
 
   _onMouseMove = (e) => {
+    // Checked before annotateMode below so a middle-click pan started
+    // while annotate mode is on still moves the camera -- see this
+    // method's panState branch further down.
+    if (this.annotateMode && !this.panState) {
+      Annotations.onMouseMove(e);
+      return;
+    }
     if (this.attractorDrag) {
       const world = this._worldAt(e.clientX, e.clientY);
       this.setAttractor(this.attractorDrag.id, world.x, world.y);
@@ -1407,6 +1444,10 @@ class MonossGraph {
   };
 
   _onMouseUp = (e) => {
+    if (this.annotateMode && !this.panState) {
+      Annotations.onMouseUp(e);
+      return;
+    }
     if (this.attractorDrag) {
       const { id } = this.attractorDrag;
       this.attractorDrag = null;

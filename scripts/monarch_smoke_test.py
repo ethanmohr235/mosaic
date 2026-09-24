@@ -21,10 +21,12 @@ Never touches real data: GARDENS_DIR and the webview storage_path both
 point at a fresh temp directory.
 """
 import json
+import os
 import sys
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -61,6 +63,8 @@ def check(name, fn):
     except Exception as e:
         results.append((name, False, str(e)))
         print(f"FAIL  {name}: {e}")
+        if os.environ.get("MONOSS_SMOKE_TRACEBACK"):
+            traceback.print_exc()
 
 
 def js(window, code):
@@ -351,109 +355,40 @@ def run_checks(window):
 
     check("species template: New instance copies template properties", species_and_templating)
 
-    def quick_add_prefills_from_template():
+    def quick_add_creates_and_selects_a_mote():
+        # Quick-add ("+ ") used to open a form panel to fill in before
+        # creating -- it's Inspector-driven now (commit c2aa50f): the
+        # button creates a blank mote immediately and opens its panel,
+        # same as "New mote here" on the canvas. Its own throwaway garden
+        # so the blank mote it leaves behind doesn't perturb the 'default'
+        # garden's layout for every later check that clicks or drags
+        # against computed canvas positions.
+        create_garden('smoke-quickadd')
+        js_async(window, """
+            async () => {
+                await api.switch_garden('smoke-quickadd');
+                await loadGarden('smoke-quickadd');
+                window.__result = 'ok';
+            }
+        """, wait=2.0)
+
+        before = js(window, "graph.nodes.size")
         js(window, "document.getElementById('quick-add-btn').click();")
-        time.sleep(1.0)
-        js(window, """
-            const chip = document.querySelector(
-                '#species-chips .chip[data-species-id=\"' + window.__seed.speciesId + '\"]');
-            chip.click();
-        """)
         time.sleep(1.5)
-        rows = json.loads(js(window, """
-            JSON.stringify(Array.from(document.querySelectorAll('#quick-add-rows .prop-row'))
-                .map(r => Array.from(r.querySelectorAll('input')).map(i => i.value)))
-        """))
-        assert ["resistance", "100"] in rows, f"picking a species should prefill from its template, got {rows}"
+        after = js(window, "graph.nodes.size")
+        assert after == before + 1, f"quick-add should create exactly one mote, got {before} -> {after}"
+        shown = js(window, "!document.querySelector('.ins').classList.contains('hidden')")
+        assert shown is True, "quick-add should select the new mote and open its panel"
 
-        js(window, """
-            const rows = document.querySelectorAll('#quick-add-rows .prop-row');
-            for (const r of rows) {
-                const [k, v] = r.querySelectorAll('input');
-                if (k.value === 'name') v.value = 'R99';
+        js_async(window, """
+            async () => {
+                await api.switch_garden('default');
+                await loadGarden('default');
+                window.__result = 'ok';
             }
-            document.getElementById('create-mote-btn').click();
-        """)
-        time.sleep(2.5)
-        name = js(window, "document.querySelector('.ins-name').value")
-        assert name == "R99", f"quick-add should create and select the new mote, got {name!r}"
+        """, wait=2.0)
 
-    check("quick add: species chip prefills from template", quick_add_prefills_from_template)
-
-    def quick_add_enter_key_creates_mote():
-        js(window, "document.getElementById('quick-add-btn').click();")
-        time.sleep(1.0)
-        js(window, """
-            const rows = document.querySelectorAll('#quick-add-rows .prop-row');
-            for (const r of rows) {
-                const [k, v] = r.querySelectorAll('input');
-                if (k.value === 'name') {
-                    v.value = 'EnterMote';
-                    v.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
-                }
-            }
-        """)
-        time.sleep(2.0)
-        name = js(window, "document.querySelector('.ins-name').value")
-        assert name == "EnterMote", f"Enter in quick-add should create the mote, got {name!r}"
-        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
-        assert hidden is True, "creating via Enter should close the quick-add panel"
-
-    check("quick add: Enter key creates the mote", quick_add_enter_key_creates_mote)
-
-    def quick_add_closes_on_outside_click():
-        js(window, "document.getElementById('quick-add-btn').click();")
-        time.sleep(1.0)
-        opened = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
-        assert opened is False, "quick-add should be open before this check"
-
-        # A real click (mousedown+mouseup from an actual user) fires a
-        # 'click' event that bubbles to document -- drag()'s synthetic
-        # mousedown/mousemove/mouseup doesn't, so this dispatches the
-        # 'click' itself to exercise the same outside-click listener.
-        js(window, """
-            document.getElementById('graph').dispatchEvent(new MouseEvent('click', {
-                clientX: 60, clientY: 60, bubbles: true, cancelable: true,
-            }));
-        """)
-        time.sleep(0.5)
-        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
-        assert hidden is True, "clicking outside the quick-add panel should close it"
-
-    check("quick add: clicking outside the panel closes it", quick_add_closes_on_outside_click)
-
-    def quick_add_property_delete_and_species_pick_dont_close_panel():
-        # Regression check: a property row's remove button detaches its
-        # own row from the DOM, and a species chip click rebuilds the
-        # whole chip strip -- both used to be misread as "outside" clicks
-        # by the outside-click listener because it checked .contains()
-        # after the target was already gone. See app.js::setupQuickAdd.
-        js(window, "document.getElementById('quick-add-btn').click();")
-        time.sleep(1.0)
-        js(window, "document.getElementById('add-property-row').click();")
-        time.sleep(0.3)
-        js(window, """
-            const rows = document.querySelectorAll('#quick-add-rows .prop-row');
-            rows[rows.length - 1].querySelector('button').click();
-        """)
-        time.sleep(0.5)
-        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
-        assert hidden is False, "removing a property row should not close the quick-add panel"
-
-        js(window, """
-            const chip = document.querySelector(
-                '#species-chips .chip[data-species-id=\"' + window.__seed.speciesId + '\"]');
-            chip.click();
-        """)
-        time.sleep(0.5)
-        hidden = js(window, "document.getElementById('quick-add').classList.contains('hidden')")
-        assert hidden is False, "picking a species chip should not close the quick-add panel"
-
-        js(window, "document.getElementById('quick-add-btn').click();")  # close for later checks
-        time.sleep(0.5)
-
-    check("quick add: removing a property row or picking a species doesn't close the panel",
-          quick_add_property_delete_and_species_pick_dont_close_panel)
+    check("quick add: creates a blank mote and opens its panel", quick_add_creates_and_selects_a_mote)
 
     def legend_and_relationship_filters():
         js(window, "(async () => { await refocus(window.__seed.aliceId); })()")
@@ -679,6 +614,12 @@ def run_checks(window):
         """, wait=2.0)
         assert result == '"ok"', f"date mote setup failed: {result}"
 
+        # Clicking the summary button opens the calendar popup -- which
+        # promotes it out to a direct child of <body> so it escapes the
+        # inspector panel's backdrop-filter (see IntervalPicker.field's
+        # openPanel comment). It keeps the "interval-field" class too, but
+        # it is no longer a descendant of `field` once open, so its
+        # contents have to be queried from the document, not from `field`.
         info = json.loads(js(window, """
             (function() {
                 const rows = document.querySelectorAll('.ins-body .ins-row');
@@ -687,8 +628,9 @@ def run_checks(window):
                         const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({found: false});
                         field.querySelector('.interval-summary-btn').click();
-                        const allDay = field.querySelector('.interval-time-row input[type=\"checkbox\"]');
-                        const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
+                        const panel = document.querySelector('.interval-panel.interval-field');
+                        const allDay = panel.querySelector('.interval-time-row input[type=\"checkbox\"]');
+                        const timeInput = panel.querySelector('.interval-time-row input[type=\"time\"]');
                         return JSON.stringify({
                             found: true, value: field.value, allDay: allDay.checked,
                             timeHidden: timeInput.classList.contains('hidden'),
@@ -705,11 +647,11 @@ def run_checks(window):
 
         # Uncheck All day and set a time -- should commit a full timed value.
         js(window, """
-            const field = document.querySelector('.ins-body .interval-field');
-            const allDay = field.querySelector('.interval-time-row input[type=\"checkbox\"]');
+            const panel = document.querySelector('.interval-panel.interval-field');
+            const allDay = panel.querySelector('.interval-time-row input[type=\"checkbox\"]');
             allDay.checked = false;
             allDay.dispatchEvent(new Event('change', {bubbles: true}));
-            const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
+            const timeInput = panel.querySelector('.interval-time-row input[type=\"time\"]');
             timeInput.value = '14:30';
             timeInput.dispatchEvent(new Event('change', {bubbles: true}));
         """)
@@ -718,6 +660,13 @@ def run_checks(window):
             async () => { window.__result = (await api.get_mote(window.__seed.datedId)).properties.date; }
         """))
         assert updated == "2026-08-15T14:30:00", f"toggling to timed should store a full datetime, got {updated!r}"
+
+        # Close the popup: it's rendered outside the inspector panel, so
+        # leaving it open blocks the panel from re-rendering for whatever
+        # mote a later check opens next (Inspector.render skips its
+        # rebuild while IntervalPicker.isOpen(), to avoid yanking a field
+        # out from under someone mid-edit -- see inspector.js::render).
+        js(window, "IntervalPicker.closeOpen();")
 
     check("detail panel: date property gets a picker and round-trips all-day/timed",
           date_property_gets_a_picker_and_round_trips)
@@ -768,7 +717,8 @@ def run_checks(window):
         js(window, """
             const field = document.querySelector('.ins-body .interval-field');
             field.querySelector('.interval-summary-btn').click();
-            const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
+            const panel = document.querySelector('.interval-panel.interval-field');
+            const timeInput = panel.querySelector('.interval-time-row input[type=\"time\"]');
             timeInput.value = '11:30';
             timeInput.dispatchEvent(new Event('change', {bubbles: true}));
         """)
@@ -778,6 +728,7 @@ def run_checks(window):
         """))
         assert updated == "2026-08-15T11:30:00/PT1H", \
             f"the span must survive an edit of the start, got {updated!r}"
+        js(window, "IntervalPicker.closeOpen();")
 
     check("detail panel: editing a start keeps the span",
           editing_a_start_keeps_the_span)
@@ -809,9 +760,10 @@ def run_checks(window):
                         const field = r.querySelector('.interval-field');
                         if (!field) return JSON.stringify({picker: false});
                         field.querySelector('.interval-summary-btn').click();
-                        const editor = field.querySelector('.interval-repeat-editor');
+                        const panel = document.querySelector('.interval-panel.interval-field');
+                        const editor = panel.querySelector('.interval-repeat-editor');
                         const on = Array.from(
-                            field.querySelectorAll('.interval-repeat-editor .interval-pill.on'))
+                            panel.querySelectorAll('.interval-repeat-editor .interval-pill.on'))
                             .map((b) => b.textContent);
                         return JSON.stringify({
                             picker: true, value: field.value,
@@ -829,6 +781,7 @@ def run_checks(window):
         assert "Week" in info["activePills"], \
             f"the editor should show the stored frequency selected, got {info}"
         assert "RRULE:FREQ=WEEKLY" in info["value"], f"the rule must still be present, got {info}"
+        js(window, "IntervalPicker.closeOpen();")
 
     check("detail panel: a repeating interval gets the picker, with an editable repeat rule",
           a_repeating_interval_gets_the_picker_with_an_editable_repeat_rule)
@@ -852,14 +805,15 @@ def run_checks(window):
         js(window, """
             const field = document.querySelector('.ins-body .interval-field');
             field.querySelector('.interval-summary-btn').click();
-            field.querySelector('.interval-repeat-detail .interval-end-ghost').click();
+            const panel = document.querySelector('.interval-panel.interval-field');
+            panel.querySelector('.interval-repeat-detail .interval-end-ghost').click();
         """)
         time.sleep(0.5)
         # "+ Add a repeat rule" seeds weekly on the start's own weekday
         # (a Monday here); clicking We and Fr adds the other two.
         js(window, """
-            const field = document.querySelector('.ins-body .interval-field');
-            const days = Array.from(field.querySelectorAll('.interval-day-pill'));
+            const panel = document.querySelector('.interval-panel.interval-field');
+            const days = Array.from(panel.querySelectorAll('.interval-day-pill'));
             for (const code of ['W', 'F']) {
                 const pill = days.find((d, i) => d.textContent === code && i >= 3);
                 if (pill) pill.click();
@@ -874,6 +828,7 @@ def run_checks(window):
         for code in ("MO", "WE", "FR"):
             assert code in updated.split("BYDAY=")[1], \
                 f"BYDAY should carry every selected weekday, got {updated!r}"
+        js(window, "IntervalPicker.closeOpen();")
 
     check("detail panel: adding a repeat rule and editing it writes a real RRULE",
           adding_a_repeat_rule_and_editing_it_writes_a_real_rrule)
@@ -901,7 +856,8 @@ def run_checks(window):
             (function() {
                 const field = document.querySelector('.ins-body .interval-field');
                 field.querySelector('.interval-summary-btn').click();
-                const until = field.querySelector('.interval-until-input');
+                const panel = document.querySelector('.interval-panel.interval-field');
+                const until = panel.querySelector('.interval-until-input');
                 return JSON.stringify({ until: until ? until.value : null });
             })()
         """))
@@ -909,8 +865,8 @@ def run_checks(window):
             f"an UNTIL= rule should decompose into the ends-on control, got {info}"
 
         js(window, """
-            const field = document.querySelector('.ins-body .interval-field');
-            const timeInput = field.querySelector('.interval-time-row input[type=\"time\"]');
+            const panel = document.querySelector('.interval-panel.interval-field');
+            const timeInput = panel.querySelector('.interval-time-row input[type=\"time\"]');
             timeInput.value = '10:15';
             timeInput.dispatchEvent(new Event('change', {bubbles: true}));
         """)
@@ -922,6 +878,7 @@ def run_checks(window):
         assert "RRULE:FREQ=WEEKLY;UNTIL=20261231" in updated, (
             f"the repeat-until-date should survive a start-only edit, got {updated!r}"
         )
+        js(window, "IntervalPicker.closeOpen();")
 
     check("detail panel: an UNTIL= rule decomposes and survives a start edit",
           an_until_rule_decomposes_and_survives_a_start_edit)
@@ -950,7 +907,8 @@ def run_checks(window):
             (function() {
                 const field = document.querySelector('.ins-body .interval-field');
                 field.querySelector('.interval-summary-btn').click();
-                const raw = field.querySelector(
+                const panel = document.querySelector('.interval-panel.interval-field');
+                const raw = panel.querySelector(
                     '.interval-repeat-detail textarea, .interval-repeat-detail input[type=\"text\"]');
                 return JSON.stringify({
                     fallbackShown: !!raw,
@@ -960,6 +918,7 @@ def run_checks(window):
         """))
         assert info["fallbackShown"] is True, f"an unsupported param must still show as editable text, got {info}"
         assert "BYMONTHDAY=15" in (info["shows"] or ""), f"the rule has to stay visible and editable, got {info}"
+        js(window, "IntervalPicker.closeOpen();")
 
     check("detail panel: a rule with an unsupported param (BYMONTHDAY) still shows as raw text",
           a_rule_with_an_unsupported_param_still_shows_as_raw_text)
@@ -1448,104 +1407,66 @@ def run_checks(window):
 
     check("reserved property/relationship names get a badge, ordinary ones don't", reserved_names_get_a_badge)
 
-    def opening_mora_from_the_graph_passes_the_right_mote():
-        # Stubbed: the real call spawns a second pywebview process, which
-        # has no business being started by an automated suite.
+    def switch_app_launcher_opens_a_sibling_app():
+        # Tools no longer lists Notes/Calendar directly -- every sibling
+        # app opens through the one launcher (\u2318J / switch-app-btn), see
+        # app.js::LAUNCHER_APPS. Stubbed for the same reason the old
+        # per-app calls were: the real one spawns a second pywebview
+        # process, which an automated suite has no business starting.
         js(window, """
-            window.__moraCalls = [];
-            window.__origOpenMora = api.open_mora.bind(api);
-            api.open_mora = (moteId) => {
-                window.__moraCalls.push(moteId === undefined ? null : moteId);
-                return Promise.resolve({garden: 'test', note: moteId});
-            };
-            // The inspector's note door goes through the shared bridge's
-            // open_app rather than Monarch's own open_mora.
+            window.__openAppCalls = [];
             window.__origOpenApp = api.open_app.bind(api);
             api.open_app = (appId, moteId) => {
-                if (appId === 'mora') window.__moraCalls.push(moteId === undefined ? null : moteId);
+                window.__openAppCalls.push([appId, moteId === undefined ? null : moteId]);
                 return Promise.resolve({app: appId, focus: moteId});
             };
-            // The door lives in the panel's Advanced pane; make sure it
-            // is open before reaching for it.
-            window.noteDoor = () => {
-                const toggle = document.querySelector('.ins-toggle');
-                if (!toggle.classList.contains('on')) toggle.click();
-                return Array.from(document.querySelectorAll('.ins-body .ins-ghost'))
-                    .find(b => b.textContent.indexOf('note') !== -1);
-            };
         """)
-        js(window, "document.getElementById('tools-btn').click();")
-        time.sleep(0.2)
-        js(window, "document.getElementById('open-mora-btn').click();")
-        time.sleep(0.4)
-        calls = json.loads(js(window, "JSON.stringify(window.__moraCalls)"))
-        assert calls == [None], f"the Tools item should open Mora with no mote, got {calls}"
-        closed = js(window, "document.getElementById('tools-menu').classList.contains('hidden')")
-        assert closed is True, "opening Mora should close the Tools menu like any other action"
+        js(window, "document.getElementById('switch-app-btn').click();")
+        time.sleep(0.3)
+        opened = js(window, "!document.getElementById('launcher-overlay').classList.contains('hidden')")
+        assert opened is True, "the switch-app button should open the launcher"
+        names = json.loads(js(window, """
+            JSON.stringify(Array.from(document.querySelectorAll('#launcher-results .launcher-name'))
+                .map(e => e.textContent))
+        """))
+        assert "Mora" in names and "Monastery" in names, f"the launcher should list sibling apps, got {names}"
+        assert "Monarch" not in names, "the launcher should not offer to open the app you're already in"
 
-        # A mote of its own, created here: by this point in the run the
-        # seeded ones have been renamed, moved and deleted by other checks.
-        js_async(window, """
-            async () => {
-                const m = await api.create_mote({name: 'Notebook'});
-                window.__noteMote = m.id;
-                await refocus(m.id);
-                await openDetailPanel(m.id);
-                window.__result = noteDoor().textContent;
-            }
-        """, wait=3.0)
-        label = json.loads(js(window, "JSON.stringify(window.__result)"))
-        assert label == "Write a note\u2026", \
-            f"a mote with no note should offer to start one, got {label!r}"
-
-        js(window, "noteDoor().click();")
+        js(window, """
+            Array.from(document.querySelectorAll('#launcher-results .launcher-card'))
+                .find(c => c.querySelector('.launcher-name').textContent === 'Mora')
+                .dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
+        """)
         time.sleep(0.4)
-        calls = json.loads(js(window, "JSON.stringify(window.__moraCalls)"))
-        expected = js(window, "window.__noteMote")
-        assert calls[-1] == expected, \
-            f"the panel button should open Mora on the selected mote, got {calls[-1]!r}"
+        calls = json.loads(js(window, "JSON.stringify(window.__openAppCalls)"))
+        assert calls == [["mora", None]], f"picking Mora should open it with no mote, got {calls}"
+        closed = js(window, "document.getElementById('launcher-overlay').classList.contains('hidden')")
+        assert closed is True, "opening an app from the launcher should close it"
 
         js(window, "api.open_app = window.__origOpenApp;")
 
-    check("Notes (Mora) opens on the garden, and the panel button on the mote",
-          opening_mora_from_the_graph_passes_the_right_mote)
+    check("the app launcher (\u2318J) lists and opens sibling apps", switch_app_launcher_opens_a_sibling_app)
 
-    def opening_monastery_from_the_graph():
-        # Stubbed for the same reason open_mora is: the real call spawns
-        # a third pywebview process.
-        js(window, """
-            window.__monasteryCalls = [];
-            window.__origOpenMonastery = api.open_monastery.bind(api);
-            api.open_monastery = (moteId) => {
-                window.__monasteryCalls.push(moteId === undefined ? null : moteId);
-                return Promise.resolve({garden: 'test', focus: moteId});
-            };
-        """)
-        js(window, "document.getElementById('tools-btn').click();")
-        time.sleep(0.2)
-        js(window, "document.getElementById('open-monastery-btn').click();")
-        time.sleep(0.4)
-        calls = json.loads(js(window, "JSON.stringify(window.__monasteryCalls)"))
-        assert calls == [None], \
-            f"the Tools item should open Monastery with no mote, got {calls}"
-        closed = js(window, "document.getElementById('tools-menu').classList.contains('hidden')")
-        assert closed is True, \
-            "opening Monastery should close the Tools menu like any other action"
-        js(window, "api.open_monastery = window.__origOpenMonastery;")
-
-    check("Calendar (Monastery) opens on the current garden",
-          opening_monastery_from_the_graph)
-
-    def a_note_property_shows_as_a_summary_not_a_wall_of_text():
+    def a_note_property_shows_as_a_summary_with_a_way_into_mora():
         # Injected as JSON rather than written inline: a .modoc source is
         # backslashes and newlines all the way down, and nesting it in a
         # Python string in a JS string in an eval is three escapings deep.
         js(window, f"window.__noteSource = {json.dumps(chr(92) + 'section{A}' + chr(10) * 2 + 'line two' + chr(10))};")
+        js(window, """
+            window.__openAppCalls = [];
+            window.__origOpenApp = api.open_app.bind(api);
+            api.open_app = (appId, moteId) => {
+                window.__openAppCalls.push([appId, moteId === undefined ? null : moteId]);
+                return Promise.resolve({app: appId, focus: moteId});
+            };
+        """)
         js_async(window, """
             async () => {
                 const m = await api.create_mote({name: 'Notebook 2'});
                 window.__noteMote = m.id;
                 await api.update_mote(window.__noteMote, {modoc: window.__noteSource});
+                await refreshMoteCache();
+                await refocus(window.__noteMote);
                 await openDetailPanel(window.__noteMote);
                 const rows = Array.from(document.querySelectorAll('.ins-body .ins-row'));
                 const row = rows.find(r => r.querySelector('.ins-key').value === 'modoc');
@@ -1553,7 +1474,6 @@ def run_checks(window):
                 // (click to rename), and it would match first.
                 const field = row.querySelector('.ins-val input, .ins-val textarea');
                 window.__result = {
-                    label: noteDoor().textContent,
                     value: field.value,
                     readOnly: field.readOnly,
                     hasOpen: !!row.querySelector('.ins-follow'),
@@ -1565,11 +1485,24 @@ def run_checks(window):
             f"the row should summarize the note, got {summary['value']!r}"
         assert summary["readOnly"] is True, "a note must not be editable from the properties list"
         assert summary["hasOpen"] is True, "the note row should offer a way into Mora"
-        assert summary["label"] == "Open note\u2026", \
-            f"a mote that has a note should offer to open it, got {summary['label']!r}"
+
+        # The \u2197 follow button is that door -- clicking it opens Mora on
+        # this mote (frontend_shared/inspector.js::trailingControls).
+        js(window, """
+            Array.from(document.querySelectorAll('.ins-body .ins-row'))
+                .find(r => r.querySelector('.ins-key').value === 'modoc')
+                .querySelector('.ins-follow').click();
+        """)
+        time.sleep(0.4)
+        calls = json.loads(js(window, "JSON.stringify(window.__openAppCalls)"))
+        note_mote_id = json.loads(js(window, "JSON.stringify(window.__noteMote)"))
+        assert calls == [["mora", note_mote_id]], \
+            f"the follow button should open Mora on this mote, got {calls}"
+
+        js(window, "api.open_app = window.__origOpenApp;")
 
     check("a `modoc` property renders as a summary with a way into Mora",
-          a_note_property_shows_as_a_summary_not_a_wall_of_text)
+          a_note_property_shows_as_a_summary_with_a_way_into_mora)
 
     def depth_control_limits_the_graph():
         def visible_at(value):
@@ -1770,6 +1703,11 @@ def run_checks(window):
         time.sleep(1.0)
         assert js(window, "graph.selectedIds.size") == 2, "setup: expected A and B selected"
 
+        # A field left focused by an earlier check (a stray input never
+        # explicitly blurred) makes isTypingInField() swallow this
+        # keypress with no error -- blur defensively rather than let that
+        # show up as a flaky failure several checks downstream.
+        js(window, "document.activeElement && document.activeElement.blur();")
         js(window, "window.confirm = () => true;")
         press_key(window, "Delete")
         time.sleep(2.0)
@@ -1799,6 +1737,7 @@ def run_checks(window):
 
         js(window, "graph.select([window.__undoPair.a, window.__undoPair.b], {pan: false});")
         time.sleep(0.3)
+        js(window, "document.activeElement && document.activeElement.blur();")
         js(window, "window.confirm = () => true;")
         press_key(window, "Delete")
         time.sleep(2.0)
@@ -1844,6 +1783,7 @@ def run_checks(window):
 
         js(window, "graph.select(window.__ctrlZId, {pan: false});")
         time.sleep(0.3)
+        js(window, "document.activeElement && document.activeElement.blur();")
         js(window, "window.confirm = () => true;")
         press_key(window, "Delete")
         time.sleep(2.0)
@@ -2084,6 +2024,7 @@ def run_checks(window):
 
         js(window, "graph.select(window.__kbdId, {pan: false});")
         time.sleep(0.3)
+        js(window, "document.activeElement && document.activeElement.blur();")
         # press_key() has no modifier support, so dispatch Ctrl+C directly.
         js(window, """
             window.dispatchEvent(new KeyboardEvent('keydown', {key: 'c', ctrlKey: true, bubbles: true}));
@@ -2159,35 +2100,29 @@ def run_checks(window):
 
     check("Pin/Unpin toggles from the context menu", pin_unpin_via_menu)
 
-    def new_mote_here_opens_near_the_click():
+    def new_mote_here_places_it_at_the_click():
         js(window, "graph.resetView();")
-        time.sleep(1.0)
+        time.sleep(1.2)
 
-        # A point far from the corner the form otherwise defaults to.
         x, y = 700, 400
+        # The world point under the click, captured before any further
+        # camera motion -- comparing against this rather than re-deriving
+        # a screen position afterward means a camera that eases/auto-fits
+        # while the new mote is being created can't make this check flaky.
+        expected_world = json.loads(js(window, f"JSON.stringify(graph._worldAt({x}, {y}))"))
         right_click(window, x, y)
         time.sleep(0.5)
         click_menu_item(window, "New mote here")
-        time.sleep(0.3)
+        time.sleep(1.5)
 
-        floating = js(window, "document.getElementById('quick-add').classList.contains('floating')")
-        assert floating is True, "New mote here should float the quick-add panel rather than leave it bottom-left"
-        rect = json.loads(js(window, "JSON.stringify(document.getElementById('quick-add').getBoundingClientRect())"))
-        assert abs(rect["left"] - x) < 40 and abs(rect["top"] - y) < 40, \
-            f"quick-add should open near the click point ({x}, {y}), got {rect}"
+        shown = js(window, "!document.querySelector('.ins').classList.contains('hidden')")
+        assert shown is True, "New mote here should select the new mote and open its panel"
+        node = json.loads(js(window, "JSON.stringify(graph.nodes.get(focusId))"))
+        assert abs(node["x"] - expected_world["x"]) < 1 and abs(node["y"] - expected_world["y"]) < 1, \
+            f"the new mote should land at the clicked world point {expected_world}, got {node}"
+        assert node["pinned"] is True, "a mote placed by right-click should be pinned there"
 
-        # Close it, then open via the ordinary + button -- reverts to bottom-left.
-        js(window, "document.getElementById('quick-add-btn').click();")
-        time.sleep(0.2)
-        js(window, "document.getElementById('quick-add-btn').click();")
-        time.sleep(0.3)
-        floating_after_button = js(window, "document.getElementById('quick-add').classList.contains('floating')")
-        assert floating_after_button is False, "the ordinary + button should not leave the panel floating"
-        js(window, "document.getElementById('quick-add-btn').click();")  # close again for later checks
-        time.sleep(0.2)
-
-    check("New mote here opens the quick-add form near the click, not always bottom-left",
-          new_mote_here_opens_near_the_click)
+    check("New mote here places the new mote at the click point", new_mote_here_places_it_at_the_click)
 
     def dragging_one_mote_moves_the_whole_selection():
         result = js_async(window, """
@@ -2725,7 +2660,12 @@ def run_checks(window):
             })()
         """
         drag(window, screen["x"], screen["y"], screen["x"] + 260, screen["y"] + 140)
-        time.sleep(0.4)   # let a frame land, so the pixel sample below reads the new state
+        # A full second, not just "a frame": under a loaded/headless
+        # compositor the canvas's rAF-driven redraw can lag well past one
+        # tick, and the pixel sample below needs a frame to have actually
+        # landed -- same margin the "graph canvas actually renders" check
+        # above gives the same kind of sample.
+        time.sleep(1.0)
 
         moved = json.loads(js(window, "JSON.stringify(graph.attractors[window.__vs.speciesId] || null)"))
         assert moved is not None, "dragging an attractor should move it"
@@ -2786,6 +2726,173 @@ def run_checks(window):
 
     check("view settings: attractor mode drags a cluster and blocks editing",
           attractor_mode_moves_a_cluster_and_blocks_editing)
+
+    def sticky_note_annotations_full_lifecycle():
+        """Drives the whole annotate-mode gesture surface for real: the
+        toolbar toggle, click-to-place (both anchor modes), the textarea
+        overlay, a drag that must prove a mote-anchored note follows its
+        mote, the × delete badge, Ctrl+Z/Ctrl+Shift+Z, and that a note
+        survives its mote being deleted (core/db.py's annotations table
+        has no FK on mote_id -- see its docstring)."""
+        def note_editor_text():
+            return js(window, "document.querySelector('.annotation-editor').value")
+
+        def type_and_blur(text):
+            js(window, f"""
+                (function() {{
+                    const editor = document.querySelector('.annotation-editor');
+                    editor.value = {json.dumps(text)};
+                    editor.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    editor.blur();
+                }})();
+            """)
+            time.sleep(0.5)
+
+        def list_notes():
+            # wait=3.0: under the full suite's accumulated DOM/data, this
+            # round trip is slower than in isolation and the default
+            # ceiling sometimes returns before window.__result lands.
+            raw = js_async(window, """
+                async () => { window.__result = await api.list_annotations(); }
+            """, wait=3.0)
+            return json.loads(raw) if raw not in (None, "null") else []
+
+        def wait_for_note_count(n, what):
+            assert wait_until(lambda: len(list_notes()) == n, timeout=5.0), (
+                f"{what}: expected {n} note(s), still {len(list_notes())} after waiting"
+            )
+            return list_notes()
+
+        # A fresh mote, refocused on -- by this point in the suite the
+        # graph's neighbourhood view has long since moved away from
+        # window.__seed's motes (search/navigation/depth checks change
+        # what's in view), so graph.nodes may no longer hold Bob at all.
+        # screenPositionOf(id) returns null for anything outside the
+        # current view, which node_xy then can't destructure.
+        target = json.loads(js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'Note-Target'});
+                await refreshMoteCache();
+                await refocus(m.id);
+                window.__result = m;
+            }
+        """, wait=3.0))
+        target_id_js = json.dumps(target["id"])
+
+        def ctrl_z(shift=False):
+            js(window, f"""
+                document.dispatchEvent(new KeyboardEvent('keydown', {{
+                    key: 'z', ctrlKey: true, shiftKey: {str(shift).lower()}, bubbles: true,
+                }}));
+            """)
+            time.sleep(0.5)
+
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+        assert js(window, "graph.annotateMode") is True, "the toolbar button should enter annotate mode"
+        active_class = js(window, "document.getElementById('annotate-mode-btn').classList.contains('active')")
+        assert active_class is True, "the button should show it's active"
+
+        # World-anchored note: click empty canvas, type, and blur to save.
+        ex, ey = empty_canvas_point(window)
+        drag(window, ex, ey, ex, ey)
+        time.sleep(0.4)
+        assert note_editor_text() == "", "a freshly placed note should open its editor empty"
+        type_and_blur("World note")
+
+        notes = wait_for_note_count(1, "clicking empty canvas")
+        world_note = notes[0]
+        assert world_note["anchorMode"] == "world" and world_note["text"] == "World note", (
+            f"world-anchored note should save its text, got {world_note}"
+        )
+
+        # Mote-anchored note: click on the target mote.
+        bx, by = node_xy(window, target_id_js)
+        drag(window, bx, by, bx, by)
+        time.sleep(0.4)
+        type_and_blur("Note on target")
+
+        notes = wait_for_note_count(2, "clicking a mote")
+        bob_note = next(n for n in notes if n["id"] != world_note["id"])
+        assert bob_note["anchorMode"] == "mote" and bob_note["moteId"] == target["id"], (
+            f"clicking a mote should create a mote-anchored note on it, got {bob_note}"
+        )
+        assert bob_note["text"] == "Note on target", f"mote note should save its text, got {bob_note}"
+
+        # Dragging the target mote (outside annotate mode, which owns the
+        # left button) must carry the note with it.
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+        assert js(window, "graph.annotateMode") is False, "the button should toggle annotate mode off"
+        bx, by = node_xy(window, target_id_js)
+        drag(window, bx, by, bx + 150, by + 90)
+        time.sleep(1.0)
+
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+        bob_node = json.loads(js(window, f"JSON.stringify(graph.nodes.get({target_id_js}))"))
+        expected_screen = json.loads(js(window, f"""
+            JSON.stringify(graph._worldToScreen(
+                {bob_node["x"]} + {bob_note["x"]}, {bob_node["y"]} + {bob_note["y"]}))
+        """))
+        # A click at that resolved position should hit the note (not miss
+        # into empty canvas, which would silently create a *third* note).
+        drag(window, expected_screen["x"], expected_screen["y"], expected_screen["x"], expected_screen["y"])
+        time.sleep(0.4)
+        assert note_editor_text() == "Note on target", (
+            "the mote-anchored note should have followed the target mote to its new position"
+        )
+        js(window, "document.querySelector('.annotation-editor').blur();")
+        wait_for_note_count(2, "clicking the followed note should not have created a new one")
+
+        # Delete the world note via its × badge.
+        world_left = world_note["x"] - 160 / 2
+        world_top = world_note["y"] - 90 / 2
+        badge_screen = json.loads(js(window, f"""
+            JSON.stringify(graph._worldToScreen({world_left} + 160, {world_top}))
+        """))
+        drag(window, badge_screen["x"], badge_screen["y"], badge_screen["x"], badge_screen["y"])
+        after_delete = wait_for_note_count(1, "the × badge should delete just the world note")
+        assert after_delete[0]["id"] == bob_note["id"], (
+            f"the × badge should delete the world note, not the other one: {after_delete}"
+        )
+
+        # Undo the delete, then undo the creation too.
+        ctrl_z()
+        wait_for_note_count(2, "Ctrl+Z should undo the delete")
+        ctrl_z(shift=True)
+        wait_for_note_count(1, "Ctrl+Shift+Z should redo the delete")
+
+        # A mote-anchored note survives its mote being deleted -- no FK,
+        # see core/db.py's annotations table.
+        js_async(window, f"""
+            async () => {{
+                await api.delete_mote({target_id_js});
+                window.__result = 'ok';
+            }}
+        """)
+        surviving = wait_for_note_count(1, "the annotation should survive its mote's deletion")
+        assert surviving[0]["id"] == bob_note["id"], (
+            f"the annotation should survive its mote's deletion, got {surviving}"
+        )
+        assert surviving[0]["moteId"] == bob_note["moteId"], (
+            "the orphaned annotation should keep its (now dangling) moteId"
+        )
+
+        # Clean up so later checks (e.g. no_uncaught_errors) see a normal
+        # graph, and leave annotate mode off.
+        js_async(window, f"""
+            async () => {{
+                await api.delete_annotation({json.dumps(surviving[0]["id"])});
+                window.__result = 'ok';
+            }}
+        """)
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+        assert js(window, "graph.annotateMode") is False, "annotate mode should be off after cleanup"
+
+    check("sticky notes: place (world + mote), follow a drag, edit, delete, undo/redo, survive mote delete",
+          sticky_note_annotations_full_lifecycle)
 
     def soon_stubs_toast_instead_of_doing_nothing():
         js(window, "document.getElementById('file-btn').click();")

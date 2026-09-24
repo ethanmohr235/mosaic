@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="commandbar.css">
 <link rel="stylesheet" href="interval.css">
 <link rel="stylesheet" href="menu.css">
+<link rel="stylesheet" href="annotations.css">
 </head>
 <body>
 
@@ -83,6 +84,7 @@
 
   <button id="refresh-btn" class="topbar-trigger icon-btn" type="button" title="Refresh: sync and reload">⟳</button>
   <button id="switch-app-btn" class="topbar-trigger icon-btn" type="button" title="Switch app (⌘J)">⊞</button>
+  <button id="annotate-mode-btn" class="topbar-trigger icon-btn" type="button" title="Add sticky notes">🗒</button>
   <button id="search-btn" type="button">
     <span class="search-glyph"></span>
     <span>Search motes…</span>
@@ -266,6 +268,8 @@
 <script src="interval.js"></script>
 <script src="inspector.js"></script>
 <script src="commandbar.js"></script>
+<script src="undo.js"></script>
+<script src="annotations.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

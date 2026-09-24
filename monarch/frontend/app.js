@@ -25,6 +25,7 @@ let openMenuName = null;               // 'garden' | 'file' | 'view' | 'tools' |
 let viewSettings = null;               // this garden's advanced view settings (forces/colors/attractors)
 let activeViewFilterId = null;         // id of the Monolith saved view currently filtering the graph, or null
 let attractorMode = false;             // arranging species attractors -- read-only
+let annotateMode = false;              // placing/editing sticky notes
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -237,8 +238,10 @@ async function loadGarden(garden) {
   $("garden-label").textContent = garden;
   closeDetailPanel();
   // Attractors are per garden, so an arrangement in progress means
-  // nothing once a different one is open.
+  // nothing once a different one is open. Annotations too -- they belong
+  // to the garden they're stored in (core/db.py's annotations table).
   if (attractorMode) exitAttractorMode();
+  if (annotateMode) exitAnnotateMode();
   graph.setHiddenSpecies(readJSON(hiddenSpeciesKey(garden), []));
   graph.setHiddenRelTypes(readJSON(hiddenRelKey(garden), []));
   activeViewFilterId = localStorage.getItem(viewFilterKey(garden)) || null;
@@ -246,6 +249,7 @@ async function loadGarden(garden) {
   graph.setViewSettings(viewSettings);
   const stored = localStorage.getItem(lastFocusKey(garden)) || null;
   await refreshMoteCache();
+  await Annotations.refresh();
   // Frame the whole garden on open rather than panning to the remembered
   // mote -- you want to see where you are before you go anywhere.
   await refocus(stored, { pan: false, select: false });
@@ -730,6 +734,7 @@ function renderLayoutSettings() {
  *  zooming is off while it's on and every mutation elsewhere toasts
  *  instead. */
 function enterAttractorMode() {
+  if (annotateMode) exitAnnotateMode();
   attractorMode = true;
   graph.setAttractorMode(true);
   closeDetailPanel();
@@ -743,6 +748,24 @@ function exitAttractorMode() {
   attractorMode = false;
   graph.setAttractorMode(false);
   renderViewSettings();
+}
+
+// ---- annotations (sticky notes) ----
+
+function enterAnnotateMode() {
+  if (attractorMode) exitAttractorMode();
+  annotateMode = true;
+  graph.setAnnotateMode(true);
+  $("annotate-mode-btn").classList.add("active");
+  Annotations.enter();
+  showToast("Annotating — click the canvas or a mote to add a note, × to delete one.", 4500);
+}
+
+function exitAnnotateMode() {
+  annotateMode = false;
+  graph.setAnnotateMode(false);
+  $("annotate-mode-btn").classList.remove("active");
+  Annotations.exit();
 }
 
 function setupViewSettings() {
@@ -767,6 +790,10 @@ function setupViewSettings() {
 
   $("arrange-attractors-btn").addEventListener("click", enterAttractorMode);
   $("attractor-done-btn").addEventListener("click", exitAttractorMode);
+
+  $("annotate-mode-btn").addEventListener("click", () => {
+    annotateMode ? exitAnnotateMode() : enterAnnotateMode();
+  });
 
   $("reset-attractors-btn").addEventListener("click", () => {
     viewSettings.attractors = {};
@@ -1100,18 +1127,8 @@ async function deleteSelection() {
     : `Delete ${ids.length} motes and all their relationships?`;
   if (!window.confirm(prompt)) return;
 
-  // Snapshotted before deleting -- cascading deletes wipe properties and
-  // relationships along with the mote, so there's nothing left to read
-  // afterward if the user hits Undo.
-  const motesSnapshot = ids.map((id) => ({ id, properties: { ...moteById(id).properties } }));
-  const relsById = new Map();
+  const answer = await call(api.delete_motes(ids));
   for (const id of ids) {
-    for (const rel of await call(api.mote_relationships(id))) relsById.set(rel.id, rel);
-  }
-  const relsSnapshot = [...relsById.values()];
-
-  for (const id of ids) {
-    await call(api.delete_mote(id));
     if (id === focusId) localStorage.removeItem(lastFocusKey(currentGarden));
   }
   closeDetailPanel();
@@ -1119,15 +1136,17 @@ async function deleteSelection() {
   await refocus(null);
 
   showUndoToast(
-    ids.length === 1 ? "Deleted." : `Deleted ${ids.length} motes.`,
+    answer.deleted === 1 ? "Deleted." : `Deleted ${answer.deleted} motes.`,
     async () => {
-      for (const m of motesSnapshot) await call(api.create_mote(m.properties, m.id));
-      for (const r of relsSnapshot) await call(api.create_relationship(r.from_id, r.to_id, r.type, r.id));
+      const undone = await call(api.undo());
+      if (!undone || !undone.undone) return;
       await refreshMoteCache();
-      const restoredIds = motesSnapshot.map((m) => m.id);
-      await refocus(restoredIds[0], { pan: false });
-      graph.select(restoredIds, { pan: false });
-      await syncSelectionPanel(restoredIds);
+      const restoredIds = ids.filter((id) => moteById(id));
+      if (restoredIds.length) {
+        await refocus(restoredIds[0], { pan: false });
+        graph.select(restoredIds, { pan: false });
+        await syncSelectionPanel(restoredIds);
+      }
       showToast(restoredIds.length === 1 ? "Restored." : `Restored ${restoredIds.length} motes.`);
     }
   );
@@ -1145,11 +1164,18 @@ async function createMote(placeAt) {
   if (editBlocked()) return;
   const mote = await call(api.create_mote({}));
   await refreshMoteCache();
+  // placeAt() only takes effect once the new mote is actually in
+  // graph.nodes -- which happens inside refocus()'s setData() call, not
+  // refreshMoteCache() (that only refills the app-level mote list). So
+  // it has to run after refocus, not before, or it silently no-ops
+  // against a node that doesn't exist yet and the mote lands at its
+  // usual hash-seeded spot instead of under the cursor.
+  await refocus(mote.id, { pan: !placeAt });
   if (placeAt) {
     graph.placeAt(mote.id, placeAt.x, placeAt.y);
     savePositions();
   }
-  await selectMote(mote.id, { pan: !placeAt });
+  await openDetailPanel(mote.id);
   showToast("Mote created.");
 }
 
@@ -2067,6 +2093,7 @@ function setupKeyboard() {
     if (!$("context-menu").classList.contains("hidden")) { hideContextMenu(); return; }
     if (openMenuName) { closeTopMenus(); return; }
     if (!$("detail-panel").classList.contains("hidden")) { closeDetailPanel(); return; }
+    if (annotateMode) { exitAnnotateMode(); return; }
     // Leaving attractor mode is a smaller step than closing the panel it
     // lives in, so it comes first -- one Esc puts the graph back to
     // editable, a second puts the panel away.
@@ -2148,7 +2175,11 @@ async function init() {
     // in an unfocused corner of the canvas didn't really take you there.
     onNavigate: (moteId) => refocus(moteId).then(() => Inspector.open(moteId)),
   });
-
+  Undo.install({
+    api,
+    toast: showToast,
+    onChanged: () => refreshMoteCache().then(() => refocus(focusId, { pan: false })),
+  });
   const reserved = await call(api.reserved_names());
   reservedProperties = new Set(reserved.properties);
   reservedRelTypes = new Set(reserved.relationshipTypes);
@@ -2182,6 +2213,7 @@ async function init() {
     },
   });
   window.graph = graph;
+  Annotations.install({ api, graph });
 
   setupTopMenus();
   setupDetailResize();

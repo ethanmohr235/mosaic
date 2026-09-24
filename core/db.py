@@ -117,6 +117,49 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     );
     """)
 
+    # Commentary layered over the graph -- sticky notes today, other markup
+    # types later (see core/annotations.py). Deliberately not a mote: it
+    # must never appear in list_motes/neighborhood/species queries, and it
+    # is local-only (no oplog row is ever written for it, unlike motes and
+    # relationships above).
+    #
+    # No FK from mote_id to motes(id), for the same reason
+    # simulation_changes has none: annotations must not go through
+    # core/motes.py, so a cascading FK would silently destroy a note when
+    # its mote is deleted, and a non-cascading one would make deleting an
+    # annotated mote raise. Instead an orphaned annotation survives with
+    # mote_id left dangling; core/annotations.py and the frontend decide
+    # what to show for it.
+    #
+    # x/y mean different things depending on anchor_mode: absolute world
+    # coordinates when 'world', an offset from the mote's position when
+    # 'mote' (or, once orphaned, the note's last-known world position).
+    # `type`/`data` (a JSON blob, parsed only by type-specific code, same
+    # convention as mote_properties.value) are what let a future
+    # annotation type reuse this table without a migration.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS annotations (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL DEFAULT 'sticky_note',
+        anchor_mode TEXT NOT NULL,
+        mote_id TEXT,
+        x REAL NOT NULL,
+        y REAL NOT NULL,
+        text TEXT NOT NULL DEFAULT '',
+        color TEXT,
+        width REAL,
+        height REAL,
+        z INTEGER NOT NULL DEFAULT 0,
+        data TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """)
+
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_annotations_mote ON annotations(mote_id);
+    """)
+
     # Simulation audit log. Failed runs are recorded too -- a run that blew
     # up is exactly the one worth looking back at. simulation_changes
     # deliberately has no foreign key on mote_id, so the history of what a

@@ -152,30 +152,30 @@ def test_switch_garden_swaps_connection(api):
 #
 # Enabling and disabling sync is the Gardens window's now
 # (tests/test_gardens_api.py); what is still this window's is when it
-# fires on its own. These point the garden at a folder through
+# fires on its own. These point the garden at a sync server through
 # core/sync.py directly, the way the Gardens window would have.
 
-def _sync_to(garden: str, folder) -> None:
-    sync_repo.init(garden, str(folder), clone=True)
+def _sync_to(garden: str, url) -> None:
+    sync_repo.init(garden, str(url), clone=True)
 
 
 def test_refresh_skips_sync_when_not_configured(api):
     assert api.refresh() == {"synced": False}
 
 
-def test_refresh_syncs_when_configured(api, tmp_path):
-    _sync_to(api.current_garden(), tmp_path)
+def test_refresh_syncs_when_configured(api, sync_dir):
+    _sync_to(api.current_garden(), sync_dir)
     api.create_mote({"name": "Alice"})
     result = api.refresh()
     assert result["synced"] is True
     assert result["push"]["pushed"] >= 1
 
 
-def test_best_effort_sync_skips_when_auto_sync_disabled(api, tmp_path, monkeypatch):
+def test_best_effort_sync_skips_when_auto_sync_disabled(api, sync_dir, monkeypatch):
     # _best_effort_sync() runs against self._current_garden *after* a
     # switch completes, so exercising the guard on "test" means switching
     # away and back to it, not just switching away.
-    _sync_to(api.current_garden(), tmp_path)
+    _sync_to(api.current_garden(), sync_dir)
     set_auto_sync_enabled(api.current_garden(), False)
     create_garden("other")
 
@@ -187,8 +187,8 @@ def test_best_effort_sync_skips_when_auto_sync_disabled(api, tmp_path, monkeypat
     assert calls == []
 
 
-def test_best_effort_sync_runs_when_auto_sync_enabled(api, tmp_path, monkeypatch):
-    _sync_to(api.current_garden(), tmp_path)
+def test_best_effort_sync_runs_when_auto_sync_enabled(api, sync_dir, monkeypatch):
+    _sync_to(api.current_garden(), sync_dir)
     create_garden("other")
 
     calls = []
@@ -199,12 +199,12 @@ def test_best_effort_sync_runs_when_auto_sync_enabled(api, tmp_path, monkeypatch
     assert calls == [1]
 
 
-def test_shutdown_skips_sync_when_auto_sync_disabled(tmp_path, monkeypatch):
+def test_shutdown_skips_sync_when_auto_sync_disabled(sync_dir, monkeypatch):
     # A fresh instance, not the `api` fixture -- the fixture's own
     # teardown calls shutdown() too, which would double-fire this.
     create_garden("shut")
     inst = Api("shut")
-    _sync_to("shut", tmp_path)
+    _sync_to("shut", sync_dir)
     set_auto_sync_enabled("shut", False)
 
     calls = []
@@ -241,6 +241,49 @@ def test_create_relationship_with_explicit_id_reuses_it(api):
     b = api.create_mote({"name": "Bob"})
     result = api.create_relationship(a["id"], b["id"], "knows", id="fixed-rel-id")
     assert result["id"] == "fixed-rel-id"
+
+
+# ---- undo ----
+
+def test_creating_a_mote_can_be_undone(api):
+    result = api.create_mote({"name": "Alice"})
+    assert api.undo()["undone"] is not None
+    assert api.get_mote(result["id"]) is None
+
+
+def test_deleting_a_mote_can_be_undone(api):
+    result = api.create_mote({"name": "Alice"})
+    api.delete_mote(result["id"])
+    assert api.get_mote(result["id"]) is None
+    assert api.undo()["undone"] is not None
+    assert api.get_mote(result["id"])["properties"]["name"] == "Alice"
+
+
+def test_creating_a_relationship_can_be_undone(api):
+    a = api.create_mote({"name": "Alice"})
+    b = api.create_mote({"name": "Bob"})
+    rel = api.create_relationship(a["id"], b["id"], "knows")
+    assert api.undo()["undone"] is not None
+    assert rel["id"] not in {r["id"] for r in api.mote_relationships(a["id"])}
+
+
+def test_deleting_several_motes_is_undone_in_one_step(api):
+    a = api.create_mote({"name": "Alice"})
+    b = api.create_mote({"name": "Bob"})
+    answer = api.delete_motes([a["id"], b["id"]])
+    assert answer["deleted"] == 2
+    assert api.undo()["undone"] is not None
+    assert api.get_mote(a["id"]) is not None
+    assert api.get_mote(b["id"]) is not None
+
+
+def test_setting_species_can_be_undone(api):
+    species = api.create_mote({"name": "Task"})
+    mote = api.create_mote({"name": "Write plan"})
+    api.set_species(mote["id"], species["id"])
+    assert len(api.species_of(mote["id"])) == 1
+    assert api.undo()["undone"] is not None
+    assert api.species_of(mote["id"]) == []
 
 
 def test_open_link_launches_a_url(api, monkeypatch):
@@ -434,3 +477,80 @@ def test_view_filter_ids_returns_none_for_a_mote_with_no_query(api):
 
 def test_view_filter_ids_returns_none_for_a_missing_mote(api):
     assert api.view_filter_ids("nonexistent") is None
+
+
+# ---- annotations (core/annotations.py via AnnotatableApi) ---------------
+
+
+def test_create_sticky_note_round_trips_through_list(api):
+    created = api.create_sticky_note("world", 1.0, 2.0, text="hello")
+    assert created["anchorMode"] == "world"
+    assert created["text"] == "hello"
+
+    listed = api.list_annotations()
+    assert [a["id"] for a in listed] == [created["id"]]
+
+
+def test_move_and_edit_and_delete_annotation(api):
+    note = api.create_sticky_note("world", 0, 0)
+
+    moved = api.move_annotation(note["id"], 9, 9)
+    assert (moved["x"], moved["y"]) == (9, 9)
+
+    edited = api.update_annotation_text(note["id"], "new text")
+    assert edited["text"] == "new text"
+
+    assert api.delete_annotation(note["id"]) is True
+    assert api.list_annotations() == []
+
+
+def test_annotations_do_not_leak_into_mote_and_focus_payloads(api):
+    mote = api.create_mote({"name": "A"})
+    api.create_sticky_note("mote", 0, 0, mote_id=mote["id"], text="note on A")
+
+    assert all("annotation" not in m for m in api.list_motes())
+    focus = api.focus(mote["id"])
+    assert all("annotation" not in m for m in focus["motes"])
+
+
+def test_annotation_mutations_never_write_to_oplog(api):
+    before = api._conn.execute("SELECT COUNT(*) AS n FROM oplog").fetchone()["n"]
+
+    note = api.create_sticky_note("world", 0, 0, text="a")
+    api.move_annotation(note["id"], 1, 1)
+    api.update_annotation_text(note["id"], "b")
+    api.delete_annotation(note["id"])
+
+    after = api._conn.execute("SELECT COUNT(*) AS n FROM oplog").fetchone()["n"]
+    assert after == before
+
+
+def test_create_and_delete_annotation_are_undoable(api):
+    note = api.create_sticky_note("world", 0, 0, text="a")
+    api.undo()
+    assert api.list_annotations() == []
+
+    api.redo()
+    assert [a["id"] for a in api.list_annotations()] == [note["id"]]
+
+    api.delete_annotation(note["id"])
+    api.undo()
+    assert [a["id"] for a in api.list_annotations()] == [note["id"]]
+
+    api.redo()
+    assert api.list_annotations() == []
+
+
+def test_rapid_moves_coalesce_into_one_undo_step(api):
+    note = api.create_sticky_note("world", 0, 0)
+    api.undo_manager.can_undo()  # sanity: manager exists
+
+    api.move_annotation(note["id"], 1, 1)
+    api.move_annotation(note["id"], 2, 2)
+
+    stack_after_moves = len(api.undo_manager._undo_stack)
+    api.undo()  # undoes the coalesced move, landing back at the create
+    assert api.list_annotations()[0]["x"] == 0
+
+    # the two moves collapsed into one undo step on top of the create
+    assert stack_after_moves == 2
