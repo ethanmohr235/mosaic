@@ -237,25 +237,27 @@ def test_an_unparseable_working_hour_keeps_the_one_it_had(api):
     assert answer == {"workStart": "10:00", "workEnd": "16:00"}
 
 
+def test_working_hours_reject_an_end_at_or_before_the_start(api):
+    """A bare `time` carries no day of its own, so "00:00" meant as
+    "open until midnight" reads identically to "the start of this same
+    day" once combined with a date -- an inverted window every
+    gap-search downstream would silently treat as always full rather
+    than raising. Regression for a real incident: this corrupted a
+    garden's working hours and made every placement land at work_start
+    with no real search happening at all."""
+    api.set_working_hours("09:00", "17:00")
+    answer = api.set_working_hours("09:00", "00:00")
+    assert answer == {"workStart": "09:00", "workEnd": "17:00"}
+
+    answer = api.set_working_hours("09:00", "09:00")
+    assert answer == {"workStart": "09:00", "workEnd": "17:00"}
+
+
 def test_unscheduling_puts_a_task_back_in_the_pool(api, board):
     api.schedule(board["backfill"], "2026-08-26")
     api.unschedule(board["backfill"])
     assert "date" not in get_mote(api._conn, board["backfill"]).properties
     assert "Backfill dry run" in {c["name"] for c in api.days(WEEK_START, WEEK_END)["pool"]}
-
-
-def test_scheduling_pins_the_placement(api, board):
-    """A drag is the one action that says "I chose this exact time" --
-    auto_schedule() has to be able to tell that placement apart from one
-    it invented itself."""
-    api.schedule(board["backfill"], "2026-08-26")
-    assert get_mote(api._conn, board["backfill"]).properties["pinned"] is True
-
-
-def test_unscheduling_clears_the_pin(api, board):
-    api.schedule(board["backfill"], "2026-08-26")
-    api.unschedule(board["backfill"])
-    assert "pinned" not in get_mote(api._conn, board["backfill"]).properties
 
 
 def test_a_scheduled_task_lands_on_its_day_in_the_week(api, board, monkeypatch):
@@ -497,6 +499,46 @@ def test_a_finished_overdue_task_is_left_where_it_was(api, monkeypatch):
     assert get_mote(api._conn, task).properties["date"] == "2020-01-01"
 
 
+def test_a_completed_tasks_scheduled_slot_is_released(api, monkeypatch):
+    """A task marked done keeps whatever `scheduled` block it already
+    had until something notices -- days() is what notices, freeing the
+    slot the same read that rolls overdue work forward already runs
+    on."""
+    _freeze_today(monkeypatch, "2026-08-27")
+    task = create_mote(api._conn, {
+        "name": "Wrapped up", "status": "done", "estimate": 0, "scheduled": "2026-08-26 09:00/PT1H",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert "scheduled" not in get_mote(api._conn, task).properties
+
+
+def test_a_zeroed_estimate_releases_the_scheduled_slot_without_a_status(api, monkeypatch):
+    """The same release, but for a garden with no status property at
+    all -- a plain `0` is what a spent-down estimate looks like
+    (format_estimate_like()), and reads as finished on its own. The key
+    is passed explicitly the way the frontend already would once a
+    board read has settled on it -- a lone zeroed task has nothing
+    else to auto-discover `estimate` from, since a parsed `0` does not
+    count as an estimate-shaped value on its own."""
+    _freeze_today(monkeypatch, "2026-08-27")
+    task = create_mote(api._conn, {
+        "name": "Spent down", "estimate": 0, "scheduled": "2026-08-27 09:00/PT1H",
+    })
+    api.days(WEEK_START, WEEK_END, estimate_key="estimate")
+    assert "scheduled" not in get_mote(api._conn, task).properties
+
+
+def test_an_open_task_with_no_estimate_keeps_its_scheduled_slot(api, monkeypatch):
+    """No estimate at all is not the same as a spent-down `0` -- only
+    the explicit zero reads as finished."""
+    _freeze_today(monkeypatch, "2026-08-27")
+    task = create_mote(api._conn, {
+        "name": "Still open", "status": "todo", "scheduled": "2026-08-27 09:00/PT1H",
+    })
+    api.days(WEEK_START, WEEK_END)
+    assert get_mote(api._conn, task).properties["scheduled"] == "2026-08-27 09:00/PT1H"
+
+
 def test_a_multi_day_booking_never_rolls_forward(api, monkeypatch):
     """A three-day conference dated last week is not a slipped task --
     rolling it onto today would delete what the span said."""
@@ -521,16 +563,7 @@ def test_a_recurring_placement_never_rolls_forward(api, monkeypatch):
         "2026-08-03T09:00/PT30M\nRRULE:FREQ=WEEKLY"
 
 
-def test_rolling_forward_clears_the_pin(api, board, monkeypatch):
-    """Today is not the day a drag pinned this task to."""
-    _freeze_today(monkeypatch, "2026-08-24")
-    api.schedule(board["backfill"], "2026-08-24")
-    _freeze_today(monkeypatch, "2026-08-27")
-    api.days(WEEK_START, WEEK_END)
-    assert "pinned" not in get_mote(api._conn, board["backfill"]).properties
-
-
-def test_auto_schedule_untangles_a_three_way_pileup(api, monkeypatch):
+def test_schedule_selected_untangles_a_three_way_pileup(api, monkeypatch):
     from datetime import datetime
 
     from core.calendar import conflicts as calendar_conflicts
@@ -538,52 +571,139 @@ def test_auto_schedule_untangles_a_three_way_pileup(api, monkeypatch):
 
     _freeze_today(monkeypatch, "2026-08-24")
     conn = api._conn
-    a = create_mote(conn, {"name": "A", "status": "todo", "estimate": "1h", "date": "2026-08-26 09:00"})
-    b = create_mote(conn, {"name": "B", "status": "todo", "estimate": "1h", "date": "2026-08-26 09:15"})
-    c = create_mote(conn, {"name": "C", "status": "todo", "estimate": "1h", "date": "2026-08-26 09:30"})
+    a = create_mote(conn, {"name": "A", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 09:00"})
+    b = create_mote(conn, {"name": "B", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 09:15"})
+    c = create_mote(conn, {"name": "C", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 09:30"})
 
-    answer = api.auto_schedule(WEEK_START, WEEK_END)
-    assert answer["unresolved"] == []
+    answer = api.schedule_selected([a, b, c])
     assert {m["name"] for m in answer["moved"]} <= {"A", "B", "C"}
 
     motes = [Mote(properties=get_mote(conn, mid).properties, id=mid) for mid in (a, b, c)]
     remaining = calendar_conflicts(
-        motes, bindings=["date"],
+        motes, bindings=["scheduled"],
         window_start=datetime.fromisoformat(WEEK_START), window_end=datetime.fromisoformat(WEEK_END),
     )
     assert remaining == []
 
 
-def test_auto_schedule_never_moves_a_pinned_task(api, board, monkeypatch):
+def test_schedule_selected_only_touches_the_ids_it_was_given(api, board, monkeypatch):
+    """The old Auto-schedule button had to guess who was allowed to
+    move; this one doesn't ask -- whatever wasn't in the selection stays
+    exactly where it was, conflict or not."""
+    from core.motes import update_mote
+
     _freeze_today(monkeypatch, "2026-08-24")
     conn = api._conn
-    api.schedule(board["backfill"], "2026-08-26")  # pins 09:30-12:30 (standup ends 09:30)
-    pinned_before = get_mote(conn, board["backfill"]).properties["date"]
+    update_mote(conn, board["backfill"], {"scheduled": "2026-08-26T09:30:00/PT3H"})
+    before = get_mote(conn, board["backfill"]).properties["scheduled"]
     overlapping = create_mote(conn, {
-        "name": "Collides", "status": "todo", "estimate": "1h", "date": "2026-08-26 10:00",
+        "name": "Collides", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 10:00",
     })
-    answer = api.auto_schedule(WEEK_START, WEEK_END)
-    assert get_mote(conn, board["backfill"]).properties["date"] == pinned_before
+
+    answer = api.schedule_selected([overlapping])
+    assert get_mote(conn, board["backfill"]).properties["scheduled"] == before
     assert any(m["name"] == "Collides" for m in answer["moved"])
 
 
-def test_auto_schedule_reports_two_pinned_tasks_it_cannot_move(api, monkeypatch):
+def test_schedule_selected_moves_a_task_off_a_fixed_calendar_event(api, board, monkeypatch):
+    """Standup is bound under `date`, so it is never itself a candidate
+    to move -- but a selected `scheduled` task dropped on top of it
+    still has to be recognized as busy and moved clear of it."""
+    from core.motes import update_mote
+
     _freeze_today(monkeypatch, "2026-08-24")
     conn = api._conn
-    a = create_mote(conn, {"name": "A", "status": "todo", "estimate": "1h"})
-    b = create_mote(conn, {"name": "B", "status": "todo", "estimate": "1h"})
-    api.schedule(a, "2026-08-26")
-    api.schedule(b, "2026-08-26")  # both land at the same earliest slot in turn
-    # Force them onto the same time by hand, as if pinned there directly.
-    from core.motes import update_mote
-    binding = next(
-        k for k in get_mote(conn, a).properties if k not in ("name", "status", "estimate", "pinned")
-    )
-    update_mote(conn, b, {binding: get_mote(conn, a).properties[binding]})
+    # Standup runs 2026-08-26 09:00-09:30; force the task directly on top
+    # of it rather than through schedule(), which would dodge the gap.
+    update_mote(conn, board["backfill"], {"scheduled": "2026-08-26 09:00/PT30M"})
 
-    answer = api.auto_schedule(WEEK_START, WEEK_END)
-    assert {m["id"] for m in answer["unresolved"]} == {a, b}
+    answer = api.schedule_selected([board["backfill"]])
+    assert any(m["name"] == "Backfill dry run" for m in answer["moved"])
+    assert get_mote(conn, board["backfill"]).properties["scheduled"] != "2026-08-26 09:00/PT30M"
+
+
+def test_schedule_selected_releases_a_completed_tasks_slot_instead_of_moving_it(api, board, monkeypatch):
+    """A done task is never something this moves out of someone else's
+    way -- its slot is simply given back."""
+    from core.motes import update_mote
+
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    update_mote(conn, board["backfill"], {
+        "status": "done", "scheduled": "2026-08-26 09:00/PT30M",
+    })
+
+    answer = api.schedule_selected([board["backfill"]])
     assert answer["moved"] == []
+    assert "scheduled" not in get_mote(conn, board["backfill"]).properties
+
+
+def test_schedule_selected_skips_an_undated_mote(api, monkeypatch):
+    """A selected mote that was never dropped on a day has no placement
+    to resolve -- schedule() is the drag that invents one, not this."""
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    undated = create_mote(conn, {"name": "Undated", "status": "todo", "estimate": "1h"})
+
+    answer = api.schedule_selected([undated])
+    assert answer["moved"] == []
+    assert "scheduled" not in get_mote(conn, undated).properties
+
+
+def test_schedule_selected_packs_two_movers_tightly_instead_of_leaving_a_gap(api, monkeypatch):
+    """When two selected tasks both need to move off the same fixed
+    class, the second one placed must dodge the *first one's real new
+    slot*, not the stale position it still sits at until its own turn --
+    otherwise a gap opens up that a tighter packing would have used."""
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    create_mote(conn, {"name": "Lecture", "date": "2026-08-26 09:00/PT1H15M"})
+    a = create_mote(conn, {
+        "name": "A", "status": "todo", "estimate": "45m", "scheduled": "2026-08-26 09:00",
+    })
+    b = create_mote(conn, {
+        "name": "B", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 09:45",
+    })
+
+    api.schedule_selected([a, b])
+
+    from core import interval as interval_repo
+    ivs = sorted(
+        (interval_repo.parse(get_mote(conn, mid).properties["scheduled"]) for mid in (a, b)),
+        key=lambda iv: iv.start,
+    )
+    # Both land back-to-back right after the lecture ends at 10:15 --
+    # no 30-minute gap left unclaimed between them.
+    assert ivs[0].start.strftime("%H:%M") == "10:15"
+    assert ivs[1].start == ivs[0].end
+
+
+def test_reorder_day_re_times_cards_to_match_the_given_order(api, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    a = create_mote(conn, {"name": "A", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 09:00"})
+    b = create_mote(conn, {"name": "B", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 10:00"})
+
+    api.reorder_day("2026-08-26", [b, a])
+
+    from core import interval as interval_repo
+    iv_a = interval_repo.parse(get_mote(conn, a).properties["scheduled"])
+    iv_b = interval_repo.parse(get_mote(conn, b).properties["scheduled"])
+    assert iv_b.start < iv_a.start
+    assert iv_b.start.strftime("%H:%M") == "09:00"
+    assert iv_a.start == iv_b.end
+
+
+def test_reorder_day_only_touches_cards_actually_on_that_day(api, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-24")
+    conn = api._conn
+    a = create_mote(conn, {"name": "A", "status": "todo", "estimate": "1h", "scheduled": "2026-08-26 09:00"})
+    elsewhere = create_mote(conn, {"name": "Elsewhere", "status": "todo", "estimate": "1h", "scheduled": "2026-08-27 09:00"})
+    before = get_mote(conn, elsewhere).properties["scheduled"]
+
+    answer = api.reorder_day("2026-08-26", [a, elsewhere])
+    assert not any(m["id"] == elsewhere for m in answer["moved"])
+    assert get_mote(conn, elsewhere).properties["scheduled"] == before
 
 
 # ---- editing ----
@@ -612,6 +732,61 @@ def test_a_subtask_index_out_of_range_changes_nothing(api, board):
 def test_the_panel_marks_which_properties_this_window_is_reading(api, board):
     panel = api.focus(board["schema"])
     assert set(panel["taskKeys"]) == {"status", "priority", "estimate", "subtasks"}
+
+
+# ---- undo ----
+
+def test_deleting_a_task_can_be_undone(api, board):
+    api.delete_mote(board["schema"])
+    assert get_mote(api._conn, board["schema"]) is None
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, board["schema"]) is not None
+
+
+def test_creating_a_task_can_be_undone(api, board):
+    created = api.create_task("New thing")
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, created["id"]) is None
+
+
+def test_setting_status_can_be_undone(api, board):
+    api.set_status(board["backfill"], "status", "doing")
+    assert get_mote(api._conn, board["backfill"]).properties["status"] == "doing"
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, board["backfill"]).properties["status"] == "todo"
+
+
+def test_scheduling_a_task_can_be_undone(api, board, monkeypatch):
+    _freeze_today(monkeypatch, "2026-08-24")
+    before = get_mote(api._conn, board["backfill"]).properties
+    answer = api.schedule(board["backfill"], "2026-08-26")
+    binding = answer["binding"]
+    assert get_mote(api._conn, board["backfill"]).properties[binding] != before.get(binding)
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, board["backfill"]).properties.get(binding) == before.get(binding)
+
+
+def test_a_subtask_toggle_can_be_undone(api, board):
+    api.set_subtask(board["schema"], 1, True)
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, board["schema"]).properties["subtasks"][1]["done"] is False
+
+
+def test_logging_a_session_can_be_undone(api, board):
+    answer = api.log_session(board["schema"], 30)
+    session_id = answer["id"]
+    assert get_mote(api._conn, session_id) is not None
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, session_id) is None
+    # the estimate deduction folds into the same undo step
+    assert get_mote(api._conn, board["schema"]).properties["estimate"] == "5h"
+
+
+def test_linking_two_motes_can_be_undone(api, board):
+    answer = api.link(board["schema"], board["backfill"], "blocks")
+    rel_id = answer["relationships"][-1]["id"]
+    assert api.undo()["undone"] is not None
+    assert all(r["id"] != rel_id for r in api.focus(board["schema"])["relationships"])
 
 
 # ---- app switcher (⌘J) ----

@@ -19,6 +19,8 @@ let keyChoice = null;             // {status, priority, estimate, bindings} once
 let data = null;             // the last answer for the current tab
 let anchor = null;           // Date; any day of the week shown in Days
 let selectedId = null;
+let pickedIds = new Set();   // multi-selected card ids, for the "Schedule these motes" menu
+let pickAnchor = null;       // last card id picked, where a shift-click range starts from
 let activeId = null;         // which mote the timer is running against
 let railW = 216;             // the rail's width, in px -- 0 means pulled shut
 let railResize = null;       // { sx, orig } while the rail's edge is being dragged
@@ -28,7 +30,8 @@ let tickTimer = null;
 let refreshSeq = 0;
 let dragState = null;        // {id, node, x0, y0, moved} while a card is pressed
 let justDragged = false;     // true for one tick after a drop, so the trailing click is a no-op
-let dropZones = [];          // {node, onDrop} for wherever a dragged card can land, this render
+let dropZones = [];          // {node, onDrop, reorderable} for wherever a dragged card can land, this render
+let dropDivider = null;      // the "it will land here" bar, moved into whichever zone is reorderable
 let addingColumn = null;     // which column's inline "+ add mote" input is open
 let sessionMinutes = 25;
 let stopwatch = false;       // true: count up with no target, until stopped
@@ -402,6 +405,7 @@ function cardNode(card, compact, draggable = true, withComplete = false) {
   node.style.borderLeftColor = color;
   node.dataset.id = card.id;
   if (card.id === selectedId) node.classList.add("selected");
+  if (pickedIds.has(card.id)) node.classList.add("picked");
   if (isDone(card)) node.classList.add("done");
 
   if (!compact) {
@@ -449,6 +453,15 @@ function cardNode(card, compact, draggable = true, withComplete = false) {
 
   node.oncontextmenu = (event) => {
     event.preventDefault();
+    if (pickedIds.size > 1 && pickedIds.has(card.id)) {
+      const ids = [...pickedIds];
+      ContextMenu.open(event.clientX, event.clientY, [
+        { label: `Schedule these motes (${ids.length})`, run: () => scheduleSelected(ids) },
+        "-",
+        { label: "Clear selection", run: () => { clearPick(); render(); } },
+      ]);
+      return;
+    }
     ContextMenu.open(event.clientX, event.clientY, [
       ...ContextMenu.inspectItems(card.id, node),
       "-",
@@ -457,11 +470,58 @@ function cardNode(card, compact, draggable = true, withComplete = false) {
   };
 
   if (draggable) node.addEventListener("pointerdown", (event) => beginCardDrag(event, card.id, node));
-  node.addEventListener("click", () => {
+  node.addEventListener("click", (event) => {
     if (justDragged) return;
+    if (event.shiftKey && pickAnchor) {
+      extendPick(node, card.id);
+      render();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey) {
+      togglePick(card.id);
+      render();
+      return;
+    }
+    if (pickedIds.size) clearPick();
     select(card.id === selectedId ? null : card.id);
   });
   return node;
+}
+
+// ---- multi-select -----------------------------------------------------
+//
+// Ctrl/Cmd-click and Shift-click, the same gesture a file manager uses --
+// a plain click still opens the inspector exactly as it always has, so
+// picking never gets in the way of the one-mote workflow. What picking
+// is *for*: right-click a picked card to "Schedule these motes", the
+// explicit replacement for the old Auto-schedule button. See
+// scheduleSelected() and momentum/api.py::schedule_selected().
+
+function togglePick(id) {
+  if (pickedIds.has(id)) pickedIds.delete(id); else pickedIds.add(id);
+  pickAnchor = id;
+}
+
+/** Shift-click: every card between `pickAnchor` and `id`, in whichever
+ *  list currently holds `node` -- a range only means something within
+ *  one column or pool, so a shift-click into a different list just
+ *  picks that one card instead of reaching across containers. */
+function extendPick(node, id) {
+  const siblings = [...node.parentElement.children].filter((n) => n.dataset && n.dataset.id);
+  const ids = siblings.map((n) => n.dataset.id);
+  const from = ids.indexOf(pickAnchor);
+  const to = ids.indexOf(id);
+  if (from === -1 || to === -1) {
+    togglePick(id);
+    return;
+  }
+  const [lo, hi] = from < to ? [from, to] : [to, from];
+  for (const mid of ids.slice(lo, hi + 1)) pickedIds.add(mid);
+}
+
+function clearPick() {
+  pickedIds.clear();
+  pickAnchor = null;
 }
 
 function ownerLabel(card) {
@@ -483,9 +543,15 @@ function dayChip(card) {
 
 /** Registers `node` as somewhere a dragged card can be released. Reset
  *  at the top of every render() (see below), so a target from the view
- *  before last cannot outlive the DOM node it pointed at. */
-function dropTarget(node, onDrop) {
-  dropZones.push({ node, onDrop });
+ *  before last cannot outlive the DOM node it pointed at.
+ *
+ *  `reorderable`, when given, is a function returning the element whose
+ *  direct `.card` children can be reordered by dragging (a day's body) --
+ *  it earns this zone the "where will it land" divider line, drawn at
+ *  the same index cardIndexAt() would hand reorderDay(). Board columns
+ *  and the pool have no order of their own, so they leave it out. */
+function dropTarget(node, onDrop, reorderable) {
+  dropZones.push({ node, onDrop, reorderable });
 }
 
 // ---- dragging -------------------------------------------------------
@@ -536,7 +602,7 @@ function onCardDragUp(event) {
   justDragged = true;
   setTimeout(() => { justDragged = false; }, 0);
   const zone = zoneAt(event.clientX, event.clientY);
-  if (zone) zone.onDrop(state.id);
+  if (zone) zone.onDrop(state.id, event.clientX, event.clientY);
 }
 
 function zoneAt(x, y) {
@@ -548,11 +614,30 @@ function zoneAt(x, y) {
 function highlightZoneAt(x, y) {
   clearZoneHighlight();
   const zone = zoneAt(x, y);
-  if (zone) zone.node.classList.add("over");
+  if (!zone) return;
+  zone.node.classList.add("over");
+  if (!zone.reorderable) return;
+  const container = zone.reorderable();
+  if (!container) return;
+  const excludeId = dragState ? dragState.id : null;
+  const index = cardIndexAt(container, y, excludeId);
+  const cards = [...container.querySelectorAll(":scope > .card")]
+    .filter((node) => node.dataset.id !== excludeId);
+  container.insertBefore(dividerNode(), cards[index] || null);
 }
 
 function clearZoneHighlight() {
   dropZones.forEach((z) => z.node.classList.remove("over"));
+  if (dropDivider && dropDivider.parentNode) dropDivider.remove();
+}
+
+/** The shared "it will land here" bar -- one node, moved wherever the
+ *  pointer currently hovers a reorderable zone, rather than a fresh one
+ *  per render (which would flicker) or per zone (which would leave
+ *  stale bars in every day the pointer has already passed through). */
+function dividerNode() {
+  if (!dropDivider) dropDivider = el("div", "drop-divider");
+  return dropDivider;
 }
 
 // ---- rendering: the rail -------------------------------------------
@@ -688,7 +773,7 @@ function renderDays() {
     day.cards.forEach((card) => body.append(cardNode(card, true, true, true)));
     node.append(body);
 
-    dropTarget(node, (id) => scheduleOn(id, day.day));
+    dropTarget(node, (id, x, y) => dropOnDay(id, day.day, node, y), () => node.querySelector(".day-body"));
     host.append(node);
   });
 
@@ -801,7 +886,6 @@ function render() {
   // Only the week has a range to step through -- the board and focus
   // tabs have nothing for prev/next/today to mean.
   $("nav").classList.toggle("hidden", tab !== "days");
-  $("auto-schedule-btn").classList.toggle("hidden", tab !== "days");
 
   if (tab === "board") renderBoard();
   else if (tab === "days") renderDays();
@@ -822,7 +906,7 @@ function renderChrome() {
     const scheduled = (data.days || []).reduce((n, d) => n + d.cards.length, 0);
     $("range-sub").textContent =
       `${scheduled} scheduled · ${(data.pool || []).length} undated · capacity ${humanMinutes(data.capacityMinutes)}/day`;
-    $("hint").textContent = "drag a mote onto a day for the earliest free slot · drop it back to unschedule";
+    $("hint").textContent = "drag a mote onto a day for the earliest free slot, or up/down within a day to reorder it · drop it back to unschedule · ⌘/ctrl-click to multi-select, then right-click to schedule them";
     $("stat-scheduled").textContent = `${scheduled} scheduled this week`;
   } else if (tab === "board") {
     $("range-title").textContent = "Board";
@@ -882,7 +966,7 @@ async function deleteMote(moteId, name = "That mote") {
   const ok = await call(api.delete_mote(moteId), "Could not delete that mote.");
   if (!ok) return;
   if (selectedId === moteId) select(null);
-  toast(`${name} deleted.`);
+  toast(`${name} deleted.`, false, { label: "Undo", run: () => Undo.undo() });
   refresh();
 }
 
@@ -927,6 +1011,50 @@ async function scheduleOn(moteId, day) {
   refresh();
 }
 
+// A day's vertical order controls nothing on its own -- start times, not
+// position in a list, are what the cards below actually read. Dragging
+// a card up or down inside a day therefore has to re-time every card
+// on that day to match, which reorder_day() does; the order itself is
+// never written down anywhere, it is read straight off the DOM the
+// moment a drop happens and thrown away right after.
+
+function dayCards(day) {
+  const found = (data.days || []).find((d) => d.day === day);
+  return found ? found.cards : [];
+}
+
+/** Which index a card dropped at `y` inside `container` (a day-body)
+ *  should land at -- the same "closest gap" a file manager's list drop
+ *  would compute. The card being dragged is skipped even when it is
+ *  still sitting in this same container (a drag within one day never
+ *  leaves the DOM), so its own old slot doesn't throw off the count. */
+function cardIndexAt(container, y, excludeId) {
+  const cards = [...container.querySelectorAll(":scope > .card")]
+    .filter((node) => node.dataset.id !== excludeId);
+  for (let i = 0; i < cards.length; i++) {
+    const rect = cards[i].getBoundingClientRect();
+    if (y < rect.top + rect.height / 2) return i;
+  }
+  return cards.length;
+}
+
+async function dropOnDay(moteId, day, dayNode, y) {
+  const body = dayNode.querySelector(".day-body");
+  const index = body ? cardIndexAt(body, y, moteId) : undefined;
+  const alreadyOn = dayCards(day).some((c) => c.id === moteId);
+  if (!alreadyOn) await scheduleOn(moteId, day);
+  await reorderDay(day, moteId, index);
+}
+
+async function reorderDay(day, moteId, index) {
+  const order = dayCards(day).map((c) => c.id).filter((id) => id !== moteId);
+  const at = index === undefined ? order.length : Math.max(0, Math.min(index, order.length));
+  order.splice(at, 0, moteId);
+  const answer = await call(api.reorder_day(day, order, ...keyArgs()), "Could not reorder that day.");
+  if (answer === null) return;
+  refresh();
+}
+
 async function saveWorkingHours() {
   const start = $("work-start-input").value || workHours.start;
   const end = $("work-end-input").value || workHours.end;
@@ -944,18 +1072,12 @@ async function unschedule(moteId) {
   refresh();
 }
 
-async function autoSchedule() {
-  const [start, end] = visibleRange();
-  const answer = await call(
-    api.auto_schedule(isoLocal(start), isoLocal(end), ...keyArgs()), "Could not auto-schedule this week.",
-  );
+async function scheduleSelected(ids) {
+  const answer = await call(api.schedule_selected(ids, ...keyArgs()), "Could not schedule those motes.");
+  clearPick();
   if (answer === null) return;
   const moved = answer.moved.length;
-  const left = answer.unresolved.length;
-  const movedPart = `Moved ${moved} task${moved === 1 ? "" : "s"}.`;
-  toast(left
-    ? `${movedPart} ${left} conflict${left === 1 ? "" : "s"} left — pinned, or no room left in the day.`
-    : `${movedPart} No conflicts left.`);
+  toast(moved ? `Moved ${moved} task${moved === 1 ? "" : "s"}.` : "Nothing needed to move.");
   refresh();
 }
 
@@ -1244,6 +1366,16 @@ function wire() {
     if (!event.target.closest(".topbar-menu")) closeGardenMenu();
   });
 
+  // A plain click on a card clears the pick itself (see cardNode); this
+  // covers everywhere else -- the gaps between cards, the rail, empty
+  // columns -- so leaving the picked set behind isn't the only way out.
+  document.addEventListener("click", (event) => {
+    if (pickedIds.size && !event.target.closest(".card") && !ContextMenu.isOpen()) {
+      clearPick();
+      render();
+    }
+  });
+
   $("switch-app-btn").onclick = openLauncher;
   $("launcher-overlay").addEventListener("mousedown", (event) => {
     if (event.target === $("launcher-overlay")) closeLauncher();
@@ -1280,8 +1412,6 @@ function wire() {
     if (answer && answer.synced) toast("Synced.");
     refresh();
   };
-
-  $("auto-schedule-btn").onclick = autoSchedule;
 
   $("chip-time").onclick = toggleTimer;
   $("run-btn").onclick = toggleTimer;
@@ -1480,6 +1610,7 @@ async function init() {
     onChanged: refresh,
     onNavigate: (moteId) => Inspector.open(moteId),
   });
+  Undo.install({ api, toast, onChanged: refresh });
   anchor = new Date();
   keyChoice = loadKeys();
   loadTimerPrefs();

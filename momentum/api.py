@@ -26,7 +26,7 @@ from datetime import date, datetime, time, timedelta
 
 import webview
 
-from api_common import CommandBarApi, InspectorApi
+from api_common import CommandBarApi, InspectorApi, UndoableApi
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
@@ -43,6 +43,7 @@ from core import scenarios as scenarios_repo
 from core import species as species_repo
 from core import sync as sync_repo
 from core import task_candidates as candidates_repo
+from core import undo
 from core.db import get_connection, initialize_database
 from core.entities import Mote
 from momentum import payload as payload_repo
@@ -65,14 +66,6 @@ FALLBACK_BINDING = "scheduled"
 # gap. Matches core/calendar.py::DEFAULT_TIMED_MINUTES, so a scheduled
 # task and the rectangle Monastery draws for it are the same length.
 DEFAULT_SLOT_MINUTES = 60
-
-# Marks a placement the person chose by dragging, rather than one this
-# window invented to fill a gap. An ordinary property, not a reserved
-# binding name -- the same footing SUBTASKS_KEY stands on in
-# momentum/payload.py. auto_schedule() will not move a pinned task, and
-# rolling an overdue task forward clears it: today is not the day it
-# was pinned for.
-PINNED_KEY = "pinned"
 
 # How low a logged session is allowed to push a task's remaining
 # estimate while the task is still open. An estimate hitting exactly
@@ -120,7 +113,7 @@ def _parse_time(raw, fallback: time) -> time:
         return fallback
 
 
-class Api(InspectorApi, CommandBarApi):
+class Api(InspectorApi, CommandBarApi, UndoableApi):
     """Every read takes the person's key choices as arguments rather
     than holding them as state. The window owns which key it is reading
     as status, the same way Monastery owns which bindings are switched
@@ -135,6 +128,7 @@ class Api(InspectorApi, CommandBarApi):
         self._initial_focus = focus
         self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
+        self._init_undo()
         self._best_effort_sync()
 
     def _open(self, garden: str):
@@ -405,6 +399,7 @@ class Api(InspectorApi, CommandBarApi):
 
         start = datetime.fromisoformat(window_start).date()
         end = datetime.fromisoformat(window_end).date()
+        self._release_finished(tasks, keys)
         self._roll_forward_overdue(tasks, visible, excluded, keys, settings)
         self._auto_place(tasks, visible, excluded, keys, settings, start, end)
         cards = [payload_repo.card_payload(m, directory, keys) for m in tasks]
@@ -528,14 +523,23 @@ class Api(InspectorApi, CommandBarApi):
         logged as one last session rather than silently disappearing.
         """
         mote = motes_repo.get_mote(self._conn, mote_id)
-        if mote is not None and isinstance(status, str) and payload_repo.is_done_value(status) \
+        if mote is None:
+            return None
+        commands = []
+        if isinstance(status, str) and payload_repo.is_done_value(status) \
                 and not payload_repo.is_done_value(mote.properties.get(status_key)):
             _, _, _, keys, _ = self._garden_state(estimate_key=estimate_key, status_key=status_key)
-            self._log_closing_session(mote, keys.estimate)
+            commands.extend(self._log_closing_session(mote, keys.estimate))
+        old_value = mote.properties.get(status_key)
         if status is None:
-            motes_repo.delete_property(self._conn, mote_id, status_key)
+            if motes_repo.delete_property(self._conn, mote_id, status_key):
+                commands.append(undo.for_delete_property(self._conn, mote_id, status_key, old_value, label="set status"))
         else:
+            old_props = {status_key: old_value} if status_key in mote.properties else {}
             motes_repo.update_mote(self._conn, mote_id, {status_key: status})
+            commands.append(undo.for_update_mote(self._conn, mote_id, old_props, {status_key: status}, label="set status"))
+        if commands:
+            self.undo_manager.push(undo.combine("set status", commands))
         return self._panel(mote_id)
 
     @_synchronized
@@ -554,9 +558,15 @@ class Api(InspectorApi, CommandBarApi):
         mote = motes_repo.get_mote(self._conn, mote_id)
         if mote is None:
             return None
-        self._log_closing_session(mote, keys.estimate)
+        commands = self._log_closing_session(mote, keys.estimate)
         if keys.status:
+            old_props = {keys.status: mote.properties[keys.status]} if keys.status in mote.properties else {}
             motes_repo.update_mote(self._conn, mote_id, {keys.status: STATUS_COMPLETE})
+            commands.append(undo.for_update_mote(
+                self._conn, mote_id, old_props, {keys.status: STATUS_COMPLETE}, label="complete task",
+            ))
+        if commands:
+            self.undo_manager.push(undo.combine("complete task", commands))
         return self._panel(mote_id, keys)
 
     @_synchronized
@@ -571,21 +581,47 @@ class Api(InspectorApi, CommandBarApi):
         mote_id = motes_repo.create_mote(self._conn, properties)
         if species_id:
             species_repo.set_species(self._conn, mote_id, species_id)
+        # Deleting the mote (this command's undo) cascades away the
+        # instance_of relationship set_species just made.
+        self.undo_manager.push(undo.for_create_mote(self._conn, mote_id, properties, label="create a task"))
         return self._panel(mote_id)
 
     @_synchronized
     def update_mote(self, mote_id: str, raw_properties: dict) -> dict | None:
-        motes_repo.update_mote(self._conn, mote_id, _coerce_properties(raw_properties))
+        new_props = _coerce_properties(raw_properties)
+        old = motes_repo.get_mote(self._conn, mote_id)
+        if old is None:
+            return None
+        old_props = {k: old.properties[k] for k in new_props if k in old.properties}
+        motes_repo.update_mote(self._conn, mote_id, new_props)
+        self.undo_manager.push(undo.for_update_mote(self._conn, mote_id, old_props, new_props, label="edit"))
         return self._panel(mote_id)
 
     @_synchronized
     def delete_property(self, mote_id: str, key: str) -> dict | None:
-        motes_repo.delete_property(self._conn, mote_id, key)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None or key not in mote.properties:
+            return self._panel(mote_id)
+        old_value = mote.properties[key]
+        if motes_repo.delete_property(self._conn, mote_id, key):
+            self.undo_manager.push(undo.for_delete_property(self._conn, mote_id, key, old_value, label=f"clear {key}"))
         return self._panel(mote_id)
 
     @_synchronized
     def delete_mote(self, mote_id: str) -> bool:
-        return motes_repo.delete_mote(self._conn, mote_id)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None:
+            return False
+        relationships = [
+            {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+            for r in graph_repo.relationships_touching(self._conn, mote_id)
+        ]
+        deleted = motes_repo.delete_mote(self._conn, mote_id)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_mote(
+                self._conn, mote_id, mote.properties, relationships, label="delete a task",
+            ))
+        return deleted
 
     @_synchronized
     def set_subtask(self, mote_id: str, index: int, done: bool) -> dict | None:
@@ -599,8 +635,13 @@ class Api(InspectorApi, CommandBarApi):
         subtasks = payload_repo.subtasks_of(mote)
         if not 0 <= index < len(subtasks):
             return self._panel(mote_id)
+        old_subtasks = [dict(s) for s in subtasks]
         subtasks[index]["done"] = bool(done)
+        old_props = {payload_repo.SUBTASKS_KEY: old_subtasks} if payload_repo.SUBTASKS_KEY in mote.properties else {}
         motes_repo.update_mote(self._conn, mote_id, {payload_repo.SUBTASKS_KEY: subtasks})
+        self.undo_manager.push(undo.for_update_mote(
+            self._conn, mote_id, old_props, {payload_repo.SUBTASKS_KEY: subtasks}, label="check subtask",
+        ))
         return self._panel(mote_id)
 
     @_synchronized
@@ -609,8 +650,12 @@ class Api(InspectorApi, CommandBarApi):
         if mote is None:
             return None
         subtasks = payload_repo.subtasks_of(mote)
+        old_props = {payload_repo.SUBTASKS_KEY: [dict(s) for s in subtasks]} if payload_repo.SUBTASKS_KEY in mote.properties else {}
         subtasks.append({"text": text, "done": False})
         motes_repo.update_mote(self._conn, mote_id, {payload_repo.SUBTASKS_KEY: subtasks})
+        self.undo_manager.push(undo.for_update_mote(
+            self._conn, mote_id, old_props, {payload_repo.SUBTASKS_KEY: subtasks}, label="add subtask",
+        ))
         return self._panel(mote_id)
 
     # ---- scheduling ----
@@ -625,17 +670,36 @@ class Api(InspectorApi, CommandBarApi):
         rail's inputs are free text, and a garden that types something
         `time.fromisoformat` cannot read should not lose its other value
         over it.
+
+        A parsed `work_end` at or before `work_start` is kept as it was
+        too, the same tolerance as an unparseable one -- `time` carries
+        no day of its own, so a bare "00:00" meant as "until midnight"
+        reads identically to "the start of this day" once combined with
+        a date, and every gap-search downstream would see an already-
+        closed window and silently place everything at `work_start`
+        instead of actually searching for room.
         """
         _, tasks, _, _, _ = self._garden_state()
         settings = self._settings(tasks)
+        parsed_start = _parse_time(work_start, settings["workStart"])
+        parsed_end = _parse_time(work_end, settings["workEnd"])
+        if parsed_end <= parsed_start:
+            parsed_start, parsed_end = settings["workStart"], settings["workEnd"]
         updates = {
-            "work_start": _parse_time(work_start, settings["workStart"]).strftime("%H:%M"),
-            "work_end": _parse_time(work_end, settings["workEnd"]).strftime("%H:%M"),
+            "work_start": parsed_start.strftime("%H:%M"),
+            "work_end": parsed_end.strftime("%H:%M"),
         }
         if settings["settingsId"]:
+            old = motes_repo.get_mote(self._conn, settings["settingsId"]).properties
+            old_props = {k: old[k] for k in updates if k in old}
             motes_repo.update_mote(self._conn, settings["settingsId"], updates)
+            self.undo_manager.push(undo.for_update_mote(
+                self._conn, settings["settingsId"], old_props, updates, label="set working hours",
+            ))
         else:
-            motes_repo.create_mote(self._conn, {"name": SETTINGS_NAME, **updates})
+            properties = {"name": SETTINGS_NAME, **updates}
+            settings_id = motes_repo.create_mote(self._conn, properties)
+            self.undo_manager.push(undo.for_create_mote(self._conn, settings_id, properties, label="set working hours"))
         return {"workStart": updates["work_start"], "workEnd": updates["work_end"]}
 
     def _binding_to_write(self, mote: Mote, keys: payload_repo.Keys, motes: list[Mote]) -> str:
@@ -659,9 +723,8 @@ class Api(InspectorApi, CommandBarApi):
 
     def _place_in_earliest_slot(
         self, mote: Mote, binding: str, day: date, minutes: float,
-        visible: list[Mote], excluded: set[str],
-        keys: payload_repo.Keys, settings: dict,
-    ) -> tuple[datetime, bool]:
+        visible: list[Mote], excluded: set[str], settings: dict,
+    ) -> tuple[datetime, bool, "undo.Command"]:
         """The earliest free start on `day` for `minutes` of work under
         `binding`, written onto the mote -- what "the earliest unblocked
         position" means everywhere this window places a task, whether
@@ -674,18 +737,23 @@ class Api(InspectorApi, CommandBarApi):
         placement was asked for -- a drag is a request to re-place, and
         _auto_place() checks that nothing was declared before it writes.
 
-        The gap is found against everything the calendar considers busy
-        that day, through core/calendar.py, so a task never lands on top
-        of a meeting Monastery would draw. A day with no room left is
-        not an error -- the task is placed at the start of the working
-        day and the caller says so, because refusing to schedule
-        something is not this window's decision to make.
+        The gap is found against every binding `visible` actually carries
+        an interval under, never just whichever ones the board currently
+        has switched on -- a person who narrows the board down to
+        `scheduled` so it stops listing every synced class as its own
+        card still needs a real class to block the slot it's sitting in.
+        Display and busy-ness are two different questions; only the
+        first one reads `keys.bindings`, and this is the second one.
+        A day with no room left is not an error -- the task is placed at
+        the start of the working day and the caller says so, because
+        refusing to schedule something is not this window's decision to
+        make.
         """
         slot = calendar_repo.earliest_free_slot(
             [m for m in visible if m.id != mote.id],
             day=day,
             duration=timedelta(minutes=minutes),
-            bindings=list(keys.bindings) or [FALLBACK_BINDING],
+            bindings=calendar_repo.default_bindings(visible) or [FALLBACK_BINDING],
             work_start=settings["workStart"],
             work_end=settings["workEnd"],
             exclude_ids=excluded,
@@ -702,12 +770,52 @@ class Api(InspectorApi, CommandBarApi):
         )
         written = interval_repo.format(placed) if existing is None else \
             interval_repo.format_like(mote.properties[binding], placed, force_span=True)
+        old_props = {binding: mote.properties[binding]} if binding in mote.properties else {}
         motes_repo.update_mote(self._conn, mote.id, {binding: written})
         # Kept in step so a second mote placed in the same call -- or the
         # card this same request renders -- sees the slot as taken and
         # already timed, rather than a moment-old snapshot.
         mote.properties[binding] = written
-        return start, full
+        command = undo.for_update_mote(self._conn, mote.id, old_props, {binding: written}, label="schedule")
+        return start, full, command
+
+    def _release_finished(self, tasks: list[Mote], keys: payload_repo.Keys) -> None:
+        """Give back a `scheduled` slot a task no longer has any business
+        holding -- because it is done, or because its estimate has been
+        spent down to exactly `0`. A depleted estimate reads the same as
+        done even without a status property to say so:
+        format_estimate_like() writes a plain `0`, never `0h`, the moment
+        nothing is left of one (see _deduct_estimate()), so `0` itself is
+        the finished signal here, not merely "no estimate" -- a task that
+        never had one carries no estimate property at all rather than a
+        zero, and parse_estimate_value() already collapses *that* case to
+        None, which is why this checks the raw value instead of going
+        through it.
+
+        Only `scheduled` is touched, the one binding this window ever
+        places something under -- a `due` date from Canvas or a `date` a
+        lecture carries is history, not a placement this window made, and
+        finishing a task does not un-happen a deadline someone still
+        might want to see. Run on every read that also rolls overdue work
+        forward and auto-places a bare date, so a slot frees up the
+        moment a task is closed out rather than sitting there until the
+        next drag pushes it aside.
+        """
+        for mote in tasks:
+            if FALLBACK_BINDING not in mote.properties:
+                continue
+            done = bool(
+                keys.status and payload_repo.is_done_value(mote.properties.get(keys.status))
+            )
+            raw_estimate = mote.properties.get(keys.estimate) if keys.estimate else None
+            zeroed = (
+                isinstance(raw_estimate, (int, float))
+                and not isinstance(raw_estimate, bool)
+                and raw_estimate == 0
+            )
+            if done or zeroed:
+                motes_repo.delete_property(self._conn, mote.id, FALLBACK_BINDING)
+                mote.properties.pop(FALLBACK_BINDING, None)
 
     def _roll_forward_overdue(
         self, tasks: list[Mote], visible: list[Mote], excluded: set[str],
@@ -729,8 +837,7 @@ class Api(InspectorApi, CommandBarApi):
         done task has no work left to catch up. A recurring placement
         is skipped too: its anchor date being in the past is normal,
         not overdue -- the series is still producing fresh occurrences
-        every week. `PINNED_KEY` is cleared first: a drag pinned a task
-        to *that* day, and today is not it.
+        every week.
         """
         today = date.today()
         for mote in tasks:
@@ -747,11 +854,8 @@ class Api(InspectorApi, CommandBarApi):
                     minutes = candidates_repo.parse_estimate_value(
                         mote.properties.get(keys.estimate) if keys.estimate else None
                     ) or DEFAULT_SLOT_MINUTES
-                    if PINNED_KEY in mote.properties:
-                        motes_repo.delete_property(self._conn, mote.id, PINNED_KEY)
-                        mote.properties.pop(PINNED_KEY, None)
                     self._place_in_earliest_slot(
-                        mote, binding, today, minutes, visible, excluded, keys, settings
+                        mote, binding, today, minutes, visible, excluded, settings
                     )
                 break
 
@@ -801,7 +905,7 @@ class Api(InspectorApi, CommandBarApi):
                         mote.properties.get(keys.estimate) if keys.estimate else None
                     ) or DEFAULT_SLOT_MINUTES
                     self._place_in_earliest_slot(
-                        mote, binding, day, minutes, visible, excluded, keys, settings
+                        mote, binding, day, minutes, visible, excluded, settings
                     )
                 break
 
@@ -829,104 +933,158 @@ class Api(InspectorApi, CommandBarApi):
         )
         minutes = estimated or DEFAULT_SLOT_MINUTES
         binding = self._binding_to_write(mote, keys, tasks)
-        start, full = self._place_in_earliest_slot(
-            mote, binding, target_day, minutes, visible, excluded, keys, settings
+        start, full, command = self._place_in_earliest_slot(
+            mote, binding, target_day, minutes, visible, excluded, settings
         )
-        # A drag is the one action that means "I chose this exact time" --
-        # auto_schedule() leaves a pinned task alone even to resolve a
-        # conflict elsewhere.
-        motes_repo.update_mote(self._conn, mote_id, {PINNED_KEY: True})
+        self.undo_manager.push(command)
 
         panel = self._panel(mote_id, keys)
         return {**(panel or {}), "slotFull": full, "binding": binding,
                 "start": start.isoformat()}
 
+    def _binding_of(self, mote: Mote, keys: payload_repo.Keys) -> str | None:
+        """Which binding already carries this mote's placement, the same
+        scan _binding_to_write() does before it invents one -- but this
+        one is allowed to come back empty, for a mote that was never
+        dated at all."""
+        for binding in (*keys.bindings, FALLBACK_BINDING):
+            if interval_repo.parse(mote.properties.get(binding)) is not None:
+                return binding
+        return None
+
     @_synchronized
-    def auto_schedule(
-        self, window_start: str, window_end: str,
+    def schedule_selected(
+        self, mote_ids: list[str],
         status_key=None, priority_key=None, estimate_key=None, bindings=None,
     ) -> dict:
-        """The Auto-schedule button: resolve every overlap it can inside
-        the drawn week without moving a task the person pinned by
-        dragging.
+        """The right-click "Schedule these motes" action: resolve overlaps
+        among exactly the motes the person multi-selected -- nothing here
+        has to guess who is allowed to move, because the person already
+        said so by selecting them.
 
-        Conflicts are found across every active binding at once with
-        calendar_repo.conflicts() -- the same reading
-        _place_in_earliest_slot() already trusts for "is this gap
-        free", so a task collides with a lecture dated under a
-        different binding exactly as readily as it collides with
-        another task. Only open tasks are considered; a done task or a
-        Monastery-only mote with no task reading is never something
-        this button moves, though it still counts as busy.
+        This replaces the old Auto-schedule button, which had to invent
+        its own rules for who was a candidate (only a mote under
+        `scheduled`, never one the person had dragged) purely to avoid
+        rearranging things nobody asked to touch. Multi-select is that
+        same guarantee moved into the person's hands instead: whatever
+        set they picked is exactly what gets replaced, nothing else --
+        so there is no pinned flag or conflict scan left to check first.
 
-        Unpinned tasks caught in a conflict are re-placed one at a
-        time, earliest start first, each against the *current* state
+        A selected mote with no placement of its own is skipped outright:
+        it has no day to be resolved onto, and this is not the drag that
+        invents one -- schedule() is, and the pool is where an undated
+        mote belongs until then. The rest are replaced one at a time,
+        earliest existing start first, each against the *current* state
         of everyone else -- _place_in_earliest_slot() keeps `visible`
-        mutated in place, so a three-way pileup fans out into three
-        clear slots in one pass rather than needing pairwise
-        resolution. A pinned task is left exactly where it was. What
-        comes back in `unresolved` is whatever still collides after
-        that pass -- a pinned task nothing could move around it, or
-        simply more open work on one day than working hours can hold,
-        since _place_in_earliest_slot() places at the start of the day
-        rather than refusing when a day is already full.
+        mutated in place, so a pileup fans out into clear slots in one
+        pass rather than needing pairwise resolution.
         """
         visible, tasks, excluded, keys, _ = self._garden_state(
             status_key=status_key, priority_key=priority_key,
             estimate_key=estimate_key, bindings=bindings,
         )
         settings = self._settings(tasks)
-        start = datetime.fromisoformat(window_start)
-        end = datetime.fromisoformat(window_end)
-        task_bindings = list(keys.bindings) or [FALLBACK_BINDING]
-        open_tasks = {
-            m.id: m for m in tasks
-            if not (keys.status and payload_repo.is_done_value(m.properties.get(keys.status)))
-        }
+        self._release_finished(tasks, keys)
+        by_id = {m.id: m for m in tasks}
 
-        def open_conflicts() -> list[tuple[calendar_repo.Occurrence, calendar_repo.Occurrence]]:
-            pairs = calendar_repo.conflicts(
-                visible, bindings=task_bindings, window_start=start, window_end=end,
-                exclude_ids=excluded,
-            )
-            return [
-                (a, b) for a, b in pairs
-                if a.mote.id in open_tasks and b.mote.id in open_tasks
-            ]
+        placements = []
+        for mote_id in mote_ids:
+            mote = by_id.get(mote_id)
+            if mote is None:
+                continue
+            binding = self._binding_of(mote, keys)
+            if binding is None:
+                continue
+            placements.append((mote, binding, interval_repo.parse(mote.properties[binding])))
+        placements.sort(key=lambda p: p[2].start)
 
-        def current_binding(mote: Mote) -> str | None:
-            return next(
-                (b for b in task_bindings if interval_repo.parse(mote.properties.get(b)) is not None),
-                None,
-            )
-
-        involved = {o.mote.id for pair in open_conflicts() for o in pair}
-        movable = [
-            open_tasks[mid] for mid in involved if PINNED_KEY not in open_tasks[mid].properties
-        ]
-        movable.sort(key=lambda m: interval_repo.parse(m.properties[current_binding(m)]).start)
+        # Every other mote still waiting its turn in this same pass sits at
+        # its stale position until it is actually placed -- counting that
+        # position as busy would make later motes dodge a slot no one will
+        # occupy by the time this pass ends. Already-placed ones stay real
+        # obstacles because their id drops out of this set the moment
+        # they are placed.
+        still_to_place = {mote.id for mote, _, _ in placements}
 
         moved = []
-        for mote in movable:
-            binding = current_binding(mote)
-            existing = interval_repo.parse(mote.properties[binding])
+        commands = []
+        for mote, binding, existing in placements:
+            still_to_place.discard(mote.id)
             minutes = candidates_repo.parse_estimate_value(
                 mote.properties.get(keys.estimate) if keys.estimate else None
             ) or round(existing.span.total_seconds() / 60) or DEFAULT_SLOT_MINUTES
             before = existing.start
-            when, _ = self._place_in_earliest_slot(
-                mote, binding, existing.start.date(), minutes, visible, excluded, keys, settings
+            when, _, command = self._place_in_earliest_slot(
+                mote, binding, existing.start.date(), minutes, visible,
+                excluded | still_to_place, settings,
             )
             if when != before:
                 moved.append({"id": mote.id, "name": payload_repo.name_of(mote), "start": when.isoformat()})
+                commands.append(command)
 
-        unresolved_ids = sorted({o.mote.id for pair in open_conflicts() for o in pair})
-        return {
-            "moved": moved,
-            "unresolved": [
-                {"id": mid, "name": payload_repo.name_of(open_tasks[mid])} for mid in unresolved_ids
-            ],
-        }
+        if commands:
+            label = "schedule a task" if len(commands) == 1 else f"schedule {len(commands)} tasks"
+            self.undo_manager.push(undo.combine(label, commands))
+        return {"moved": moved}
+
+    @_synchronized
+    def reorder_day(
+        self, day: str, mote_ids: list[str],
+        status_key=None, priority_key=None, estimate_key=None, bindings=None,
+    ) -> dict:
+        """Match a day's real time slots to a manual drag order.
+
+        The order itself is app.js's own bookkeeping -- read off the DOM
+        for the drop and never written anywhere -- but the times on
+        screen come from real calendar slots (see
+        _place_in_earliest_slot()), so honoring a reorder means
+        re-placing every card on `day`, earliest through `mote_ids`
+        first, the same pileup-resolving walk schedule_selected() does
+        for a stale batch, just walked in the order given rather than
+        by existing start.
+        """
+        visible, tasks, excluded, keys, _ = self._garden_state(
+            status_key=status_key, priority_key=priority_key,
+            estimate_key=estimate_key, bindings=bindings,
+        )
+        settings = self._settings(tasks)
+        by_id = {m.id: m for m in tasks}
+        target_day = date.fromisoformat(day)
+
+        placements = []
+        for mote_id in mote_ids:
+            mote = by_id.get(mote_id)
+            if mote is None:
+                continue
+            binding = self._binding_of(mote, keys)
+            if binding is None:
+                continue
+            existing = interval_repo.parse(mote.properties[binding])
+            if existing is None or existing.start.date() != target_day:
+                continue
+            placements.append((mote, binding, existing))
+
+        still_to_place = {mote.id for mote, _, _ in placements}
+        moved = []
+        commands = []
+        for mote, binding, existing in placements:
+            still_to_place.discard(mote.id)
+            minutes = candidates_repo.parse_estimate_value(
+                mote.properties.get(keys.estimate) if keys.estimate else None
+            ) or round(existing.span.total_seconds() / 60) or DEFAULT_SLOT_MINUTES
+            before = existing.start
+            when, _, command = self._place_in_earliest_slot(
+                mote, binding, target_day, minutes, visible,
+                excluded | still_to_place, settings,
+            )
+            if when != before:
+                moved.append({"id": mote.id, "start": when.isoformat()})
+                commands.append(command)
+
+        if commands:
+            label = "reorder a day" if len(commands) == 1 else f"reorder {len(commands)} tasks"
+            self.undo_manager.push(undo.combine(label, commands))
+        return {"moved": moved}
 
     @_synchronized
     def unschedule(self, mote_id: str, bindings=None) -> dict | None:
@@ -938,16 +1096,19 @@ class Api(InspectorApi, CommandBarApi):
         mote = motes_repo.get_mote(self._conn, mote_id)
         if mote is None:
             return None
+        commands = []
         for binding in keys.bindings:
             if calendar_repo.parse_date_value(mote.properties.get(binding)) is not None:
-                motes_repo.delete_property(self._conn, mote_id, binding)
-        if PINNED_KEY in mote.properties:
-            motes_repo.delete_property(self._conn, mote_id, PINNED_KEY)
+                old_value = mote.properties[binding]
+                if motes_repo.delete_property(self._conn, mote_id, binding):
+                    commands.append(undo.for_delete_property(self._conn, mote_id, binding, old_value, label="unschedule"))
+        if commands:
+            self.undo_manager.push(undo.combine("unschedule", commands))
         return self._panel(mote_id, keys)
 
     # ---- the timer ----
 
-    def _record_session(self, subject: Mote | None, minutes: float, start: datetime) -> str:
+    def _record_session(self, subject: Mote | None, minutes: float, start: datetime) -> tuple[str, "undo.Command"]:
         """The mote a finished session becomes: an ordinary mote carrying
         `date` and `duration`, an instance of a `Work Session` species,
         pointing at the task with `about` (the same relationship a Mora
@@ -961,18 +1122,22 @@ class Api(InspectorApi, CommandBarApi):
         species_id = self._session_species_id()
         if species_id is None:
             species_id = motes_repo.create_mote(self._conn, {"name": SESSION_SPECIES_NAME})
-        session_id = motes_repo.create_mote(self._conn, {
+        properties = {
             "name": name,
             "date": interval_repo.format(interval_repo.Interval(
                 start=start, end=start + timedelta(minutes=minutes), all_day=False,
             )),
-        })
+        }
+        session_id = motes_repo.create_mote(self._conn, properties)
         species_repo.set_species(self._conn, session_id, species_id)
         if subject is not None:
             rel_repo.create_relationship(self._conn, session_id, subject.id, modoc_repo.ABOUT)
-        return session_id
+        # Deleting the session mote (this command's undo) cascades away
+        # both the instance_of and the about relationship just made.
+        command = undo.for_create_mote(self._conn, session_id, properties, label="log a session")
+        return session_id, command
 
-    def _deduct_estimate(self, mote: Mote, estimate_key: str, minutes: float, *, floor: bool) -> None:
+    def _deduct_estimate(self, mote: Mote, estimate_key: str, minutes: float, *, floor: bool) -> "undo.Command | None":
         """A logged session's minutes taken back off the task's own
         estimate -- the number is what's left to do, not what was
         planned, once work against it has actually happened.
@@ -990,15 +1155,16 @@ class Api(InspectorApi, CommandBarApi):
         raw = mote.properties.get(estimate_key)
         current = candidates_repo.parse_estimate_value(raw)
         if current is None:
-            return
+            return None
         floor_minutes = ESTIMATE_FLOOR_MINUTES if floor else 0
         remaining = max(current - minutes, floor_minutes)
-        motes_repo.update_mote(
-            self._conn, mote.id,
-            {estimate_key: candidates_repo.format_estimate_like(raw, remaining)},
+        new_value = candidates_repo.format_estimate_like(raw, remaining)
+        motes_repo.update_mote(self._conn, mote.id, {estimate_key: new_value})
+        return undo.for_update_mote(
+            self._conn, mote.id, {estimate_key: raw}, {estimate_key: new_value}, label="log a session",
         )
 
-    def _log_closing_session(self, mote: Mote, estimate_key: str | None) -> None:
+    def _log_closing_session(self, mote: Mote, estimate_key: str | None) -> list:
         """What marking a task done means for whatever estimate is still
         on it, with no timer around to say how long that last stretch
         actually took: log it as one session ending now, so the hour a
@@ -1011,19 +1177,26 @@ class Api(InspectorApi, CommandBarApi):
         task carrying a fortnight's estimate would otherwise land its
         closing entry on some day last week -- crediting the streak and
         the heatmap for work that was recorded today.
+
+        Returns the undo.Command(s) for what it wrote, so callers fold
+        them into their own undo step rather than this leaving a second,
+        unrelated entry on the stack.
         """
         if not estimate_key:
-            return
+            return []
         remaining = candidates_repo.parse_estimate_value(mote.properties.get(estimate_key))
         if not remaining or remaining <= 0:
-            return
+            return []
         now = datetime.now()
         start = max(now - timedelta(minutes=remaining), datetime.combine(now.date(), time.min))
-        self._record_session(mote, remaining, start)
-        motes_repo.update_mote(
-            self._conn, mote.id,
-            {estimate_key: candidates_repo.format_estimate_like(mote.properties[estimate_key], 0)},
+        _session_id, record_command = self._record_session(mote, remaining, start)
+        raw = mote.properties[estimate_key]
+        new_value = candidates_repo.format_estimate_like(raw, 0)
+        motes_repo.update_mote(self._conn, mote.id, {estimate_key: new_value})
+        deduct_command = undo.for_update_mote(
+            self._conn, mote.id, {estimate_key: raw}, {estimate_key: new_value}, label="log a session",
         )
+        return [record_command, deduct_command]
 
     @_synchronized
     def log_session(
@@ -1047,21 +1220,41 @@ class Api(InspectorApi, CommandBarApi):
             return {"logged": False}
         start = datetime.fromisoformat(started_at) if started_at else datetime.now()
         subject = motes_repo.get_mote(self._conn, mote_id) if mote_id else None
-        session_id = self._record_session(subject, minutes, start)
+        session_id, record_command = self._record_session(subject, minutes, start)
+        commands = [record_command]
 
         if subject is not None:
             _, _, _, keys, _ = self._garden_state(estimate_key=estimate_key, status_key=status_key)
             if keys.estimate:
-                self._deduct_estimate(subject, keys.estimate, minutes, floor=not complete)
+                deduct_command = self._deduct_estimate(subject, keys.estimate, minutes, floor=not complete)
+                if deduct_command:
+                    commands.append(deduct_command)
             if complete and keys.status:
+                old_props = {keys.status: subject.properties[keys.status]} if keys.status in subject.properties else {}
                 motes_repo.update_mote(self._conn, subject.id, {keys.status: STATUS_COMPLETE})
+                commands.append(undo.for_update_mote(
+                    self._conn, subject.id, old_props, {keys.status: STATUS_COMPLETE}, label="log a session",
+                ))
 
+        self.undo_manager.push(undo.combine("log a session", commands))
         return {"logged": True, "id": session_id, "minutes": round(minutes),
                 "subject": subject.id if subject else None}
 
     @_synchronized
     def delete_session(self, session_id: str) -> bool:
-        return motes_repo.delete_mote(self._conn, session_id)
+        session = motes_repo.get_mote(self._conn, session_id)
+        if session is None:
+            return False
+        relationships = [
+            {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+            for r in graph_repo.relationships_touching(self._conn, session_id)
+        ]
+        deleted = motes_repo.delete_mote(self._conn, session_id)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_mote(
+                self._conn, session_id, session.properties, relationships, label="delete a session",
+            ))
+        return deleted
 
     # ---- relationships ----
 
@@ -1079,12 +1272,22 @@ class Api(InspectorApi, CommandBarApi):
         motes. Nothing here validates the type against a list; a garden
         may say `reviewed_by` and Momentum will draw it in the panel
         beside the rest."""
-        rel_repo.create_relationship(self._conn, from_id, to_id, type_)
+        rel_id = rel_repo.create_relationship(self._conn, from_id, to_id, type_)
+        self.undo_manager.push(undo.for_create_relationship(
+            self._conn, rel_id, from_id, to_id, type_, label=f"link {type_}",
+        ))
         return self._panel(from_id)
 
     @_synchronized
     def unlink(self, rel_id: str, mote_id: str) -> dict | None:
-        rel_repo.delete_relationship(self._conn, rel_id)
+        relationship = rel_repo.get_relationship(self._conn, rel_id)
+        if relationship is None:
+            return self._panel(mote_id)
+        if rel_repo.delete_relationship(self._conn, rel_id):
+            self.undo_manager.push(undo.for_delete_relationship(
+                self._conn, rel_id, relationship.from_id, relationship.to_id, relationship.type,
+                label=f"unlink {relationship.type}",
+            ))
         return self._panel(mote_id)
 
     @_synchronized

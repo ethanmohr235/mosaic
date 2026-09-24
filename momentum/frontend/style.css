@@ -270,8 +270,13 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 }
 .card:hover { background: oklch(0.215 0 0); }
 .card.selected { background: var(--raised); border-color: var(--accent); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); }
+.card.picked { outline: 2px solid var(--accent); outline-offset: -1px; }
 .card.dragging { opacity: 0.45; }
 body.dragging-on { user-select: none; cursor: grabbing; }
+.drop-divider {
+  height: 3px; border-radius: 2px; background: var(--accent-bright);
+  flex-shrink: 0; pointer-events: none;
+}
 .card.done { opacity: 0.62; }
 .card.done .card-name { text-decoration: line-through; }
 
