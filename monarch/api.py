@@ -8,7 +8,7 @@ from pathlib import Path
 
 import webview
 
-from api_common import CommandBarApi, InspectorApi
+from api_common import AnnotatableApi, CommandBarApi, InspectorApi, UndoableApi
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
@@ -28,6 +28,7 @@ from core import reserved as reserved_repo
 from core import kinds as kinds_repo
 from core import sync as sync_repo
 from core import species as species_repo
+from core import undo
 
 
 def _classify(motes: list, rels: list) -> dict:
@@ -54,7 +55,7 @@ MOMENTUM_SCRIPT = Path(__file__).resolve().parent.parent / "run_momentum.py"
 logger = logging.getLogger(__name__)
 
 
-class Api(InspectorApi, CommandBarApi):
+class Api(InspectorApi, CommandBarApi, UndoableApi, AnnotatableApi):
     """JS-facing bridge over the core data layer. Holds the live garden
     connection as instance state -- not module-global, same pattern as
     cli/repl.py's locals.
@@ -80,16 +81,17 @@ class Api(InspectorApi, CommandBarApi):
         # needs this Api instance to exist first, as its js_api) -- used
         # for native file dialogs in export/import.
         self._window: webview.Window | None = None
+        self._init_undo()
         self._best_effort_sync()
 
     def _best_effort_sync(self) -> None:
         """Push and pull this garden's changes if it's been pointed at a
-        sync folder (`sync init`, core/sync.py) -- called on open, on
+        sync server (`sync init`, core/sync.py) -- called on open, on
         garden switch, and on close, so "edit on one device, open the
         app on another later" converges with no action from the user.
         Never allowed to block opening or closing the app: a sync
-        folder that's a moment-unmounted cloud drive just means this
-        pass is skipped, not a failure to launch."""
+        server that's a moment unreachable just means this pass is
+        skipped, not a failure to launch."""
         if gardens_repo.get_sync_dir(self._current_garden) is None:
             return
         if not gardens_repo.get_auto_sync_enabled(self._current_garden):
@@ -162,21 +164,71 @@ class Api(InspectorApi, CommandBarApi):
 
     @_synchronized
     def create_mote(self, raw_properties: dict[str, str], id: str | None = None) -> dict:
-        mote_id = motes_repo.create_mote(self._conn, _coerce_properties(raw_properties), id=id)
+        properties = _coerce_properties(raw_properties)
+        mote_id = motes_repo.create_mote(self._conn, properties, id=id)
+        self.undo_manager.push(undo.for_create_mote(self._conn, mote_id, properties, label="create a mote"))
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
 
     @_synchronized
     def update_mote(self, mote_id: str, raw_properties: dict[str, str]) -> dict:
-        motes_repo.update_mote(self._conn, mote_id, _coerce_properties(raw_properties))
+        new_props = _coerce_properties(raw_properties)
+        old = motes_repo.get_mote(self._conn, mote_id)
+        old_props = {k: old.properties[k] for k in new_props if k in old.properties}
+        motes_repo.update_mote(self._conn, mote_id, new_props)
+        self.undo_manager.push(undo.for_update_mote(self._conn, mote_id, old_props, new_props, label="edit"))
         return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
 
     @_synchronized
     def delete_property(self, mote_id: str, key: str) -> bool:
-        return motes_repo.delete_property(self._conn, mote_id, key)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None or key not in mote.properties:
+            return False
+        old_value = mote.properties[key]
+        deleted = motes_repo.delete_property(self._conn, mote_id, key)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_property(self._conn, mote_id, key, old_value, label=f"clear {key}"))
+        return deleted
 
     @_synchronized
     def delete_mote(self, mote_id: str) -> bool:
-        return motes_repo.delete_mote(self._conn, mote_id)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None:
+            return False
+        relationships = [
+            {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+            for r in graph_repo.relationships_touching(self._conn, mote_id)
+        ]
+        deleted = motes_repo.delete_mote(self._conn, mote_id)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_mote(
+                self._conn, mote_id, mote.properties, relationships, label="delete a mote",
+            ))
+        return deleted
+
+    @_synchronized
+    def delete_motes(self, mote_ids: list[str]) -> dict:
+        """The canvas's multi-select delete: every mote in one call, so
+        the whole batch is one undo step (api.undo()) instead of one per
+        mote -- the same reasoning monolith/api.py::delete_motes gives.
+        Relationships are recorded before each delete, not after -- they
+        cascade with the mote (core/db.py's ON DELETE CASCADE)."""
+        commands = []
+        for mote_id in mote_ids or []:
+            mote = motes_repo.get_mote(self._conn, mote_id)
+            if mote is None:
+                continue
+            relationships = [
+                {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+                for r in graph_repo.relationships_touching(self._conn, mote_id)
+            ]
+            if motes_repo.delete_mote(self._conn, mote_id):
+                commands.append(undo.for_delete_mote(
+                    self._conn, mote_id, mote.properties, relationships, label="delete a mote",
+                ))
+        if commands:
+            label = "delete a mote" if len(commands) == 1 else f"delete {len(commands)} motes"
+            self.undo_manager.push(undo.combine(label, commands))
+        return {"deleted": len(commands)}
 
     # ---- links ----
 
@@ -263,24 +315,49 @@ class Api(InspectorApi, CommandBarApi):
     @_synchronized
     def create_relationship(self, from_id: str, to_id: str, type_: str, id: str | None = None) -> dict:
         rel_id = rel_repo.create_relationship(self._conn, from_id, to_id, type_, id=id)
+        self.undo_manager.push(undo.for_create_relationship(
+            self._conn, rel_id, from_id, to_id, type_, label=f"link {type_}",
+        ))
         return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
 
     @_synchronized
     def update_relationship(
         self, rel_id: str, from_id: str | None = None, to_id: str | None = None, type_: str | None = None
     ) -> dict:
+        before = rel_repo.get_relationship(self._conn, rel_id)
+        fields = {"from_id": from_id, "to_id": to_id, "type_": type_}
+        new_fields = {k: v for k, v in fields.items() if v is not None}
+        old_fields = {
+            "from_id": before.from_id, "to_id": before.to_id, "type_": before.type,
+        }
+        old_fields = {k: old_fields[k] for k in new_fields}
         rel_repo.update_relationship(self._conn, rel_id, from_id, to_id, type_)
+        self.undo_manager.push(undo.for_update_relationship(
+            self._conn, rel_id, old_fields, new_fields, label="edit relationship",
+        ))
         return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
 
     @_synchronized
     def delete_relationship(self, rel_id: str) -> bool:
-        return rel_repo.delete_relationship(self._conn, rel_id)
+        relationship = rel_repo.get_relationship(self._conn, rel_id)
+        if relationship is None:
+            return False
+        deleted = rel_repo.delete_relationship(self._conn, rel_id)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_relationship(
+                self._conn, rel_id, relationship.from_id, relationship.to_id, relationship.type,
+                label=f"unlink {relationship.type}",
+            ))
+        return deleted
 
     # ---- species ----
 
     @_synchronized
     def set_species(self, mote_id: str, species_id: str) -> dict:
         rel_id = species_repo.set_species(self._conn, mote_id, species_id)
+        self.undo_manager.push(undo.for_create_relationship(
+            self._conn, rel_id, mote_id, species_id, species_repo.INSTANCE_OF, label="set species",
+        ))
         return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
 
     @_synchronized
@@ -298,6 +375,9 @@ class Api(InspectorApi, CommandBarApi):
     @_synchronized
     def set_template(self, mote_id: str, species_id: str) -> dict:
         rel_id = species_repo.set_template(self._conn, mote_id, species_id)
+        self.undo_manager.push(undo.for_create_relationship(
+            self._conn, rel_id, mote_id, species_id, species_repo.TEMPLATE_OF, label="set template",
+        ))
         return dataclasses.asdict(rel_repo.get_relationship(self._conn, rel_id))
 
     @_synchronized
@@ -310,7 +390,11 @@ class Api(InspectorApi, CommandBarApi):
         mote_id = species_repo.create_instance(
             self._conn, species_id, _coerce_properties(raw_overrides or {})
         )
-        return dataclasses.asdict(motes_repo.get_mote(self._conn, mote_id))
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        # Deleting the mote (this command's undo) cascades away the
+        # instance_of relationship create_instance() just made.
+        self.undo_manager.push(undo.for_create_mote(self._conn, mote_id, mote.properties, label="create an instance"))
+        return dataclasses.asdict(mote)
 
     # ---- reserved names ----
 

@@ -18,13 +18,12 @@ What it adds is the two things only a window knows: which garden is
 open, and which bindings the person has turned off.
 """
 import logging
-import sqlite3
 import threading
 from datetime import datetime
 
 import webview
 
-from api_common import CommandBarApi, InspectorApi
+from api_common import CommandBarApi, InspectorApi, UndoableApi
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
@@ -38,6 +37,7 @@ from core import relationships as rel_repo
 from core import scenarios as scenarios_repo
 from core import species as species_repo
 from core import sync as sync_repo
+from core import undo
 from core.db import get_connection, initialize_database
 from core.entities import Mote
 from monastery import payload as payload_repo
@@ -61,7 +61,7 @@ SERIES = "series"
 OCCURRENCE = "occurrence"
 
 
-class Api(InspectorApi, CommandBarApi):
+class Api(InspectorApi, CommandBarApi, UndoableApi):
     """Every read takes the visible window as arguments rather than
     holding a cursor of its own. The frontend owns where the calendar is
     scrolled to; asking for a range keeps that the one source of truth
@@ -76,6 +76,7 @@ class Api(InspectorApi, CommandBarApi):
         self._initial_focus = focus
         self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
+        self._init_undo()
         self._best_effort_sync()
 
     def _open(self, garden: str):
@@ -233,24 +234,54 @@ class Api(InspectorApi, CommandBarApi):
         to be filtered by: reading is deliberately general, but there is
         one right answer to where a *new* date belongs, and Calendar
         export already knows that key."""
-        mote_id = motes_repo.create_mote(self._conn, _coerce_properties(raw_properties))
+        properties = _coerce_properties(raw_properties)
+        mote_id = motes_repo.create_mote(self._conn, properties)
         if species_id:
             species_repo.set_species(self._conn, mote_id, species_id)
+        # Deleting the mote (this command's undo) cascades away the
+        # instance_of relationship set_species just made, so one
+        # for_create_mote is the whole undo step -- same reasoning as
+        # monolith/api.py::save_view.
+        self.undo_manager.push(undo.for_create_mote(self._conn, mote_id, properties, label="create a mote"))
         return self._panel(mote_id)
 
     @_synchronized
     def update_mote(self, mote_id: str, raw_properties: dict) -> dict | None:
-        motes_repo.update_mote(self._conn, mote_id, _coerce_properties(raw_properties))
+        new_props = _coerce_properties(raw_properties)
+        old = motes_repo.get_mote(self._conn, mote_id)
+        if old is None:
+            return None
+        old_props = {k: old.properties[k] for k in new_props if k in old.properties}
+        motes_repo.update_mote(self._conn, mote_id, new_props)
+        self.undo_manager.push(undo.for_update_mote(self._conn, mote_id, old_props, new_props, label="edit"))
         return self._panel(mote_id)
 
     @_synchronized
     def delete_property(self, mote_id: str, key: str) -> dict | None:
-        motes_repo.delete_property(self._conn, mote_id, key)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None or key not in mote.properties:
+            return self._panel(mote_id)
+        old_value = mote.properties[key]
+        if motes_repo.delete_property(self._conn, mote_id, key):
+            self.undo_manager.push(undo.for_delete_property(self._conn, mote_id, key, old_value, label=f"clear {key}"))
         return self._panel(mote_id)
 
     @_synchronized
     def delete_mote(self, mote_id: str) -> bool:
-        return motes_repo.delete_mote(self._conn, mote_id)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        if mote is None:
+            return False
+        relationships = [
+            {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+            for r in rel_repo.list_relationships(self._conn)
+            if mote_id in (r.from_id, r.to_id)
+        ]
+        deleted = motes_repo.delete_mote(self._conn, mote_id)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_mote(
+                self._conn, mote_id, mote.properties, relationships, label="delete a mote",
+            ))
+        return deleted
 
     # ---- editing an occurrence ----
     #
@@ -285,21 +316,26 @@ class Api(InspectorApi, CommandBarApi):
         purpose, and an ordinary mote says the same thing without
         inventing a second kind of event.
         """
+        commands = []
         excepted = calendar_repo.with_exception(mote, binding, occurrence_start)
         if excepted:
+            old_props = {k: mote.properties[k] for k in excepted if k in mote.properties}
             motes_repo.update_mote(self._conn, mote.id, excepted)
+            commands.append(undo.for_update_mote(self._conn, mote.id, old_props, excepted, label="detach"))
         # detached_properties() drops the rule itself -- a copy that kept
         # it would go on recurring, and the rule now lives inside the
         # binding's own value rather than in a property of its own.
-        detached_id = motes_repo.copy_mote(
-            self._conn, self._conn, mote.id,
-            calendar_repo.detached_properties(mote, binding, new_start, new_end),
-        )
+        detached_properties = calendar_repo.detached_properties(mote, binding, new_start, new_end)
+        detached_id = motes_repo.copy_mote(self._conn, self._conn, mote.id, detached_properties)
         # copy_mote() is properties only -- there is no general answer for
         # relationships -- but the species is the one a split-off
-        # occurrence has to keep, because it is what colours it.
+        # occurrence has to keep, because it is what colours it. Deleting
+        # detached_id (this command's undo) cascades those away too.
         for species in species_repo.species_of(self._conn, mote.id):
             species_repo.set_species(self._conn, detached_id, species.id)
+        detached_properties = motes_repo.get_mote(self._conn, detached_id).properties
+        commands.append(undo.for_create_mote(self._conn, detached_id, detached_properties, label="detach"))
+        self.undo_manager.push(undo.combine("detach an occurrence", commands))
         return detached_id
 
     @_synchronized
@@ -344,7 +380,11 @@ class Api(InspectorApi, CommandBarApi):
             calendar_repo.resized_properties(after, binding, target, target_end)
             if target_end - target != calendar_repo.span_of(mote, binding) else {}
         )
-        motes_repo.update_mote(self._conn, mote.id, {**moved, **resized})
+        changed = {**moved, **resized}
+        if changed:
+            old_props = {k: mote.properties[k] for k in changed if k in mote.properties}
+            motes_repo.update_mote(self._conn, mote.id, changed)
+            self.undo_manager.push(undo.for_update_mote(self._conn, mote.id, old_props, changed, label="move"))
         return self._panel(mote.id)
 
     @_synchronized
@@ -356,8 +396,8 @@ class Api(InspectorApi, CommandBarApi):
         `scope="occurrence"` on a series writes an exception: the mote
         stays, one repetition stops happening. Anything else deletes the
         mote, because a mote that does not recur *is* its placement.
-        Both hand back what undo_delete() needs to put it back, which is
-        why this returns a token rather than a bare bool.
+        Either way it lands on the shared undo stack (api.undo()) as one
+        step, same as any other edit here.
         """
         found = self._occurrence(mote_id, binding, occurrence_start)
         if found is None:
@@ -368,13 +408,12 @@ class Api(InspectorApi, CommandBarApi):
         if scope == OCCURRENCE:
             excepted = calendar_repo.with_exception(mote, binding, start)
             if excepted:
+                old_props = {k: mote.properties[k] for k in excepted if k in mote.properties}
                 motes_repo.update_mote(self._conn, mote.id, excepted)
-                return {"name": name, "scope": OCCURRENCE, "undo": {
-                    "kind": "interval",
-                    "moteId": mote.id,
-                    "binding": binding,
-                    "value": mote.properties.get(binding),
-                }}
+                self.undo_manager.push(undo.for_update_mote(
+                    self._conn, mote.id, old_props, excepted, label=f"delete “{name}”",
+                ))
+                return {"name": name, "scope": OCCURRENCE}
 
         # Recorded before the delete, not after: relationships cascade
         # with the mote (core/db.py's ON DELETE CASCADE), so this is the
@@ -385,49 +424,7 @@ class Api(InspectorApi, CommandBarApi):
             if mote.id in (r.from_id, r.to_id)
         ]
         motes_repo.delete_mote(self._conn, mote.id)
-        return {"name": name, "scope": SERIES, "undo": {
-            "kind": "mote",
-            "moteId": mote.id,
-            "properties": mote.properties,
-            "relationships": relationships,
-        }}
-
-    @_synchronized
-    def undo_delete(self, token: dict) -> dict | None:
-        """Put back exactly what delete_occurrence() took.
-
-        A deleted mote returns under its own id, with the relationships
-        that touched it under theirs -- create_mote() and
-        create_relationship() both accept one -- so undo restores the
-        graph rather than a lookalike, and every arrow that pointed at it
-        still points at it.
-        """
-        if not isinstance(token, dict):
-            return None
-
-        if token.get("kind") == "interval":
-            mote_id, binding = token.get("moteId"), token.get("binding")
-            previous = token.get("value")
-            if previous is None:
-                motes_repo.delete_property(self._conn, mote_id, binding)
-            else:
-                motes_repo.update_mote(self._conn, mote_id, {binding: previous})
-            return self._panel(mote_id)
-
-        if token.get("kind") != "mote":
-            return None
-        restored = motes_repo.create_mote(
-            self._conn, token.get("properties") or {}, id=token.get("moteId")
-        )
-        for relationship in token.get("relationships") or []:
-            try:
-                rel_repo.create_relationship(
-                    self._conn, relationship["fromId"], relationship["toId"],
-                    relationship["type"], id=relationship["id"],
-                )
-            except sqlite3.IntegrityError:
-                # The mote at the other end went away while the undo toast
-                # was still up. Restoring the rest is better than refusing
-                # the whole undo over an arrow with nothing to point at.
-                logger.warning("could not restore relationship %r", relationship.get("id"))
-        return self._panel(restored)
+        self.undo_manager.push(undo.for_delete_mote(
+            self._conn, mote.id, mote.properties, relationships, label=f"delete “{name}”",
+        ))
+        return {"name": name, "scope": SERIES}

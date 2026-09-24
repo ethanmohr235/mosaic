@@ -14,6 +14,7 @@ from core.gardens import create_garden, set_sync_dir
 from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 from core.species import set_species
+from core.sync_remote import has_history as sync_has_history
 from monastery.api import Api
 from monastery.app import DEFAULT_HTTP_PORT
 from window_launcher import choose_port
@@ -293,18 +294,26 @@ def test_deleting_the_only_placement_of_a_plain_mote_deletes_it(api, week):
 
 
 def test_undo_puts_back_a_deleted_occurrence(api, series):
-    answer = api.delete_occurrence(series, "when", "2026-08-31T09:15:00", scope="occurrence")
-    api.undo_delete(answer["undo"])
+    api.delete_occurrence(series, "when", "2026-08-31T09:15:00", scope="occurrence")
+    assert api.undo()["undone"] is not None
     assert get_mote(api._conn, series).properties["when"] == \
         "2026-08-24 09:15/PT20M\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4"
 
 
 def test_undo_puts_back_a_deleted_mote_with_its_id_and_arrows(api, week):
-    answer = api.delete_occurrence(week["standup"], "when", "2026-08-24T09:15:00")
-    panel = api.undo_delete(answer["undo"])
+    api.delete_occurrence(week["standup"], "when", "2026-08-24T09:15:00")
+    assert api.undo()["undone"] is not None
+    panel = api.focus(week["standup"])
     assert panel["id"] == week["standup"], "the same mote, not a lookalike"
     assert panel["properties"]["when"] == "2026-08-24 09:15/PT20M"
     assert [r["type"] for r in panel["relationships"]] == ["instance_of"]
+
+
+def test_redo_deletes_the_mote_again(api, week):
+    api.delete_occurrence(week["standup"], "when", "2026-08-24T09:15:00")
+    api.undo()
+    assert api.redo()["redone"] is not None
+    assert get_mote(api._conn, week["standup"]) is None
 
 
 def test_editing_an_occurrence_of_a_vanished_mote_says_nothing_happened(api, week):
@@ -345,23 +354,22 @@ def test_open_app_delegates_to_api_common(api, monkeypatch):
 # ---- best-effort sync ----
 #
 # run_monastery.py is its own launch path, not only ever opened from the
-# graph window -- so a garden pointed at a sync folder must converge from
+# graph window -- so a garden pointed at a sync server must converge from
 # a Monastery-only session too, exactly as Mora's does.
 
-def test_opening_monastery_pushes_pending_local_changes(tmp_path):
+def test_opening_monastery_pushes_pending_local_changes(sync_dir):
     create_garden("synced")
     conn = get_connection("synced")
     initialize_database(conn)
     create_mote(conn, {"name": "written before Monastery opened"})
     conn.close()
 
-    sync_dir = tmp_path / "shared"
-    set_sync_dir("synced", str(sync_dir))
+    set_sync_dir("synced", sync_dir)
 
     instance = Api("synced")
     instance.shutdown()
 
-    assert any((sync_dir / "synced" / "ops").glob("*.jsonl"))
+    assert sync_has_history(sync_dir, "synced")
 
 
 # ---- manual refresh ----
@@ -370,8 +378,8 @@ def test_refresh_skips_sync_when_not_configured(api):
     assert api.refresh() == {"synced": False}
 
 
-def test_refresh_syncs_when_configured(api, tmp_path):
-    set_sync_dir("test", str(tmp_path))
+def test_refresh_syncs_when_configured(api, sync_dir):
+    set_sync_dir("test", sync_dir)
     create_mote(api._conn, {"name": "Alice"})
     result = api.refresh()
     assert result["synced"] is True

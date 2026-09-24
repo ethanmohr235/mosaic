@@ -18,13 +18,31 @@ import threading
 import webbrowser
 from pathlib import Path
 
+from core import annotations as annotations_repo
 from core import links as links_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import species as species_repo
+from core import undo
 from core import units as units_repo
 from core.command_bar import run_command, suggest as suggest_command
 from core.reserved import RESERVED_PROPERTIES, RESERVED_RELATIONSHIP_TYPES
+from core.undo import UndoManager
+
+
+def _push_undo(api, command, coalesce_key=None, coalesce_window: float = 1.5) -> None:
+    """Record a command on `api.undo_manager`, if it has one. Every app
+    that mixes in InspectorApi also mixes in UndoableApi now, but this
+    stays defensive rather than assuming it: InspectorApi is the one
+    surface shared across all seven windows, and a future one that skips
+    UndoableApi should still work, just without undo.
+
+    coalesce_key/coalesce_window pass straight through to
+    UndoManager.push() -- see its docstring. AnnotatableApi.move_annotation
+    is the first caller to use this."""
+    manager = getattr(api, "undo_manager", None)
+    if manager is not None:
+        manager.push(command, coalesce_key=coalesce_key, coalesce_window=coalesce_window)
 
 
 def synchronized(method):
@@ -400,7 +418,11 @@ class InspectorApi:
 
     @synchronized
     def inspector_set_property(self, mote_id: str, key: str, raw_value) -> dict | None:
-        motes_repo.update_mote(self._conn, mote_id, {key: coerce(raw_value)})
+        value = coerce(raw_value)
+        mote = motes_repo.get_mote(self._conn, mote_id)
+        old_props = {key: mote.properties[key]} if mote and key in mote.properties else {}
+        motes_repo.update_mote(self._conn, mote_id, {key: value})
+        _push_undo(self, undo.for_update_mote(self._conn, mote_id, old_props, {key: value}, label=f"set {key}"))
         return self._inspector_payload(mote_id)
 
     @synchronized
@@ -410,13 +432,25 @@ class InspectorApi:
         property that no longer exists, and a later property reusing
         that key would silently inherit a unit it never declared."""
         mote = motes_repo.get_mote(self._conn, mote_id)
-        if mote is not None:
-            units = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
-            if key in units:
-                units = dict(units)
-                del units[key]
-                motes_repo.update_mote(self._conn, mote_id, {units_repo.UNITS_KEY: units})
-        motes_repo.delete_property(self._conn, mote_id, key)
+        if mote is None:
+            return self._inspector_payload(mote_id)
+        commands = []
+        units = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+        if key in units:
+            old_units = mote.properties.get(units_repo.UNITS_KEY)
+            units = dict(units)
+            del units[key]
+            motes_repo.update_mote(self._conn, mote_id, {units_repo.UNITS_KEY: units})
+            commands.append(undo.for_update_mote(
+                self._conn, mote_id, {units_repo.UNITS_KEY: old_units}, {units_repo.UNITS_KEY: units},
+                label=f"clear {key}",
+            ))
+        if key in mote.properties:
+            old_value = mote.properties[key]
+            if motes_repo.delete_property(self._conn, mote_id, key):
+                commands.append(undo.for_delete_property(self._conn, mote_id, key, old_value, label=f"clear {key}"))
+        if commands:
+            _push_undo(self, undo.combine(f"clear {key}", commands))
         return self._inspector_payload(mote_id)
 
     @synchronized
@@ -435,22 +469,36 @@ class InspectorApi:
             return self._inspector_payload(mote_id)
         updates = {new: mote.properties[old]}
         units = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+        old_updates_props = {new: mote.properties[new]} if new in mote.properties else {}
         if old in units:
+            old_units = mote.properties.get(units_repo.UNITS_KEY)
             units = dict(units)
             units[new] = units.pop(old)
             updates[units_repo.UNITS_KEY] = units
+            old_updates_props[units_repo.UNITS_KEY] = old_units
         motes_repo.update_mote(self._conn, mote_id, updates)
         motes_repo.delete_property(self._conn, mote_id, old)
+        _push_undo(self, undo.combine(f"rename {old}", [
+            undo.for_update_mote(self._conn, mote_id, old_updates_props, updates, label=f"rename {old}"),
+            undo.for_delete_property(self._conn, mote_id, old, mote.properties[old], label=f"rename {old}"),
+        ]))
         return self._inspector_payload(mote_id)
 
     @synchronized
     def inspector_relate(self, from_id: str, to_id: str, type_: str) -> dict | None:
-        rel_repo.create_relationship(self._conn, from_id, to_id, type_.strip() or "related_to")
+        type_ = type_.strip() or "related_to"
+        rel_id = rel_repo.create_relationship(self._conn, from_id, to_id, type_)
+        _push_undo(self, undo.for_create_relationship(self._conn, rel_id, from_id, to_id, type_, label=f"link {type_}"))
         return self._inspector_payload(from_id)
 
     @synchronized
     def inspector_unrelate(self, mote_id: str, rel_id: str) -> dict | None:
-        rel_repo.delete_relationship(self._conn, rel_id)
+        relationship = rel_repo.get_relationship(self._conn, rel_id)
+        if relationship is not None and rel_repo.delete_relationship(self._conn, rel_id):
+            _push_undo(self, undo.for_delete_relationship(
+                self._conn, rel_id, relationship.from_id, relationship.to_id, relationship.type,
+                label=f"unlink {relationship.type}",
+            ))
         return self._inspector_payload(mote_id)
 
     @synchronized
@@ -462,11 +510,20 @@ class InspectorApi:
         quietly accumulating memberships the control cannot display.
         Multi-species motes remain expressible over MCP and the CLI."""
         conn = self._conn
+        commands = []
         for rel in rel_repo.list_relationships(conn, from_id=mote_id,
                                                type_=species_repo.INSTANCE_OF):
-            rel_repo.delete_relationship(conn, rel.id)
+            if rel_repo.delete_relationship(conn, rel.id):
+                commands.append(undo.for_delete_relationship(
+                    conn, rel.id, rel.from_id, rel.to_id, rel.type, label="set species",
+                ))
         if species_id:
-            species_repo.set_species(conn, mote_id, species_id)
+            rel_id = species_repo.set_species(conn, mote_id, species_id)
+            commands.append(undo.for_create_relationship(
+                conn, rel_id, mote_id, species_id, species_repo.INSTANCE_OF, label="set species",
+            ))
+        if commands:
+            _push_undo(self, undo.combine("set species", commands))
         return self._inspector_payload(mote_id)
 
     @synchronized
@@ -480,10 +537,18 @@ class InspectorApi:
         the new relationship written, the old one still answering --
         which is the worst of the three possible behaviours."""
         conn = self._conn
+        commands = []
         for rel in rel_repo.list_relationships(conn, type_=species_repo.TEMPLATE_OF):
             if rel.to_id == species_id and rel.from_id != mote_id:
-                rel_repo.delete_relationship(conn, rel.id)
-        species_repo.set_template(conn, mote_id, species_id)
+                if rel_repo.delete_relationship(conn, rel.id):
+                    commands.append(undo.for_delete_relationship(
+                        conn, rel.id, rel.from_id, rel.to_id, rel.type, label="set template",
+                    ))
+        rel_id = species_repo.set_template(conn, mote_id, species_id)
+        commands.append(undo.for_create_relationship(
+            conn, rel_id, mote_id, species_id, species_repo.TEMPLATE_OF, label="set template",
+        ))
+        _push_undo(self, undo.combine("set template", commands))
         return self._inspector_payload(mote_id)
 
     @synchronized
@@ -536,6 +601,115 @@ class CommandBarApi:
     @synchronized
     def command_suggest(self, text: str, cursor: int | None = None) -> list[str]:
         return suggest_command(self._conn, text, cursor)
+
+
+class UndoableApi:
+    """The generic api.undo()/api.redo() every desktop app exposes,
+    backed by one core.undo.UndoManager per Api instance -- session-only,
+    same lifetime as the window. `_init_undo()` must run in `Api.__init__`;
+    mutating methods elsewhere in that Api push a core.undo.Command after
+    each change they make (see core/undo.py's factory functions).
+
+    frontend_shared/undo.js is the JS half: it binds Ctrl/Cmd+Z and
+    Ctrl/Cmd+Shift+Z to these two methods and toasts the label each
+    returns."""
+
+    def _init_undo(self) -> None:
+        self.undo_manager = UndoManager()
+
+    @synchronized
+    def undo(self) -> dict:
+        return {"undone": self.undo_manager.undo()}
+
+    @synchronized
+    def redo(self) -> dict:
+        return {"redone": self.undo_manager.redo()}
+
+
+class AnnotatableApi:
+    """Sticky-note CRUD (core/annotations.py), identical in shape to
+    InspectorApi -- Monarch is the only app mixing this in for now (see
+    docs/architecture.md's Annotations section). Local-only: no method
+    here ever writes to core/sync.py or the oplog.
+
+    Assumes `self._conn` and `self._lock`, like InspectorApi. Each
+    writing method returns the refreshed annotation (or None/bool for
+    delete) and, where `self.undo_manager` exists, pushes a Command so
+    Ctrl+Z covers annotations the same as it covers motes."""
+
+    @synchronized
+    def list_annotations(self) -> list[dict]:
+        return [_annotation_payload(a) for a in annotations_repo.list_annotations(self._conn)]
+
+    @synchronized
+    def create_sticky_note(
+        self, anchor_mode: str, x: float, y: float,
+        mote_id: str | None = None, text: str = "",
+    ) -> dict:
+        annotation_id = annotations_repo.create_sticky_note(
+            self._conn, anchor_mode=anchor_mode, x=x, y=y, text=text, mote_id=mote_id,
+        )
+        snapshot = annotations_repo.to_dict(annotations_repo.get_annotation(self._conn, annotation_id))
+        _push_undo(self, undo.for_create_annotation(self._conn, snapshot, label="add a note"))
+        return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
+
+    @synchronized
+    def update_annotation_text(self, annotation_id: str, text: str) -> dict | None:
+        annotation = annotations_repo.get_annotation(self._conn, annotation_id)
+        if annotation is None:
+            return None
+        old_text = annotation.text
+        annotations_repo.update_annotation(self._conn, annotation_id, text=text)
+        _push_undo(self, undo.for_update_annotation(
+            self._conn, annotation_id, {"text": old_text}, {"text": text}, label="edit a note",
+        ))
+        return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
+
+    @synchronized
+    def move_annotation(self, annotation_id: str, x: float, y: float) -> dict | None:
+        annotation = annotations_repo.get_annotation(self._conn, annotation_id)
+        if annotation is None:
+            return None
+        old_xy = (annotation.x, annotation.y)
+        annotations_repo.move_annotation(self._conn, annotation_id, x, y)
+        _push_undo(
+            self,
+            undo.for_move_annotation(self._conn, annotation_id, old_xy, (x, y), label="move a note"),
+            coalesce_key=("annotation-move", annotation_id),
+        )
+        return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
+
+    @synchronized
+    def delete_annotation(self, annotation_id: str) -> bool:
+        annotation = annotations_repo.get_annotation(self._conn, annotation_id)
+        if annotation is None:
+            return False
+        snapshot = annotations_repo.to_dict(annotation)
+        deleted = annotations_repo.delete_annotation(self._conn, annotation_id)
+        if deleted:
+            _push_undo(self, undo.for_delete_annotation(self._conn, snapshot, label="delete a note"))
+        return deleted
+
+
+def _annotation_payload(annotation) -> dict:
+    """An Annotation as the frontend reads it: camelCase keys, matching
+    every other payload in this module (see _inspector_payload)."""
+    return {
+        "id": annotation.id,
+        "type": annotation.type,
+        "anchorMode": annotation.anchor_mode,
+        "moteId": annotation.mote_id,
+        "x": annotation.x,
+        "y": annotation.y,
+        "text": annotation.text,
+        "color": annotation.color,
+        "width": annotation.width,
+        "height": annotation.height,
+        "z": annotation.z,
+        "data": annotation.data,
+        "createdAt": annotation.created_at,
+        "updatedAt": annotation.updated_at,
+    }
 
 
 def _label(mote) -> str:

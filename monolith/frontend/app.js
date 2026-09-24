@@ -967,15 +967,8 @@ async function deleteMotes(ids) {
   toast(
     `${answer.deleted} mote${answer.deleted === 1 ? "" : "s"} deleted from the garden.`,
     false,
-    { label: "Undo", run: () => undoDelete(answer.undo) },
+    { label: "Undo", run: () => Undo.undo() },
   );
-}
-
-async function undoDelete(tokens) {
-  const answer = await call(api.undo_delete(tokens), "Could not undo that.");
-  if (answer === null) return;
-  refresh();
-  toast(`${answer.restored} mote${answer.restored === 1 ? "" : "s"} restored.`);
 }
 
 // ---- the relationship matrix ----------------------------------------
@@ -1591,6 +1584,7 @@ async function init() {
     onChanged: refresh,
     onNavigate: (moteId) => Inspector.open(moteId),
   });
+  Undo.install({ api, toast, onChanged: refresh });
   const garden = await api.current_garden();
   restore(garden);
   loadLayout();

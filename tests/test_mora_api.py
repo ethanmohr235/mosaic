@@ -16,6 +16,7 @@ from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 from core.species import set_species
 from core.sweep import PLOT_KEY
+from core.sync_remote import has_history as sync_has_history
 from mora.api import Api
 from mora.app import DEFAULT_HTTP_PORT
 from window_launcher import choose_port
@@ -107,6 +108,12 @@ def test_create_note_takes_the_given_name(api):
 def test_create_note_without_a_name_falls_back_to_the_id_prefix(api):
     created = api.create_note()
     assert created["name"] == created["noteId"][:8]
+
+
+def test_creating_a_note_can_be_undone(api):
+    created = api.create_note("Field notes")
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, created["noteId"]) is None
 
 
 def test_a_created_note_shows_up_in_the_switcher(api, project):
@@ -280,27 +287,26 @@ def test_open_app_delegates_to_api_common(api, monkeypatch):
 # ---- best-effort sync ----
 #
 # run_mora.py is its own launch path, not only ever opened from the graph
-# window (monarch/app.py) -- so a garden pointed at a sync folder must converge
+# window (monarch/app.py) -- so a garden pointed at a sync server must converge
 # from a Mora-only session too, the same way monarch/api.py::Api does on open,
 # switch and close.
 
-def test_opening_mora_pushes_pending_local_changes(tmp_path):
+def test_opening_mora_pushes_pending_local_changes(sync_dir):
     create_garden("synced")
     conn = get_connection("synced")
     initialize_database(conn)
     create_mote(conn, {"name": "written before Mora opened"})
     conn.close()
 
-    sync_dir = tmp_path / "shared"
-    set_sync_dir("synced", str(sync_dir))
+    set_sync_dir("synced", sync_dir)
 
     instance = Api("synced")
     instance.shutdown()
 
-    assert any((sync_dir / "synced" / "ops").glob("*.jsonl"))
+    assert sync_has_history(sync_dir, "synced")
 
 
-def test_switching_garden_pushes_the_new_gardens_pending_changes(tmp_path):
+def test_switching_garden_pushes_the_new_gardens_pending_changes(sync_dir):
     create_garden("plain")
     instance = Api("plain")
 
@@ -310,17 +316,16 @@ def test_switching_garden_pushes_the_new_gardens_pending_changes(tmp_path):
     create_mote(conn, {"name": "written before switching in"})
     conn.close()
 
-    sync_dir = tmp_path / "shared"
-    set_sync_dir("synced", str(sync_dir))
+    set_sync_dir("synced", sync_dir)
 
     instance.switch_garden("synced")
     instance.shutdown()
 
-    assert any((sync_dir / "synced" / "ops").glob("*.jsonl"))
+    assert sync_has_history(sync_dir, "synced")
 
 
 def test_opening_mora_on_an_unsynced_garden_does_nothing(api):
-    # No sync folder configured for "test" (the `api` fixture's garden) --
+    # No sync server configured for "test" (the `api` fixture's garden) --
     # must not raise or create one implicitly.
     assert api.current_garden() == "test"
 
@@ -331,8 +336,8 @@ def test_refresh_skips_sync_when_not_configured(api):
     assert api.refresh() == {"synced": False}
 
 
-def test_refresh_syncs_when_configured(api, tmp_path):
-    set_sync_dir("test", str(tmp_path))
+def test_refresh_syncs_when_configured(api, sync_dir):
+    set_sync_dir("test", sync_dir)
     create_mote(api._conn, {"name": "Alice"})
     result = api.refresh()
     assert result["synced"] is True

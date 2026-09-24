@@ -23,12 +23,11 @@ click that landed on a 200-row selection is one toast away from undone
 instead of one dialog away from prevented.
 """
 import logging
-import sqlite3
 import threading
 
 import webview
 
-from api_common import CommandBarApi, InspectorApi
+from api_common import CommandBarApi, InspectorApi, UndoableApi
 from api_common import coerce as _coerce
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
@@ -41,6 +40,7 @@ from core import query as query_repo
 from core import relationships as relationships_repo
 from core import species as species_repo
 from core import sync as sync_repo
+from core import undo
 from core.db import get_connection, initialize_database
 from core.entities import Mote, Relationship
 from core.query import Index, Query
@@ -62,7 +62,7 @@ VIEW_SPECIES_NAME = "Saved View"
 _BUSY_TIMEOUT_MS = 5000
 
 
-class Api(InspectorApi, CommandBarApi):
+class Api(InspectorApi, CommandBarApi, UndoableApi):
     """Every read re-reads the whole garden. That is deliberate and it is
     what the other windows do too (monarch/api.py::focus,
     mora/api.py::render): a table showing a stale row after somebody
@@ -78,6 +78,7 @@ class Api(InspectorApi, CommandBarApi):
         self._initial_view = view
         self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
+        self._init_undo()
         self._best_effort_sync()
 
     def _open(self, garden: str):
@@ -234,8 +235,15 @@ class Api(InspectorApi, CommandBarApi):
             raise ValueError("A property needs a key.")
         value = _coerce(raw_value)
         written = self._existing(mote_ids)
+        commands = []
         for mote_id in written:
+            old = motes_repo.get_mote(self._conn, mote_id).properties
+            old_value = {key: old[key]} if key in old else {}
             motes_repo.update_mote(self._conn, mote_id, {key: value})
+            commands.append(undo.for_update_mote(self._conn, mote_id, old_value, {key: value}, label=f"set {key}"))
+        if commands:
+            label = f"set {key}" if len(commands) == 1 else f"set {key} on {len(commands)} motes"
+            self.undo_manager.push(undo.combine(label, commands))
         return {"written": len(written), "key": key, "value": value}
 
     @_synchronized
@@ -243,9 +251,17 @@ class Api(InspectorApi, CommandBarApi):
         """Deleting the key, not writing an empty string -- "is empty"
         has to mean the same thing after a clear as it does before one
         was ever set."""
-        cleared = [m for m in self._existing(mote_ids)
-                   if motes_repo.delete_property(self._conn, m, key)]
-        return {"cleared": len(cleared), "key": key}
+        commands = []
+        for mote_id in self._existing(mote_ids):
+            old = motes_repo.get_mote(self._conn, mote_id).properties
+            if key not in old:
+                continue
+            if motes_repo.delete_property(self._conn, mote_id, key):
+                commands.append(undo.for_delete_property(self._conn, mote_id, key, old[key], label=f"clear {key}"))
+        if commands:
+            label = f"clear {key}" if len(commands) == 1 else f"clear {key} on {len(commands)} motes"
+            self.undo_manager.push(undo.combine(label, commands))
+        return {"cleared": len(commands), "key": key}
 
     def _existing(self, mote_ids) -> list[str]:
         """Ids that are still there. A selection outlives the rows it was
@@ -259,21 +275,24 @@ class Api(InspectorApi, CommandBarApi):
         """A blank row. Returned as an id rather than as a row, because
         where it lands depends on the query -- the caller re-fetches."""
         properties = {k: _coerce(v) for k, v in (raw_properties or {}).items()}
-        return {"id": motes_repo.create_mote(self._conn, properties)}
+        mote_id = motes_repo.create_mote(self._conn, properties)
+        self.undo_manager.push(undo.for_create_mote(self._conn, mote_id, properties, label="create a mote"))
+        return {"id": mote_id}
 
     @_synchronized
     def delete_motes(self, mote_ids: list[str]) -> dict:
-        """The one destructive thing in this window, and the reason it
-        hands back an undo token per mote instead of asking first: every
-        other action here is reversible by editing the cell back, and a
-        confirmation dialog was the wrong shape for a bulk selection that
-        might be one row or two hundred. undo_delete() below is what
-        makes skipping that dialog safe.
+        """The one destructive thing in this window -- and the reason it
+        used to hand back a bespoke undo token instead of asking first:
+        every other action here is reversible by editing the cell back,
+        and a confirmation dialog was the wrong shape for a bulk selection
+        that might be one row or two hundred. Now it is undone the same
+        way any other change here is, through api.undo() -- one Ctrl+Z
+        (or the toast's own button) for the whole batch, via undo.combine.
 
         Relationships are recorded before the delete, not after -- they
         cascade with the mote (core/db.py's ON DELETE CASCADE), so this
         is the last moment they can be read."""
-        undo = []
+        commands = []
         for mote_id in self._existing(mote_ids):
             mote = motes_repo.get_mote(self._conn, mote_id)
             relationships = [
@@ -281,32 +300,13 @@ class Api(InspectorApi, CommandBarApi):
                 for r in graph_repo.relationships_touching(self._conn, mote_id)
             ]
             if motes_repo.delete_mote(self._conn, mote_id):
-                undo.append({"moteId": mote_id, "properties": mote.properties, "relationships": relationships})
-        return {"deleted": len(undo), "undo": undo}
-
-    @_synchronized
-    def undo_delete(self, tokens: list[dict]) -> dict:
-        """Put back exactly what delete_motes() took, under the same ids
-        -- create_mote() and create_relationship() both accept one -- so
-        every arrow that pointed at a restored mote still points at it."""
-        restored = 0
-        for token in tokens or []:
-            if not isinstance(token, dict) or not token.get("moteId"):
-                continue
-            motes_repo.create_mote(self._conn, token.get("properties") or {}, id=token["moteId"])
-            for relationship in token.get("relationships") or []:
-                try:
-                    relationships_repo.create_relationship(
-                        self._conn, relationship["fromId"], relationship["toId"],
-                        relationship["type"], id=relationship["id"],
-                    )
-                except sqlite3.IntegrityError:
-                    # The mote at the other end went away while the undo
-                    # toast was still up. Restoring the rest is better
-                    # than refusing the whole undo over one dangling arrow.
-                    logger.warning("could not restore relationship %r", relationship.get("id"))
-            restored += 1
-        return {"restored": restored}
+                commands.append(undo.for_delete_mote(
+                    self._conn, mote_id, mote.properties, relationships, label="delete a mote",
+                ))
+        if commands:
+            label = "delete a mote" if len(commands) == 1 else f"delete {len(commands)} motes"
+            self.undo_manager.push(undo.combine(label, commands))
+        return {"deleted": len(commands)}
 
     # ---- editing relationships ----
 
@@ -319,14 +319,19 @@ class Api(InspectorApi, CommandBarApi):
         if not type_:
             raise ValueError("A relationship needs a type.")
         existing = self._pairs_of_type(type_)
-        written = 0
+        commands = []
         for from_id, to_id in self._valid(pairs):
             if (from_id, to_id) in existing:
                 continue
-            relationships_repo.create_relationship(self._conn, from_id, to_id, type_)
+            rel_id = relationships_repo.create_relationship(self._conn, from_id, to_id, type_)
             existing.add((from_id, to_id))
-            written += 1
-        return {"written": written, "type": type_}
+            commands.append(undo.for_create_relationship(
+                self._conn, rel_id, from_id, to_id, type_, label=f"link {type_}",
+            ))
+        if commands:
+            label = f"link {type_}" if len(commands) == 1 else f"link {len(commands)} {type_}"
+            self.undo_manager.push(undo.combine(label, commands))
+        return {"written": len(commands), "type": type_}
 
     @_synchronized
     def unrelate(self, pairs: list[list[str]], type_: str) -> dict:
@@ -336,12 +341,18 @@ class Api(InspectorApi, CommandBarApi):
         cell shows it (two motes and a type) without also tracking the
         id of an edge it never named."""
         wanted = set(self._valid(pairs))
-        removed = [
-            r for r in relationships_repo.list_relationships(self._conn)
-            if r.type == type_ and (r.from_id, r.to_id) in wanted
-            and relationships_repo.delete_relationship(self._conn, r.id)
-        ]
-        return {"removed": len(removed), "type": type_}
+        commands = []
+        for r in relationships_repo.list_relationships(self._conn):
+            if r.type != type_ or (r.from_id, r.to_id) not in wanted:
+                continue
+            if relationships_repo.delete_relationship(self._conn, r.id):
+                commands.append(undo.for_delete_relationship(
+                    self._conn, r.id, r.from_id, r.to_id, r.type, label=f"unlink {type_}",
+                ))
+        if commands:
+            label = f"unlink {type_}" if len(commands) == 1 else f"unlink {len(commands)} {type_}"
+            self.undo_manager.push(undo.combine(label, commands))
+        return {"removed": len(commands), "type": type_}
 
     def _pairs_of_type(self, type_: str) -> set[tuple[str, str]]:
         return {
@@ -403,10 +414,19 @@ class Api(InspectorApi, CommandBarApi):
         parsed = Query.from_json(raw_query).to_json()
         properties = {"name": name or "Untitled view", query_repo.QUERY_KEY: parsed}
         if view_id and motes_repo.get_mote(self._conn, view_id) is not None:
+            old = motes_repo.get_mote(self._conn, view_id).properties
+            old_values = {k: old[k] for k in properties if k in old}
             motes_repo.update_mote(self._conn, view_id, properties)
+            self.undo_manager.push(undo.for_update_mote(
+                self._conn, view_id, old_values, properties, label="save view",
+            ))
             return {"id": view_id, "created": False}
         new_id = motes_repo.create_mote(self._conn, properties)
         species_repo.set_species(self._conn, new_id, self._view_species_id())
+        # Deleting the mote (this command's undo) already cascades away
+        # the instance_of relationship set_species just made, so one
+        # for_create_mote is the whole undo step.
+        self.undo_manager.push(undo.for_create_mote(self._conn, new_id, properties, label="save view"))
         return {"id": new_id, "created": True}
 
     @_synchronized
@@ -414,4 +434,16 @@ class Api(InspectorApi, CommandBarApi):
         """Deletes the view mote outright. Unlike deleting rows this
         needs no confirmation flag: the frontend asks, and what is lost
         is a saved query rather than any of the garden's own data."""
-        return {"deleted": bool(motes_repo.delete_mote(self._conn, view_id))}
+        mote = motes_repo.get_mote(self._conn, view_id)
+        if mote is None:
+            return {"deleted": False}
+        relationships = [
+            {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+            for r in graph_repo.relationships_touching(self._conn, view_id)
+        ]
+        deleted = motes_repo.delete_mote(self._conn, view_id)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_mote(
+                self._conn, view_id, mote.properties, relationships, label="delete view",
+            ))
+        return {"deleted": deleted}

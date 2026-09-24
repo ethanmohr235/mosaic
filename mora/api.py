@@ -28,7 +28,7 @@ import threading
 
 import webview
 
-from api_common import CommandBarApi, InspectorApi
+from api_common import CommandBarApi, InspectorApi, UndoableApi
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
 from api_common import species_ids as _species_ids
@@ -40,6 +40,7 @@ from core import modoc_bind
 from core import motes as motes_repo
 from core import plotview
 from core import sync as sync_repo
+from core import undo
 from core.db import get_connection, initialize_database
 from mora import payload as payload_repo
 
@@ -99,7 +100,7 @@ class _Figures:
         return self._drawn[ref]
 
 
-class Api(InspectorApi, CommandBarApi):
+class Api(InspectorApi, CommandBarApi, UndoableApi):
     """Every method takes the note's *live* source rather than reading it
     back from the database. The source pane is the truth while you type;
     the property only catches up when you save. Resolving what is on
@@ -115,6 +116,7 @@ class Api(InspectorApi, CommandBarApi):
         self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
         self._figures = _Figures()
+        self._init_undo()
         self._best_effort_sync()
 
     def _open(self, garden: str):
@@ -240,6 +242,7 @@ class Api(InspectorApi, CommandBarApi):
         if name:
             properties["name"] = name
         mote_id = motes_repo.create_mote(self._conn, properties)
+        self.undo_manager.push(undo.for_create_mote(self._conn, mote_id, properties, label="create a note"))
         mote = motes_repo.get_mote(self._conn, mote_id)
         return {"noteId": mote_id, "source": "", "name": payload_repo.name_of(mote)}
 

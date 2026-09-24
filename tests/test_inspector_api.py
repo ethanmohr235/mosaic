@@ -245,6 +245,56 @@ def test_delete_property_drops_its_unit_entry(api, garden):
     assert "priority" not in payload["properties"]
 
 
+# ---- undo ----
+
+def test_set_property_can_be_undone(api, garden):
+    task = garden["tasks"][0]
+    api.inspector_set_property(task, "priority", "low")
+    assert api.undo()["undone"] is not None
+    assert api.inspect_mote(task)["properties"]["priority"] == "high"
+
+
+def test_deleting_a_property_with_a_unit_is_undone_in_one_step(api, garden):
+    task = garden["tasks"][0]
+    api.inspector_set_property(task, "units", {"priority": "kohm", "estimate": "hr"})
+    api.inspector_delete_property(task, "priority")
+    assert api.undo()["undone"] is not None
+    payload = api.inspect_mote(task)
+    assert payload["properties"]["priority"] == "high"
+    assert payload["properties"]["units"] == {"priority": "kohm", "estimate": "hr"}
+
+
+def test_renaming_a_property_with_a_unit_is_undone_in_one_step(api, garden):
+    task = garden["tasks"][0]
+    api.inspector_set_property(task, "units", {"priority": "kohm"})
+    api.inspector_rename_property(task, "priority", "urgency")
+    assert api.undo()["undone"] is not None
+    payload = api.inspect_mote(task)
+    assert payload["properties"]["priority"] == "high"
+    assert "urgency" not in payload["properties"]
+    assert payload["properties"]["units"] == {"priority": "kohm"}
+
+
+def test_setting_species_is_undone_in_one_step_even_when_it_replaces_one(api, garden):
+    task = garden["tasks"][0]
+    other_species = api.create_mote({"name": "Other"})["id"]
+    api.inspector_set_species(task, other_species)
+    before = {s["otherId"] for s in api.inspect_mote(task)["relationships"] if s["type"] == "instance_of"}
+    assert api.undo()["undone"] is not None
+    after = {s["otherId"] for s in api.inspect_mote(task)["relationships"] if s["type"] == "instance_of"}
+    assert after == {garden["species"]}
+    assert before == {other_species}
+
+
+def test_relate_can_be_undone(api, garden):
+    person = api.create_mote({"name": "Amara Voss"})["id"]
+    task = garden["tasks"][0]
+    api.inspector_relate(task, person, "assigned_to")
+    assert api.undo()["undone"] is not None
+    payload = api.inspect_mote(task)
+    assert not [r for r in payload["relationships"] if r["type"] == "assigned_to"]
+
+
 def test_relate_and_unrelate(api, garden):
     person = api.create_mote({"name": "Amara Voss"})["id"]
     task = garden["tasks"][0]

@@ -283,20 +283,45 @@ input:focus { outline: none; border-color: oklch(0.74 0.1 68 / 0.6); }
 #now-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--accent); z-index: 3; pointer-events: none; }
 
 .event {
-  position: absolute; border-radius: 6px; overflow: hidden;
+  position: absolute; border-radius: 6px; overflow: visible;
   border: 1px solid; border-left-width: 2.5px;
-  padding: 2px 6px; display: flex; flex-direction: column; gap: 1px;
   text-align: left; transition: background 0.15s ease;
 }
-.event.compact { flex-direction: row; align-items: center; gap: 5px; padding: 0 6px; }
 .event.selected { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); }
+
+/* Big enough to hold its own label: the time and name sit inside the
+   highlight, same as an event always has. */
+.event.inline { padding: 2px 6px; display: flex; flex-direction: column; gap: 1px; }
+.event.inline.compact { flex-direction: row; align-items: center; gap: 5px; padding: 0 6px; }
+.event.inline .event-name {
+  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
+}
+.event.inline.compact .event-name { white-space: nowrap; -webkit-line-clamp: 1; }
+
+/* Too small to hold its own label: the highlight stays bare, and the
+   name and time float off it instead, appearing only on hover so a run
+   of short events doesn't turn into a wall of overlapping text. */
+.event-label {
+  position: absolute; left: 0; z-index: 6; pointer-events: none;
+  display: flex; align-items: baseline; gap: 6px;
+  width: max-content; max-width: 220px;
+  padding: 3px 8px; border-radius: 6px;
+  background: oklch(0.15 0 0 / 0.95); border: 1px solid oklch(1 0 0 / 0.14);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  opacity: 0; visibility: hidden; transform: translateY(2px);
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+.event-label:not(.below) { bottom: 100%; margin-bottom: 4px; }
+.event-label.below { top: 100%; margin-top: 4px; }
+.event:hover .event-label, .event.selected .event-label {
+  opacity: 1; visibility: visible; transform: translateY(0);
+}
+
 .event-time { font-family: var(--mono); font-size: 9px; flex-shrink: 0; white-space: nowrap; }
 .event-name {
   font-size: 11.5px; line-height: 1.25; color: var(--fg-bright);
-  min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  display: -webkit-box; -webkit-box-orient: vertical;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.event.compact .event-name { white-space: nowrap; -webkit-line-clamp: 1; }
 
 /* ---- month ---- */
 

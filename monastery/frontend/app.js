@@ -33,11 +33,14 @@ let chooserFresh = false;    // ... and the one that put the chooser up
 let lastPointer = { x: 0, y: 0 };
 
 const POLL_MS = 4000;
+const STORE_KEY = "monastery.bindings";
 const HOUR_PX = 48;          // must match --hour in style.css
 const DRAG_PX = 4;           // how far a press moves before it counts as a drag
 const EDGE_PX = 6;           // how deep an event's resize edges reach
 const SNAP_MIN = 15;         // what a dragged time rounds to
 const MIN_MINUTES = 15;      // the shortest event a drag can leave behind
+const EVENT_MIN_PX = 6;      // shortest an event's highlight is drawn, regardless of duration
+const INLINE_LABEL_MIN_PX = 16; // shortest an event can be and still hold its own label inline
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = ["January", "February", "March", "April", "May", "June",
                 "July", "August", "September", "October", "November", "December"];
@@ -297,6 +300,29 @@ async function call(promise, failure) {
 
 // ---- loading -------------------------------------------------------
 
+// ---- the bindings preference -----------------------------------------
+//
+// Which properties count as dates is the person's answer, not the
+// garden's, so it lives here rather than in a mote -- remembered in
+// localStorage the same way Momentum remembers its keys, and sent back
+// on every call so a poll can never quietly re-guess one you switched off.
+
+function loadBindings() {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function saveBindings() {
+  try {
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(bindings));
+  } catch (error) {
+    /* a window that cannot remember still works; it just re-guesses. */
+  }
+}
 
 async function refresh() {
   const seq = ++refreshSeq;
@@ -311,6 +337,7 @@ async function refresh() {
   adoptPalette(answer.speciesIds);
   payload = answer;
   bindings = answer.bindings.filter((b) => b.active).map((b) => b.key);
+  saveBindings();
   draw();
 }
 
@@ -604,11 +631,18 @@ function eventFor(o) {
   const tint = eventTint(o, selected);
   const top = (minutesInto(o._start) / 60) * HOUR_PX;
   const minutes = Math.max(15, (o._end - o._start) / 60000);
-  const height = Math.max(20, (minutes / 60) * HOUR_PX - 2);
+  const height = Math.max(EVENT_MIN_PX, (minutes / 60) * HOUR_PX - 2);
   const width = 100 / o._laneCount;
   const compact = height < 42;
+  // Tall enough to hold its own label inline, the way an event always
+  // has; too short, and the label floats off the highlight instead.
+  const inline = height >= INLINE_LABEL_MIN_PX;
+  // A block near the top of the column has no room for a floating label
+  // above it, so its label drops below instead.
+  const labelBelow = top < 26;
 
   const node = button("event");
+  if (inline) node.classList.add("inline");
   if (compact) node.classList.add("compact");
   if (selected) node.classList.add("selected");
   node.style.top = `${Math.round(top)}px`;
@@ -623,11 +657,18 @@ function eventFor(o) {
     ? fmtTime(o._start)
     : `${fmtTime(o._start)}–${fmtTime(o._end)}`);
   time.style.color = tint.color;
-  node.append(time);
-
   const name = el("div", "event-name", o.name);
-  if (!compact) name.style.webkitLineClamp = String(Math.max(1, Math.floor((height - 16) / 15)));
-  node.append(name);
+  if (inline && !compact) name.style.webkitLineClamp = String(Math.max(1, Math.floor((height - 16) / 15)));
+
+  if (inline) {
+    node.append(time, name);
+  } else {
+    // Too small to hold text of its own -- the label floats off the
+    // highlight and only shows up when someone's actually looking.
+    const label = el("div", `event-label${labelBelow ? " below" : ""}`);
+    label.append(time, name);
+    node.append(label);
+  }
 
   node.append(killFor(o));
   node.title = `${o.name} — placed by ${o.binding}`;
@@ -1049,7 +1090,7 @@ function paintTimedDrag() {
     : column;
   drag.node.style.top = `${Math.round((minutesInto(start) / 60) * HOUR_PX)}px`;
   drag.node.style.height =
-    `${Math.max(20, Math.round(((end - start) / 3600000) * HOUR_PX) - 2)}px`;
+    `${Math.max(EVENT_MIN_PX, Math.round(((end - start) / 3600000) * HOUR_PX) - 2)}px`;
   const shift = target.getBoundingClientRect().left - column.getBoundingClientRect().left;
   drag.node.style.transform = `translateX(${Math.round(shift)}px)`;
   const time = drag.node.querySelector(".event-time");
@@ -1208,15 +1249,8 @@ async function deleteOccurrence(o) {
       ? `One occurrence of ${answer.name} removed.`
       : `${answer.name} deleted.`,
     false,
-    { label: "Undo", run: () => undoDelete(answer.undo) },
+    { label: "Undo", run: () => Undo.undo() },
   );
-}
-
-async function undoDelete(token) {
-  const restored = await call(api.undo_delete(token), "Could not undo that.");
-  if (restored === null) return;
-  await refresh();
-  toast(`${restored.name} restored.`);
 }
 
 // ---- status bar ----
@@ -1848,7 +1882,9 @@ async function init() {
     onChanged: refresh,
     onNavigate: (moteId) => Inspector.open(moteId),
   });
+  Undo.install({ api, toast, onChanged: refresh });
   anchor = new Date();
+  bindings = loadBindings();
   loadRailWidth();
   applyRailWidth();
   wire();

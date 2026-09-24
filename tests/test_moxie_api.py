@@ -369,3 +369,16 @@ def test_deleting_a_plot_removes_it(api, divider):
 
     assert api.delete_plot(saved["id"]) == {"deleted": True}
     assert api.board()["plots"] == []
+
+
+def test_saving_a_plot_can_be_undone(api, divider):
+    saved = api.save_plot("I vs V", {"mode": "sweep"})
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, saved["id"]) is None
+
+
+def test_deleting_a_plot_can_be_undone(api, divider):
+    saved = api.save_plot("I vs V", {"mode": "sweep"})
+    api.delete_plot(saved["id"])
+    assert api.undo()["undone"] is not None
+    assert get_mote(api._conn, saved["id"]).properties[PLOT_KEY]["mode"] == "sweep"

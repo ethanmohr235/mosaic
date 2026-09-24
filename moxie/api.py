@@ -52,18 +52,20 @@ from pathlib import Path
 
 import webview
 
-from api_common import CommandBarApi, InspectorApi
+from api_common import CommandBarApi, InspectorApi, UndoableApi
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
 from api_common import synchronized as _synchronized
 from core import gardens as gardens_repo
 from core import motes as motes_repo
+from core import relationships as rel_repo
 from core import scenarios as scenarios_repo
 from core import simulation as simulation_repo
 from core import solvers as solvers_repo
 from core import species as species_repo
 from core import sweep as sweep_repo
 from core import sync as sync_repo
+from core import undo
 from core.db import get_connection, initialize_database
 from core.graph import whole_garden
 from core.sweep import Axis, Case, PLOT_KEY, has_plot
@@ -91,7 +93,7 @@ _DEFAULT_STEPS = 200
 _COARSE_STRIDE = 8
 
 
-class Api(InspectorApi, CommandBarApi):
+class Api(InspectorApi, CommandBarApi, UndoableApi):
     """Moxie's bridge. Reads the garden, sweeps snapshots of it, and
     writes nothing but a saved plot."""
 
@@ -109,6 +111,7 @@ class Api(InspectorApi, CommandBarApi):
         # counter would mean the second plot's first frame cancelled the
         # first plot's sweep, and neither would ever finish.
         self._generations: dict[str, int] = {}
+        self._init_undo()
         self._best_effort_sync()
 
     def _open(self, garden: str):
@@ -395,10 +398,16 @@ class Api(InspectorApi, CommandBarApi):
         number does."""
         properties = {"name": name or "Untitled plot", PLOT_KEY: plot}
         if plot_id and motes_repo.get_mote(self._conn, plot_id) is not None:
+            old = motes_repo.get_mote(self._conn, plot_id).properties
+            old_props = {k: old[k] for k in properties if k in old}
             motes_repo.update_mote(self._conn, plot_id, properties)
+            self.undo_manager.push(undo.for_update_mote(self._conn, plot_id, old_props, properties, label="save plot"))
             return {"id": plot_id, "created": False}
         new_id = motes_repo.create_mote(self._conn, properties)
         species_repo.set_species(self._conn, new_id, self._plot_species_id())
+        # Deleting the mote (this command's undo) cascades away the
+        # instance_of relationship set_species just made.
+        self.undo_manager.push(undo.for_create_mote(self._conn, new_id, properties, label="save plot"))
         return {"id": new_id, "created": True}
 
     @_synchronized
@@ -407,7 +416,19 @@ class Api(InspectorApi, CommandBarApi):
         specification rather than any of the garden's own data, so the
         frontend's own confirmation is enough -- the same call monolith
         makes about deleting a saved view."""
-        return {"deleted": bool(motes_repo.delete_mote(self._conn, plot_id))}
+        mote = motes_repo.get_mote(self._conn, plot_id)
+        if mote is None:
+            return {"deleted": False}
+        relationships = [
+            {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+            for r in rel_repo.list_relationships(self._conn) if plot_id in (r.from_id, r.to_id)
+        ]
+        deleted = motes_repo.delete_mote(self._conn, plot_id)
+        if deleted:
+            self.undo_manager.push(undo.for_delete_mote(
+                self._conn, plot_id, mote.properties, relationships, label="delete plot",
+            ))
+        return {"deleted": deleted}
 
     # ---- leaving with an answer ----
 

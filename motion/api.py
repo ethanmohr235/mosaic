@@ -40,7 +40,7 @@ import threading
 
 import webview
 
-from api_common import CommandBarApi, InspectorApi
+from api_common import CommandBarApi, InspectorApi, UndoableApi
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
@@ -58,6 +58,7 @@ from core import simulation as simulation_repo
 from core import solvers as solvers_repo
 from core import species as species_repo
 from core import sync as sync_repo
+from core import undo
 from core.db import get_connection, initialize_database
 from core.units import UNITS_KEY, parse_units_property
 from motion import payload as payload_repo
@@ -149,7 +150,7 @@ def _explanation_payload(explanation) -> dict | None:
     }
 
 
-class Api(InspectorApi, CommandBarApi):
+class Api(InspectorApi, CommandBarApi, UndoableApi):
     """Every read re-reads the whole garden, the same choice the other
     windows make (monarch/api.py::focus, monolith/api.py::table):
     Motion is routinely open beside Monarch on the same garden file, and
@@ -164,6 +165,7 @@ class Api(InspectorApi, CommandBarApi):
         self._initial_focus = focus
         self._conn = self._open(self._garden)
         self._window: webview.Window | None = None
+        self._init_undo()
         self._best_effort_sync()
 
     def _open(self, garden: str):
@@ -726,7 +728,11 @@ class Api(InspectorApi, CommandBarApi):
         target = mote_id
         if scenario is not None:
             target = scenarios_repo.get_or_create_override(self._conn, scenario, mote_id)
-        motes_repo.update_mote(self._conn, target, _coerce_properties({key: raw_value}))
+        new_props = _coerce_properties({key: raw_value})
+        old = motes_repo.get_mote(self._conn, target)
+        old_props = {key: old.properties[key]} if old and key in old.properties else {}
+        motes_repo.update_mote(self._conn, target, new_props)
+        self.undo_manager.push(undo.for_update_mote(self._conn, target, old_props, new_props, label=f"set {key}"))
         return self._inspector_payload(mote_id)
 
     def command_run(self, text: str, confirm: bool = False) -> dict:

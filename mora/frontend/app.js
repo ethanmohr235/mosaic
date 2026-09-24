@@ -1372,6 +1372,7 @@ async function init() {
     onChanged: () => renderNow(),
     onNavigate: (moteId) => Inspector.open(moteId),
   });
+  Undo.install({ api, toast, onChanged: () => renderNow() });
   Launcher.install({
     api,
     thisApp: "mora",

@@ -2354,6 +2354,7 @@ async function init() {
       Inspector.open(moteId);
     },
   });
+  Undo.install({ api, toast, onChanged: () => { refresh(); scheduleFastRun(); } });
   Launcher.install({
     api,
     thisApp: "motion",

@@ -1404,6 +1404,7 @@ async function init() {
     onChanged: () => { refresh().then(runAll); },
     onNavigate: (moteId) => Inspector.open(moteId),
   });
+  Undo.install({ api, toast, onChanged: () => { refresh().then(runAll); } });
   Launcher.install({
     api,
     thisApp: THIS_APP,

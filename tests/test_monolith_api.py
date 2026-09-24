@@ -168,13 +168,45 @@ def test_deleting_needs_no_confirmation_but_can_be_undone(api, garden):
     _motes, relationships = whole_garden(api._conn)
     assert garden["schema"] not in {r.from_id for r in relationships} | {r.to_id for r in relationships}
 
-    restored = api.undo_delete(answer["undo"])
-    assert restored["restored"] == 1
+    restored = api.undo()
+    assert restored["undone"] == "delete a mote"
     assert get_mote(api._conn, garden["schema"]).properties["name"] == "Schema"
     _motes, relationships = whole_garden(api._conn)
     pairs = {(r.from_id, r.to_id, r.type) for r in relationships}
     assert (garden["schema"], garden["species"], q.INSTANCE_OF) in pairs
     assert (garden["backfill"], garden["schema"], "depends_on") in pairs
+
+
+def test_redoing_a_delete_removes_the_mote_again(api, garden):
+    api.delete_motes([garden["schema"]])
+    api.undo()
+
+    redone = api.redo()
+    assert redone["redone"] == "delete a mote"
+    assert get_mote(api._conn, garden["schema"]) is None
+
+
+def test_deleting_several_motes_is_undone_in_one_step(api, garden):
+    answer = api.delete_motes([garden["schema"], garden["backfill"]])
+    assert answer["deleted"] == 2
+
+    restored = api.undo()
+    assert restored["undone"] == "delete 2 motes"
+    assert get_mote(api._conn, garden["schema"]) is not None
+    assert get_mote(api._conn, garden["backfill"]) is not None
+    assert api.undo()["undone"] is None  # the whole batch was one step
+
+
+def test_setting_a_property_can_be_undone(api, garden):
+    api.set_property([garden["schema"]], "owner", "Rina")
+    assert api.undo()["undone"] == "set owner"
+    assert "owner" not in get_mote(api._conn, garden["schema"]).properties
+
+
+def test_creating_a_mote_can_be_undone(api, garden):
+    created = api.create_mote({"name": "New mote"})
+    assert api.undo()["undone"] == "create a mote"
+    assert get_mote(api._conn, created["id"]) is None
 
 
 # ---- editing relationships ----
