@@ -2329,17 +2329,6 @@ async function refresh() {
 
 async function init() {
   api = window.pywebview.api;
-  // X11/GTK's middle-click-paste fires on any focused text control under
-  // the cursor. inspector.js and commandbar.js already guard their own
-  // DOM subtree (frontend_shared/inspector.js), and the board's own nodes
-  // already treat button 1 as "pan, don't select" (onNodeDown above) --
-  // this covers motion's own text inputs (the equation editor) the same
-  // way, without touching the pan gesture, which never targets a control.
-  document.addEventListener("mousedown", (event) => {
-    if (event.button !== 1) return;
-    const tag = (event.target.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
-  });
   Inspector.install({
     api,
     onChanged: () => { refresh(); scheduleFastRun(); },

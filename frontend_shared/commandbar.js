@@ -153,19 +153,6 @@ const CommandBar = (() => {
     candidates = root.querySelector(".cmdbar-candidates");
     hint = root.querySelector(".cmdbar-hint");
 
-    // Docked at the bottom, the bar now sits right where a middle-drag
-    // pans the graph. monarch/frontend/graph.js already guards its own
-    // canvas against X11/GTK's middle-click-paste, but that guard only
-    // needs to preventDefault() on mousedown (autoscroll is a mousedown-
-    // time action). WebKitGTK's primary-selection paste into an actual
-    // editable element -- which the canvas isn't, but this bar's <input>
-    // is -- fires its paste on mouseup instead, so mousedown alone leaves
-    // it untouched; both need the guard.
-    const blockMiddleClick = (event) => {
-      if (event.button === 1) event.preventDefault();
-    };
-    root.addEventListener("mousedown", blockMiddleClick);
-    root.addEventListener("mouseup", blockMiddleClick);
     input.addEventListener("keydown", onKeydown);
     input.addEventListener("input", () => {
       pendingConfirm = null;

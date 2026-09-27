@@ -1084,3 +1084,31 @@ wiring one more mutation kind into it added no new coupling to sync or
 the oplog. A note drag pushes through `UndoManager.push`'s existing
 `coalesce_key` support, the same mechanism a property edit's keystrokes
 were already built to use, so a whole drag gesture undoes in one step.
+
+# Focus and the clipboard
+
+`frontend_shared/focus.js` is loaded first by every window and installs
+itself -- there is nothing to configure. It owns two window-wide rules
+that used to be re-implemented per app and per shared widget, each over
+its own subtree, with gaps between them:
+
+- **Middle-click never pastes.** WebKitGTK runs X11's primary-selection
+  paste on the middle button's *mouseup*, into whatever element has
+  focus, not the one under the cursor. So guarding only mousedown, or
+  only one subtree, let a middle-drag pan across a canvas paste into a
+  field focused elsewhere (a sticky note being edited, an inspector
+  value). `focus.js` preventDefault()s both events in the capture phase
+  on `window`. Middle-drag panning reads `button === 1` itself and never
+  needed the default action.
+- **Clicking outside a text field unfocuses it.** Browsers do this only
+  when the mousedown's default action runs, and every canvas, drag
+  surface, or resize handle that preventDefault()s its mousedown kept a
+  stale field focused. `focus.js` blurs the focused field on any
+  mousedown (capture phase, so `stopPropagation()` can't skip it) that
+  isn't inside that field, on another focusable control, or inside an
+  element marked `data-keep-focus` -- the explicit opt-out for a popup
+  that must leave focus where it is.
+
+A new window gets both by symlinking `focus.js` into its `frontend/` and
+loading it before its other scripts; no app should add its own
+middle-click or click-away handlers.

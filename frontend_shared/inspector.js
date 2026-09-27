@@ -398,13 +398,6 @@ const Inspector = (() => {
       <div class="ins-grip" title="Resize"></div>`;
     document.body.appendChild(root);
 
-    // X11/GTK's middle-click-paste fires on any focused <input>/<textarea>
-    // under the cursor, including the panel's key/value fields - guard the
-    // whole panel the same way commandbar.js and graph.js already do.
-    root.addEventListener("mousedown", (event) => {
-      if (event.button === 1) event.preventDefault();
-    });
-
     els = {
       tabs: root.querySelector(".ins-tabs"),
       head: root.querySelector(".ins-head"),

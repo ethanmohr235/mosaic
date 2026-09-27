@@ -1338,15 +1338,6 @@ function onRailResizeUp() {
 // ---- wiring --------------------------------------------------------
 
 function wire() {
-  // X11/GTK's middle-click-paste fires on any focused text control under
-  // the cursor. inspector.js and commandbar.js already guard their own
-  // DOM subtree (frontend_shared/inspector.js) -- this covers the board's
-  // own inputs (card title/description edits) the same way.
-  document.addEventListener("mousedown", (event) => {
-    if (event.button !== 1) return;
-    const tag = (event.target.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
-  });
 
   [...$("tabs").children].forEach((b) => {
     b.onclick = () => setTab(b.dataset.tab);

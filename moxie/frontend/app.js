@@ -1298,16 +1298,6 @@ async function openGardenMenu() {
 
 function wire() {
   $("garden-btn").onclick = openGardenMenu;
-  // X11/GTK's middle-click-paste fires on any focused text control under
-  // the cursor. inspector.js and commandbar.js already guard their own
-  // DOM subtree (frontend_shared/inspector.js) -- this covers moxie's own
-  // inputs the same way.
-  document.addEventListener("mousedown", (event) => {
-    if (event.button === 1) {
-      const tag = (event.target.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
-    }
-  });
   document.addEventListener("mousedown", (event) => {
     const menu = $("garden-menu");
     if (!menu.classList.contains("hidden") && !menu.contains(event.target)

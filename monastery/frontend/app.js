@@ -1584,15 +1584,6 @@ function stopPolling() {
 // ---- wiring --------------------------------------------------------
 
 function wire() {
-  // X11/GTK's middle-click-paste fires on any focused text control under
-  // the cursor. inspector.js and commandbar.js already guard their own
-  // DOM subtree (frontend_shared/inspector.js) -- this covers the event
-  // draft form's own inputs the same way.
-  document.addEventListener("mousedown", (event) => {
-    if (event.button !== 1) return;
-    const tag = (event.target.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") event.preventDefault();
-  });
 
   $("prev").onclick = () => step(-1);
   $("next").onclick = () => step(1);

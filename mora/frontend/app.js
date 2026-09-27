@@ -1236,14 +1236,6 @@ function wire() {
   $("switch-app-btn").addEventListener("click", Launcher.open);
 
   const editor = $("editor");
-  // X11/GTK's middle-click-paste fires on any focused text control under
-  // the cursor -- inspector.js and commandbar.js already guard themselves
-  // against it (see frontend_shared/inspector.js), but the editor is a
-  // plain <textarea> with nothing of its own stopping a stray middle
-  // click from dropping the primary selection into the note.
-  editor.addEventListener("mousedown", (event) => {
-    if (event.button === 1) event.preventDefault();
-  });
   editor.addEventListener("input", onEditorInput);
   editor.addEventListener("beforeinput", markUndoBurst);
   editor.addEventListener("scroll", () => { $("highlight").scrollTop = editor.scrollTop; });
