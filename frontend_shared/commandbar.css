@@ -27,22 +27,59 @@
 .cmdbar-history {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 2px;
   margin-bottom: 6px;
+  padding: 0 14px;
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 32px));
   pointer-events: none;
 }
 .cmdbar-history.hidden { display: none; }
 
+/* Each line is a slash (hidden, but sized like the real one in
+ * .cmdbar-box) plus the text, so the text lands at the exact x-position
+ * where it was typed instead of centering above the bar. */
 .cmdbar-history-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--faint);
-  white-space: nowrap;
+  overflow: hidden;
+}
+.cmdbar-history-slash {
+  visibility: hidden;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.cmdbar-history-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: min(560px, calc(100vw - 32px));
+  white-space: nowrap;
 }
+
+/* Arrow-key recall shifts existing lines to their new row and fades in
+ * whichever one the scroll just revealed -- see scrollTrailTo() in
+ * commandbar.js, which sets the actual transform/opacity values; this
+ * only supplies the transition so those changes animate instead of
+ * snapping. */
+.cmdbar-history-line {
+  transition: transform 0.18s ease-out, opacity 0.18s ease-out;
+}
+
+/* A line that scrolled out of the trail entirely keeps existing for one
+ * more frame as a fixed-position ghost over its old spot, so it can
+ * animate away instead of just vanishing -- see scrollTrailTo(). */
+.cmdbar-history-ghost {
+  position: fixed;
+  pointer-events: none;
+  transition: transform 0.2s ease-in, opacity 0.2s ease-in;
+  z-index: 71;
+}
+.cmdbar-history-ghost-recall { color: var(--accent-bright); }
 
 .cmdbar-box {
   display: flex;
@@ -109,7 +146,6 @@
   color: transparent;
   caret-color: var(--fg-bright);
 }
-.cmdbar-input::placeholder { color: var(--faint); }
 
 /* Subtle, low-chroma so the bar still reads as plain text at a glance --
  * color is a hint about how core/command_bar.py is about to parse the
@@ -126,18 +162,6 @@
 .cmdbar-tok-unit { color: oklch(0.78 0.08 300); }
 .cmdbar-tok-expr { color: oklch(0.82 0.05 90); }
 .cmdbar-tok-id { color: var(--faint); font-style: italic; }
-
-.cmdbar-hint {
-  flex-shrink: 0;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 11px;
-  opacity: 0.65;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .cmdbar-message {
   width: min(560px, calc(100vw - 32px));

@@ -49,23 +49,11 @@ const CommandBar = (() => {
   const HISTORY_MAX = 50;
   const TRAIL_LINES = 3; // how many past commands fade in above the box
 
-  const EXAMPLES = [
-    "R1.resistance = 500 ohms",
-    "R1.resistance units kohm",
-    "R1.voltage == R1.current * R1.resistance",
-    "beam.I / beam.I0 == 0.1",
-    "R1.resistance ?",
-    "R1 -> R2",
-    "R1 -> owns -> R2",
-    "R1 : Resistor",
-    "delete R1.resistance",
-  ];
-
   let api = null;
   let onChanged = () => {};
   let onNavigate = () => {};
 
-  let root, input, highlight, message, candidates, hint, trail;
+  let root, input, highlight, message, candidates, trail;
   let history = [];
   let historyIndex = -1;
   let pendingConfirm = null; // the exact text a second Enter would confirm-delete
@@ -118,7 +106,6 @@ const CommandBar = (() => {
     setMessage("");
     setCandidates(null);
     renderTrail();
-    hint.textContent = EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
     setTimeout(() => input.focus(), 0);
   }
 
@@ -137,10 +124,8 @@ const CommandBar = (() => {
         <span class="cmdbar-slash">/</span>
         <div class="cmdbar-input-wrap">
           <div class="cmdbar-highlight" aria-hidden="true"></div>
-          <input class="cmdbar-input" spellcheck="false" autocomplete="off"
-                 placeholder="R1.resistance = 500 ohms">
+          <input class="cmdbar-input" spellcheck="false" autocomplete="off">
         </div>
-        <span class="cmdbar-hint"></span>
       </div>
       <div class="cmdbar-message"></div>
       <div class="cmdbar-candidates hidden"></div>`;
@@ -151,7 +136,6 @@ const CommandBar = (() => {
     highlight = root.querySelector(".cmdbar-highlight");
     message = root.querySelector(".cmdbar-message");
     candidates = root.querySelector(".cmdbar-candidates");
-    hint = root.querySelector(".cmdbar-hint");
 
     input.addEventListener("keydown", onKeydown);
     input.addEventListener("input", () => {
@@ -171,9 +155,20 @@ const CommandBar = (() => {
 
   /** The last few submitted commands, oldest faintest, directly above the
    *  box -- reused from the same `history` array arrow-key recall reads,
-   *  so nothing extra is tracked just for display. */
-  function renderTrail() {
-    const shown = history.slice(-TRAIL_LINES);
+   *  so nothing extra is tracked just for display. Each line carries an
+   *  invisible slash the same size as the real one in `.cmdbar-box`, so
+   *  its text starts at exactly the x-position where it was originally
+   *  typed instead of being centered above the bar. */
+  /** `uptoIndex` is where the input's own recall position is -- the
+   *  trail shows the TRAIL_LINES entries immediately *before* it, so a
+   *  recalled command drops out of the trail the moment it becomes the
+   *  input's value rather than staying listed twice. Defaults to
+   *  `history.length` (nothing recalled), which shows the most recent
+   *  few, same as always. */
+  function renderTrail(uptoIndex) {
+    const end = uptoIndex === undefined ? history.length : uptoIndex;
+    const start = Math.max(0, end - TRAIL_LINES);
+    const shown = history.slice(start, end);
     if (!shown.length) {
       trail.classList.add("hidden");
       trail.innerHTML = "";
@@ -182,12 +177,97 @@ const CommandBar = (() => {
     trail.classList.remove("hidden");
     trail.innerHTML = "";
     shown.forEach((text, i) => {
-      const line = document.createElement("div");
-      line.className = "cmdbar-history-line";
       // Oldest shown line is faintest, newest is closest to full opacity.
-      line.style.opacity = 0.15 + (0.4 * (i + 1)) / shown.length;
-      line.textContent = text;
-      trail.appendChild(line);
+      trail.appendChild(makeTrailLine(text, start + i, 0.15 + (0.4 * (i + 1)) / shown.length));
+    });
+  }
+
+  function makeTrailLine(text, historyIdx, opacity) {
+    const line = document.createElement("div");
+    line.className = "cmdbar-history-line";
+    line.dataset.historyIndex = String(historyIdx);
+    line.style.opacity = opacity;
+
+    const slash = document.createElement("span");
+    slash.className = "cmdbar-history-slash";
+    slash.textContent = "/";
+    const label = document.createElement("span");
+    label.className = "cmdbar-history-text";
+    label.textContent = text;
+    line.appendChild(slash);
+    line.appendChild(label);
+    return line;
+  }
+
+  /** Arrow-key recall re-renders the trail around the new position, then
+   *  animates the difference so it reads as scrolling rather than a
+   *  jump-cut: a line the trail keeps showing slides to its new row, the
+   *  entry the scroll newly reveals fades in from the direction of
+   *  travel, and the one that scrolled out entirely gets a ghost of its
+   *  own -- ArrowUp drops it (briefly brightened) down into the box,
+   *  since it's what the input now holds, while ArrowDown just lets it
+   *  drift back out of view the way it came. */
+  function scrollTrailTo(uptoIndex, direction) {
+    const before = new Map();
+    trail.querySelectorAll(".cmdbar-history-line").forEach((line) => {
+      before.set(line.dataset.historyIndex, {
+        rect: line.getBoundingClientRect(),
+        text: line.querySelector(".cmdbar-history-text").textContent,
+        opacity: line.style.opacity,
+      });
+    });
+
+    renderTrail(uptoIndex);
+    if (!before.size) return; // nothing to animate from (bar just opened)
+
+    const after = new Set();
+    trail.querySelectorAll(".cmdbar-history-line").forEach((line) => {
+      const idx = line.dataset.historyIndex;
+      after.add(idx);
+      const prev = before.get(idx);
+
+      if (!prev) {
+        // Newly revealed by the scroll.
+        const targetOpacity = line.style.opacity;
+        line.style.transition = "none";
+        line.style.transform = `translateY(${direction < 0 ? -10 : 10}px)`;
+        line.style.opacity = "0";
+        void line.offsetWidth;
+        line.style.transition = "";
+        requestAnimationFrame(() => {
+          line.style.transform = "";
+          line.style.opacity = targetOpacity;
+        });
+        return;
+      }
+
+      // Still shown, but in a different row -- FLIP from the old
+      // position to the new one.
+      const dy = prev.rect.top - line.getBoundingClientRect().top;
+      if (dy) {
+        line.style.transition = "none";
+        line.style.transform = `translateY(${dy}px)`;
+        void line.offsetWidth;
+        line.style.transition = "";
+        requestAnimationFrame(() => { line.style.transform = ""; });
+      }
+    });
+
+    before.forEach((info, idx) => {
+      if (after.has(idx)) return;
+      const ghost = makeTrailLine(info.text, idx, info.opacity);
+      ghost.classList.add("cmdbar-history-ghost");
+      if (direction < 0) ghost.classList.add("cmdbar-history-ghost-recall");
+      ghost.style.left = `${info.rect.left}px`;
+      ghost.style.top = `${info.rect.top}px`;
+      ghost.style.width = `${info.rect.width}px`;
+      document.body.appendChild(ghost);
+      requestAnimationFrame(() => {
+        ghost.style.transform = `translateY(${direction < 0 ? 14 : -14}px)`;
+        ghost.style.opacity = "0";
+      });
+      ghost.addEventListener("transitionend", () => ghost.remove(), { once: true });
+      setTimeout(() => ghost.remove(), 400); // safety net if transitionend never fires
     });
   }
 
@@ -212,9 +292,12 @@ const CommandBar = (() => {
 
   function recall(direction) {
     if (!history.length) return;
+    const prevIndex = historyIndex;
     historyIndex = Math.max(0, Math.min(history.length, historyIndex + direction));
+    if (historyIndex === prevIndex) return;
     setValue(historyIndex === history.length ? "" : history[historyIndex]);
     pendingConfirm = null;
+    scrollTrailTo(historyIndex, direction);
   }
 
   /** Sets the input's value and repaints the color layer underneath it
