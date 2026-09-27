@@ -554,3 +554,53 @@ def test_rapid_moves_coalesce_into_one_undo_step(api):
 
     # the two moves collapsed into one undo step on top of the create
     assert stack_after_moves == 2
+
+
+def test_move_annotations_moves_a_selection_as_one_undo_step(api):
+    a = api.create_sticky_note("world", 0, 0)
+    b = api.create_sticky_note("world", 10, 10)
+    api.move_annotations([{"id": a["id"], "x": 5, "y": 5}, {"id": b["id"], "x": 15, "y": 15}])
+    by_id = {n["id"]: n for n in api.list_annotations()}
+    assert (by_id[a["id"]]["x"], by_id[b["id"]]["x"]) == (5, 15)
+
+    api.undo()
+    by_id = {n["id"]: n for n in api.list_annotations()}
+    assert (by_id[a["id"]]["x"], by_id[b["id"]]["x"]) == (0, 10)
+
+
+def test_delete_annotations_deletes_a_selection_as_one_undo_step(api):
+    a = api.create_sticky_note("world", 0, 0, text="a")
+    b = api.create_sticky_note("world", 1, 1, text="b")
+    assert api.delete_annotations([a["id"], b["id"], "missing"]) == 2
+    assert api.list_annotations() == []
+
+    api.undo()
+    assert {n["text"] for n in api.list_annotations()} == {"a", "b"}
+
+
+def test_resize_annotation_is_undoable(api):
+    note = api.create_sticky_note("world", 0, 0)
+    resized = api.resize_annotation(note["id"], 20, 30, 200, 150)
+    assert (resized["x"], resized["y"], resized["width"], resized["height"]) == (20, 30, 200, 150)
+
+    api.undo()
+    restored = api.list_annotations()[0]
+    assert (restored["x"], restored["y"], restored["width"], restored["height"]) == (0, 0, None, None)
+
+
+def test_anchor_annotation_attaches_and_detaches_undoably(api):
+    mote = api.create_mote({"name": "A"})
+    note = api.create_sticky_note("world", 100, 100)
+
+    attached = api.anchor_annotation(note["id"], "mote", mote["id"], 40, -40)
+    assert (attached["anchorMode"], attached["moteId"], attached["x"]) == ("mote", mote["id"], 40)
+
+    detached = api.anchor_annotation(note["id"], "world", mote["id"], 140, 60)
+    assert (detached["anchorMode"], detached["moteId"]) == ("world", None)
+
+    api.undo()
+    back = api.list_annotations()[0]
+    assert (back["anchorMode"], back["moteId"], back["x"]) == ("mote", mote["id"], 40)
+    api.undo()
+    back = api.list_annotations()[0]
+    assert (back["anchorMode"], back["x"], back["y"]) == ("world", 100, 100)

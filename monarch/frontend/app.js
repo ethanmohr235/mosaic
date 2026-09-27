@@ -26,6 +26,7 @@ let viewSettings = null;               // this garden's advanced view settings (
 let activeViewFilterId = null;         // id of the Monolith saved view currently filtering the graph, or null
 let attractorMode = false;             // arranging species attractors -- read-only
 let annotateMode = false;              // placing/editing sticky notes
+const ANNOTATE_KEY = "a";              // bare key that toggles annotate mode
 
 const DEPTH_KEY = "monoss:depth";
 const DETAIL_WIDTH_KEY = "monoss:detailWidth";
@@ -758,7 +759,7 @@ function enterAnnotateMode() {
   graph.setAnnotateMode(true);
   $("annotate-mode-btn").classList.add("active");
   Annotations.enter();
-  showToast("Annotating — click the canvas or a mote to add a note, × to delete one.", 4500);
+  showToast("Annotating — double-click to add or edit a note (on a mote to attach it), ctrl+drag a note onto a mote to attach/detach.", 5000);
 }
 
 function exitAnnotateMode() {
@@ -2040,6 +2041,17 @@ function setupKeyboard() {
       return;
     }
 
+    if (e.key.toLowerCase() === ANNOTATE_KEY && !e.ctrlKey && !e.metaKey && !e.altKey
+        && !isTypingInField()) {
+      e.preventDefault();
+      annotateMode ? exitAnnotateMode() : enterAnnotateMode();
+      return;
+    }
+
+    // Annotate mode's note selection gets first refusal on Delete/
+    // Backspace, Enter and Escape (frontend_shared/annotations.js).
+    if (annotateMode && !isTypingInField() && Annotations.onKeyDown(e)) return;
+
     if ((e.key === "Delete" || e.key === "Backspace") && !isTypingInField()) {
       if (graph.selectedIds.size > 0) {
         e.preventDefault();
@@ -2169,7 +2181,11 @@ async function init() {
   Undo.install({
     api,
     toast: showToast,
-    onChanged: () => refreshMoteCache().then(() => refocus(focusId, { pan: false })),
+    // Annotations too: Ctrl+Z covers note edits, and the canvas draws
+    // from Annotations' own cached list, not from refocus().
+    onChanged: () => refreshMoteCache()
+      .then(() => refocus(focusId, { pan: false }))
+      .then(() => Annotations.refresh()),
   });
   const reserved = await call(api.reserved_names());
   reservedProperties = new Set(reserved.properties);

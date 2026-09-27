@@ -690,6 +690,78 @@ class AnnotatableApi:
             _push_undo(self, undo.for_delete_annotation(self._conn, snapshot, label="delete a note"))
         return deleted
 
+    @synchronized
+    def move_annotations(self, moves: list[dict]) -> list[dict]:
+        """Several notes moved by one gesture (a multi-selection drag):
+        moves is [{id, x, y}, ...], and the whole batch is one undo step."""
+        commands, moved = [], []
+        for move in moves:
+            annotation = annotations_repo.get_annotation(self._conn, move["id"])
+            if annotation is None:
+                continue
+            old_xy = (annotation.x, annotation.y)
+            annotations_repo.move_annotation(self._conn, annotation.id, move["x"], move["y"])
+            commands.append(undo.for_move_annotation(
+                self._conn, annotation.id, old_xy, (move["x"], move["y"]), label="move a note",
+            ))
+            moved.append(_annotation_payload(annotations_repo.get_annotation(self._conn, annotation.id)))
+        if commands:
+            label = "move a note" if len(commands) == 1 else f"move {len(commands)} notes"
+            _push_undo(self, undo.combine(label, commands))
+        return moved
+
+    @synchronized
+    def delete_annotations(self, annotation_ids: list[str]) -> int:
+        """Delete a selection of notes as one undo step."""
+        commands = []
+        for annotation_id in annotation_ids:
+            annotation = annotations_repo.get_annotation(self._conn, annotation_id)
+            if annotation is None:
+                continue
+            snapshot = annotations_repo.to_dict(annotation)
+            if annotations_repo.delete_annotation(self._conn, annotation_id):
+                commands.append(undo.for_delete_annotation(self._conn, snapshot, label="delete a note"))
+        if commands:
+            label = "delete a note" if len(commands) == 1 else f"delete {len(commands)} notes"
+            _push_undo(self, undo.combine(label, commands))
+        return len(commands)
+
+    @synchronized
+    def resize_annotation(
+        self, annotation_id: str, x: float, y: float, width: float, height: float,
+    ) -> dict | None:
+        """x/y come along because a note is stored by its centre and a
+        resize keeps its top-left corner fixed, so the centre moves too."""
+        annotation = annotations_repo.get_annotation(self._conn, annotation_id)
+        if annotation is None:
+            return None
+        before = annotations_repo.to_dict(annotation)
+        annotations_repo.update_annotation(
+            self._conn, annotation_id, x=x, y=y, width=width, height=height,
+        )
+        after = annotations_repo.to_dict(annotations_repo.get_annotation(self._conn, annotation_id))
+        _push_undo(self, undo.for_replace_annotation(self._conn, before, after, label="resize a note"))
+        return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
+
+    @synchronized
+    def anchor_annotation(
+        self, annotation_id: str, anchor_mode: str, mote_id: str | None, x: float, y: float,
+    ) -> dict | None:
+        """Attach a note to a mote or detach it back to the canvas. The
+        frontend converts x/y (an offset from the mote vs. an absolute
+        position) so the note doesn't jump."""
+        annotation = annotations_repo.get_annotation(self._conn, annotation_id)
+        if annotation is None:
+            return None
+        before = annotations_repo.to_dict(annotation)
+        annotations_repo.set_anchor(
+            self._conn, annotation_id, anchor_mode=anchor_mode, mote_id=mote_id, x=x, y=y,
+        )
+        after = annotations_repo.to_dict(annotations_repo.get_annotation(self._conn, annotation_id))
+        label = "attach a note" if anchor_mode == "mote" else "detach a note"
+        _push_undo(self, undo.for_replace_annotation(self._conn, before, after, label=label))
+        return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
+
 
 def _annotation_payload(annotation) -> dict:
     """An Annotation as the frontend reads it: camelCase keys, matching

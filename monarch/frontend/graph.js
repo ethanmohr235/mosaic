@@ -1166,6 +1166,7 @@ class MonossGraph {
     this._observer = new ResizeObserver(() => this._resize());
     this._observer.observe(this.canvas.parentElement);
     this.canvas.addEventListener("mousedown", this._onMouseDown);
+    this.canvas.addEventListener("dblclick", this._onDoubleClick);
     this.canvas.addEventListener("wheel", this._onWheel, { passive: false });
     this.canvas.addEventListener("contextmenu", this._onContextMenu);
     window.addEventListener("mousemove", this._onMouseMove);
@@ -1291,9 +1292,9 @@ class MonossGraph {
     if (e.button !== 0) return; // right button is handled by contextmenu
 
     // Annotate mode owns the left button outright too, same reasoning as
-    // attractor mode below: placing/dragging/editing a note must not also
-    // drag a node or start a box-select underneath it. Middle-click pan
-    // (handled above) and wheel-zoom stay live either way.
+    // attractor mode below: selecting/dragging/box-selecting notes must
+    // not also drag a node or box-select motes underneath. Middle-click
+    // pan (handled above) and wheel-zoom stay live either way.
     if (this.annotateMode) {
       Annotations.onMouseDown(e);
       return;
@@ -1343,6 +1344,12 @@ class MonossGraph {
       startX: e.clientX, startY: e.clientY, moved: false,
       mode: e.shiftKey ? "rel" : "mote",
     };
+  };
+
+  /** Only annotate mode uses double-click (to add or edit a note); the
+   *  ordinary editor leaves it alone. */
+  _onDoubleClick = (e) => {
+    if (this.annotateMode && e.button === 0) Annotations.onDoubleClick(e);
   };
 
   _onMouseMove = (e) => {

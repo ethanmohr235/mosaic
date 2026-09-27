@@ -158,6 +158,39 @@ def move_annotation(conn: sqlite3.Connection, annotation_id: str, x: float, y: f
     update_annotation(conn, annotation_id, x=x, y=y)
 
 
+def set_anchor(
+    conn: sqlite3.Connection, annotation_id: str, *,
+    anchor_mode: str, mote_id: str | None, x: float, y: float,
+) -> None:
+    """Re-anchor a note: to a mote (x/y become an offset from it) or to
+    the world (x/y become an absolute position). The caller converts the
+    coordinates so the note stays where it's drawn; anchor_mode, mote_id
+    and x/y only make sense together, which is why this isn't
+    update_annotation()."""
+    if anchor_mode not in _ANCHOR_MODES:
+        raise ValueError(f"Invalid anchor_mode: {anchor_mode!r} (must be 'world' or 'mote')")
+    if anchor_mode == "mote" and not mote_id:
+        raise ValueError("anchor_mode='mote' requires mote_id")
+    if anchor_mode == "world":
+        mote_id = None
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE annotations SET anchor_mode = ?, mote_id = ?, x = ?, y = ?, updated_at = ? WHERE id=?",
+        (anchor_mode, mote_id, x, y, oplog.now_iso(), annotation_id),
+    )
+    conn.commit()
+
+
+def replace_annotation(conn: sqlite3.Connection, snapshot: dict) -> None:
+    """Put an existing annotation back to exactly a prior to_dict()
+    snapshot, whatever changed in between -- the generic undo/redo half
+    for edits that touch several columns at once (a resize moves x/y and
+    width/height together; a re-anchor changes anchor_mode, mote_id and
+    x/y)."""
+    delete_annotation(conn, snapshot["id"])
+    _recreate(conn, snapshot)
+
+
 def delete_annotation(conn: sqlite3.Connection, annotation_id: str) -> bool:
     cur = conn.cursor()
     cur.execute("DELETE FROM annotations WHERE id=?", (annotation_id,))

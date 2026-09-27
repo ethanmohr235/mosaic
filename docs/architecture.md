@@ -1085,6 +1085,40 @@ the oplog. A note drag pushes through `UndoManager.push`'s existing
 `coalesce_key` support, the same mechanism a property edit's keystrokes
 were already built to use, so a whole drag gesture undoes in one step.
 
+A note draws as a dark card in the host window's own palette (`--raised`
+fill, `--border` edge, `--fg` text, read from CSS at install), not a
+yellow sticky. The one visual cue for how a note is anchored is a faint
+dashed leader line from a mote-anchored note back to its mote; a
+world-anchored note has none. Text size, face, line height, and padding
+are world-unit constants shared by the canvas renderer and the textarea
+overlay, which scales them by `camera.scale` every frame, so a note
+reads identically while editing and after. A note's stored width/height
+is the size it was given (default, or dragged with its bottom-right
+grip); it is drawn taller whenever its text needs more, growing down
+from a fixed top edge, so a note never scrolls or clips.
+
+Notes are frosted glass: a 72%-opaque fill over the graph pixels
+already drawn beneath, blurred in place (`CanvasRenderingContext2D
+.filter`, feature-detected -- without it a note is just translucent; the
+editor overlay uses CSS `backdrop-filter` for the same look). Once the
+zoom makes a note's text smaller than ~6 screen px it collapses to a
+small fixed-size marker, which is also all that hit-tests; asking to
+edit a collapsed note zooms back in to it first. `A` toggles annotate
+mode (`ANNOTATE_KEY` in monarch/frontend/app.js).
+
+Inside annotate mode the left button behaves the way it does in the
+graph editor, just over notes: click selects, shift+click adds, a drag
+on empty canvas box-selects, dragging a selected note moves the whole
+selection, and Delete removes it -- each batch one undo step
+(`AnnotatableApi.move_annotations`/`delete_annotations`). Double-click
+adds a note (attached, if it lands on a mote) or edits one; Backspace in
+an empty note deletes it. Ctrl+drag from a note onto a mote attaches it
+there, and onto the mote it's already on detaches it, mirroring ctrl+drag
+between motes -- `anchor_annotation` converts the stored x/y between an
+offset and an absolute position so the note doesn't move. Resizes and
+re-anchors change several columns at once, so their undo restores a
+whole-row snapshot (`core/undo.py`'s `for_replace_annotation`).
+
 # Focus and the clipboard
 
 `frontend_shared/focus.js` is loaded first by every window and installs

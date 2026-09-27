@@ -145,6 +145,20 @@ def node_xy(window, id_expr):
     return pos["x"], pos["y"]
 
 
+def dblclick(window, x, y):
+    """Two synthetic left clicks then a dblclick, in page pixels -- the
+    sequence a real double-click delivers, so the canvas sees both
+    mousedown/mouseup pairs (annotate mode's select/box logic) before
+    the dblclick that adds or edits a note."""
+    drag(window, x, y, x, y)
+    drag(window, x, y, x, y)
+    js(window, f"""
+        document.getElementById('graph').dispatchEvent(new MouseEvent('dblclick', {{
+            clientX: {x}, clientY: {y}, bubbles: true, cancelable: true, button: 0, detail: 2,
+        }}));
+    """)
+
+
 def empty_canvas_point(window, clearance=70):
     """A canvas point with no node within `clearance` pixels.
 
@@ -2793,9 +2807,9 @@ def run_checks(window):
         active_class = js(window, "document.getElementById('annotate-mode-btn').classList.contains('active')")
         assert active_class is True, "the button should show it's active"
 
-        # World-anchored note: click empty canvas, type, and blur to save.
+        # World-anchored note: double-click empty canvas, type, and blur to save.
         ex, ey = empty_canvas_point(window)
-        drag(window, ex, ey, ex, ey)
+        dblclick(window, ex, ey)
         time.sleep(0.4)
         assert note_editor_text() == "", "a freshly placed note should open its editor empty"
         type_and_blur("World note")
@@ -2806,9 +2820,9 @@ def run_checks(window):
             f"world-anchored note should save its text, got {world_note}"
         )
 
-        # Mote-anchored note: click on the target mote.
+        # Mote-anchored note: double-click on the target mote.
         bx, by = node_xy(window, target_id_js)
-        drag(window, bx, by, bx, by)
+        dblclick(window, bx, by)
         time.sleep(0.4)
         type_and_blur("Note on target")
 
@@ -2835,9 +2849,9 @@ def run_checks(window):
             JSON.stringify(graph._worldToScreen(
                 {bob_node["x"]} + {bob_note["x"]}, {bob_node["y"]} + {bob_note["y"]}))
         """))
-        # A click at that resolved position should hit the note (not miss
-        # into empty canvas, which would silently create a *third* note).
-        drag(window, expected_screen["x"], expected_screen["y"], expected_screen["x"], expected_screen["y"])
+        # A double-click at that resolved position should edit the note
+        # (not miss into empty canvas, which would create a *third* note).
+        dblclick(window, expected_screen["x"], expected_screen["y"])
         time.sleep(0.4)
         assert note_editor_text() == "Note on target", (
             "the mote-anchored note should have followed the target mote to its new position"
@@ -2893,6 +2907,294 @@ def run_checks(window):
 
     check("sticky notes: place (world + mote), follow a drag, edit, delete, undo/redo, survive mote delete",
           sticky_note_annotations_full_lifecycle)
+
+    def note_editing_focus_and_clipboard():
+        """The editor overlay matches the drawn note's zoom-scaled text
+        size, a click outside it only ends the edit (no second note), and
+        frontend_shared/focus.js's window-wide rules hold: a middle
+        mouseup anywhere is default-prevented -- WebKitGTK's primary-
+        selection paste runs on that mouseup, into whatever has focus --
+        and a click on non-focusable UI blurs a focused text field."""
+        def note_count():
+            raw = js_async(window, """
+                async () => { window.__result = (await api.list_annotations()).length; }
+            """, wait=3.0)
+            return json.loads(raw)
+
+        before = note_count()
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+        ex, ey = empty_canvas_point(window)
+        dblclick(window, ex, ey)
+        assert wait_until(lambda: js(window,
+            "document.activeElement === document.querySelector('.annotation-editor')") is True), (
+            "a freshly placed note should focus its editor"
+        )
+        font_px = js(window, "parseFloat(document.querySelector('.annotation-editor').style.fontSize)")
+        scale = js(window, "graph.camera.scale")
+        assert abs(font_px - 13 * scale) < 0.01, (
+            f"the editor's font should be the note's 13 world px at zoom {scale}, got {font_px}px"
+        )
+
+        middle_up_prevented = js(window, """
+            !document.getElementById('graph').dispatchEvent(new MouseEvent('mouseup', {
+                bubbles: true, cancelable: true, button: 1, buttons: 0,
+            }))
+        """)
+        assert middle_up_prevented is True, (
+            "a middle mouseup must be default-prevented, or X11 pastes the primary selection into the note"
+        )
+
+        js(window, "document.querySelector('.annotation-editor').value = 'kept';")
+        fx, fy = ex + 200, ey + 120
+        drag(window, fx, fy, fx, fy)
+        time.sleep(0.5)
+        assert js(window, "document.querySelector('.annotation-editor').classList.contains('hidden')") is True, (
+            "clicking outside the note should close its editor"
+        )
+        assert note_count() == before + 1, "clicking outside an open note must not also create a new one"
+
+        # The same click-away rule outside annotations: a plain focused
+        # <input> blurs on a mousedown over non-focusable chrome, even
+        # when that element's own handler would stop the event.
+        blurred = js(window, """
+            (function() {
+                const input = document.createElement('input');
+                const pad = document.createElement('div');
+                pad.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+                document.body.append(input, pad);
+                input.focus();
+                pad.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+                const ok = document.activeElement !== input;
+                input.remove(); pad.remove();
+                return ok;
+            })()
+        """)
+        assert blurred is True, "a mousedown outside a focused field should blur it"
+
+        js_async(window, """
+            async () => {
+                const notes = await api.list_annotations();
+                const kept = notes.find((n) => n.text === 'kept');
+                if (kept) await api.delete_annotation(kept.id);
+                window.__result = 'ok';
+            }
+        """, wait=3.0)
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+
+    check("sticky notes: editor font matches zoom, click-away ends edit, middle-click never pastes, click-away blurs",
+          note_editing_focus_and_clipboard)
+
+    def note_selection_linking_and_sizing():
+        """Annotate mode's editor-style gestures: Backspace in an empty
+        note deletes it; box-select, a group drag, and Delete act on
+        several notes at once; ctrl+drag from a note onto a mote attaches
+        it and a second one detaches it; the corner grip resizes; and a
+        note grows to fit long text instead of scrolling."""
+        def notes():
+            raw = js_async(window, """
+                async () => { window.__result = await api.list_annotations(); }
+            """, wait=3.0)
+            return json.loads(raw) if raw not in (None, "null") else []
+
+        def screen_of(world_x, world_y):
+            return json.loads(js(window, f"JSON.stringify(graph._worldToScreen({world_x}, {world_y}))"))
+
+        def type_and_blur(text):
+            js(window, f"""
+                (function() {{
+                    const editor = document.querySelector('.annotation-editor');
+                    editor.value = {json.dumps(text)};
+                    editor.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    editor.blur();
+                }})();
+            """)
+            time.sleep(0.5)
+
+        def key(k, target="document"):
+            js(window, f"""
+                {target}.dispatchEvent(new KeyboardEvent('keydown', {{
+                    key: {json.dumps(k)}, bubbles: true, cancelable: true,
+                }}));
+            """)
+            time.sleep(0.5)
+
+        def ctrl_drag(x1, y1, x2, y2):
+            drag(window, x1, y1, x2, y2, ctrl=True)
+            time.sleep(0.6)
+
+        before = len(notes())
+        target = json.loads(js_async(window, """
+            async () => {
+                const m = await api.create_mote({name: 'Link-Target'});
+                await refreshMoteCache();
+                await refocus(m.id);
+                window.__result = m;
+            }
+        """, wait=3.0))
+        target_id_js = json.dumps(target["id"])
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+
+        # Backspace in an empty note deletes it.
+        ex, ey = empty_canvas_point(window)
+        dblclick(window, ex, ey)
+        assert wait_until(lambda: len(notes()) == before + 1), "double-click should add a note"
+        key("Backspace", "document.querySelector('.annotation-editor')")
+        assert wait_until(lambda: len(notes()) == before), "Backspace in an empty note should delete it"
+        assert js(window, "document.querySelector('.annotation-editor').classList.contains('hidden')") is True
+
+        # Two world notes side by side, placed through the api so the
+        # layout is exact.
+        created = json.loads(js_async(window, f"""
+            async () => {{
+                const c = graph._worldAt({ex}, {ey});
+                const a = await api.create_sticky_note('world', c.x, c.y, null, 'A');
+                const b = await api.create_sticky_note('world', c.x + 200, c.y, null, 'B');
+                await Annotations.refresh();
+                window.__result = [a, b];
+            }}
+        """, wait=3.0))
+        a, b = created
+        a_centre = screen_of(a["x"], a["y"])
+        b_centre = screen_of(b["x"], b["y"])
+
+        # Box-select both: drag from above-left of A to below-right of B.
+        tl = screen_of(a["x"] - 100, a["y"] - 60)
+        br = screen_of(b["x"] + 100, b["y"] + 60)
+        drag(window, tl["x"], tl["y"], br["x"], br["y"])
+        time.sleep(0.3)
+        chosen = set(json.loads(js(window, "JSON.stringify(Annotations.selectedIds())")))
+        assert chosen == {a["id"], b["id"]}, f"box-select should select both notes, got {chosen}"
+
+        # Dragging one moves both, as one undo step.
+        drag(window, a_centre["x"], a_centre["y"], a_centre["x"] + 60, a_centre["y"] + 40)
+        time.sleep(0.6)
+        by_id = {n["id"]: n for n in notes()}
+        moved_a = by_id[a["id"]]["x"] - a["x"]
+        moved_b = by_id[b["id"]]["x"] - b["x"]
+        assert moved_a > 1 and abs(moved_a - moved_b) < 0.01, (
+            f"dragging a selected note should move the whole selection together, moved {moved_a} / {moved_b}"
+        )
+
+        # ctrl+drag from A onto the mote attaches it, without moving it.
+        a_now = by_id[a["id"]]
+        a_screen = screen_of(a_now["x"], a_now["y"])
+        mx, my = node_xy(window, target_id_js)
+        ctrl_drag(a_screen["x"], a_screen["y"], mx, my)
+        attached = {n["id"]: n for n in notes()}[a["id"]]
+        assert attached["anchorMode"] == "mote" and attached["moteId"] == target["id"], (
+            f"ctrl+drag onto a mote should attach the note to it, got {attached}"
+        )
+        node = json.loads(js(window, f"JSON.stringify(graph.nodes.get({target_id_js}))"))
+        assert abs(node["x"] + attached["x"] - a_now["x"]) < 2, "attaching shouldn't move the note"
+
+        # The same gesture again detaches it.
+        a_screen = screen_of(node["x"] + attached["x"], node["y"] + attached["y"])
+        mx, my = node_xy(window, target_id_js)
+        ctrl_drag(a_screen["x"], a_screen["y"], mx, my)
+        detached = {n["id"]: n for n in notes()}[a["id"]]
+        assert detached["anchorMode"] == "world" and detached["moteId"] is None, (
+            f"ctrl+drag onto the mote it's already on should detach it, got {detached}"
+        )
+
+        # The corner grip resizes, keeping the top-left corner put.
+        b_now = {n["id"]: n for n in notes()}[b["id"]]
+        corner = screen_of(b_now["x"] + 80, b_now["y"] + 45)
+        drag(window, corner["x"] - 1, corner["y"] - 1, corner["x"] + 80, corner["y"] + 60)
+        time.sleep(0.6)
+        resized = {n["id"]: n for n in notes()}[b["id"]]
+        assert resized["width"] and resized["width"] > 180, f"the grip should widen the note, got {resized}"
+        assert abs((resized["x"] - resized["width"] / 2) - (b_now["x"] - 80)) < 0.5, (
+            "resizing should keep the note's left edge where it was"
+        )
+
+        # Long text grows the note (drawn height > stored height) and the
+        # editor never needs to scroll.
+        dblclick(window, *[screen_of(resized["x"], resized["y"])[k] for k in ("x", "y")])
+        time.sleep(0.4)
+        long_text = "\n".join(f"line {i}" for i in range(15))
+        js(window, f"""
+            (function() {{
+                const editor = document.querySelector('.annotation-editor');
+                editor.value = {json.dumps(long_text)};
+                editor.dispatchEvent(new Event('input', {{bubbles: true}}));
+            }})();
+        """)
+        time.sleep(0.2)
+        overflow = js(window, """
+            (function() {
+                const editor = document.querySelector('.annotation-editor');
+                return editor.scrollHeight - editor.clientHeight;
+            })()
+        """)
+        assert overflow <= 1, f"the editor should grow to fit its text, still {overflow}px to scroll"
+        js(window, "document.querySelector('.annotation-editor').blur();")
+        time.sleep(0.4)
+
+        # Select both again and Delete removes them together.
+        tl = screen_of(min(a["x"], b["x"]) - 400, a["y"] - 400)
+        br = screen_of(max(a["x"], b["x"]) + 400, a["y"] + 400)
+        drag(window, tl["x"], tl["y"], br["x"], br["y"])
+        time.sleep(0.3)
+        key("Delete")
+        assert wait_until(lambda: len(notes()) == before), "Delete should remove every selected note"
+
+        js(window, "document.getElementById('annotate-mode-btn').click();")
+        time.sleep(0.3)
+        js_async(window, f"""
+            async () => {{ await api.delete_mote({target_id_js}); await refreshMoteCache(); window.__result = 'ok'; }}
+        """)
+
+    check("sticky notes: Backspace-delete, box-select/move/delete, ctrl+drag attach/detach, resize, auto-grow",
+          note_selection_linking_and_sizing)
+
+    def note_key_toggle_and_zoomed_out_glyph():
+        """"A" toggles annotate mode; zoomed out past legibility a note
+        collapses to a small marker (hit-testing shrinks with it), and
+        double-clicking the marker zooms back in to edit it."""
+        def press_a():
+            js(window, """
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', bubbles: true, cancelable: true}));
+            """)
+            time.sleep(0.3)
+
+        press_a()
+        assert js(window, "graph.annotateMode") is True, "'a' should enter annotate mode"
+        note = json.loads(js_async(window, """
+            async () => {
+                const c = graph.viewCenterWorld();
+                const n = await api.create_sticky_note('world', c.x, c.y, null, 'far away');
+                await Annotations.refresh();
+                graph.camera.scale = 0.2;  // 13px text -> 2.6px on screen
+                graph.camera.x = -c.x * 0.2; graph.camera.y = -c.y * 0.2;
+                window.__result = n;
+            }
+        """, wait=3.0))
+        time.sleep(0.3)
+        edge = json.loads(js(window, f"JSON.stringify(graph._worldToScreen({note['x']} - 70, {note['y']}))"))
+        centre = json.loads(js(window, f"JSON.stringify(graph._worldToScreen({note['x']}, {note['y']}))"))
+        # A point inside the full note but well outside the marker misses.
+        drag(window, edge["x"], edge["y"], edge["x"], edge["y"])
+        time.sleep(0.2)
+        assert json.loads(js(window, "JSON.stringify(Annotations.selectedIds())")) == [], (
+            "a collapsed note should only be hit on its marker"
+        )
+        dblclick(window, centre["x"], centre["y"])
+        time.sleep(0.4)
+        scale = js(window, "graph.camera.scale")
+        assert scale >= 1, f"editing a collapsed note should zoom in to it, scale is {scale}"
+        assert js(window, "document.activeElement === document.querySelector('.annotation-editor')") is True
+        js(window, "document.querySelector('.annotation-editor').blur();")
+        js_async(window, f"""
+            async () => {{ await api.delete_annotation({json.dumps(note['id'])}); await Annotations.refresh(); window.__result = 'ok'; }}
+        """)
+        press_a()
+        assert js(window, "graph.annotateMode") is False, "'a' again should leave annotate mode"
+
+    check("sticky notes: 'a' toggles annotate mode, zoomed-out notes collapse to a marker",
+          note_key_toggle_and_zoomed_out_glyph)
 
     def soon_stubs_toast_instead_of_doing_nothing():
         js(window, "document.getElementById('file-btn').click();")

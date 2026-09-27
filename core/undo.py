@@ -230,6 +230,16 @@ def for_move_annotation(conn, annotation_id: str, old_xy: tuple, new_xy: tuple, 
     )
 
 
+def for_replace_annotation(conn, before: dict, after: dict, label: str) -> Command:
+    """before/after: annotations_repo.to_dict() snapshots of the same
+    annotation either side of a multi-column edit (resize, re-anchor)."""
+    return Command(
+        label=label,
+        undo=lambda: annotations_repo.replace_annotation(conn, before),
+        redo=lambda: annotations_repo.replace_annotation(conn, after),
+    )
+
+
 def combine(label: str, commands: list[Command]) -> Command:
     """One Command out of several, so a bulk action (delete 200 selected
     rows, restyle a whole column) is one undo step rather than 200 -- a
