@@ -324,8 +324,8 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
 
         `scenario`, when given, folds that scenario's override for this
         mote (if any) over the garden's own properties -- the same merge
-        a run would see (core/scenarios.py::apply). Build mode edits
-        against this merged view, and write through update_mote_in_scenario,
+        a run would see (core/scenarios.py::apply). Editing a mote edits
+        against this merged view, and writes through update_mote_in_scenario,
         so a property the user is looking at and the one their edit lands
         on are always the same one."""
         mote = motes_repo.get_mote(self._conn, mote_id)
@@ -603,7 +603,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         committed run history -- backs the inspector's sparklines."""
         return simulation_repo.mote_history(self._conn, mote_id)
 
-    # ---- authoring (Build mode) ----
+    # ---- authoring ----
 
     @_synchronized
     def check_equation_names(
@@ -648,7 +648,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
     def update_mote_in_scenario(
         self, scenario_id: str, mote_id: str, raw_properties: dict
     ) -> dict:
-        """Build mode's write path while a scenario is active: the edit
+        """The write path while a scenario is active: the edit
         lands on that scenario's override for `mote_id`, not the mote
         itself, so looking at a hypothetical never means overwriting the
         garden's own state (core/scenarios.py's whole point). The override
@@ -698,7 +698,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
     def _inspector_payload(self, mote_id: str) -> dict | None:
         """The shared payload, but showing the scenario's values.
 
-        Build mode reads and writes through the same merged view -- see
+        Editing reads and writes through the same merged view -- see
         `inspect` -- so that the property a person is looking at and the
         one their edit lands on are always the same property. The
         inspector has to obey that too, or a scenario would show the

@@ -63,7 +63,10 @@
     <aside id="rail">
       <div class="rail-head">
         <span class="rail-title">Scenarios</span>
-        <span id="scenario-count" class="rail-meta"></span>
+        <div class="rail-head-right">
+          <span id="scenario-count" class="rail-meta"></span>
+          <button id="add-compare-btn" class="rail-add-btn" type="button" title="Add a comparison pane">+ compare</button>
+        </div>
       </div>
       <div id="scenario-list" class="rail-list"></div>
 
@@ -95,6 +98,24 @@
           <button id="tool-rule" class="tool" type="button" title="Add rule mote">ƒ</button>
           <button id="tool-link" class="tool" type="button" title="Draw relationship">→</button>
           <button id="tool-layout" class="tool" type="button" title="Re-layout and recentre">⤢</button>
+          <div class="tool-menu">
+            <button id="tool-snap" class="tool" type="button" title="Snap to grid (right-click to set spacing)">⌗</button>
+            <div id="grid-settings" class="menu hidden" role="menu">
+              <div class="grid-settings-row">
+                <label for="grid-step-x">Horizontal</label>
+                <input id="grid-step-x" type="number" min="8" step="1">
+                <button id="grid-step-x-reset" class="grid-reset-icon" type="button" title="Reset to default">↺</button>
+              </div>
+              <div class="grid-settings-row">
+                <label for="grid-step-y">Vertical</label>
+                <input id="grid-step-y" type="number" min="8" step="1">
+                <button id="grid-step-y-reset" class="grid-reset-icon" type="button" title="Reset to default">↺</button>
+              </div>
+              <div class="menu-sep"></div>
+              <button id="grid-snap-all-btn" type="button">Snap all motes</button>
+              <button id="grid-autoset-btn" type="button">Autoset to largest box</button>
+            </div>
+          </div>
           <div class="spacer"></div>
           <button id="zoom-label" class="tool zoom" type="button" title="Reset zoom and pan">100%</button>
         </div>

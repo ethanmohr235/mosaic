@@ -15,10 +15,10 @@ the code.
 What it is for is the half of Motion that Python tests cannot reach --
 that pressing Run really draws lanes, that dragging the playhead really
 moves the numbers on the node cards, that picking a scenario really
-re-runs against it, that Compare really draws two boards, and that
-Commit really writes the tick that was scrubbed to. The bridge itself is
-tests/test_motion_api.py's job; what is untested anywhere else is the
-wiring between the two.
+re-runs against it, that a comparison pane really draws a second board,
+and that Commit really writes the tick that was scrubbed to. The bridge
+itself is tests/test_motion_api.py's job; what is untested anywhere else
+is the wiring between the two.
 """
 import functools
 import http.server
@@ -141,6 +141,18 @@ def texts_values(window, selector):
     """))
 
 
+def computed_style(window, selector, prop):
+    """A CSS property's live, resolved value -- for a background-size
+    set by app.js, not the stylesheet, `.style.x` would miss anything
+    set some other way, so this reads getComputedStyle instead."""
+    return js(window, f"""
+        (() => {{
+          const el = document.querySelector({json.dumps(selector)});
+          return el ? getComputedStyle(el)[{json.dumps(prop)}] : null;
+        }})()
+    """)
+
+
 def click_text(window, selector, wanted):
     """Click the first node matching `selector` whose text contains
     `wanted` -- by what it says, which is what a person clicks, rather
@@ -229,6 +241,18 @@ def run_checks(window):
           motion_loads_its_own_frontend)
     if not results[-1][1]:
         return  # nothing below can mean anything if this window is not Motion
+
+    def motion_opens_in_fast_mode():
+        assert js(window, "document.querySelector('#mode-chips button.on').textContent") == "Fast", \
+            "Motion should open directly into Fast mode"
+        assert js(window, "document.getElementById('rail').classList.contains('hidden')") is True, \
+            "Fast mode should hide the rail"
+
+    check("Motion opens in Fast mode by default", motion_opens_in_fast_mode)
+
+    # Everything below exercises the manual run/scenario/comparison
+    # machinery, which only Advanced mode shows.
+    click_text(window, "#mode-chips button", "Advanced")
 
     def no_errors():
         errors = js(window, "JSON.stringify(window.__motionErrors)")
@@ -341,34 +365,35 @@ def run_checks(window):
 
     check("a scenario run writes nothing", a_scenario_run_leaves_the_graph_alone)
 
-    def compare_draws_two_boards():
-        click_text(window, "#mode-chips button", "Compare")
+    def comparison_pane_draws_a_second_board():
+        # Right-clicking a scenario card adds it as a display-only
+        # comparison pane alongside the primary board (see
+        # scenarioCard/renderBoards in motion/frontend/app.js) -- this
+        # replaces the old fixed-A/B Compare mode with an N-pane model.
+        js(window, """
+            Array.from(document.querySelectorAll('#scenario-list .card'))
+              .find(n => n.textContent.includes('Windfall'))
+              .dispatchEvent(new MouseEvent('contextmenu', {bubbles: true}));
+        """)
         assert wait_until(lambda: count(window, ".board") == 2), \
-            f"Compare should draw two boards, got {count(window, '.board')}"
+            f"a comparison pane should draw a second board, got {count(window, '.board')}"
         badges = texts(window, ".board-badge")
-        assert "scenario A" in badges and "scenario B" in badges, \
-            f"each board should say which side it is, got {badges}"
-        click_text(window, "#mode-chips button", "Run")
+        assert any("pane" in b or "run" in b for b in badges), \
+            f"a comparison board should badge itself as a pane, got {badges}"
+        click(window, ".board-close")
         assert wait_until(lambda: count(window, ".board") == 1), \
-            "leaving Compare left the second board behind"
+            "closing the comparison pane left the second board behind"
 
-    check("Compare draws both scenarios side by side", compare_draws_two_boards)
+    check("a comparison pane draws and removes a second board",
+          comparison_pane_draws_a_second_board)
 
     # ---- panels ----
 
-    def the_rules_panel_is_read_only_outside_build_mode():
-        click_text(window, ".rule-row", "Growth")
-        assert wait_until(lambda: count(window, ".eq-edit") == 1), "the equation editor never opened"
-        assert js(window, "document.querySelector('.eq-edit').readOnly") is True, \
-            "the equation editor must be read-only outside Build mode"
-
-    check("the equation editor is read-only outside Build mode",
-          the_rules_panel_is_read_only_outside_build_mode)
-
     def the_rules_panel_edits_the_equation():
-        click_text(window, "#mode-chips button", "Build")
         click_text(window, ".rule-row", "Growth")
         assert wait_until(lambda: count(window, ".eq-edit") == 1), "the equation editor never opened"
+        assert js(window, "document.querySelector('.eq-edit').readOnly") is False, \
+            "Advanced mode should always allow editing the equation"
         js(window, """
             (() => {
               const box = document.querySelector('.eq-edit');
@@ -379,9 +404,8 @@ def run_checks(window):
         assert wait_until(
             lambda: "1.10" in get_mote(get_conn(), ids["rule"]).properties["equation"]
         ), "editing the equation did not write the rule mote"
-        click_text(window, "#mode-chips button", "Run")
 
-    check("the rules panel writes an edited equation in Build mode", the_rules_panel_edits_the_equation)
+    check("the rules panel writes an edited equation in Advanced mode", the_rules_panel_edits_the_equation)
 
     def the_bindings_partition_solved_from_read():
         roles = texts(window, ".binding-role")
@@ -444,6 +468,113 @@ def run_checks(window):
             "Check roles reported nothing at all"
 
     check("the pre-flight check reports on roles", pre_flight_reports_on_roles)
+
+    def snap_to_grid_toggles_and_resizes():
+        # Toggling paints the grid as a background on the *viewport*
+        # (.board-surface), not the node-sized .board-world -- see
+        # updateGridOverlay in app.js -- so it should already be sized
+        # off default step constants before any resize.
+        click(window, "#tool-snap")
+        assert wait_until(lambda: count(window, ".board-surface.snap-grid") >= 1), \
+            "toggling snap-to-grid did not paint the overlay"
+        size = computed_style(window, ".board-surface.snap-grid", "backgroundSize")
+        assert size and size != "auto", f"the grid overlay should have an explicit size, got {size!r}"
+
+        # Right-click opens the size popover; changing a field resizes
+        # the overlay live, and Reset restores the node-spacing default.
+        js(window, "document.getElementById('tool-snap')"
+                   ".dispatchEvent(new MouseEvent('contextmenu', {bubbles: true}));")
+        assert wait_until(lambda: not js(window, "document.getElementById('grid-settings').classList.contains('hidden')")), \
+            "right-clicking snap-to-grid should open its size settings"
+        js(window, """
+            const x = document.getElementById('grid-step-x');
+            x.value = 300;
+            x.dispatchEvent(new Event('input'));
+        """)
+        assert wait_until(lambda: "300px" in (computed_style(window, ".board-surface.snap-grid", "backgroundSize") or "")), \
+            "changing the horizontal step should resize the grid live"
+        click(window, "#grid-step-x-reset")
+        assert wait_until(lambda: "300px" not in (computed_style(window, ".board-surface.snap-grid", "backgroundSize") or "")), \
+            "the horizontal reset icon should undo a custom grid size"
+
+    check("snap-to-grid toggles, resizes live, and resets",
+          snap_to_grid_toggles_and_resizes)
+
+    def snap_all_moves_only_unaligned_motes():
+        # Nudge one mote off the grid by a few px; leave the rest wherever
+        # layoutNodes seeded them (already grid-aligned, since the default
+        # step comes from the same NODE_W/H + gap constants).
+        js(window, f"""
+            positions[{json.dumps(ids["acct1"])}] = {{ x: 17, y: 23 }};
+            renderBoards();
+        """)
+        others_before = js(window, f"""
+            JSON.stringify(positions[{json.dumps(ids["acct2"])}])
+        """)
+        click(window, "#grid-snap-all-btn")
+        moved = js(window, f"""
+            (() => {{
+              const p = positions[{json.dumps(ids["acct1"])}];
+              return p.x % gridStepX === 0 && p.y % gridStepY === 0;
+            }})()
+        """)
+        assert moved is True, "Snap all should land an off-grid mote on a grid intersection"
+        others_after = js(window, f"""
+            JSON.stringify(positions[{json.dumps(ids["acct2"])}])
+        """)
+        assert others_before == others_after, \
+            "Snap all should leave a mote already on the grid untouched"
+
+    check("Snap all moves only the motes not already on the grid",
+          snap_all_moves_only_unaligned_motes)
+
+    def snap_all_avoids_overlap():
+        # Both nudges round to the same cell -- (gridStepX, gridStepY) --
+        # under plain rounding, so Snap all has to walk one of them out
+        # to a neighboring free cell rather than stacking both on it.
+        gx, gy = json.loads(js(window, "JSON.stringify([gridStepX, gridStepY])"))
+        js(window, f"""
+            positions[{json.dumps(ids["acct1"])}] = {{ x: {gx - 12}, y: {gy - 10} }};
+            positions[{json.dumps(ids["acct2"])}] = {{ x: {gx + 8}, y: {gy + 10} }};
+            renderBoards();
+        """)
+        click(window, "#grid-snap-all-btn")
+        p1, p2 = json.loads(js(window, f"""
+            JSON.stringify([positions[{json.dumps(ids["acct1"])}], positions[{json.dumps(ids["acct2"])}]])
+        """))
+        assert (p1["x"], p1["y"]) != (p2["x"], p2["y"]), \
+            f"Snap all let two motes land on the same grid cell: {p1} and {p2}"
+        for p in (p1, p2):
+            assert p["x"] % gx == 0 and p["y"] % gy == 0, \
+                f"a displaced mote should still land on a grid intersection, got {p}"
+
+    check("Snap all keeps two motes headed for the same cell apart",
+          snap_all_avoids_overlap)
+
+    def autoset_matches_the_largest_box():
+        # autosetGridStep() floors its search at NODE_W/NODE_H (a card
+        # can render narrower/shorter than that default only in theory,
+        # never in practice, but the floor is real -- match it here too).
+        expected = js(window, """
+            (() => {
+              let w = NODE_W, h = NODE_H;
+              for (const el of document.querySelectorAll('#boards .board:first-child .node')) {
+                w = Math.max(w, el.offsetWidth);
+                h = Math.max(h, el.offsetHeight);
+              }
+              return JSON.stringify([w, h]);
+            })()
+        """)
+        expected_w, expected_h = json.loads(expected)
+        gap_x, gap_y = json.loads(js(window, "JSON.stringify([COL_GAP, ROW_GAP])"))
+        click(window, "#grid-autoset-btn")
+        step_x, step_y = json.loads(js(window, "JSON.stringify([gridStepX, gridStepY])"))
+        assert step_x == expected_w + gap_x and step_y == expected_h + gap_y, \
+            f"Autoset should be the largest box plus the layout gap, got {step_x}x{step_y}, " \
+            f"expected {expected_w + gap_x}x{expected_h + gap_y} (box {expected_w}x{expected_h}, gap {gap_x}x{gap_y})"
+        click(window, "#tool-snap")  # leave snap off for the checks that follow
+
+    check("Autoset sizes the grid to the largest mote box", autoset_matches_the_largest_box)
 
     def empty_garden_leaves_the_tools_clickable():
         """A garden with nothing in it yet draws the stage's empty state,

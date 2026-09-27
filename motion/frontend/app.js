@@ -17,8 +17,10 @@
 //               dragging the playhead costs nothing and never re-solves.
 //   the overlay a node's value at that tick, folded from the run's
 //               changes over the values the board shipped (valuesAt).
-//   the mode    build / run / compare, which is a question about this
-//               window and not about the garden.
+//   the mode    fast (auto-run, edit anywhere, no run/scenario
+//               bookkeeping) or advanced (manual run/save/commit, saved
+//               runs, and side-by-side scenario comparison) -- which is
+//               a question about this window and not about the garden.
 //
 // # Ticks, not seconds
 //
@@ -53,17 +55,19 @@ const KIND_COLOR = {
 let api;
 let board = null;          // the last board() answer
 let runA = null;           // { steps, axis, events, ... } -- the primary run
-let runB = null;           // the comparison run, in compare mode
 let lanesA = [];
-let lanesB = [];
 let tick = 0;              // 0 = the garden before the run; k = through steps[k-1]
 let playing = false;
 let playTimer = null;
-let mode = "run";          // build | run | compare
+let mode = "fast";         // fast | advanced
 let scenario = null;       // active scenario mote id, or null for the garden as it stands
-let compareWith = null;
-let compareRunA = null;    // a saved run's id standing in for scenario A, in compare mode
-let compareRunB = null;    // a saved run's id standing in for scenario B, in compare mode
+// Display-only scenario boards shown alongside the primary one in
+// Advanced mode, for side-by-side comparison -- never selectable or
+// independently run (see onPanDown). { scenarioId, runId, run } each;
+// runId stands in a saved run for a live preview, same idea as
+// replayRunId but per pane. Not persisted: a fresh load always starts
+// with none, same as `mode` itself.
+let comparePanes = [];
 let panelTab = "rules";
 let activeRule = null;
 // Rule mote id -> [{name, candidates: [{id, label}]}] from the last
@@ -81,6 +85,10 @@ let selectedRelId = null;   // a clicked edge, mutually exclusive with selectedI
 let selectedIds = new Set();
 let boxState = null;        // { startX, startY, moved, shiftBase } -- a box-select drag in progress
 let connectArmed = false;
+// True between clicking "+ compare" and the next scenario-card click,
+// which becomes an "add a comparison pane" instead of "make this
+// primary" -- see scenarioCard.
+let armCompare = false;
 let solver = "linear";
 let strictUnits = false;   // promotes a dimensional mismatch from a logged warning to a run-stopping error
 let steps = DEFAULT_STEPS;
@@ -94,9 +102,9 @@ let resize = null;
 // held as an element reference, because render() rebuilds the board's
 // DOM (renderBoards' innerHTML = "") on plenty of things that aren't a
 // pan, including the click that opens the inspector in the first place.
-// Only board A's nodes are ever clickable (buildNode only wires
-// onmousedown for !isB), so a plain data-id match is unambiguous even
-// in compare mode. Null when the inspector is anchored to something
+// Only the primary board's nodes are ever clickable (buildNode only
+// wires onmousedown for !isB), so a plain data-id match is unambiguous
+// even with comparison panes open. Null when the inspector is anchored to something
 // that doesn't pan with the board (a dock lane, a relationship
 // endpoint) or not anchored at all.
 let inspectedNodeId = null;
@@ -116,6 +124,9 @@ let positions = {};        // mote id -> {x, y}, per garden
 // properties its card previews. A mote with no entry falls back to
 // primaryKey's auto-pick (see previewKeysFor).
 let previewKeys = {};
+let snapToGrid = false;    // per garden -- see snapToGridKey
+let gridStepX = NODE_W + COL_GAP;  // per garden -- see gridStepKey
+let gridStepY = NODE_H + ROW_GAP;
 
 const $ = (id) => document.getElementById(id);
 
@@ -147,6 +158,8 @@ function toast(message, isError) {
 function layoutKey() { return "motion.layout"; }
 function positionsKey() { return `motion.positions.${board ? board.garden : "?"}`; }
 function previewKeysKey() { return `motion.previewKeys.${board ? board.garden : "?"}`; }
+function snapToGridKey() { return `motion.snapToGrid.${board ? board.garden : "?"}`; }
+function gridStepKey() { return `motion.gridStep.${board ? board.garden : "?"}`; }
 
 function loadLayout() {
   try {
@@ -199,6 +212,116 @@ function savePreviewKeys() {
   } catch (error) {
     // Not fatal.
   }
+}
+
+function loadSnapToGrid() {
+  snapToGrid = false;
+  try {
+    snapToGrid = window.localStorage.getItem(snapToGridKey()) === "1";
+  } catch (error) {
+    snapToGrid = false;
+  }
+}
+
+function saveSnapToGrid() {
+  try {
+    window.localStorage.setItem(snapToGridKey(), snapToGrid ? "1" : "0");
+  } catch (error) {
+    // Not fatal.
+  }
+}
+
+function loadGridStep() {
+  gridStepX = NODE_W + COL_GAP;
+  gridStepY = NODE_H + ROW_GAP;
+  try {
+    const raw = window.localStorage.getItem(gridStepKey());
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.x > 0) gridStepX = parsed.x;
+      if (parsed.y > 0) gridStepY = parsed.y;
+    }
+  } catch (error) {
+    gridStepX = NODE_W + COL_GAP;
+    gridStepY = NODE_H + ROW_GAP;
+  }
+}
+
+function saveGridStep() {
+  try {
+    window.localStorage.setItem(gridStepKey(), JSON.stringify({ x: gridStepX, y: gridStepY }));
+  } catch (error) {
+    // Not fatal.
+  }
+}
+
+/** Moves every mote not already on a grid intersection onto the nearest
+ *  free one, in one pass -- so turning the grid on (or resizing it)
+ *  doesn't mean dragging each node by hand just to make it line up. A
+ *  node already sitting exactly on a line is left alone, the same as
+ *  onMove's drag-time snap never moving something that's already
+ *  aligned -- and, since two boxes sharing a cell is exactly the
+ *  overlap a grid exists to prevent, a mote whose nearest cell is
+ *  already claimed (by an untouched node, or one already placed this
+ *  same pass) is walked out to the nearest free one instead. */
+function snapAllPositions() {
+  if (!board || !board.nodes.length) return;
+  const occupied = new Set();
+  const moving = [];
+  for (const node of board.nodes) {
+    const p = nodePosition(node.id);
+    const cx = Math.round(p.x / gridStepX);
+    const cy = Math.round(p.y / gridStepY);
+    if (p.x === cx * gridStepX && p.y === cy * gridStepY) {
+      occupied.add(`${cx},${cy}`);
+    } else {
+      moving.push({ id: node.id, cx, cy });
+    }
+  }
+  let moved = false;
+  for (const { id, cx, cy } of moving) {
+    const [tx, ty] = occupied.has(`${cx},${cy}`)
+      ? nearestFreeCell(cx, cy, occupied)
+      : [cx, cy];
+    occupied.add(`${tx},${ty}`);
+    positions[id] = { x: tx * gridStepX, y: ty * gridStepY };
+    moved = true;
+  }
+  if (moved) savePositions();
+  renderBoards();
+}
+
+/** The closest grid cell to (cx, cy), by cell steps, not already in
+ *  `occupied` -- rings outward one step at a time and scans each ring's
+ *  perimeter, so ties go to whichever direction is checked first rather
+ *  than to distance alone (there's no meaningful tiebreaker between,
+ *  say, one cell left and one cell up). Always terminates: the grid is
+ *  unbounded and there are only ever as many claimed cells as motes. */
+function nearestFreeCell(cx, cy, occupied) {
+  for (let r = 1; ; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const candidate = [cx + dx, cy + dy];
+        if (!occupied.has(`${candidate[0]},${candidate[1]}`)) return candidate;
+      }
+    }
+  }
+}
+
+/** The smallest grid that still guarantees no overlap between adjacent
+ *  boxes: the largest mote card actually on the primary board right
+ *  now, plus the same gap layoutNodes leaves between cards. */
+function autosetGridStep() {
+  let maxW = NODE_W, maxH = NODE_H;
+  for (const nodeEl of document.querySelectorAll("#boards .board:first-child .node")) {
+    maxW = Math.max(maxW, nodeEl.offsetWidth);
+    maxH = Math.max(maxH, nodeEl.offsetHeight);
+  }
+  gridStepX = maxW + COL_GAP;
+  gridStepY = maxH + ROW_GAP;
+  saveGridStep();
+  renderBoards();
 }
 
 /** Which of a node's numeric properties its card shows, in the order the
@@ -362,6 +485,7 @@ function fmt(value) {
 
 function render() {
   if (!board) return;
+  $("tool-snap").classList.toggle("armed", snapToGrid);
   renderModes();
   renderRail();
   renderBoards();
@@ -395,7 +519,7 @@ function renderTopbar() {
     ? "This run is already logged."
     : "Log the whole run for later review, without writing it to the graph";
 
-  const canCommit = !!runA && tick > 0 && !scenario && !replayRunId && mode !== "compare";
+  const canCommit = !!runA && tick > 0 && !scenario && !replayRunId;
   const commit = $("commit-btn");
   commit.disabled = !canCommit;
   commit.textContent = tick > 0 ? `Commit tick ${tick}` : "Commit tick";
@@ -440,7 +564,7 @@ function setRunState() {
 function renderModes() {
   const host = $("mode-chips");
   host.innerHTML = "";
-  for (const [id, label] of [["build", "Build"], ["run", "Run"], ["compare", "Compare"], ["fast", "Fast"]]) {
+  for (const [id, label] of [["fast", "Fast"], ["advanced", "Advanced"]]) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = label;
@@ -452,11 +576,7 @@ function renderModes() {
 
 function setMode(next) {
   mode = next;
-  if (mode === "compare" && !compareWith) {
-    const other = board.scenarios.find((s) => s.id !== scenario);
-    compareWith = other ? other.id : null;
-  }
-  if (mode !== "compare") { runB = null; lanesB = []; compareRunA = null; compareRunB = null; }
+  clearTimeout(fastRunTimer);
   if (mode === "fast") {
     runA = null;
     tick = 0;
@@ -464,7 +584,6 @@ function setMode(next) {
     panelTab = "rules";
     scheduleFastRun();
   }
-  if (mode === "build") panelTab = "rules";
   render();
 }
 
@@ -484,6 +603,10 @@ function renderRail() {
   $("scenario-count").textContent = board.scenarios.length
     ? `${board.scenarios.length}`
     : "";
+  $("add-compare-btn").classList.toggle("armed", armCompare);
+  $("add-compare-btn").title = armCompare
+    ? "Pick a scenario (or the garden) below to compare"
+    : "Add a comparison pane";
 
   scenarios.appendChild(scenarioCard(
     { id: null, name: "Garden as it stands", overrideCount: 0 },
@@ -510,13 +633,11 @@ function renderRail() {
   for (const run of keptRuns) {
     const card = document.createElement("button");
     card.type = "button";
-    const isRunA = mode === "compare" && compareRunA === run.run_id;
-    const isRunB = mode === "compare" && compareRunB === run.run_id;
-    card.className = "card" + (replayRunId === run.run_id || isRunA || isRunB ? " on" : "");
+    const paneIdx = comparePaneIndices((p) => p.runId === run.run_id);
+    card.className = "card" + (replayRunId === run.run_id || paneIdx.length ? " on" : "");
     card.innerHTML =
       `<div class="card-top"><span class="card-label"></span>` +
-      (isRunA ? `<span class="chip a">A</span>` : "") +
-      (isRunB ? `<span class="chip b">B</span>` : "") +
+      paneIdx.map((i) => `<span class="chip b">${i + 1}</span>`).join("") +
       `</div>` +
       `<div class="card-meta"></div>`;
     card.querySelector(".card-label").textContent = runLabel(run);
@@ -535,26 +656,18 @@ function renderRail() {
       card.appendChild(chips);
     }
     if (run.detail) card.title = run.detail;
-    if (mode === "compare") {
-      // In compare mode a saved run can stand in for a scenario on
-      // either side -- left click for A, right click for B, mirroring
-      // how scenario cards themselves are picked.
-      card.title = (card.title ? card.title + " -- " : "") +
-        "Click to compare as scenario A, right-click for B.";
-      card.onclick = () => {
-        compareRunA = run.run_id;
-        render();
-        if (runA) runSimulation();
-      };
-      card.oncontextmenu = (e) => {
-        e.preventDefault();
-        compareRunB = run.run_id;
-        render();
-        if (runA) runSimulation();
-      };
-    } else {
-      card.onclick = () => enterRun(run.run_id);
-    }
+    // A saved run can stand in for a live scenario preview in a
+    // comparison pane -- right-click adds one, mirroring how scenario
+    // cards themselves are added (see scenarioCard).
+    card.title = (card.title ? card.title + " -- " : "") +
+      "Click to replay, right-click to add as a comparison pane.";
+    card.onclick = () => enterRun(run.run_id);
+    card.oncontextmenu = (e) => {
+      e.preventDefault();
+      comparePanes.push({ scenarioId: null, runId: run.run_id, run: null });
+      render();
+      if (runA) runSimulation();
+    };
     runs.appendChild(card);
   }
   if (!keptRuns.length) {
@@ -569,13 +682,11 @@ function scenarioCard(sc, on) {
   const card = document.createElement("button");
   card.type = "button";
   card.className = "card" + (on ? " on" : "");
-  const isA = mode === "compare" && !compareRunA && scenario === sc.id;
-  const isB = mode === "compare" && !compareRunB && compareWith === sc.id;
+  const paneIdx = comparePaneIndices((p) => !p.runId && p.scenarioId === sc.id);
   card.innerHTML =
     `<div class="card-top">` +
     `<span class="card-dot"></span><span class="card-label"></span>` +
-    (isA ? `<span class="chip a">A</span>` : "") +
-    (isB ? `<span class="chip b">B</span>` : "") +
+    paneIdx.map((i) => `<span class="chip b">${i + 1}</span>`).join("") +
     `</div>`;
   card.querySelector(".card-dot").style.background =
     sc.id === null ? "var(--node-fixed)" : "var(--node-varied)";
@@ -589,19 +700,25 @@ function scenarioCard(sc, on) {
     chips.appendChild(chip);
     card.appendChild(chips);
   }
+  card.title = armCompare
+    ? "Click to add this as a comparison pane."
+    : "Click to make this the primary scenario, right-click to add it as a comparison pane.";
   card.onclick = () => {
-    // In compare mode, left click always picks scenario A.
+    if (armCompare) {
+      armCompare = false;
+      comparePanes.push({ scenarioId: sc.id, runId: null, run: null });
+      render();
+      if (runA) runSimulation();
+      return;
+    }
     scenario = sc.id;
-    compareRunA = null;
     replayRunId = null;
     render();
     if (runA) runSimulation();
   };
   card.oncontextmenu = (e) => {
-    if (mode !== "compare") return;
     e.preventDefault();
-    compareWith = sc.id;
-    compareRunB = null;
+    comparePanes.push({ scenarioId: sc.id, runId: null, run: null });
     render();
     if (runA) runSimulation();
   };
@@ -609,10 +726,19 @@ function scenarioCard(sc, on) {
 }
 
 /** A run's label the way the rail lists it -- "run-0004" -- shared by
- *  the run card and, once a run stands in for a scenario, the compare
+ *  the run card and, once a run stands in for a scenario, a comparison
  *  board head. */
 function runLabel(run) {
   return `run-${String(run.run_number).padStart(4, "0")}`;
+}
+
+/** Indices into comparePanes matching a predicate -- used to badge a
+ *  scenario or run card with which comparison pane(s), if any, it
+ *  currently fills (see scenarioCard and renderRail's run cards). */
+function comparePaneIndices(matchFn) {
+  const idx = [];
+  comparePanes.forEach((p, i) => { if (matchFn(p)) idx.push(i); });
+  return idx;
 }
 
 function renderBoards() {
@@ -628,17 +754,38 @@ function renderBoards() {
     host.appendChild(empty);
     return;
   }
-  const boardA = buildBoard(runA, scenario, false, compareRunA);
+  const boardA = buildBoard(runA, scenario, false, null, -1);
   host.appendChild(boardA);
   finishEdges(boardA, false);
-  if (mode === "compare") {
-    const boardB = buildBoard(runB, compareWith, true, compareRunB);
-    host.appendChild(boardB);
-    finishEdges(boardB, true);
+  if (mode === "advanced") {
+    comparePanes.forEach((pane, i) => {
+      const el = buildBoard(pane.run, pane.scenarioId, true, pane.runId, i);
+      host.appendChild(el);
+      finishEdges(el, true);
+    });
+  }
+  updateGridOverlay();
+}
+
+/** The snap-to-grid overlay is a background on .board-surface (the fixed
+ *  viewport), not a child of .board-world (the panned/zoomed, node-sized
+ *  canvas) -- a world sized only to its nodes' extent left most of the
+ *  visible stage without a grid once panned or zoomed out. Painting it
+ *  on the viewport instead means it always fills whatever is visible,
+ *  and background-position/-size (rather than a transform) is how it
+ *  tracks the same pan and zoom every board-world gets, since a
+ *  background doesn't ride along with its element's own transform the
+ *  way a child does. */
+function updateGridOverlay() {
+  for (const surface of document.querySelectorAll(".board-surface")) {
+    surface.classList.toggle("snap-grid", snapToGrid);
+    if (!snapToGrid) continue;
+    surface.style.backgroundSize = `${gridStepX * layout.zoom}px ${gridStepY * layout.zoom}px`;
+    surface.style.backgroundPosition = `${layout.panX}px ${layout.panY}px`;
   }
 }
 
-function buildBoard(run, scenarioId, isB, runId) {
+function buildBoard(run, scenarioId, isB, runId, paneIndex) {
   const el = document.createElement("div");
   el.className = "board";
 
@@ -649,17 +796,28 @@ function buildBoard(run, scenarioId, isB, runId) {
   head.innerHTML =
     `<span class="card-dot"></span><span class="board-label"></span>` +
     `<span class="board-badge${isB ? " b" : ""}"></span>` +
-    `<span class="board-readout"></span>`;
+    `<span class="board-readout"></span>` +
+    (isB ? `<button type="button" class="board-close" title="Remove this comparison pane">×</button>` : "");
   head.querySelector(".card-dot").style.background =
     runId || scenarioId !== null ? "var(--node-varied)" : "var(--node-fixed)";
   head.querySelector(".board-label").textContent =
     savedRun ? runLabel(savedRun) : sc ? sc.name : "Garden as it stands";
-  head.querySelector(".board-badge").textContent =
-    mode === "build" ? "editing" : runId ? (isB ? "run B" : "run A")
-      : isB ? "scenario B" : mode === "compare" ? "scenario A" : "running";
+  // Only comparison panes carry a badge: they're display-only stand-ins
+  // (a saved run, or a live scenario preview) shown alongside the
+  // primary board, so the ordinal is what tells two panes apart once
+  // their labels happen to match.
+  const badge = head.querySelector(".board-badge");
+  badge.textContent = isB ? (runId ? `run ${paneIndex + 1}` : `pane ${paneIndex + 1}`) : "";
+  badge.classList.toggle("hidden", !badge.textContent);
   head.querySelector(".board-readout").textContent = run
     ? `${run.steps.length} ${run.axis.label} · tick ${tick}`
     : "not run";
+  if (isB) {
+    head.querySelector(".board-close").onclick = () => {
+      comparePanes.splice(paneIndex, 1);
+      renderBoards();
+    };
+  }
   el.appendChild(head);
 
   const surface = document.createElement("div");
@@ -984,22 +1142,12 @@ function renderLanes() {
     host.appendChild(note);
     return;
   }
-  const paired = pairLanes();
-  for (const { a, b } of paired) {
-    host.appendChild(buildLane(a, b));
+  for (const lane of lanesA) {
+    host.appendChild(buildLane(lane));
   }
 }
 
-/** Match compare-mode lanes by the value they trace, not by position:
- *  two scenarios can move different sets of values, and lining them up
- *  by index would draw scenario B's mass flow against scenario A's
- *  temperature. A lane with no partner draws single-sided. */
-function pairLanes() {
-  const byKey = new Map(lanesB.map((l) => [`${l.moteId}|${l.key}`, l]));
-  return lanesA.map((a) => ({ a, b: byKey.get(`${a.moteId}|${a.key}`) || null }));
-}
-
-function buildLane(a, b) {
+function buildLane(a) {
   const el = document.createElement("div");
   el.className = "lane" + (selectedIds.has(a.moteId) ? " on" : "");
   el.dataset.id = a.moteId;
@@ -1018,23 +1166,7 @@ function buildLane(a, b) {
   svg.setAttribute("width", "100%");
   svg.setAttribute("height", "100%");
 
-  // Both series share one scale so the compare band means something --
-  // two lines drawn against their own extents always look identical.
-  const bounds = laneBounds(a, b);
-  if (b) {
-    const band = document.createElementNS(NS, "polygon");
-    band.setAttribute("points", `${polyline(a, bounds)} ${polyline(b, bounds, true)}`);
-    band.setAttribute("fill", "oklch(0.74 0.10 68 / 0.14)");
-    svg.appendChild(band);
-    const lineB = document.createElementNS(NS, "polyline");
-    lineB.setAttribute("points", polyline(b, bounds));
-    lineB.setAttribute("fill", "none");
-    lineB.setAttribute("stroke", "var(--accent)");
-    lineB.setAttribute("stroke-width", "1.3");
-    lineB.setAttribute("stroke-dasharray", "4 3");
-    lineB.setAttribute("vector-effect", "non-scaling-stroke");
-    svg.appendChild(lineB);
-  }
+  const bounds = laneBounds(a);
   const lineA = document.createElementNS(NS, "polyline");
   lineA.setAttribute("points", polyline(a, bounds));
   lineA.setAttribute("fill", "none");
@@ -1053,9 +1185,8 @@ function buildLane(a, b) {
 
   const value = document.createElement("div");
   value.className = "lane-value";
-  value.innerHTML = `<span class="lane-a"></span>` + (b ? `<span class="lane-b"></span>` : "");
+  value.innerHTML = `<span class="lane-a"></span>`;
   value.querySelector(".lane-a").textContent = fmt(at(a, tick));
-  if (b) value.querySelector(".lane-b").textContent = fmt(at(b, tick));
   el.appendChild(value);
 
   return el;
@@ -1066,12 +1197,9 @@ function at(lane, index) {
   return point === null || point === undefined ? null : point;
 }
 
-function laneBounds(a, b) {
+function laneBounds(a) {
   const values = [];
-  for (const lane of [a, b]) {
-    if (!lane) continue;
-    for (const p of lane.points) if (p !== null && p !== undefined) values.push(p);
-  }
+  for (const p of a.points) if (p !== null && p !== undefined) values.push(p);
   if (!values.length) return { lo: 0, hi: 1 };
   let lo = Math.min(...values);
   let hi = Math.max(...values);
@@ -1082,7 +1210,7 @@ function laneBounds(a, b) {
   return { lo: lo - pad, hi: hi + pad };
 }
 
-function polyline(lane, bounds, reverse) {
+function polyline(lane, bounds) {
   const n = lane.points.length - 1 || 1;
   const pts = [];
   lane.points.forEach((value, i) => {
@@ -1091,7 +1219,7 @@ function polyline(lane, bounds, reverse) {
     const y = 38 - ((value - bounds.lo) / (bounds.hi - bounds.lo)) * 36;
     pts.push(`${x.toFixed(1)},${Math.max(2, Math.min(38, y)).toFixed(1)}`);
   });
-  return (reverse ? pts.reverse() : pts).join(" ");
+  return pts.join(" ");
 }
 
 function renderEvents(total) {
@@ -1125,7 +1253,9 @@ function setTick(next) {
 function updateBoardsForTick() {
   const host = $("boards");
   const boards = [{ el: host.children[0], run: runA }];
-  if (mode === "compare") boards.push({ el: host.children[1], run: runB });
+  if (mode === "advanced") {
+    comparePanes.forEach((pane, i) => boards.push({ el: host.children[i + 1], run: pane.run }));
+  }
   const byId = new Map(board.nodes.map((n) => [n.id, n]));
   for (const { el, run } of boards) {
     if (!el) continue;
@@ -1183,36 +1313,21 @@ async function runSimulation() {
   btn.textContent = "Running…";
   replayRunId = null;
   try {
-    if (mode === "compare") {
-      // Either side of a compare can be a saved run instead of a live
-      // scenario preview -- those are fetched with run_ticks (the same
-      // call enterRun uses) rather than folded into compare(), since a
-      // logged run has already happened and re-previewing it would be
-      // asking the engine a question it was never asked.
-      if (compareRunA || compareRunB) {
-        const [a, b] = await Promise.all([
-          compareRunA ? call(api.run_ticks(compareRunA)) : call(api.preview(steps, solver, null, scenario, strictUnits)),
-          compareRunB ? call(api.run_ticks(compareRunB)) : call(api.preview(steps, solver, null, compareWith, strictUnits)),
-        ]);
-        if (!a || !b) return;
-        runA = a;
-        runB = b;
-      } else {
-        const result = await call(api.compare(steps, solver, scenario, compareWith, strictUnits));
-        if (!result) return;
-        runA = result.a;
-        runB = result.b;
-      }
-      lanesA = (await call(api.lanes(runA.steps))) || [];
-      lanesB = (await call(api.lanes(runB.steps))) || [];
-    } else {
-      const result = await call(api.preview(steps, solver, null, scenario, strictUnits));
-      if (!result) return;
-      runA = result;
-      runB = null;
-      lanesA = (await call(api.lanes(runA.steps))) || [];
-      lanesB = [];
-    }
+    // Comparison panes are fetched alongside the primary run -- a saved
+    // run stands in via run_ticks (the same call enterRun uses), since a
+    // logged run has already happened and re-previewing it would be
+    // asking the engine a question it was never asked; otherwise it's an
+    // ordinary live preview under that pane's own scenario.
+    const [primary, ...paneRuns] = await Promise.all([
+      call(api.preview(steps, solver, null, scenario, strictUnits)),
+      ...comparePanes.map((p) =>
+        p.runId ? call(api.run_ticks(p.runId)) : call(api.preview(steps, solver, null, p.scenarioId, strictUnits))
+      ),
+    ]);
+    if (!primary) return;
+    runA = primary;
+    comparePanes.forEach((p, i) => { p.run = paneRuns[i] || null; });
+    lanesA = (await call(api.lanes(runA.steps))) || [];
     tick = Math.min(tick, stepCount());
     if (runA.error && !runA.steps.length) {
       toast(`Simulation failed: ${runA.error}`, true);
@@ -1261,9 +1376,7 @@ async function enterRun(runId) {
   if (!result) return;
   stopPlay();
   runA = { ...result, constraint_violations: [], dimension_warnings: [] };
-  runB = null;
   lanesA = (await call(api.lanes(result.steps))) || [];
-  lanesB = [];
   replayRunId = runId;
   tick = 0;
   render();
@@ -1278,9 +1391,7 @@ async function commitRun() {
     const last = result.steps[result.steps.length - 1];
     toast(last ? last.summary : `Committed tick ${tick}.`);
     runA = null;
-    runB = null;
     lanesA = [];
-    lanesB = [];
     tick = 0;
     await refresh();
   } else {
@@ -1390,32 +1501,24 @@ function renderRulesPanel() {
   editor.className = "eq-edit";
   editor.value = rule.equation;
   editor.spellcheck = false;
-  if (mode === "build" || mode === "fast") {
-    // Committed on blur rather than per keystroke: an equation is only
-    // valid in whole, and writing it letter by letter would put a dozen
-    // broken rules through the oplog for every edit.
-    editor.onblur = async () => {
-      if (editor.value === rule.equation) return;
-      const written = await call(api.update_mote(rule.moteId, { equation: editor.value }));
-      if (!written) return;
-      toast(`${rule.name} updated.`);
-      // Fired without awaiting: the name check is advisory, not part of
-      // what "the equation was written" means, and letting it hold up
-      // refresh() here used to delay it long enough to land after
-      // whatever the user clicked next, undoing that click's state when
-      // it finally resolved.
-      checkEquationNames(rule, editor.value);
-      scheduleFastRun();
-      await refresh();
-    };
-  } else {
-    // Same rule as the inspector's stored properties: editable in Build
-    // mode only, and said so rather than left to look editable and
-    // silently discard what was typed.
-    editor.readOnly = true;
-    editor.classList.add("eq-edit-locked");
-    editor.title = "Switch to Build mode to edit";
-  }
+  // Committed on blur rather than per keystroke: an equation is only
+  // valid in whole, and writing it letter by letter would put a dozen
+  // broken rules through the oplog for every edit. Both modes allow
+  // editing -- Fast and Advanced alike -- so there's no lock to check.
+  editor.onblur = async () => {
+    if (editor.value === rule.equation) return;
+    const written = await call(api.update_mote(rule.moteId, { equation: editor.value }));
+    if (!written) return;
+    toast(`${rule.name} updated.`);
+    // Fired without awaiting: the name check is advisory, not part of
+    // what "the equation was written" means, and letting it hold up
+    // refresh() here used to delay it long enough to land after
+    // whatever the user clicked next, undoing that click's state when
+    // it finally resolved.
+    checkEquationNames(rule, editor.value);
+    scheduleFastRun();
+    await refresh();
+  };
   box.appendChild(editor);
   host.appendChild(box);
 
@@ -1949,6 +2052,7 @@ function applyBoardTransforms() {
     world.classList.add("transforming");
     world.style.transform = t;
   }
+  updateGridOverlay();
   clearTimeout(transformSettleTimer);
   transformSettleTimer = setTimeout(() => {
     // Mouse-drag panning gets its guaranteed crisp repaint from onUp's
@@ -2046,7 +2150,12 @@ function onMove(event) {
   const wdx = dx / layout.zoom, wdy = dy / layout.zoom;
   for (const gid of drag.groupIds) {
     const start = drag.startPositions.get(gid);
-    positions[gid] = { x: start.x + wdx, y: start.y + wdy };
+    let x = start.x + wdx, y = start.y + wdy;
+    if (snapToGrid) {
+      x = Math.round(x / gridStepX) * gridStepX;
+      y = Math.round(y / gridStepY) * gridStepY;
+    }
+    positions[gid] = { x, y };
   }
   renderBoards();
 }
@@ -2159,8 +2268,8 @@ async function openGardenMenu() {
     btn.onclick = async () => {
       menu.classList.add("hidden");
       await call(api.switch_garden(name));
-      runA = null; runB = null; lanesA = []; lanesB = []; tick = 0; replayRunId = null;
-      scenario = null; equationSuggestions = {};
+      runA = null; lanesA = []; tick = 0; replayRunId = null;
+      scenario = null; comparePanes = []; equationSuggestions = {};
       setSelection([]);
       await refresh();
     };
@@ -2224,6 +2333,56 @@ function wire() {
   $("tool-mote").onclick = addMote;
   $("tool-rule").onclick = addRule;
   $("tool-link").onclick = armConnect;
+  $("tool-snap").onclick = () => {
+    snapToGrid = !snapToGrid;
+    saveSnapToGrid();
+    $("tool-snap").classList.toggle("armed", snapToGrid);
+    renderBoards();
+  };
+  $("tool-snap").oncontextmenu = (e) => {
+    e.preventDefault();
+    $("grid-step-x").value = gridStepX;
+    $("grid-step-y").value = gridStepY;
+    $("grid-settings").classList.remove("hidden");
+  };
+  document.addEventListener("mousedown", (event) => {
+    const menu = $("grid-settings");
+    if (!menu.classList.contains("hidden") && !menu.contains(event.target) && event.target !== $("tool-snap")) {
+      menu.classList.add("hidden");
+    }
+  });
+  const applyGridStep = () => {
+    const x = parseInt($("grid-step-x").value, 10);
+    const y = parseInt($("grid-step-y").value, 10);
+    if (x > 0) gridStepX = x;
+    if (y > 0) gridStepY = y;
+    saveGridStep();
+    renderBoards();
+  };
+  $("grid-step-x").oninput = applyGridStep;
+  $("grid-step-y").oninput = applyGridStep;
+  $("grid-step-x-reset").onclick = () => {
+    gridStepX = NODE_W + COL_GAP;
+    $("grid-step-x").value = gridStepX;
+    saveGridStep();
+    renderBoards();
+  };
+  $("grid-step-y-reset").onclick = () => {
+    gridStepY = NODE_H + ROW_GAP;
+    $("grid-step-y").value = gridStepY;
+    saveGridStep();
+    renderBoards();
+  };
+  $("grid-snap-all-btn").onclick = snapAllPositions;
+  $("grid-autoset-btn").onclick = () => {
+    autosetGridStep();
+    $("grid-step-x").value = gridStepX;
+    $("grid-step-y").value = gridStepY;
+  };
+  $("add-compare-btn").onclick = () => {
+    armCompare = !armCompare;
+    renderRail();
+  };
   $("tool-layout").onclick = () => {
     positions = layoutNodes(board.nodes);
     layout.zoom = 1;
@@ -2314,7 +2473,7 @@ async function refresh() {
   board = next;
   // Positions are keyed by garden, so a switch reloads them rather than
   // dragging the old garden's layout onto motes that do not exist here.
-  if (firstLoad || gardenChanged) { loadPositions(); loadPreviewKeys(); }
+  if (firstLoad || gardenChanged) { loadPositions(); loadPreviewKeys(); loadSnapToGrid(); loadGridStep(); }
   if (!solver || !board.solvers.includes(solver)) solver = board.solvers[0] || "linear";
   if (!activeRule && board.rules.length) activeRule = board.rules[0].moteId;
   if (firstLoad && board.focus) setSelection([board.focus]);

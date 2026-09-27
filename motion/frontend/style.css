@@ -220,6 +220,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   letter-spacing: 0.14em; text-transform: uppercase; color: oklch(0.58 0 0);
 }
 .rail-meta { font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
+.rail-head-right { display: flex; align-items: baseline; gap: 8px; }
+.rail-add-btn {
+  font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 5px;
+  padding: 2px 6px; white-space: nowrap;
+}
+.rail-add-btn:hover { border-color: oklch(1 0 0 / 0.24); color: var(--fg-bright); }
+.rail-add-btn.armed { background: oklch(0.28 0.05 68); border-color: var(--accent); color: var(--fg-bright); }
 .rail-list { display: flex; flex-direction: column; gap: 4px; padding: 0 10px 12px; }
 .rail-sep { height: 1px; background: var(--hairline); margin: 0 10px; flex-shrink: 0; }
 .rail-box { padding: 0 10px 14px; display: flex; flex-direction: column; gap: 8px; }
@@ -266,7 +274,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 
 #stage {
   flex: 1; min-height: 0; display: flex; position: relative; overflow: hidden;
-  background: radial-gradient(70% 70% at 45% 40%, oklch(0.185 0 0) 0%, oklch(0.135 0 0) 100%);
+  background: var(--bg);
 }
 
 #tools {
@@ -287,10 +295,29 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 }
 .tool.zoom:hover { color: oklch(0.9 0 0); }
 
-#boards { flex: 1; min-width: 0; display: flex; position: relative; }
+.tool-menu { position: relative; }
+#grid-settings { top: 0; left: 38px; min-width: 190px; padding: 9px; }
+.grid-settings-row {
+  display: flex; align-items: center; gap: 6px; padding: 4px 2px;
+}
+.grid-settings-row label { flex: 1; font-size: 11.5px; color: oklch(0.75 0 0); }
+.grid-settings-row input {
+  width: 56px; background: var(--bg); border: 1px solid var(--border-soft);
+  border-radius: 6px; padding: 3px 6px; color: var(--fg); font-family: var(--mono); font-size: 11.5px;
+}
+#grid-settings .grid-reset-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0; padding: 0;
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 6px;
+  color: oklch(0.7 0 0); font-size: 13px; line-height: 1;
+}
+#grid-settings .grid-reset-icon:hover { border-color: oklch(1 0 0 / 0.24); color: var(--fg-bright); }
+#grid-snap-all-btn, #grid-autoset-btn { width: 100%; text-align: center; color: oklch(0.75 0 0); }
+
+#boards { flex: 1; min-width: 0; display: flex; position: relative; overflow-x: auto; }
 
 .board {
-  flex: 1; min-width: 0; position: relative; overflow: hidden;
+  flex: 1; min-width: 280px; position: relative; overflow: hidden;
   display: flex; flex-direction: column;
 }
 .board + .board { border-left: 1px solid var(--border-soft); }
@@ -312,8 +339,26 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   font-family: var(--mono); font-size: 10.5px; color: oklch(0.58 0 0);
   white-space: nowrap; flex-shrink: 0; margin-left: auto;
 }
+.board-close {
+  width: 18px; height: 18px; flex-shrink: 0; padding: 0; margin-left: 4px;
+  background: transparent; border: 1px solid var(--border-soft); border-radius: 5px;
+  color: var(--muted); font-size: 12px; line-height: 1;
+}
+.board-close:hover { border-color: oklch(1 0 0 / 0.24); color: var(--fg-bright); }
 .board-surface { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .board-surface.panning { cursor: grabbing; }
+/* A background on the viewport, not a child of .board-world -- a world
+   sized only to its nodes' extent (see worldExtent() in app.js) would
+   leave most of the visible stage without a grid once panned or zoomed
+   out. Painted here it always fills whatever is visible; app.js keeps
+   background-size/-position in sync with the same pan and zoom every
+   board-world's transform gets (see updateGridOverlay). */
+.board-surface.snap-grid {
+  background-image:
+    linear-gradient(to right, oklch(1 0 0 / 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(1 0 0 / 0.07) 1px, transparent 1px);
+  background-repeat: repeat;
+}
 /* will-change hints the compositor to keep this layer's raster around
    across a pan or zoom instead of a fresh (and sometimes lower-res)
    paint each time -- see applyBoardTransforms() in app.js, which now
