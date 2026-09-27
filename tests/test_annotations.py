@@ -94,3 +94,50 @@ def test_initialize_database_is_idempotent_for_annotations(conn):
     db.initialize_database(conn)
     db.initialize_database(conn)
     assert ann.list_annotations(conn) == []
+
+
+def test_create_group_stores_members_title_and_size(conn):
+    gid = ann.create_group(conn, x=10, y=20, width=200, height=100, members=["a", "b", "a"], title="Core")
+    group = ann.get_annotation(conn, gid)
+
+    assert group.type == ann.GROUP
+    assert group.anchor_mode == "world"
+    assert (group.x, group.y, group.width, group.height) == (10, 20, 200, 100)
+    assert group.text == "Core"
+    assert group.data == {"members": ["a", "b"], "slot": 0}
+
+
+def test_group_color_slots_keep_climbing_past_deleted_groups(conn):
+    first = ann.create_group(conn, x=0, y=0, width=1, height=1, members=[])
+    second = ann.create_group(conn, x=0, y=0, width=1, height=1, members=[])
+    ann.delete_annotation(conn, first)
+    third = ann.create_group(conn, x=0, y=0, width=1, height=1, members=[])
+    assert ann.get_annotation(conn, second).data["slot"] == 1
+    assert ann.get_annotation(conn, third).data["slot"] == 2
+
+
+def test_create_group_rejects_empty_size(conn):
+    with pytest.raises(ValueError):
+        ann.create_group(conn, x=0, y=0, width=0, height=10, members=[])
+
+
+def test_create_stroke_stores_relative_points_and_width(conn):
+    sid = ann.create_stroke(conn, x=5, y=6, points=[[0, 0], [1.5, 2]], width=3, color="#ff0000")
+    stroke = ann.get_annotation(conn, sid)
+
+    assert stroke.type == ann.STROKE
+    assert (stroke.x, stroke.y, stroke.color) == (5, 6, "#ff0000")
+    assert stroke.data == {"points": [[0.0, 0.0], [1.5, 2.0]], "width": 3}
+
+
+def test_create_stroke_rejects_empty_points_or_width(conn):
+    with pytest.raises(ValueError):
+        ann.create_stroke(conn, x=0, y=0, points=[], width=2)
+    with pytest.raises(ValueError):
+        ann.create_stroke(conn, x=0, y=0, points=[[0, 0]], width=0)
+
+
+def test_group_of_finds_the_group_owning_a_mote(conn):
+    gid = ann.create_group(conn, x=0, y=0, width=10, height=10, members=["m1"])
+    assert ann.group_of(conn, "m1").id == gid
+    assert ann.group_of(conn, "m2") is None

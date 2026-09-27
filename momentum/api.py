@@ -36,7 +36,6 @@ from core import calendar as calendar_repo
 from core import gardens as gardens_repo
 from core import interval as interval_repo
 from core import graph as graph_repo
-from core import modoc as modoc_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import scenarios as scenarios_repo
@@ -98,6 +97,7 @@ DEFAULT_CAPACITY_HOURS = 6.0
 # name. A session is an ordinary mote carrying an ordinary interval,
 # which is precisely why it turns up in Monastery for free.
 SESSION_SPECIES_NAME = "Work Session"
+SESSION_FOR = "for"
 
 # How far back the focus tab's heatmap and streak look.
 HEATMAP_DAYS = 14
@@ -444,7 +444,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
 
     def _sessions(self, directory: payload_repo.Directory) -> list[dict]:
         """Every logged session, newest first, with the task it was
-        about. Read from the graph rather than a counter: a session is a
+        for. Read from the graph rather than a counter: a session is a
         mote, so deleting one in any window is simply a session that no
         longer happened."""
         species_id = self._session_species_id()
@@ -452,7 +452,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
             return []
         found = []
         for mote in species_repo.instances_of(self._conn, species_id):
-            subject = next(iter(directory.targets(mote.id, modoc_repo.ABOUT)), None)
+            subject = next(iter(directory.targets(mote.id, SESSION_FOR)), None)
             found.append(payload_repo.session_payload(mote, directory, subject))
         return sorted(found, key=lambda s: s["start"] or "", reverse=True)
 
@@ -1111,12 +1111,12 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
     def _record_session(self, subject: Mote | None, minutes: float, start: datetime) -> tuple[str, "undo.Command"]:
         """The mote a finished session becomes: an ordinary mote carrying
         `date` and `duration`, an instance of a `Work Session` species,
-        pointing at the task with `about` (the same relationship a Mora
-        note uses for its subject). Being ordinary is what makes it show
-        up in Monastery and Monarch without either window knowing this
-        one exists. Shared by log_session() and _log_closing_session(),
-        which differ only in where `start` and `minutes` come from -- a
-        watched timer for one, whatever estimate was left for the other.
+        pointing at the task with `for`. Being ordinary is what makes it
+        show up in Monastery and Monarch without either window knowing
+        this one exists. Shared by log_session() and
+        _log_closing_session(), which differ only in where `start` and
+        `minutes` come from -- a watched timer for one, whatever estimate
+        was left for the other.
         """
         name = payload_repo.name_of(subject) if subject else "Work session"
         species_id = self._session_species_id()
@@ -1131,9 +1131,9 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         session_id = motes_repo.create_mote(self._conn, properties)
         species_repo.set_species(self._conn, session_id, species_id)
         if subject is not None:
-            rel_repo.create_relationship(self._conn, session_id, subject.id, modoc_repo.ABOUT)
+            rel_repo.create_relationship(self._conn, session_id, subject.id, SESSION_FOR)
         # Deleting the session mote (this command's undo) cascades away
-        # both the instance_of and the about relationship just made.
+        # both the instance_of and the for relationship just made.
         command = undo.for_create_mote(self._conn, session_id, properties, label="log a session")
         return session_id, command
 

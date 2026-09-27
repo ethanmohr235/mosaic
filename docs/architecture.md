@@ -1038,7 +1038,8 @@ A commit made here is not observed by an open Monarch until it refetches
 
 # Annotations
 
-A sticky note is commentary about a view of the graph, not data in it.
+An annotation -- a sticky note, a group box, or a pen stroke -- is
+commentary about a view of the graph, not data in it.
 `core/annotations.py` stores one in a garden's own `annotations` table
 (`core/db.py`) -- deliberately its own table, not a mote: an annotation
 must never appear in `list_motes()`/`neighborhood()`/species queries,
@@ -1060,11 +1061,17 @@ that as best-effort -- it resolves a live mote-anchored note through
 `graph.nodes`, and falls back to redrawing at the note's last stored
 offset, flagged, once the mote is gone.
 
-`type` and a JSON `data` column exist so a future annotation kind
-(a highlight, a callout arrow, freehand ink) can reuse the same table
-and the same frontend contract rather than forcing a schema change --
-sticky notes are the only kind actually built. `frontend_shared/
-annotations.js` is symlinked in like `undo.js`, but its integration
+`type` and a JSON `data` column let every kind share the one table
+with no schema change: a `sticky_note` uses the text/size columns, a
+`group` keeps its member mote ids (and its automatic-color palette
+slot) in `data`, and a `stroke` keeps its points (offsets from its
+x/y, so moving one is an ordinary move) and width there.
+`frontend_shared/annotations.js` owns the shared state (every
+annotation, the selection, the current tool, all gestures) and the
+notes; `annotation_groups.js`, `annotation_ink.js` and
+`annotation_toolbar.js` each handle one other part and read that state
+through a `shared` object passed to their `install()`. All four are
+symlinked in like `undo.js`, but the integration
 runs the other way: it does not own the canvas or any event listener
 itself. The host graph (`monarch/frontend/graph.js` today) calls into
 it from its own render loop and pointer handlers, the same way
@@ -1146,3 +1153,40 @@ its own subtree, with gaps between them:
 A new window gets both by symlinking `focus.js` into its `frontend/` and
 loading it before its other scripts; no app should add its own
 middle-click or click-away handlers.
+
+## Group boxes, ink, and the tool bar
+
+While annotating, a tool bar along the bottom of the graph
+(`annotation_toolbar.js`) switches between Select, Note, Group, Pen, and
+Eraser (keys V/N/G/P/E; Escape goes back to Select first). Note and
+Group place one thing and then switch back to Select; Pen and Eraser
+stay selected. Its color row works like the species color rows in the
+view settings (preset swatches from the species palette, a native
+picker, ↺ for automatic). It recolors the selected groups and strokes,
+or sets the pen color when none are selected.
+
+A **group box** owns the motes whose centres were inside it when it was
+drawn. Membership is a layout constraint, never a pin, and that is the
+one place annotations reach into the force layout: `graph.js` calls
+`Annotations.applyLayoutForces()` in its simulation step (a gentle pull
+back toward the box for members nearing a wall) and
+`Annotations.constrainLayout()` on every frame, settled or not. That
+second call is a hard wall both ways: members are clamped inside their
+box, and every other mote is pushed out of every box. A mote being
+dragged is exempt until it's dropped, and `Annotations.onMotesDropped()`
+then makes it a member of whichever box it landed in, or of none. So
+dragging a mote out of a box removes it from the group, and dragging one
+in adds it. A mote belongs to at most one group:
+`AnnotatableApi.create_group`/`set_group_members` take it out of any
+other group in the same undo step. Moving a box (by its title tab or
+border; the interior stays clear for box-selecting) carries its members
+and any canvas-anchored notes and strokes lying wholly inside it. Mote
+positions are still view state and not part of undo, so undoing a box
+move only restores the box, and the wall brings the members back with
+it. Boxes draw under edges and nodes (`Annotations.drawUnderlay`).
+
+A **stroke** is vector ink: the captured points are simplified with
+Ramer-Douglas-Peucker when the pen lifts and drawn as quadratic curves
+through their midpoints. Its width is the pen's screen width divided by
+the zoom it was drawn at. The Eraser deletes every stroke it touches as
+one undo step, never part of a stroke.

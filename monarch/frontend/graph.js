@@ -177,7 +177,7 @@ class MonossGraph {
     this.colors = { ...DEFAULT_COLORS, species: {} };
     this.attractors = {};          // species id (or __none__) -> {x, y}
     this.attractorMode = false;    // arranging attractors: read-only, no editing gestures
-    this.annotateMode = false;     // placing/editing sticky notes (frontend_shared/annotations.js)
+    this.annotateMode = false;     // placing/editing annotations (frontend_shared/annotations.js)
     this.hoverAttractorId = null;
     this._moteById = new Map();
     this._colorCache = new Map();  // mote id -> colour, dropped whenever data or settings change
@@ -800,6 +800,10 @@ class MonossGraph {
 
   _tick = () => {
     if (this.alpha > 0.004) this._step();
+    // Group boxes hold their members in and everyone else out on every
+    // frame, not only while the layout runs: a box moved or resized after
+    // the graph settled still has to take effect.
+    Annotations.constrainLayout(this);
     if (this._fitUntilAlpha) {
       this.fitToContent();
       if (this.alpha <= this._fitUntilAlpha) this._fitUntilAlpha = 0;
@@ -867,6 +871,11 @@ class MonossGraph {
       if (!a.pinned) { a.vx += fx; a.vy += fy; }
       if (!b.pinned) { b.vx -= fx; b.vy -= fy; }
     }
+
+    // Group boxes pull members drifting toward their walls back in
+    // (frontend_shared/annotation_groups.js) -- a force like the rest,
+    // added before integration so damping treats it the same.
+    Annotations.applyLayoutForces(this);
 
     for (const id of ids) {
       const node = this.nodes.get(id);
@@ -940,13 +949,16 @@ class MonossGraph {
       }
     }
 
+    // Group boxes are regions the motes sit in, so they go under
+    // everything else.
+    Annotations.drawUnderlay(ctx);
     this._drawEdges(ctx, bg, neighbours);
     this._drawNodes(ctx, labelBg, neighbours);
     if (this.attractorMode) this._drawAttractors(ctx, labelBg);
-    // Both world- and mote-anchored notes are world coordinates, so they
-    // belong inside this transform like the nodes above -- drawn whenever
-    // any exist, not just while actively placing/editing one.
-    if (Annotations.hasNotes()) Annotations.draw(ctx);
+    // Every annotation is in world coordinates, so they belong inside
+    // this transform like the nodes above -- drawn whenever any exist,
+    // not just while annotating.
+    Annotations.draw(ctx);
     ctx.restore();
     Annotations.tick();
 
@@ -1477,9 +1489,11 @@ class MonossGraph {
       return;
     }
     if (this.dragState) {
-      const { id, moved } = this.dragState;
+      const { id, moved, groupIds } = this.dragState;
       this.dragState = null;
       if (moved) {
+        // Where a mote lands decides its group box, if any.
+        Annotations.onMotesDropped(groupIds);
         if (this.callbacks.onPositionsChanged) this.callbacks.onPositionsChanged();
       } else if (this.callbacks.onSelect) {
         // The event goes with it: ctrl/cmd-click means "open this in a
@@ -1569,6 +1583,12 @@ class MonossGraph {
     this.camera.scale = scale;
     this.panTarget = null;
   };
+
+  /** Motes being dragged right now -- exempt from group boxes' walls
+   *  until they're dropped (frontend_shared/annotation_groups.js). */
+  draggingIds() {
+    return this.dragState && this.dragState.moved ? new Set(this.dragState.groupIds) : new Set();
+  }
 
   /** Un-pin a node so it rejoins the force simulation. */
   unpin(id) {

@@ -1,6 +1,8 @@
 # core/annotations.py
-"""Commentary layered over a garden's graph -- sticky notes today, other
-markup types (highlight halos, callout arrows, freehand ink) later.
+"""Commentary layered over a garden's graph: sticky notes, group boxes
+(a titled rectangle that owns a set of motes and holds them inside it as
+a layout constraint) and freehand pen strokes. All three share one table;
+`type` says which, and `data` carries what only that type needs.
 
 Deliberately not built on core/motes.py: an annotation is a reader's aside
 about the graph, not graph data, so it must never appear in
@@ -17,8 +19,12 @@ from core.db import generate_uuid
 
 _ANCHOR_MODES = {"world", "mote"}
 
+STICKY_NOTE = "sticky_note"
+GROUP = "group"
+STROKE = "stroke"
+
 # Columns editable through update_annotation(); text/x/y/color/width/height/z
-# and, for a future annotation type, data. anchor_mode and mote_id change
+# and data (a group's members, a stroke's points). anchor_mode and mote_id change
 # together and are handled separately since one implies the other.
 _UPDATABLE_FIELDS = {"text", "x", "y", "color", "width", "height", "z", "data"}
 
@@ -101,14 +107,95 @@ def create_sticky_note(
     if anchor_mode == "mote" and not mote_id:
         raise ValueError("anchor_mode='mote' requires mote_id")
 
+    return _insert(
+        conn, type=STICKY_NOTE, anchor_mode=anchor_mode, mote_id=mote_id, x=x, y=y,
+        text=text, color=color, width=width, height=height, id=id,
+    )
+
+
+def create_group(
+    conn: sqlite3.Connection,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    members: list[str],
+    title: str = "",
+    color: str | None = None,
+) -> str:
+    """A group box: x/y is its centre (as for a sticky note), `text` its
+    title, and data["members"] the mote ids it owns. Keeping each mote in
+    at most one group is the caller's job (see group_of()), since it
+    means editing *other* groups' rows too.
+
+    data["slot"] picks the group's automatic color (used while `color`
+    is NULL) from the same golden-angle palette species colors walk: one
+    past the highest slot any group has, so a new group never repeats its
+    neighbours' color and deleting a group never recolors the rest."""
+    if width <= 0 or height <= 0:
+        raise ValueError("A group needs a positive width and height")
+    slots = [a.data.get("slot", -1) for a in list_annotations(conn) if a.type == GROUP]
+    data = {"members": list(dict.fromkeys(members)), "slot": max(slots, default=-1) + 1}
+    return _insert(
+        conn, type=GROUP, anchor_mode="world", mote_id=None, x=x, y=y, text=title,
+        color=color, width=width, height=height, data=data,
+    )
+
+
+def create_stroke(
+    conn: sqlite3.Connection,
+    *,
+    x: float,
+    y: float,
+    points: list[list[float]],
+    width: float,
+    color: str | None = None,
+) -> str:
+    """A pen stroke: data["points"] are [dx, dy] offsets from x/y, so
+    moving a stroke is only move_annotation(), same as a note."""
+    if not points:
+        raise ValueError("A stroke needs at least one point")
+    if width <= 0:
+        raise ValueError("A stroke needs a positive width")
+    return _insert(
+        conn, type=STROKE, anchor_mode="world", mote_id=None, x=x, y=y, color=color,
+        data={"points": [[float(px), float(py)] for px, py in points], "width": width},
+    )
+
+
+def group_of(conn: sqlite3.Connection, mote_id: str) -> Annotation | None:
+    """The group box a mote belongs to, if any."""
+    for annotation in list_annotations(conn):
+        if annotation.type == GROUP and mote_id in annotation.data.get("members", []):
+            return annotation
+    return None
+
+
+def _insert(
+    conn: sqlite3.Connection,
+    *,
+    type: str,
+    anchor_mode: str,
+    mote_id: str | None,
+    x: float,
+    y: float,
+    text: str = "",
+    color: str | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    data: dict | None = None,
+    id: str | None = None,
+) -> str:
     annotation_id = id or generate_uuid()
     ts = oplog.now_iso()
     cur = conn.cursor()
     cur.execute(
         """INSERT INTO annotations
            (id, type, anchor_mode, mote_id, x, y, text, color, width, height, z, data, created_at, updated_at)
-           VALUES (?, 'sticky_note', ?, ?, ?, ?, ?, ?, ?, ?, 0, '{}', ?, ?)""",
-        (annotation_id, anchor_mode, mote_id, x, y, text, color, width, height, ts, ts),
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
+        (annotation_id, type, anchor_mode, mote_id, x, y, text, color, width, height,
+         json.dumps(data or {}), ts, ts),
     )
     conn.commit()
     return annotation_id

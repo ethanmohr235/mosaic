@@ -627,7 +627,8 @@ class UndoableApi:
 
 
 class AnnotatableApi:
-    """Sticky-note CRUD (core/annotations.py), identical in shape to
+    """Annotation CRUD -- sticky notes, group boxes, pen strokes
+    (core/annotations.py) -- identical in shape to
     InspectorApi -- Monarch is the only app mixing this in for now (see
     docs/architecture.md's Annotations section). Local-only: no method
     here ever writes to core/sync.py or the oplog.
@@ -660,8 +661,9 @@ class AnnotatableApi:
             return None
         old_text = annotation.text
         annotations_repo.update_annotation(self._conn, annotation_id, text=text)
+        label = "rename a group" if annotation.type == annotations_repo.GROUP else "edit a note"
         _push_undo(self, undo.for_update_annotation(
-            self._conn, annotation_id, {"text": old_text}, {"text": text}, label="edit a note",
+            self._conn, annotation_id, {"text": old_text}, {"text": text}, label=label,
         ))
         return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
 
@@ -674,7 +676,9 @@ class AnnotatableApi:
         annotations_repo.move_annotation(self._conn, annotation_id, x, y)
         _push_undo(
             self,
-            undo.for_move_annotation(self._conn, annotation_id, old_xy, (x, y), label="move a note"),
+            undo.for_move_annotation(
+                self._conn, annotation_id, old_xy, (x, y), label=f"move {_noun(annotation.type)}",
+            ),
             coalesce_key=("annotation-move", annotation_id),
         )
         return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
@@ -687,14 +691,17 @@ class AnnotatableApi:
         snapshot = annotations_repo.to_dict(annotation)
         deleted = annotations_repo.delete_annotation(self._conn, annotation_id)
         if deleted:
-            _push_undo(self, undo.for_delete_annotation(self._conn, snapshot, label="delete a note"))
+            _push_undo(self, undo.for_delete_annotation(
+                self._conn, snapshot, label=f"delete {_noun(annotation.type)}",
+            ))
         return deleted
 
     @synchronized
     def move_annotations(self, moves: list[dict]) -> list[dict]:
-        """Several notes moved by one gesture (a multi-selection drag):
-        moves is [{id, x, y}, ...], and the whole batch is one undo step."""
-        commands, moved = [], []
+        """Several annotations moved by one gesture (a multi-selection
+        drag, or a group box carrying the ink inside it): moves is
+        [{id, x, y}, ...], and the whole batch is one undo step."""
+        commands, moved, types = [], [], []
         for move in moves:
             annotation = annotations_repo.get_annotation(self._conn, move["id"])
             if annotation is None:
@@ -702,28 +709,28 @@ class AnnotatableApi:
             old_xy = (annotation.x, annotation.y)
             annotations_repo.move_annotation(self._conn, annotation.id, move["x"], move["y"])
             commands.append(undo.for_move_annotation(
-                self._conn, annotation.id, old_xy, (move["x"], move["y"]), label="move a note",
+                self._conn, annotation.id, old_xy, (move["x"], move["y"]), label="move",
             ))
+            types.append(annotation.type)
             moved.append(_annotation_payload(annotations_repo.get_annotation(self._conn, annotation.id)))
         if commands:
-            label = "move a note" if len(commands) == 1 else f"move {len(commands)} notes"
-            _push_undo(self, undo.combine(label, commands))
+            _push_undo(self, undo.combine(f"move {_count_noun(types)}", commands))
         return moved
 
     @synchronized
     def delete_annotations(self, annotation_ids: list[str]) -> int:
-        """Delete a selection of notes as one undo step."""
-        commands = []
+        """Delete a selection of annotations as one undo step."""
+        commands, types = [], []
         for annotation_id in annotation_ids:
             annotation = annotations_repo.get_annotation(self._conn, annotation_id)
             if annotation is None:
                 continue
             snapshot = annotations_repo.to_dict(annotation)
             if annotations_repo.delete_annotation(self._conn, annotation_id):
-                commands.append(undo.for_delete_annotation(self._conn, snapshot, label="delete a note"))
+                commands.append(undo.for_delete_annotation(self._conn, snapshot, label="delete"))
+                types.append(annotation.type)
         if commands:
-            label = "delete a note" if len(commands) == 1 else f"delete {len(commands)} notes"
-            _push_undo(self, undo.combine(label, commands))
+            _push_undo(self, undo.combine(f"delete {_count_noun(types)}", commands))
         return len(commands)
 
     @synchronized
@@ -740,7 +747,9 @@ class AnnotatableApi:
             self._conn, annotation_id, x=x, y=y, width=width, height=height,
         )
         after = annotations_repo.to_dict(annotations_repo.get_annotation(self._conn, annotation_id))
-        _push_undo(self, undo.for_replace_annotation(self._conn, before, after, label="resize a note"))
+        _push_undo(self, undo.for_replace_annotation(
+            self._conn, before, after, label=f"resize {_noun(annotation.type)}",
+        ))
         return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
 
     @synchronized
@@ -762,6 +771,98 @@ class AnnotatableApi:
         _push_undo(self, undo.for_replace_annotation(self._conn, before, after, label=label))
         return _annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id))
 
+    @synchronized
+    def create_group(
+        self, x: float, y: float, width: float, height: float,
+        member_ids: list[str], color: str | None = None,
+    ) -> dict:
+        """A group box around member_ids. A mote belongs to one group at
+        most, so any member already in another group leaves it -- in the
+        same undo step as the create."""
+        commands = self._release_members(member_ids, keep_group_id=None)
+        group_id = annotations_repo.create_group(
+            self._conn, x=x, y=y, width=width, height=height, members=member_ids, color=color,
+        )
+        snapshot = annotations_repo.to_dict(annotations_repo.get_annotation(self._conn, group_id))
+        commands.append(undo.for_create_annotation(self._conn, snapshot, label="add a group"))
+        _push_undo(self, undo.combine("add a group", commands))
+        return _annotation_payload(annotations_repo.get_annotation(self._conn, group_id))
+
+    @synchronized
+    def set_group_members(self, changes: list[dict]) -> list[dict]:
+        """changes is [{groupId, members}, ...] -- each group's new full
+        member list, e.g. after motes were dragged out of one box and into
+        another. Members named here leave any group not in `changes`, so
+        the one-group-per-mote rule holds whatever the caller sent. One
+        undo step for the lot."""
+        commands, changed = [], []
+        named = {change["groupId"] for change in changes}
+        for change in changes:
+            group = annotations_repo.get_annotation(self._conn, change["groupId"])
+            if group is None or group.type != annotations_repo.GROUP:
+                continue
+            members = list(dict.fromkeys(change["members"]))
+            commands.extend(self._release_members(members, keep_group_id=group.id, skip=named))
+            commands.append(self._update_data(group, {**group.data, "members": members}))
+            changed.append(_annotation_payload(annotations_repo.get_annotation(self._conn, group.id)))
+        if commands:
+            _push_undo(self, undo.combine("regroup motes", commands))
+        return changed
+
+    @synchronized
+    def create_stroke(
+        self, x: float, y: float, points: list[list[float]], width: float,
+        color: str | None = None,
+    ) -> dict:
+        stroke_id = annotations_repo.create_stroke(
+            self._conn, x=x, y=y, points=points, width=width, color=color,
+        )
+        snapshot = annotations_repo.to_dict(annotations_repo.get_annotation(self._conn, stroke_id))
+        _push_undo(self, undo.for_create_annotation(self._conn, snapshot, label="draw"))
+        return _annotation_payload(annotations_repo.get_annotation(self._conn, stroke_id))
+
+    @synchronized
+    def recolor_annotations(self, annotation_ids: list[str], color: str | None) -> list[dict]:
+        """Recolor a selection as one undo step; None means the automatic
+        color again."""
+        commands, types, changed = [], [], []
+        for annotation_id in annotation_ids:
+            annotation = annotations_repo.get_annotation(self._conn, annotation_id)
+            if annotation is None or annotation.color == color:
+                continue
+            annotations_repo.update_annotation(self._conn, annotation_id, color=color)
+            commands.append(undo.for_update_annotation(
+                self._conn, annotation_id, {"color": annotation.color}, {"color": color}, label="recolor",
+            ))
+            types.append(annotation.type)
+            changed.append(_annotation_payload(annotations_repo.get_annotation(self._conn, annotation_id)))
+        if commands:
+            _push_undo(self, undo.combine(f"recolor {_count_noun(types)}", commands))
+        return changed
+
+    def _release_members(
+        self, member_ids: list[str], keep_group_id: str | None, skip: set[str] = frozenset(),
+    ) -> list:
+        """Take member_ids out of every group but keep_group_id (and those
+        in `skip`, which the caller is rewriting itself). Returns the undo
+        commands for the edits it made."""
+        wanted = set(member_ids)
+        commands = []
+        for group in annotations_repo.list_annotations(self._conn):
+            if group.type != annotations_repo.GROUP or group.id == keep_group_id or group.id in skip:
+                continue
+            members = group.data.get("members", [])
+            kept = [m for m in members if m not in wanted]
+            if len(kept) != len(members):
+                commands.append(self._update_data(group, {**group.data, "members": kept}))
+        return commands
+
+    def _update_data(self, annotation, data: dict):
+        annotations_repo.update_annotation(self._conn, annotation.id, data=data)
+        return undo.for_update_annotation(
+            self._conn, annotation.id, {"data": annotation.data}, {"data": data}, label="regroup",
+        )
+
 
 def _annotation_payload(annotation) -> dict:
     """An Annotation as the frontend reads it: camelCase keys, matching
@@ -782,6 +883,27 @@ def _annotation_payload(annotation) -> dict:
         "createdAt": annotation.created_at,
         "updatedAt": annotation.updated_at,
     }
+
+
+_ANNOTATION_NOUNS = {
+    annotations_repo.STICKY_NOTE: ("a note", "notes"),
+    annotations_repo.GROUP: ("a group", "groups"),
+    annotations_repo.STROKE: ("a drawing", "drawings"),
+}
+
+
+def _noun(annotation_type: str) -> str:
+    """How an undo label names one annotation of this type."""
+    return _ANNOTATION_NOUNS.get(annotation_type, ("an annotation", "annotations"))[0]
+
+
+def _count_noun(types: list[str]) -> str:
+    """"a note", "3 groups", or "4 annotations" for a mixed batch."""
+    if len(types) == 1:
+        return _noun(types[0])
+    kinds = set(types)
+    plural = _ANNOTATION_NOUNS.get(types[0], ("", "annotations"))[1] if len(kinds) == 1 else "annotations"
+    return f"{len(types)} {plural}"
 
 
 def _label(mote) -> str:

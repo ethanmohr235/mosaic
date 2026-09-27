@@ -1,6 +1,18 @@
-/* Sticky-note annotations layered over a hand-written canvas graph
- * (monarch/frontend/graph.js today; other apps' graphs can adopt this
- * later -- see docs/architecture.md's Annotations section).
+/* Annotations layered over a hand-written canvas graph -- sticky notes,
+ * group boxes and pen strokes (monarch/frontend/graph.js today; other
+ * apps' graphs can adopt this later -- see docs/architecture.md's
+ * Annotations section).
+ *
+ * This file is the public face and the owner of shared state: the list
+ * of annotations of every kind, the selection, the current tool, and
+ * every gesture. Sticky notes live here too; group boxes and pen strokes
+ * are drawn, hit-tested and (for groups) constrained by their own modules,
+ * which read this module's state through the `shared` object handed to
+ * their install():
+ *   annotation_groups.js   AnnotationGroups   boxes that hold motes
+ *   annotation_ink.js      AnnotationInk      pen strokes and the eraser
+ *   annotation_toolbar.js  AnnotationToolbar  the tool bar's DOM
+ * Load those three before this one.
  *
  * Unlike Undo (a pure keybinding module -- the stack lives in Python),
  * annotations render *inside* the host graph's own canvas loop, so the
@@ -15,28 +27,39 @@
  *   Annotations.exit()
  *
  *   In the host's _draw(), inside the same ctx.save()/translate/scale
- *   block that draws nodes (both world- and mote-anchored notes are world
- *   coordinates):
- *     if (graph.annotateMode || Annotations.hasNotes()) Annotations.draw(ctx);
+ *   block that draws nodes (every annotation is in world coordinates):
+ *     Annotations.drawUnderlay(ctx);   before edges -- group boxes
+ *     Annotations.draw(ctx);           after nodes -- ink, notes, previews
+ *   and, after the transform is restored, Annotations.tick().
+ *
+ *   In the host's layout: Annotations.applyLayoutForces(graph) in its
+ *   simulation step before integrating, Annotations.constrainLayout(graph)
+ *   every frame, and Annotations.onMotesDropped(ids) when a mote drag ends
+ *   (see annotation_groups.js).
  *
  *   While annotate mode is on, the host hands its left-button
  *   mousedown/mousemove/mouseup and its dblclick to onMouseDown/
  *   onMouseMove/onMouseUp/onDoubleClick, mirroring the existing
  *   attractorMode short-circuit, and gives onKeyDown(e) first refusal on
- *   keys (Delete/Backspace, Enter, Escape act on the note selection).
+ *   keys (V/N/G/P/E pick a tool; Delete/Backspace, Enter, Escape act on
+ *   the selection).
  *
- * Gestures inside annotate mode deliberately match the graph editor's
+ * The Select tool's gestures deliberately match the graph editor's
  * own: click selects, shift+click adds to the selection, drag on empty
- * canvas box-selects, dragging a selected note moves the whole selection,
- * and ctrl+drag from a note to a mote attaches it there (or detaches it,
- * if it's already on that mote) the way ctrl+drag between motes relates
- * them. Double-click is what creates a note (or edits one); the bottom-
- * right corner resizes one.
+ * canvas box-selects, dragging a selected annotation moves the whole
+ * selection, and ctrl+drag from a note to a mote attaches it there (or
+ * detaches it, if it's already on that mote) the way ctrl+drag between
+ * motes relates them. Double-click creates a note or edits one (or a
+ * group's title); a bottom-right corner resizes a note or group. A group
+ * is grabbed by its title tab or border -- its interior stays clear for
+ * box-selecting -- and moving it carries its member motes and any
+ * canvas-anchored notes and strokes lying wholly inside it.
  *
  * `graph` must expose: _worldAt(clientX, clientY), _worldToScreen(x, y),
- * camera.scale, hitTest(clientX, clientY), hoverId, canvas, and nodes (Map
- * of mote id -> {x, y}) for resolving a mote-anchored note's live
- * position.
+ * camera.scale, hitTest(clientX, clientY), hoverId, canvas, alpha,
+ * callbacks, and nodes (Map of mote id -> {x, y, vx, vy, pinned}) for
+ * resolving a mote-anchored note's live position and moving a group's
+ * members -- plus what annotation_groups.js asks for.
  *
  * Kept in frontend_shared/ and symlinked into each app's frontend/, like
  * undo.js and inspector.js. */
@@ -79,21 +102,43 @@ const Annotations = (() => {
   const CLOSE_BADGE_RADIUS = 9;   // screen px
   const RESIZE_GRIP = 10;         // screen px, either side of the corner
   const DRAG_THRESHOLD = 4;       // screen px
+  const TOOL_KEYS = { v: "select", n: "note", g: "group", p: "pen", e: "eraser" };
+  // Note and Group place one thing and hand back to Select; Pen and
+  // Eraser stay picked until you choose another tool.
+  const ONE_SHOT_TOOLS = new Set(["note", "group"]);
+  const PEN_STORAGE_KEY = "monoss:annotation-pen";
 
   let api = null;
   let graph = null;
   let onChanged = () => {};
 
-  let notes = [];            // last list_annotations() payload, camelCase
+  // What annotation_groups.js and annotation_ink.js see of this module.
+  // `items` is every annotation (last list_annotations() payload,
+  // camelCase, updated in place as gestures move things); `notes` and
+  // `strokes` below are views of it, rebuilt by _reindex().
+  const shared = {
+    api: null, graph: null, theme: null, items: [], active: false,
+    changed: () => onChanged(),
+  };
+  let notes = [];
+  let strokes = [];
   let active = false;        // annotate mode on/off
-  let selected = new Set();  // note ids
+  let selected = new Set();  // annotation ids, any kind
+  let tool = "select";
+  let pen = { color: null, widthPx: 4 };  // color null = the theme's text color
+  let pointerWorld = null;   // last pointer position, for the eraser's ring
   // The one gesture in progress, if any -- the same one-at-a-time shape
   // as graph.js's dragState/boxState/connectState, folded together:
-  //   {kind: "drag", id, moved, startClientX, startClientY, starts: Map id -> {x, y}}
+  //   {kind: "drag", id, moved, startClientX, startClientY, starts: Map id -> {x, y},
+  //    members: [mote id], lastDx, lastDy}     (members: of the groups being moved)
   //   {kind: "box", moved, additive, base: Set, startClientX, startClientY, rect}
   //   {kind: "connect", id, cursor: {x, y}, targetId}
   //   {kind: "resize", id, moved, startClientX, startClientY, startX, startY,
   //    startBaseW, startBaseH, startW, startH}
+  //   {kind: "groupResize", id, moved, startClientX, startClientY, left, top, startW, startH}
+  //   {kind: "groupDraw", moved, startClientX, startClientY, rect}
+  //   {kind: "pen", points}                    (annotation_ink.js)
+  //   {kind: "erase", ids: Set}
   let gesture = null;
   let editingId = null;
   // True for the rest of the current event dispatch after an edit ends.
@@ -117,7 +162,7 @@ const Annotations = (() => {
     fill: "oklch(0.24 0 0)", border: "oklch(0.32 0 0)",
     text: "oklch(0.93 0 0)", faint: "oklch(0.48 0 0)",
     accent: "oklch(0.74 0.10 68)", accentSoft: "oklch(0.74 0.10 68 / 0.12)",
-    leader: "oklch(0.68 0 0 / 0.55)",
+    leader: "oklch(0.68 0 0 / 0.55)", onColor: "oklch(0.18 0 0)",
   };
 
   function install(options) {
@@ -130,6 +175,13 @@ const Annotations = (() => {
     measureCtx.filter = "none";
     _readTheme();
     _ensureEditor();
+    _loadPen();
+    Object.assign(shared, { api, graph, theme });
+    AnnotationInk.install(shared);
+    AnnotationGroups.install(shared);
+    AnnotationToolbar.install(graph.canvas.parentElement, AnnotationGroups.autoColor, AnnotationInk.WIDTHS, {
+      onTool: setTool, onColor: _applyColor, onWidth: _setPenWidth,
+    });
   }
 
   function isActive() {
@@ -140,28 +192,130 @@ const Annotations = (() => {
     return notes.length > 0;
   }
 
+  function hasContent() {
+    return shared.items.length > 0;
+  }
+
   function selectedIds() {
     return [...selected];
   }
 
+  function currentTool() {
+    return tool;
+  }
+
   async function enter() {
-    active = true;
+    active = shared.active = true;
+    tool = "select";
+    AnnotationToolbar.show();
     await refresh();
   }
 
   function exit() {
-    active = false;
+    active = shared.active = false;
     _stopEditing({ save: true });
+    AnnotationGroups.stopEditing({ save: true });
     _endGesture();
     selected.clear();
+    tool = "select";
+    AnnotationToolbar.hide();
   }
 
   async function refresh() {
-    notes = await api.list_annotations();
-    const ids = new Set(notes.map((n) => n.id));
+    shared.items = await api.list_annotations();
+    _reindex();
+    const ids = new Set(shared.items.map((n) => n.id));
     for (const id of selected) if (!ids.has(id)) selected.delete(id);
     if (editingId != null && !ids.has(editingId)) _stopEditing({ save: false });
+    _changed();
+  }
+
+  function _reindex() {
+    notes = shared.items.filter((a) => a.type === "sticky_note");
+    strokes = shared.items.filter((a) => a.type === "stroke");
+  }
+
+  function _byId(id) {
+    return shared.items.find((a) => a.id === id);
+  }
+
+  /** Anything visible changed: tell the host, and bring the tool bar's
+   *  color row in line with the new selection. */
+  function _changed() {
+    if (active) _syncToolbar();
     onChanged();
+  }
+
+  // ---- tools -------------------------------------------------------------
+
+  function setTool(next) {
+    if (!AnnotationToolbar.TOOLS.some((t) => t.id === next)) return;
+    _endGesture();
+    tool = next;
+    // A tool that makes something starts from a clean slate -- otherwise
+    // the color row would be coloring an old selection, not the new ink.
+    if (next !== "select") selected.clear();
+    graph.canvas.style.cursor = _toolCursor();
+    _changed();
+  }
+
+  function _toolCursor() {
+    if (tool === "pen" || tool === "group") return "crosshair";
+    if (tool === "note") return "cell";
+    if (tool === "eraser") return "none"; // draw() rings the pointer instead
+    return "default";
+  }
+
+  function _loadPen() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PEN_STORAGE_KEY) || "null");
+      if (saved && AnnotationInk.WIDTHS.includes(saved.widthPx)) pen = { color: saved.color || null, widthPx: saved.widthPx };
+    } catch (_) { /* the default pen, then */ }
+  }
+
+  function _savePen() {
+    try { localStorage.setItem(PEN_STORAGE_KEY, JSON.stringify(pen)); } catch (_) { /* per-viewer nicety only */ }
+  }
+
+  function _setPenWidth(px) {
+    pen.widthPx = px;
+    _savePen();
+    _syncToolbar();
+  }
+
+  /** Groups and strokes in the selection -- what the color row recolors
+   *  when there are any. */
+  function _colorTargets() {
+    return shared.items.filter((a) => selected.has(a.id) && (a.type === "group" || a.type === "stroke"));
+  }
+
+  function _applyColor(color, { final }) {
+    const targets = _colorTargets();
+    if (targets.length === 0) {
+      pen.color = color;
+      if (final) _savePen();
+      _syncToolbar();
+      return;
+    }
+    for (const item of targets) item.color = color;
+    if (final) api.recolor_annotations(targets.map((t) => t.id), color).then(() => _changed());
+    else onChanged();
+  }
+
+  function _syncToolbar() {
+    const targets = _colorTargets();
+    const first = targets[0];
+    let color = pen.color, auto = theme.text;
+    if (first) {
+      color = first.color;
+      auto = first.type === "group" ? AnnotationGroups.colorOf(first) : theme.text;
+    }
+    AnnotationToolbar.sync({
+      tool, widthPx: pen.widthPx, color, autoColor: auto,
+      target: first ? "selection" : "pen",
+      showColors: tool === "pen" || targets.length > 0,
+      showWidths: tool === "pen",
+    });
   }
 
   function _readTheme() {
@@ -175,6 +329,7 @@ const Annotations = (() => {
       accent: token("--accent") || theme.accent,
       accentSoft: token("--accent-soft") || theme.accentSoft,
       leader: theme.leader,
+      onColor: theme.onColor,
     };
   }
 
@@ -310,7 +465,17 @@ const Annotations = (() => {
 
   // ---- drawing -----------------------------------------------------------
 
+  /** Group boxes, under the host's edges and nodes. */
+  function drawUnderlay(ctx) {
+    if (!graph) return; // the host's frame loop can start before install()
+    AnnotationGroups.draw(ctx, selected);
+    if (gesture && gesture.kind === "groupDraw" && gesture.moved) AnnotationGroups.drawDraft(ctx, gesture.rect);
+  }
+
   function draw(ctx) {
+    if (!graph) return;
+    // Ink under the notes, so a note always reads over a scribble.
+    for (const stroke of strokes) AnnotationInk.drawStroke(ctx, stroke, selected.has(stroke.id));
     // Leaders first, so a note overlapping another note's line covers it.
     for (const note of notes) _drawLeader(ctx, note);
     const collapsed = _isCollapsed();
@@ -319,8 +484,14 @@ const Annotations = (() => {
       if (collapsed) _drawGlyph(ctx, note);
       else _drawNote(ctx, note);
     }
-    if (gesture && gesture.kind === "connect") _drawConnectPreview(ctx);
-    if (gesture && gesture.kind === "box" && gesture.moved) _drawBox(ctx, gesture.rect);
+    if (!gesture) {
+      if (active && tool === "eraser" && pointerWorld) AnnotationInk.drawEraserCursor(ctx, pointerWorld);
+      return;
+    }
+    if (gesture.kind === "connect") _drawConnectPreview(ctx);
+    if (gesture.kind === "box" && gesture.moved) _drawBox(ctx, gesture.rect);
+    if (gesture.kind === "pen") AnnotationInk.drawLive(ctx, gesture, pen.color, pen.widthPx);
+    if (gesture.kind === "erase" && pointerWorld) AnnotationInk.drawEraserCursor(ctx, pointerWorld);
   }
 
   /** The one visual difference between a mote-anchored note and a
@@ -532,10 +703,46 @@ const Annotations = (() => {
   function onMouseDown(e) {
     if (e.button !== 0) return false;
     const world = graph._worldAt(e.clientX, e.clientY);
+    pointerWorld = world;
 
+    // A click away from a note or group title being edited only finishes
+    // that edit -- the same "click away to unfocus" every text field gets
+    // from frontend_shared/focus.js -- rather than also starting whatever
+    // the tool would do. Grabbing a note still works in one click.
+    const wasEditing = editingId != null || editJustEnded
+      || AnnotationGroups.isEditing() || AnnotationGroups.editJustEndedNow();
+    if (wasEditing && !(tool === "select" && _hitTest(world.x, world.y))) {
+      _stopEditing({ save: true });
+      AnnotationGroups.stopEditing({ save: true });
+      return true;
+    }
+
+    if (tool === "pen") {
+      gesture = AnnotationInk.begin(world);
+      return true;
+    }
+    if (tool === "eraser") {
+      gesture = { kind: "erase", ids: new Set() };
+      _eraseAt(world);
+      return true;
+    }
+    if (tool === "group") {
+      gesture = { kind: "groupDraw", moved: false, startClientX: e.clientX, startClientY: e.clientY, rect: null };
+      return true;
+    }
+    if (tool === "note") {
+      e.preventDefault(); // keep the new note's editor focused once it opens
+      _createNoteAt(e.clientX, e.clientY, world);
+      setTool("select");
+      return true;
+    }
+    return _selectMouseDown(e, world);
+  }
+
+  function _selectMouseDown(e, world) {
     const closeHit = _hitTestCloseBadge(world.x, world.y);
     if (closeHit) {
-      _deleteNotes([closeHit.id]);
+      _deleteItems([closeHit.id]);
       return true;
     }
 
@@ -557,38 +764,42 @@ const Annotations = (() => {
       return true;
     }
 
-    const hit = _hitTest(world.x, world.y);
-    // A click outside the note being edited only finishes that edit --
-    // the same "click away to unfocus" every text field gets from
-    // frontend_shared/focus.js -- rather than also starting a box-select.
-    // Grabbing another note still works in one click.
-    if ((editingId != null || editJustEnded) && !hit) {
-      _stopEditing({ save: true });
+    const noteHit = _hitTest(world.x, world.y);
+    if (noteHit && (e.ctrlKey || e.metaKey)) {
+      gesture = { kind: "connect", id: noteHit.id, cursor: world, targetId: null };
+      graph.canvas.style.cursor = "crosshair";
       return true;
     }
 
+    const groupGrip = noteHit ? null : AnnotationGroups.hitTestResizeGrip(world.x, world.y);
+    if (groupGrip) {
+      const rect = AnnotationGroups.rectOf(groupGrip);
+      selected = new Set([groupGrip.id]);
+      gesture = {
+        kind: "groupResize", id: groupGrip.id, moved: false,
+        startClientX: e.clientX, startClientY: e.clientY,
+        left: rect.left, top: rect.top, startW: rect.w, startH: rect.h,
+      };
+      _changed();
+      return true;
+    }
+
+    const hit = noteHit
+      || AnnotationInk.hitTest(strokes, world.x, world.y)
+      || AnnotationGroups.hitTest(world.x, world.y);
     if (hit) {
-      if (e.ctrlKey || e.metaKey) {
-        gesture = { kind: "connect", id: hit.id, cursor: world, targetId: null };
-        graph.canvas.style.cursor = "crosshair";
-        return true;
-      }
       if (e.shiftKey) {
         if (selected.has(hit.id)) {
           selected.delete(hit.id);
+          _changed();
           return true;
         }
         selected.add(hit.id);
       } else if (!selected.has(hit.id)) {
         selected = new Set([hit.id]);
       }
-      // Dragging a note in the selection moves the whole selection, same
-      // as dragging a mote in graph.js's multi-selection.
-      gesture = {
-        kind: "drag", id: hit.id, moved: false,
-        startClientX: e.clientX, startClientY: e.clientY,
-        starts: new Map(notes.filter((n) => selected.has(n.id)).map((n) => [n.id, { x: n.x, y: n.y }])),
-      };
+      gesture = _dragGesture(hit.id, e);
+      _changed();
       return true;
     }
 
@@ -600,7 +811,50 @@ const Annotations = (() => {
     return true;
   }
 
+  /** Dragging an annotation in the selection moves the whole selection,
+   *  same as dragging a mote in graph.js's multi-selection. A group in it
+   *  brings its member motes along, and any canvas-anchored note or
+   *  stroke lying wholly inside the box. */
+  function _dragGesture(id, e) {
+    const moving = shared.items.filter((a) => selected.has(a.id));
+    const carried = new Set(moving);
+    const members = [];
+    for (const group of moving.filter((a) => a.type === "group")) {
+      members.push(...AnnotationGroups.membersOf(group));
+      const box = AnnotationGroups.rectOf(group);
+      for (const item of shared.items) {
+        if (carried.has(item) || !_isLoose(item)) continue;
+        if (_contains(box, _boundsOf(item))) carried.add(item);
+      }
+    }
+    return {
+      kind: "drag", id, moved: false,
+      startClientX: e.clientX, startClientY: e.clientY,
+      starts: new Map([...carried].map((a) => [a.id, { x: a.x, y: a.y }])),
+      members, lastDx: 0, lastDy: 0,
+    };
+  }
+
+  /** A note or stroke pinned to the canvas rather than to a mote -- what
+   *  a moving group can carry. */
+  function _isLoose(item) {
+    return item.type === "stroke" || (item.type === "sticky_note" && item.anchorMode === "world");
+  }
+
+  function _boundsOf(item) {
+    if (item.type === "stroke") return AnnotationInk.boundsOf(item);
+    if (item.type === "group") return AnnotationGroups.rectOf(item);
+    return _shownRectOf(item);
+  }
+
+  function _contains(outer, inner) {
+    return inner.left >= outer.left && inner.top >= outer.top
+      && inner.left + inner.w <= outer.left + outer.w && inner.top + inner.h <= outer.top + outer.h;
+  }
+
   function onMouseMove(e) {
+    const world = graph._worldAt(e.clientX, e.clientY);
+    pointerWorld = world;
     if (!gesture) {
       _updateHoverCursor(e);
       return active;
@@ -609,33 +863,43 @@ const Annotations = (() => {
       e.clientX - (gesture.startClientX ?? e.clientX),
       e.clientY - (gesture.startClientY ?? e.clientY),
     ) > DRAG_THRESHOLD;
-    const world = graph._worldAt(e.clientX, e.clientY);
 
     if (gesture.kind === "drag") {
       if (!gesture.moved && pastThreshold) gesture.moved = true;
       if (!gesture.moved) return true;
       const startWorld = graph._worldAt(gesture.startClientX, gesture.startClientY);
       const dx = world.x - startWorld.x, dy = world.y - startWorld.y;
-      for (const note of notes) {
-        const start = gesture.starts.get(note.id);
+      for (const item of shared.items) {
+        const start = gesture.starts.get(item.id);
         if (!start) continue;
-        note.x = start.x + dx;
-        note.y = start.y + dy;
+        item.x = start.x + dx;
+        item.y = start.y + dy;
       }
+      // Members move by this step's delta rather than to start + total:
+      // the layout keeps nudging them between mouse events, and pinning
+      // them to a fixed offset would fight it.
+      const stepX = dx - gesture.lastDx, stepY = dy - gesture.lastDy;
+      for (const moteId of gesture.members) {
+        const node = graph.nodes.get(moteId);
+        if (node) { node.x += stepX; node.y += stepY; }
+      }
+      gesture.lastDx = dx;
+      gesture.lastDy = dy;
+      if (gesture.members.length) graph.alpha = Math.max(graph.alpha, 0.3);
     } else if (gesture.kind === "box") {
       if (!gesture.moved && pastThreshold) gesture.moved = true;
       if (!gesture.moved) return true;
-      const start = graph._worldAt(gesture.startClientX, gesture.startClientY);
-      gesture.rect = {
-        left: Math.min(start.x, world.x), top: Math.min(start.y, world.y),
-        w: Math.abs(world.x - start.x), h: Math.abs(world.y - start.y),
-      };
-      // Live, like graph.js's box-select: notes light up as the box
-      // reaches them, not only on release.
+      gesture.rect = _dragRect(gesture, world);
+      // Live, like graph.js's box-select: annotations light up as the box
+      // reaches them, not only on release. Notes and strokes need only
+      // touch the box; a group, being big, must be wholly inside it.
       selected = new Set(gesture.base);
-      for (const note of notes) {
-        if (_rectsOverlap(_shownRectOf(note), gesture.rect)) selected.add(note.id);
+      for (const item of shared.items) {
+        const bounds = _boundsOf(item);
+        const hit = item.type === "group" ? _contains(gesture.rect, bounds) : _rectsOverlap(bounds, gesture.rect);
+        if (hit) selected.add(item.id);
       }
+      _changed();
     } else if (gesture.kind === "connect") {
       gesture.cursor = world;
       gesture.targetId = graph.hitTest(e.clientX, e.clientY);
@@ -654,8 +918,45 @@ const Annotations = (() => {
       note.height = h;
       note.x = gesture.startX + (w - gesture.startBaseW) / 2;
       note.y = gesture.startY + (h - gesture.startBaseH) / 2;
+    } else if (gesture.kind === "groupResize") {
+      if (!gesture.moved && pastThreshold) gesture.moved = true;
+      if (!gesture.moved) return true;
+      const group = _byId(gesture.id);
+      if (!group) return true;
+      const scale = graph.camera.scale;
+      const min = AnnotationGroups.MIN_SIZE;
+      group.width = Math.max(min, gesture.startW + (e.clientX - gesture.startClientX) / scale);
+      group.height = Math.max(min, gesture.startH + (e.clientY - gesture.startClientY) / scale);
+      group.x = gesture.left + group.width / 2;
+      group.y = gesture.top + group.height / 2;
+      graph.alpha = Math.max(graph.alpha, 0.3);
+    } else if (gesture.kind === "groupDraw") {
+      if (!gesture.moved && pastThreshold) gesture.moved = true;
+      if (gesture.moved) gesture.rect = _dragRect(gesture, world);
+    } else if (gesture.kind === "pen") {
+      AnnotationInk.extend(gesture, world);
+    } else if (gesture.kind === "erase") {
+      _eraseAt(world);
     }
     return true;
+  }
+
+  function _dragRect(g, world) {
+    const start = graph._worldAt(g.startClientX, g.startClientY);
+    return {
+      left: Math.min(start.x, world.x), top: Math.min(start.y, world.y),
+      w: Math.abs(world.x - start.x), h: Math.abs(world.y - start.y),
+    };
+  }
+
+  /** The eraser takes strokes off the canvas as it touches them; the one
+   *  save (and undo step) waits for mouseup. */
+  function _eraseAt(world) {
+    const hits = AnnotationInk.erasedAt(strokes, world.x, world.y);
+    if (hits.length === 0) return;
+    for (const stroke of hits) gesture.ids.add(stroke.id);
+    shared.items = shared.items.filter((a) => !gesture.ids.has(a.id));
+    _reindex();
   }
 
   async function onMouseUp(e) {
@@ -665,10 +966,13 @@ const Annotations = (() => {
 
     if (g.kind === "drag") {
       if (g.moved) {
-        const moves = notes.filter((n) => g.starts.has(n.id)).map((n) => ({ id: n.id, x: n.x, y: n.y }));
+        const moves = shared.items.filter((a) => g.starts.has(a.id)).map((a) => ({ id: a.id, x: a.x, y: a.y }));
+        // Pinned members moved too, and pinned positions are the host's
+        // to save.
+        if (g.members.length && graph.callbacks.onPositionsChanged) graph.callbacks.onPositionsChanged();
         await api.move_annotations(moves);
       } else if (!e.shiftKey && selected.size > 1) {
-        // A plain click on one note of a multi-selection narrows to it,
+        // A plain click on one item of a multi-selection narrows to it,
         // same as clicking a mote in graph.js.
         selected = new Set([g.id]);
       }
@@ -681,14 +985,30 @@ const Annotations = (() => {
     } else if (g.kind === "resize" && g.moved) {
       const note = notes.find((n) => n.id === g.id);
       if (note) await api.resize_annotation(note.id, note.x, note.y, note.width, note.height);
+    } else if (g.kind === "groupResize" && g.moved) {
+      const group = _byId(g.id);
+      if (group) await api.resize_annotation(group.id, group.x, group.y, group.width, group.height);
+    } else if (g.kind === "groupDraw") {
+      setTool("select");
+      if (g.moved && g.rect.w >= AnnotationGroups.MIN_SIZE / 2 && g.rect.h >= AnnotationGroups.MIN_SIZE / 2) {
+        await _createGroup(g.rect);
+      }
+    } else if (g.kind === "pen") {
+      const stroke = AnnotationInk.finish(g, pen.widthPx);
+      const created = await api.create_stroke(stroke.x, stroke.y, stroke.points, stroke.width, pen.color);
+      shared.items.push(created);
+      _reindex();
+    } else if (g.kind === "erase" && g.ids.size) {
+      await api.delete_annotations([...g.ids]);
     }
-    onChanged();
+    _changed();
     return true;
   }
 
-  /** Double-click edits a note, or adds one: on a mote, attached to it;
-   *  anywhere else, on the canvas. */
+  /** Double-click (Select tool) edits a note or a group's title, or adds
+   *  a note: on a mote, attached to it; anywhere else, on the canvas. */
   function onDoubleClick(e) {
+    if (tool !== "select") return true;
     const world = graph._worldAt(e.clientX, e.clientY);
     const hit = _hitTest(world.x, world.y);
     if (hit) {
@@ -696,7 +1016,19 @@ const Annotations = (() => {
       _startEditing(hit);
       return true;
     }
-    const moteId = graph.hitTest(e.clientX, e.clientY);
+    const group = AnnotationGroups.hitTest(world.x, world.y);
+    if (group) {
+      selected = new Set([group.id]);
+      AnnotationGroups.startEditing(group);
+      return true;
+    }
+    if (AnnotationInk.hitTest(strokes, world.x, world.y)) return true;
+    _createNoteAt(e.clientX, e.clientY, world);
+    return true;
+  }
+
+  function _createNoteAt(clientX, clientY, world) {
+    const moteId = graph.hitTest(clientX, clientY);
     if (moteId) {
       _create({
         anchorMode: "mote", moteId,
@@ -706,67 +1038,132 @@ const Annotations = (() => {
     } else {
       _create({ anchorMode: "world", x: world.x, y: world.y });
     }
-    return true;
   }
 
-  /** Keys that act on the note selection. The host calls this first
+  /** Keys for the tools and the selection. The host calls this first
    *  while annotate mode is on and skips its own handling when it returns
-   *  true. The editor textarea stops its own keys from reaching here. */
+   *  true. The note and title editors stop their own keys from reaching
+   *  here. */
   function onKeyDown(e) {
-    if (!active || editingId != null) return false;
+    if (!active || editingId != null || AnnotationGroups.isEditing()) return false;
+    const toolKey = TOOL_KEYS[e.key.toLowerCase()];
+    if (toolKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setTool(toolKey);
+      return true;
+    }
     if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
       e.preventDefault();
-      _deleteNotes([...selected]);
+      _deleteItems([...selected]);
       return true;
     }
     if (e.key === "Enter" && selected.size === 1) {
-      const note = notes.find((n) => selected.has(n.id));
-      if (note) {
+      const item = _byId([...selected][0]);
+      if (item && item.type === "sticky_note") {
         e.preventDefault();
-        _startEditing(note);
+        _startEditing(item);
+        return true;
+      }
+      if (item && item.type === "group") {
+        e.preventDefault();
+        AnnotationGroups.startEditing(item);
         return true;
       }
     }
-    if (e.key === "Escape" && selected.size > 0) {
-      selected.clear();
-      onChanged();
-      return true;
+    if (e.key === "Escape") {
+      // Back to Select first, then clear the selection; only with neither
+      // left does Escape fall through to the host (which leaves the mode).
+      if (tool !== "select") {
+        setTool("select");
+        return true;
+      }
+      if (selected.size > 0) {
+        selected.clear();
+        _changed();
+        return true;
+      }
     }
     return false;
   }
 
   function _updateHoverCursor(e) {
     if (!active) return;
+    if (tool !== "select") {
+      graph.canvas.style.cursor = _toolCursor();
+      return;
+    }
     const world = graph._worldAt(e.clientX, e.clientY);
     let cursor = "default";
     if (_hitTestCloseBadge(world.x, world.y)) cursor = "pointer";
     else if (_hitTestResizeGrip(world.x, world.y)) cursor = "nwse-resize";
     else if (_hitTest(world.x, world.y)) cursor = e.ctrlKey || e.metaKey ? "crosshair" : "move";
+    else if (AnnotationGroups.hitTestResizeGrip(world.x, world.y)) cursor = "nwse-resize";
+    else if (AnnotationInk.hitTest(strokes, world.x, world.y)) cursor = "move";
+    else if (AnnotationGroups.hitTest(world.x, world.y)) cursor = "move";
     graph.canvas.style.cursor = cursor;
   }
 
   function _endGesture() {
     if (gesture && gesture.kind === "connect") graph.hoverId = null;
     gesture = null;
-    if (graph) graph.canvas.style.cursor = "default";
+    if (graph) graph.canvas.style.cursor = active ? _toolCursor() : "default";
+  }
+
+  // ---- host layout hooks ----------------------------------------------------
+
+  function applyLayoutForces(host) {
+    if (graph) AnnotationGroups.applyForces(host);
+  }
+
+  function constrainLayout(host) {
+    if (graph) AnnotationGroups.constrain(host);
+  }
+
+  /** The host finished dragging motes (outside annotate mode): each joins
+   *  the group box it was dropped in, or leaves its group if it was
+   *  dropped outside it. */
+  function onMotesDropped(ids) {
+    if (!graph) return;
+    const changes = AnnotationGroups.membershipAfterDrop(ids);
+    if (changes.length === 0) return;
+    onChanged();
+    api.set_group_members(changes).then(() => onChanged());
   }
 
   // ---- CRUD ---------------------------------------------------------------
 
   async function _create({ anchorMode, x, y, moteId }) {
     const note = await api.create_sticky_note(anchorMode, x, y, moteId || null, "");
-    notes.push(note);
+    shared.items.push(note);
+    _reindex();
     selected = new Set([note.id]);
-    onChanged();
+    _changed();
     _startEditing(note);
   }
 
-  async function _deleteNotes(ids) {
+  /** A group around whatever visible motes the drawn rectangle holds.
+   *  Refreshes afterwards: taking motes from another group edited that
+   *  group's row too. Opens the title for typing, as a new note opens
+   *  its text. */
+  async function _createGroup(rect) {
+    const members = AnnotationGroups.motesIn(rect);
+    const created = await api.create_group(
+      rect.left + rect.w / 2, rect.top + rect.h / 2, rect.w, rect.h, members, null,
+    );
+    await refresh();
+    selected = new Set([created.id]);
+    _changed();
+    const group = _byId(created.id);
+    if (group) AnnotationGroups.startEditing(group);
+  }
+
+  async function _deleteItems(ids) {
     if (editingId != null && ids.includes(editingId)) _stopEditing({ save: false });
     const gone = new Set(ids);
-    notes = notes.filter((n) => !gone.has(n.id));
+    shared.items = shared.items.filter((a) => !gone.has(a.id));
+    _reindex();
     for (const id of ids) { selected.delete(id); heightCache.delete(id); }
-    onChanged();
+    _changed();
     await api.delete_annotations(ids);
   }
 
@@ -803,7 +1200,7 @@ const Annotations = (() => {
       // reaching for its × badge.
       if (e.key === "Backspace" && editor.value === "" && editingId != null) {
         e.preventDefault();
-        _deleteNotes([editingId]);
+        _deleteItems([editingId]);
       }
       e.stopPropagation(); // don't let graph.js's Delete/Ctrl+Z shortcuts fire while typing
     });
@@ -881,13 +1278,17 @@ const Annotations = (() => {
   /** Called every frame while an editor is open, so it tracks pan/zoom --
    *  the host calls this from the same place it calls draw(). */
   function tick() {
+    if (!graph) return;
+    AnnotationGroups.tick();
     if (editingId == null) return;
     const note = notes.find((n) => n.id === editingId);
     if (note) _positionEditor(note);
   }
 
   return {
-    install, isActive, hasNotes, selectedIds, enter, exit, refresh,
-    draw, tick, onMouseDown, onMouseMove, onMouseUp, onDoubleClick, onKeyDown,
+    install, isActive, hasNotes, hasContent, selectedIds, currentTool, setTool,
+    enter, exit, refresh, drawUnderlay, draw, tick,
+    onMouseDown, onMouseMove, onMouseUp, onDoubleClick, onKeyDown,
+    applyLayoutForces, constrainLayout, onMotesDropped,
   };
 })();

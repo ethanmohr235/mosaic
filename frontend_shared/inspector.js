@@ -109,6 +109,14 @@ const Inspector = (() => {
 
   function speciesColor(speciesId, emphatic) {
     if (!speciesId) return UNKNOWN_COLOR;
+    // The host's graph is the source of truth for species colour -- it
+    // knows about custom colours the user picked, which this panel has
+    // no way to see on its own. Fall back to the hash-based palette only
+    // when no host is wired up to answer (or hasn't seen this species).
+    if (hostSpeciesColor) {
+      const fromHost = hostSpeciesColor(speciesId, !!emphatic);
+      if (fromHost) return fromHost;
+    }
     const map = slots();
     // A species made since the last payload has claimed nothing yet; its
     // unprobed entry still gives its instances a consistent colour.
@@ -131,6 +139,7 @@ const Inspector = (() => {
   let hostEditor = null;
   let notesDoor = true;
   let onOpenMora = () => {};
+  let hostSpeciesColor = null;
 
   let root = null;
   let leader = null;
@@ -167,6 +176,7 @@ const Inspector = (() => {
     // Mora is the room, not a door to it.
     notesDoor = options.notesDoor !== false;
     onOpenMora = options.onOpenMora || (() => {});
+    hostSpeciesColor = options.speciesColorFor || null;
     build();
     restoreGeometry();
     state.advanced = localStorage.getItem(ADVANCED_KEY) === "1";

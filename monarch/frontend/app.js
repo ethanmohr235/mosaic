@@ -751,7 +751,7 @@ function exitAttractorMode() {
   renderViewSettings();
 }
 
-// ---- annotations (sticky notes) ----
+// ---- annotations (notes, group boxes, ink) ----
 
 function enterAnnotateMode() {
   if (attractorMode) exitAttractorMode();
@@ -759,7 +759,7 @@ function enterAnnotateMode() {
   graph.setAnnotateMode(true);
   $("annotate-mode-btn").classList.add("active");
   Annotations.enter();
-  showToast("Annotating — double-click to add or edit a note (on a mote to attach it), ctrl+drag a note onto a mote to attach/detach.", 5000);
+  showToast("Annotating — pick a tool below (V N G P E). Double-click adds a note; ctrl+drag one onto a mote to attach it.", 4000);
 }
 
 function exitAnnotateMode() {
@@ -1036,8 +1036,30 @@ function renderMultiRelationshipPanel(ids) {
     container.appendChild(el);
   }
 
+  $("rename-relationship-selection-btn").textContent = `Rename ${ids.length} relationships`;
   $("delete-relationship-selection-btn").textContent = `Delete ${ids.length} relationships`;
   $("detail-panel").classList.remove("hidden");
+}
+
+/** Bulk counterpart to renameRelationshipType. Prompts once for the new
+ *  type and applies it to every selected relationship -- pre-fills the
+ *  prompt with the common type when the selection happens to share one,
+ *  otherwise leaves it blank rather than guessing. */
+async function renameRelationshipSelection() {
+  if (editBlocked()) return;
+  const ids = [...graph.selectedRelIds];
+  if (ids.length === 0) return;
+
+  const types = new Set(
+    ids.map((id) => graph.relationships.find((r) => r.id === id)?.type).filter(Boolean)
+  );
+  const common = types.size === 1 ? [...types][0] : "";
+  const next = window.prompt(`Rename ${ids.length} relationships to:`, common);
+  if (!next || next === common) return;
+
+  for (const id of ids) await call(api.update_relationship(id, null, null, next));
+  await refocus(focusId, { pan: false });
+  renderMultiRelationshipPanel(ids);
 }
 
 /** Bulk counterpart to deleteRelationshipAndRefresh. No confirm dialog,
@@ -1783,6 +1805,7 @@ function setupViewControls() {
   $("close-panel").addEventListener("click", closeDetailPanel);
 
   $("delete-selection-btn").addEventListener("click", deleteSelection);
+  $("rename-relationship-selection-btn").addEventListener("click", renameRelationshipSelection);
   $("delete-relationship-selection-btn").addEventListener("click", deleteRelationshipSelection);
 }
 
@@ -2169,6 +2192,10 @@ async function init() {
     valueEditor: monarchValueEditor,
     advancedSections: [monarchSpeciesExtras],
     onOpenMora: () => showToast("Opening Mora…"),
+    // Without this the panel falls back to its own hash-based palette,
+    // which disagrees with the graph whenever a species has a custom
+    // colour picked in view settings.
+    speciesColorFor: (id, emphatic) => graph.speciesColorFor(id, { emphatic }),
   });
   CommandBar.install({
     api,

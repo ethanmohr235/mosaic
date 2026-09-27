@@ -1,7 +1,8 @@
-/* The one DOM element frontend_shared/annotations.js needs: a text
- * editor overlaid on a sticky note being edited. Positioned in JS
- * (annotations.js's _positionEditor), tracking the host canvas's pan/zoom;
- * this file only carries its static look. */
+/* The DOM side of annotate mode (frontend_shared/annotations.js and its
+ * annotation_*.js modules): the text editor overlaid on a sticky note
+ * being edited, the title editor over a group box's tab, and the tool
+ * bar. Editors are positioned in JS, tracking the host canvas's pan/zoom;
+ * this file only carries their static look. */
 
 .annotation-editor {
   position: fixed;
@@ -37,3 +38,118 @@
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* ---- group titles ----
+ * The one-line editor over a group box's title tab
+ * (annotation_groups.js's _positionEditor sets its geometry and
+ * background, the group's own color, every frame). */
+
+.annotation-group-title {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  margin: 0;
+  border: none;
+  outline: none;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 600;
+  color: oklch(0.18 0 0);
+  caret-color: oklch(0.18 0 0);
+  box-shadow: 0 0 0 1px var(--accent, oklch(0.74 0.10 68)), 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.annotation-group-title::placeholder { color: oklch(0.18 0 0 / 0.5); }
+.annotation-group-title.hidden { display: none; }
+
+/* ---- tool bar ----
+ * annotation_toolbar.js: bottom centre of the graph, only while
+ * annotating. */
+
+.annotation-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
+  background: var(--panel, oklch(0.205 0 0));
+  border: 1px solid var(--border-soft, oklch(1 0 0 / 0.08));
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  user-select: none;
+}
+.annotation-toolbar.hidden { display: none; }
+
+.annotation-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.annotation-toolbar-group.hidden { display: none; }
+.annotation-toolbar-group + .annotation-toolbar-group {
+  padding-left: 6px;
+  margin-left: 2px;
+  border-left: 1px solid var(--border-soft, oklch(1 0 0 / 0.08));
+}
+
+.annotation-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted, oklch(0.68 0 0));
+  cursor: pointer;
+}
+.annotation-tool:hover { background: var(--raised, oklch(0.24 0 0)); color: var(--fg, oklch(0.93 0 0)); }
+.annotation-tool.active {
+  background: var(--accent-soft, oklch(0.74 0.10 68 / 0.12));
+  border-color: var(--accent, oklch(0.74 0.10 68));
+  color: var(--accent, oklch(0.74 0.10 68));
+}
+.annotation-tool:focus-visible { outline: 2px solid var(--accent, oklch(0.74 0.10 68)); outline-offset: 1px; }
+.annotation-tool:disabled { opacity: 0.35; cursor: default; background: transparent; }
+
+.annotation-swatch {
+  width: 18px;
+  height: 18px;
+  margin: 0 1px;
+  padding: 0;
+  border: 1.5px solid transparent;
+  border-radius: 50%;
+  background: var(--swatch);
+  background-clip: padding-box;
+  cursor: pointer;
+}
+.annotation-swatch.active { box-shadow: 0 0 0 1.5px var(--fg, oklch(0.93 0 0)); }
+.annotation-swatch:focus-visible { outline: 2px solid var(--accent, oklch(0.74 0.10 68)); outline-offset: 1px; }
+
+.annotation-toolbar-colors input[type="color"] {
+  width: 24px;
+  height: 22px;
+  margin-left: 3px;
+  padding: 0;
+  border: 1px solid var(--border, oklch(0.32 0 0));
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.annotation-reset { font-size: 14px; width: 26px; }
+
+.annotation-width-dot {
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The tool bar sits where Monarch's toast pops up; lift the toast above
+ * it while annotating. */
+body.annotation-toolbar-open #toast { bottom: 96px; }

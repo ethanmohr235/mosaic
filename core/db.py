@@ -117,8 +117,8 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     );
     """)
 
-    # Commentary layered over the graph -- sticky notes today, other markup
-    # types later (see core/annotations.py). Deliberately not a mote: it
+    # Commentary layered over the graph -- sticky notes, group boxes and
+    # pen strokes (see core/annotations.py). Deliberately not a mote: it
     # must never appear in list_motes/neighborhood/species queries, and it
     # is local-only (no oplog row is ever written for it, unlike motes and
     # relationships above).
@@ -135,8 +135,9 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     # coordinates when 'world', an offset from the mote's position when
     # 'mote' (or, once orphaned, the note's last-known world position).
     # `type`/`data` (a JSON blob, parsed only by type-specific code, same
-    # convention as mote_properties.value) are what let a future
-    # annotation type reuse this table without a migration.
+    # convention as mote_properties.value) are what let a new annotation
+    # type reuse this table without a migration -- a group keeps its
+    # member ids there, a stroke its points.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS annotations (
         id TEXT PRIMARY KEY,

@@ -604,3 +604,91 @@ def test_anchor_annotation_attaches_and_detaches_undoably(api):
     api.undo()
     back = api.list_annotations()[0]
     assert (back["anchorMode"], back["x"], back["y"]) == ("world", 100, 100)
+
+
+def _groups(api) -> dict:
+    return {a["id"]: a for a in api.list_annotations() if a["type"] == "group"}
+
+
+def test_create_group_takes_members_from_other_groups_in_one_undo_step(api):
+    first = api.create_group(0, 0, 100, 100, ["m1", "m2"])
+    second = api.create_group(50, 0, 100, 100, ["m2", "m3"])
+
+    groups = _groups(api)
+    assert groups[first["id"]]["data"]["members"] == ["m1"]
+    assert groups[second["id"]]["data"]["members"] == ["m2", "m3"]
+
+    api.undo()
+    groups = _groups(api)
+    assert list(groups) == [first["id"]]
+    assert groups[first["id"]]["data"]["members"] == ["m1", "m2"]
+
+
+def test_set_group_members_moves_a_mote_between_groups_undoably(api):
+    a = api.create_group(0, 0, 100, 100, ["m1", "m2"])
+    b = api.create_group(200, 0, 100, 100, ["m3"])
+
+    api.set_group_members([{"groupId": b["id"], "members": ["m3", "m2"]}])
+    groups = _groups(api)
+    assert groups[a["id"]]["data"]["members"] == ["m1"]
+    assert groups[b["id"]]["data"]["members"] == ["m3", "m2"]
+    assert api.undo_manager._undo_stack[-1].label == "regroup motes"
+
+    api.undo()
+    groups = _groups(api)
+    assert groups[a["id"]]["data"]["members"] == ["m1", "m2"]
+    assert groups[b["id"]]["data"]["members"] == ["m3"]
+
+
+def test_stroke_create_move_delete_are_undoable(api):
+    stroke = api.create_stroke(1, 2, [[0, 0], [3, 4]], 2.5, "#00ff00")
+    assert stroke["type"] == "stroke"
+    assert stroke["data"]["points"] == [[0, 0], [3, 4]]
+
+    api.move_annotations([{"id": stroke["id"], "x": 11, "y": 12}])
+    assert api.undo_manager._undo_stack[-1].label == "move a drawing"
+    api.undo()
+    assert (api.list_annotations()[0]["x"], api.list_annotations()[0]["y"]) == (1, 2)
+
+    api.delete_annotations([stroke["id"]])
+    assert api.list_annotations() == []
+    api.undo()
+    assert api.list_annotations()[0]["data"]["width"] == 2.5
+
+
+def test_recolor_annotations_is_one_undo_step_and_none_means_automatic(api):
+    group = api.create_group(0, 0, 10, 10, [])
+    stroke = api.create_stroke(0, 0, [[0, 0]], 1, "#111111")
+
+    api.recolor_annotations([group["id"], stroke["id"]], "#abcdef")
+    assert {a["color"] for a in api.list_annotations()} == {"#abcdef"}
+    assert api.undo_manager._undo_stack[-1].label == "recolor 2 annotations"
+
+    api.undo()
+    colors = {a["id"]: a["color"] for a in api.list_annotations()}
+    assert colors == {group["id"]: None, stroke["id"]: "#111111"}
+
+    api.recolor_annotations([stroke["id"]], None)
+    assert {a["id"]: a["color"] for a in api.list_annotations()}[stroke["id"]] is None
+
+
+def test_group_title_edit_is_labelled_as_a_rename(api):
+    group = api.create_group(0, 0, 10, 10, [])
+    api.update_annotation_text(group["id"], "Backend")
+    assert api.list_annotations()[0]["text"] == "Backend"
+    assert api.undo_manager._undo_stack[-1].label == "rename a group"
+
+
+def test_groups_and_strokes_never_write_to_oplog_or_mote_payloads(api):
+    mote = api.create_mote({"name": "A"})
+    before = api._conn.execute("SELECT COUNT(*) AS n FROM oplog").fetchone()["n"]
+
+    group = api.create_group(0, 0, 10, 10, [mote["id"]])
+    stroke = api.create_stroke(0, 0, [[0, 0]], 1)
+    api.set_group_members([{"groupId": group["id"], "members": []}])
+    api.recolor_annotations([group["id"], stroke["id"]], "#123456")
+    api.delete_annotations([group["id"], stroke["id"]])
+
+    after = api._conn.execute("SELECT COUNT(*) AS n FROM oplog").fetchone()["n"]
+    assert after == before
+    assert all("annotation" not in m for m in api.list_motes())

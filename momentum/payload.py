@@ -302,8 +302,8 @@ def is_done(card: dict) -> bool:
 
 
 def session_payload(mote: Mote, directory: Directory, subject_id: str | None) -> dict:
-    """One logged work session. `subject` is the task it was about --
-    the mote on the other end of its `about` relationship -- so the log
+    """One logged work session. `subject` is the task it was for --
+    the mote on the other end of its `for` relationship -- so the log
     can name what the time went into without a second lookup.
 
     How long it ran comes from the interval's own span, the same reading

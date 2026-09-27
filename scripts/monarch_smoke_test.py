@@ -3196,6 +3196,188 @@ def run_checks(window):
     check("sticky notes: 'a' toggles annotate mode, zoomed-out notes collapse to a marker",
           note_key_toggle_and_zoomed_out_glyph)
 
+    def group_boxes_ink_and_toolbar():
+        """Annotate mode's tool bar and the two annotation kinds it adds:
+        the Group tool draws a box that captures the motes inside it and
+        opens its title; dragging the box by its tab carries its members
+        (never pinning them) and the ink inside it, and undo puts it back;
+        its walls keep members in and non-members out; dragging a member
+        out in the ordinary editor drops it from the group; the swatches
+        recolor a selected group; Pen strokes and the Eraser removes them."""
+        def annotations(kind):
+            raw = js_async(window, """
+                async () => { window.__result = await api.list_annotations(); }
+            """, wait=3.0)
+            items = json.loads(raw) if raw not in (None, "null") else []
+            return [a for a in items if a["type"] == kind]
+
+        def key(k, **mods):
+            flags = ", ".join(f"{name}: true" for name in mods)
+            js(window, f"""
+                document.dispatchEvent(new KeyboardEvent('keydown', {{
+                    key: {json.dumps(k)}, bubbles: true, cancelable: true{', ' + flags if flags else ''}
+                }}));
+            """)
+            time.sleep(0.3)
+
+        def screen_of(x, y):
+            p = json.loads(js(window, f"JSON.stringify(graph._worldToScreen({x}, {y}))"))
+            return p["x"], p["y"]
+
+        def node(id_js):
+            return json.loads(js(window, f"JSON.stringify(graph.nodes.get({id_js}))"))
+
+        def inside(n, g, pad=0):
+            return (g["x"] - g["width"] / 2 - pad <= n["x"] <= g["x"] + g["width"] / 2 + pad
+                    and g["y"] - g["height"] / 2 - pad <= n["y"] <= g["y"] + g["height"] / 2 + pad)
+
+        # Two motes somewhere no other mote is, and a third (not grouped)
+        # to test the walls against. All pinned for now, so the layout
+        # can't carry one off before the box is drawn round it.
+        made = json.loads(js_async(window, """
+            async () => {
+                const one = await api.create_mote({name: 'Group-One'});
+                const two = await api.create_mote({name: 'Group-Two'});
+                const out = await api.create_mote({name: 'Group-Outsider'});
+                await refreshMoteCache();
+                await refocus(one.id);
+                const c = graph.viewCenterWorld();
+                const X = c.x + 4000, Y = c.y;
+                graph.placeAt(one.id, X, Y);
+                graph.placeAt(two.id, X + 60, Y);
+                graph.placeAt(out.id, X + 400, Y);
+                graph._fitUntilAlpha = 0; graph.panTarget = null;
+                graph.camera.scale = 1; graph.camera.x = -X - 30; graph.camera.y = -Y;
+                window.__result = {one: one.id, two: two.id, out: out.id, X, Y};
+            }
+        """, wait=3.0))
+        one_js, two_js, out_js = (json.dumps(made[k]) for k in ("one", "two", "out"))
+        X, Y = made["X"], made["Y"]
+        time.sleep(0.3)
+
+        key("a")
+        assert js(window, "graph.annotateMode") is True
+        assert js(window, "document.querySelector('.annotation-toolbar').classList.contains('hidden')") is False, (
+            "the tool bar should show while annotating"
+        )
+
+        # Group tool: draw a box round the two motes.
+        key("g")
+        assert js(window, "Annotations.currentTool()") == "group"
+        assert js(window, "document.querySelector('.annotation-tool.active').title") == "Group (G)"
+        x1, y1 = screen_of(X - 60, Y - 60)
+        x2, y2 = screen_of(X + 120, Y + 60)
+        drag(window, x1, y1, x2, y2)
+        assert wait_until(lambda: len(annotations("group")) == 1), "drawing with the Group tool should add a group"
+        group = annotations("group")[0]
+        assert set(group["data"]["members"]) == {made["one"], made["two"]}, group["data"]
+        assert js(window, "Annotations.currentTool()") == "select", "the Group tool should hand back to Select"
+        assert js(window, "document.activeElement.classList.contains('annotation-group-title')") is True, (
+            "a new group should open its title for typing"
+        )
+        js(window, """
+            (function() {
+                const input = document.activeElement;
+                input.value = 'Pair';
+                input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            })();
+        """)
+        assert wait_until(lambda: annotations("group")[0]["text"] == "Pair"), "Enter should save the title"
+        # From here on one member floats: only the box holds it.
+        js(window, f"graph.unpin({two_js});")
+
+        # Pen: a stroke inside the box, which the box will carry.
+        key("p")
+        sx1, sy1 = screen_of(X - 20, Y + 30)
+        sx2, sy2 = screen_of(X + 80, Y + 40)
+        drag(window, sx1, sy1, sx2, sy2)
+        assert wait_until(lambda: len(annotations("stroke")) == 1), "a Pen drag should add a stroke"
+        stroke = annotations("stroke")[0]
+        assert len(stroke["data"]["points"]) >= 2 and stroke["data"]["width"] > 0, stroke
+        assert js(window, "Annotations.currentTool()") == "pen", "the Pen should stay picked"
+
+        # Move the group by its title tab.
+        key("v")
+        tab_x, tab_y = screen_of(X - 60 + 24, Y - 60 - 10)
+        drag(window, tab_x, tab_y, tab_x + 150, tab_y)
+        assert wait_until(lambda: abs(annotations("group")[0]["x"] - (group["x"] + 150)) < 1), (
+            f"dragging the tab should move the group, got {annotations('group')[0]['x']} vs {group['x'] + 150}"
+        )
+        moved_stroke = annotations("stroke")[0]
+        assert abs(moved_stroke["x"] - (stroke["x"] + 150)) < 1, "the stroke inside the box should move with it"
+        time.sleep(1.0)
+        moved = annotations("group")[0]
+        one_now, two_now = node(one_js), node(two_js)
+        assert abs(one_now["x"] - (X + 150)) < 1, f"the pinned member should move with the box: {one_now}"
+        assert inside(two_now, moved), f"the floating member should stay inside the box: {two_now} {moved}"
+        assert two_now["pinned"] is False, "moving a group must never pin its members"
+
+        # Undo puts the box (and the stroke) back; the wall brings the
+        # members back with it.
+        key("z", ctrlKey=True)
+        assert wait_until(lambda: abs(annotations("group")[0]["x"] - group["x"]) < 1), "Ctrl+Z should undo the move"
+        assert abs(annotations("stroke")[0]["x"] - stroke["x"]) < 1, "the carried stroke's move is the same undo step"
+        time.sleep(0.5)
+        assert inside(node(one_js), group) and inside(node(two_js), group), "members should follow the box back"
+
+        # Walls: a non-member put inside the box is pushed straight out.
+        js(window, f"graph.placeAt({out_js}, {group['x']}, {group['y']});")
+        time.sleep(0.3)
+        assert not inside(node(out_js), group), f"a non-member should be pushed out: {node(out_js)}"
+
+        # Recolor: select the group by its tab, click the third swatch.
+        tab_x, tab_y = screen_of(X - 60 + 24, Y - 60 - 10)
+        drag(window, tab_x, tab_y, tab_x, tab_y)
+        assert js(window, "JSON.stringify(Annotations.selectedIds())") == json.dumps([group["id"]])
+        assert js(window, "document.querySelector('.annotation-toolbar-colors').classList.contains('hidden')") is False
+        swatch = js(window, "document.querySelectorAll('.annotation-swatch')[2].dataset.color")
+        js(window, "document.querySelectorAll('.annotation-swatch')[2].click();")
+        assert wait_until(lambda: annotations("group")[0]["color"] == swatch), "a swatch should recolor the group"
+        js(window, "document.querySelector('.annotation-reset').click();")
+        assert wait_until(lambda: annotations("group")[0]["color"] is None), "↺ should go back to automatic"
+
+        # Eraser: drag across the stroke.
+        key("e")
+        ex1, ey1 = screen_of(X + 30, Y - 10)
+        ex2, ey2 = screen_of(X + 30, Y + 70)
+        drag(window, ex1, ey1, ex2, ey2)
+        assert wait_until(lambda: len(annotations("stroke")) == 0), "the Eraser should remove the stroke it crosses"
+
+        # Esc: back to Select, then (nothing selected) out of the mode.
+        key("Escape")
+        assert js(window, "Annotations.currentTool()") == "select"
+        key("Escape")
+        key("Escape")
+        assert js(window, "graph.annotateMode") is False
+        assert js(window, "document.querySelector('.annotation-toolbar').classList.contains('hidden')") is True
+
+        # In the ordinary editor, dragging a member out drops it from the group.
+        tx, ty = node_xy(window, two_js)
+        drag(window, tx, ty, tx, ty + 250)
+        assert wait_until(lambda: annotations("group")[0]["data"]["members"] == [made["one"]]), (
+            f"dragging a member out should drop it: {annotations('group')[0]['data']}"
+        )
+        # ...and dragging it back in adds it again.
+        tx, ty = node_xy(window, two_js)
+        cx, cy = screen_of(group["x"] + 30, group["y"])
+        drag(window, tx, ty, cx, cy)
+        assert wait_until(lambda: set(annotations("group")[0]["data"]["members"]) == {made["one"], made["two"]}), (
+            "dropping a mote inside a box should add it"
+        )
+
+        js_async(window, f"""
+            async () => {{
+                await api.delete_annotations({json.dumps([group['id']])});
+                await Annotations.refresh();
+                for (const id of [{one_js}, {two_js}, {out_js}]) await api.delete_mote(id);
+                await refreshMoteCache();
+                window.__result = 'ok';
+            }}
+        """, wait=3.0)
+
+    check("annotate tool bar: group boxes hold and carry motes, pen and eraser, recolor, undo",
+          group_boxes_ink_and_toolbar)
+
     def soon_stubs_toast_instead_of_doing_nothing():
         js(window, "document.getElementById('file-btn').click();")
         time.sleep(0.3)

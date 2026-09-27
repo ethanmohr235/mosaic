@@ -290,12 +290,12 @@ def test_a_logged_session_is_an_ordinary_dated_mote(api, board):
         "an ordinary interval, which is why Monastery draws it for free"
 
 
-def test_a_session_points_at_the_task_it_was_about(api, board):
+def test_a_session_points_at_the_task_it_was_for(api, board):
     api.log_session(board["schema"], 25)
     panel = api.focus(board["schema"])
-    about = [r for r in panel["relationships"] if r["type"] == "about"]
-    assert len(about) == 1
-    assert about[0]["outgoing"] is False
+    for_rel = [r for r in panel["relationships"] if r["type"] == "for"]
+    assert len(for_rel) == 1
+    assert for_rel[0]["outgoing"] is False
 
 
 def test_a_session_shows_up_in_the_log_with_its_subject(api, board):

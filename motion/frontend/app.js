@@ -2383,17 +2383,6 @@ function wire() {
     armCompare = !armCompare;
     renderRail();
   };
-  $("tool-layout").onclick = () => {
-    positions = layoutNodes(board.nodes);
-    layout.zoom = 1;
-    layout.panX = 0;
-    layout.panY = 0;
-    savePositions();
-    saveLayout();
-    applyLayout();
-    renderBoards();
-    toast("Layout reset, view recentred.");
-  };
   $("zoom-label").onclick = () => {
     layout.zoom = 1;
     layout.panX = 0;
