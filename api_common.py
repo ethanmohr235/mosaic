@@ -8,6 +8,7 @@ to get re-copied per app.
 """
 import functools
 import json
+import logging
 import os
 import platform
 import re
@@ -19,15 +20,20 @@ import webbrowser
 from pathlib import Path
 
 from core import annotations as annotations_repo
+from core import gardens as gardens_repo
 from core import links as links_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import species as species_repo
+from core import sync as sync_repo
 from core import undo
 from core import units as units_repo
 from core.command_bar import run_command, suggest as suggest_command
+from core.db import get_connection
 from core.reserved import RESERVED_PROPERTIES, RESERVED_RELATIONSHIP_TYPES
 from core.undo import UndoManager
+
+logger = logging.getLogger(__name__)
 
 
 def _push_undo(api, command, coalesce_key=None, coalesce_window: float = 1.5) -> None:
@@ -163,6 +169,32 @@ def popen_detached(args: list[str], *, quiet: bool = True) -> None:
     streams = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if quiet else {}
     proc = subprocess.Popen(args, **streams)
     threading.Thread(target=proc.wait, daemon=True).start()
+
+
+def best_effort_sync(garden: str) -> None:
+    """Every app's `_best_effort_sync()` calls this on open, garden
+    switch, and close: it pushes/pulls `garden` on a background thread,
+    using its own short-lived connection rather than the caller's, so a
+    sync server that's slow or offline (compass turned off, Tailscale
+    peer unreachable) never blocks opening, switching gardens, or
+    closing a window -- whichever one of those called this has often
+    already replaced or closed its own connection by the time the
+    thread gets to run. Errors are logged, not raised: this path is
+    opportunistic, unlike the visible refresh()/sync_now() button,
+    which waits and surfaces a real failure to the user."""
+    if gardens_repo.get_sync_dir(garden) is None:
+        return
+
+    def _run() -> None:
+        conn = get_connection(garden)
+        try:
+            sync_repo.run(conn, garden)
+        except Exception:
+            logger.exception("garden sync failed for %r", garden)
+        finally:
+            conn.close()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def open_app(app_id: str, garden: str, mote_id: str | None = None) -> dict:

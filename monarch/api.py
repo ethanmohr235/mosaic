@@ -9,6 +9,7 @@ from pathlib import Path
 import webview
 
 from api_common import AnnotatableApi, CommandBarApi, InspectorApi, UndoableApi
+from api_common import best_effort_sync as _best_effort_sync_bg
 from api_common import coerce_properties as _coerce_properties
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
@@ -89,17 +90,12 @@ class Api(InspectorApi, CommandBarApi, UndoableApi, AnnotatableApi):
         sync server (`sync init`, core/sync.py) -- called on open, on
         garden switch, and on close, so "edit on one device, open the
         app on another later" converges with no action from the user.
-        Never allowed to block opening or closing the app: a sync
-        server that's a moment unreachable just means this pass is
-        skipped, not a failure to launch."""
-        if gardens_repo.get_sync_dir(self._current_garden) is None:
-            return
+        Runs on a background thread (api_common.best_effort_sync): a
+        sync server that's unreachable just means this pass is skipped,
+        never a delay to opening or closing the app."""
         if not gardens_repo.get_auto_sync_enabled(self._current_garden):
             return
-        try:
-            sync_repo.run(self._conn, self._current_garden)
-        except Exception:
-            logger.exception("garden sync failed for %r", self._current_garden)
+        _best_effort_sync_bg(self._current_garden)
 
     @_synchronized
     def shutdown(self) -> None:

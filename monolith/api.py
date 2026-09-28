@@ -28,6 +28,7 @@ import threading
 import webview
 
 from api_common import CommandBarApi, InspectorApi, UndoableApi
+from api_common import best_effort_sync as _best_effort_sync_bg
 from api_common import coerce as _coerce
 from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
@@ -91,13 +92,9 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         """run_monolith.py is its own launch path, so an edit made here
         must converge on its own rather than depending on another
         window's session having been open to carry it. Never allowed to
-        block opening, switching or closing this window."""
-        if gardens_repo.get_sync_dir(self._garden) is None:
-            return
-        try:
-            sync_repo.run(self._conn, self._garden)
-        except Exception:
-            logger.exception("garden sync failed for %r", self._garden)
+        block opening, switching or closing this window: it runs on a
+        background thread (api_common.best_effort_sync)."""
+        _best_effort_sync_bg(self._garden)
 
     # ---- sync ----
 
