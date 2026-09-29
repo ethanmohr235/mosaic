@@ -87,9 +87,9 @@ every feature built on it must still work when it's absent.
 
 The app is moving from separate windows to **one tiled window**: each
 app becomes a tile in a single workspace, with a compact, minimal,
-terminal-like look. The design language is still being worked out in a
-separate design project, so don't lock in visual details yet. Build new
-UI with tiling in mind.
+terminal-like look. `console.md` has the decided design (with the
+visual reference in `docs/design/mosaic-console/`), the architecture
+and the port order.
 
 | Surface | Role in the new direction |
 |---|---|

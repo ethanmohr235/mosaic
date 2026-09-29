@@ -77,9 +77,11 @@ Each one was a separate act of filing. That lesson became a rule in
   revisions.
 
 ### Surfaces
-- **One tiled window.** Apps become tiles, with a compact, minimal,
-  terminal-like look. It gets built in parallel with the other phases,
-  pending the design project. Build new UI with tiling in mind.
+- **One tiled window (the console).** Apps become panes in one
+  keyboard-first, all-monospace window. It gets built in parallel with
+  the other phases as steps U1–U9. The design, architecture, view
+  contract and step order are in `console.md`. Once U1 lands, new UI is
+  built only there.
 - **Momentum:** remove it. Keep `status` and `estimate` as plain
   properties.
 - **Monastery:** becomes the agenda that launches work: project bars
@@ -101,7 +103,7 @@ Each one was a separate act of filing. That lesson became a rule in
 
 ## Phases
 
-The order is cleanup first, then smallest shippable. The tiled window runs
+The order is cleanup first, then smallest shippable. The tiled window (`console.md`, steps U1–U9) runs
 alongside all of them.
 
 | # | Phase | Proves |

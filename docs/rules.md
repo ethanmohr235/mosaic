@@ -2,7 +2,8 @@
 
 Read `philosophy.md`, `overview.md`, and `roadmap.md` before changing code.
 Read the reference doc for whatever you touch (`architecture.md`,
-`simulation.md`, `modoc.md`, `mcp.md`, `ui-setup.md`).
+`simulation.md`, `modoc.md`, `mcp.md`, `ui-setup.md`). For any UI work,
+read `console.md` first.
 
 ## Workflow
 
