@@ -1,3 +1,7 @@
+> Reference for the code as it is today. For the product direction, see
+> `overview.md` and `roadmap.md`. Sections change as each roadmap phase
+> lands.
+
 MonOSS should not be a very complicated software fundamentally.
 
 Store motes and relationships in SQLite database(s). Use Python commands to update those databases.
@@ -32,7 +36,7 @@ Species, template, property model and rule are all the same idea: an ordinary mo
 
 Called kinds and not roles, which is what this was: `core/roles.py` answers a different question -- what an assembly's parts are *called* (see Roles below). **A kind is what a mote is; a role is what something else calls it.** A kind is derived and never stored; a role is a declared property. The frontend was already using this word (`kindLabel`, `kindOf`), so the rename made existing names correct rather than inventing one.
 
-`core/kinds.py` is where it is answered, once. It is an index, not an implementation: each kind's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()` -- and the `KINDS` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for kinds, and `docs/style.md` rules out the global mutable state a `register_kind()` would need.
+`core/kinds.py` is where it is answered, once. It is an index, not an implementation: each kind's detection stays in the module that owns the concept -- `species_ids_in()`, `template_ids_in()`, `model_ids_in()`, `rule_ids_in()` + `has_equation()` -- and the `KINDS` table just says which is which, plus the human label every surface shows. A declarative table rather than a providers-style registry: there is no plugin story for kinds, and `docs/rules.md` rules out the global mutable state a `register_kind()` would need.
 
 | kind | recognized by |
 | --- | --- |
@@ -85,8 +89,7 @@ equation's dimensional consistency, reusing `core/formula.py`'s
 call-name whitelist rather than duplicating it -- that whitelist is the
 security boundary, and two copies could drift. Mismatches are advisory
 by default (`SimulationResult.dimension_warnings`); `strict_units=True`
-promotes them to a failure. See `docs/simulation.md` for the reference
-and `docs/units_proposal` for the design.
+promotes them to a failure. See `docs/simulation.md` for the reference.
 
 # Physical property models
 
@@ -98,8 +101,7 @@ via a `uses_model` relationship. The property-model mote itself carries a
 to instantiate, e.g. a gas constant). `core/model_resolver.py` turns that
 relationship into an executable `PropertyProvider` (`core/providers.py`);
 simulation rules never see the provider directly, only the `property()`
-builtin described in `docs/simulation.md`. See
-`docs/physical_property_proposal` for the full design.
+builtin described in `docs/simulation.md`.
 
 A provider declares `DESCRIPTION`, `CONFIGURATION` and `CAPABILITIES` on
 the class, not per instance, so `core/providers.py::describe_providers()`
@@ -336,8 +338,7 @@ raises on before any read is recorded, still shows up as the thing
 is solving; while solving, a missing property is an error, and answering
 for it would produce a confident wrong number instead of a failure.
 
-See `docs/simulation.md` for the reference and `docs/modeling_proposal`
-for the design and what follows it.
+See `docs/simulation.md` for the reference.
 
 # The Observatory
 
@@ -358,7 +359,7 @@ only place the two representations are visible at once.
 Roles, freedoms and scenarios needed no bespoke editors: they are
 ordinary properties and relationships, so the existing property editor
 and the reserved-name badge already cover them. That is the monism paying
-for itself -- every abstraction added in `docs/modeling_proposal` arrived
+for itself -- every modeling abstraction (roles, freedoms, scenarios) arrived
 in the GUI as data the app already knew how to display.
 
 See `docs/ui-setup.md` for the interaction reference.

@@ -14,7 +14,7 @@ import time -- never parsed as arbitrary expressions from a database
 string -- so naming a unit can't make MonOSS interpret something it
 wasn't built to.
 
-See docs/units_proposal.
+See docs/simulation.md, Units.
 """
 import math
 import re

@@ -1,138 +1,132 @@
-# MonOSS Project Overview
+# Mosaic Project Overview
+
+Mosaic was called MonOSS during early development. Code, packages, and
+the MCP server still use the old names (`monoss`, `Monarch`, `Mora`, …).
+Don't mass-rename anything until a phase approves it.
 
 ## Purpose
 
-MonOSS (Monist Organization and Simulation System) is a personal information management platform centered around the idea that every piece of information can be represented as an object with properties and relationships.
+Mosaic is where an engineer's projects live. A project is a model (givens,
+equations, solved values, units), the documents that show that work, the
+plots that illustrate it, and the deadlines and time it runs on. The first
+user is an engineering student: homework sets, lab reports, FEA
+verification write-ups. The same shape later becomes a working engineer's
+calc package, with givens, assumptions, method, results, checks, and
+revisions.
 
-Unlike traditional note-taking or task-management software, MonOSS does not separate information into rigid categories such as notes, contacts, files, projects, calendars, or tasks. Instead, everything is modeled as a single fundamental object type called a **mote**. Specialized behavior emerges from the properties attached to motes and the relationships between them.
+Most of the work happens in the calculation. That's where most of the
+investment goes, but the core treats a deadline and an equation as the
+same kind of thing.
 
-The goal is to create a flexible knowledge graph that more closely represents how real-world information is connected than conventional folder hierarchies or isolated applications.
-
----
-
-## Philosophy
-
-MonOSS is built around several core principles.
-
-### Everything is a mote
-
-Every entity in the system is represented by a mote.
-
-Examples include:
-
-* people
-* projects
-* tasks
-* meetings
-* ideas
-* books
-* documents
-* locations
-* organizations
-* events
-
-The system should never introduce separate object models for concepts that can instead be represented as motes.
+What sets Mosaic apart is **model + live document + plots over one graph,
+local, with units**. EES solves equations but has no structure or
+documents. Mathcad puts math inside a document, but the document *is* the
+model. LaTeX looks good, but its numbers go stale. Excel hides formulas
+and has no units.
 
 ---
 
-### Relationships are first-class
+## The model
 
-Connections between objects are just as important as the objects themselves.
+Everything is a **mote**: one object type with free-form JSON properties.
+Motes are connected by typed **relationships**. A **garden** is a
+separate graph stored as one SQLite file in the `gardens/` folder.
 
-Examples:
+Specialized behavior comes from data, not from new object models:
 
-* Alice **works_on** Reactor Project
-* Reactor Project **contains** Fuel Analysis
-* Meeting **references** Design Document
-* Book **written_by** Author
+- A mote is a **species** when others point at it with `instance_of`. A
+  species may have a **template** via `template_of`.
+- A mote with an `equation` is a **rule**. Rules solve for **freedoms**
+  and reach other motes through `applies_to`, roles, and connected names.
+- **Units**, **property models** (CoolProp, ideal gas), **scenarios**,
+  **sweeps**, and **comparison constraints** are all properties and
+  relationships the engine recognizes by reserved names (`core/reserved.py`).
+- A mote with `modoc` is a **note**: a LaTeX-like document whose `\val`,
+  `\mote`, and `\graph` read the graph live.
 
-Relationships are stored explicitly and should never be duplicated as hidden references inside individual objects.
+Properties describe; relationships connect. Never duplicate a
+relationship as a hidden reference inside a property.
 
----
-
-### Properties describe, relationships connect
-
-A property is data owned by a single mote.
-
-Examples:
-
-* name
-* description
-* due date
-* phone number
-* priority
-* creation time
-
-Relationships connect multiple motes together.
-
-Maintaining this distinction is fundamental to the data model.
+See `architecture.md` and `simulation.md` for the full reference.
 
 ---
 
-### Extensibility over specialization
+## Structure: motes own gardens
 
-The system should avoid hardcoding behavior for specific object types whenever possible.
+Projects are organized by one convention: **a mote may own a garden**.
 
-New object types should typically be created through data, configuration, or plugins rather than modifications to the core architecture.
+- A mote carrying `garden: <name>` owns that garden. Usually the owner is
+  a deliverable, like the `HW 4` homework mote in `college-fall-2026`.
+  *Start project* on a mote creates the garden and writes the property.
+  Creating the project is the only act of filing.
+- **The owning mote is the project's cover.** Its title, `due`,
+  `status`, author, and revision are what Home lists and what Mora's
+  title block prints. The child garden holds only the work.
+- **Nesting is recursion.** A mote inside a project garden can own a
+  garden of its own, so projects within projects need nothing new.
+- **One owner per garden.** If two motes claim the same garden, that's
+  flagged, which keeps the structure a tree and the cover unambiguous.
+- **A "hub"** is just a garden whose motes own other gardens, such as a
+  semester or a job. It holds coordination (deadlines, classes, events,
+  time), and its children hold calculation. Nothing marks it as special.
+- **Loose gardens** (demos, scratch work) have no owner and still work
+  everywhere.
+- **On disk, gardens stay flat.** The tree lives only in `garden:`
+  properties, and the filename is the garden's identity. There are no
+  subdirectories and no registry.
+- **Across gardens, access is read-only.** Cross-garden search can read
+  every garden, and importing makes a copy that records its source.
+  There are no live links between gardens.
 
----
-
-### Simple core, powerful composition
-
-The core system should remain small.
-
-Complex behavior should emerge by composing:
-
-* motes
-* properties
-* relationships
-* rules
-* plugins
-* services
-
-Avoid adding special cases that only solve one problem.
-
----
-
-## Long-Term Goals
-
-MonOSS is intended to become a unified platform for:
-
-* personal knowledge management
-* task management
-* project planning
-* note organization
-* contact management
-* research organization
-* simulation and rule execution
-* automation
-* plugin-based extensions
-
-Rather than replacing one application, MonOSS aims to replace the need for many disconnected applications by providing a common object model.
+This is a convention, not a schema. The store doesn't enforce it, and
+every feature built on it must still work when it's absent.
 
 ---
 
-## Current Architecture
+## Surfaces
 
-The current implementation is written in Python.
+The app is moving from separate windows to **one tiled window**: each
+app becomes a tile in a single workspace, with a compact, minimal,
+terminal-like look. The design language is still being worked out in a
+separate design project, so don't lock in visual details yet. Build new
+UI with tiling in mind.
 
-Data is stored in SQLite.
+| Surface | Role in the new direction |
+|---|---|
+| **Motion** | Main calc surface: model, runs, scenarios, solve health. One of several editors, alongside a planned worksheet. |
+| **Mora** | Engineering documents: shown work, given/answers, LaTeX export, submit and revisions. |
+| **Moxie** | Plots, heading toward publication-quality export. |
+| **Monolith** | The general table, plus a project variables pane (value, unit, given/solved/external, ±). |
+| **Monastery** | The agenda that launches work: project bars, plan-my-week, click-to-open, planned vs. actual time. |
+| **Gardens → Home** | The garden tree (owners → owned gardens) plus loose gardens. Health indicators come later. |
+| **Monarch** | Graph view as a structure debugger for seeing and editing plumbing. No new investment. |
+| **Momentum** | Being removed. Its scheduling ideas move to Monastery. |
+| **CLI / MCP** | Scriptable and agent access to the same core. MCP is a side door, not the product. |
 
-The application follows a layered architecture that separates:
-
-* data storage
-* repositories
-* services
-* business logic
-* user interfaces
-
-The project intentionally favors readability, maintainability, and correctness over premature optimization.
+`core/` holds all logic. Every surface is a thin adapter over it, and
+an adapter that holds logic of its own is a bug.
 
 ---
 
-## Design Priorities
+## Current architecture
 
-When making implementation decisions, prioritize the following in order:
+- Python, with SQLite per garden.
+- pywebview windows with hand-written HTML/JS frontends (no framework).
+- `core/` holds the domain: motes, relationships, species, rules,
+  solvers (linear, Newton), units, providers, scenarios, sweeps, modoc,
+  and sync.
+- Adapters: `cli/`, `mcp_server/`, and one package per app (`monarch/`,
+  `mora/`, `motion/`, …).
+- `sync_server/` provides optional sync between machines.
+
+The project favors readability, maintainability, and correctness over
+premature optimization.
+
+---
+
+## Design priorities
+
+When making implementation decisions, prioritize in this order:
 
 1. Correctness
 2. Simplicity
@@ -140,26 +134,24 @@ When making implementation decisions, prioritize the following in order:
 4. Extensibility
 5. Performance
 
-Avoid introducing unnecessary abstractions, frameworks, or dependencies.
+Avoid unnecessary abstractions, frameworks, and dependencies.
 
 ---
 
-## What Claude Should Optimize For
+## What agents should optimize for
 
-When implementing features, optimize for consistency with the existing architecture rather than minimizing lines of code.
+Aim for a coherent, long-lived system whose architecture stays
+understandable as it grows, not just for code that works.
 
-New features should:
+- Reuse existing abstractions. Stay consistent with the architecture
+  rather than minimizing lines.
+- Keep everything a mote. Surfaces may hide plumbing but must never
+  replace it.
+- Don't duplicate data.
+- Keep APIs predictable.
+- Include tests, and update the docs with any architectural change.
+- Don't redesign the architecture unless explicitly asked.
+- When a requirement is ambiguous, ask instead of inventing behavior.
 
-* reuse existing abstractions whenever practical
-* preserve the "everything is a mote" philosophy
-* avoid duplicating data
-* keep APIs predictable
-* maintain backwards compatibility when reasonable
-* include tests
-* include documentation for significant architectural changes
-
-Do not redesign the architecture unless explicitly instructed.
-
-If requirements are ambiguous, prefer asking for clarification over inventing behavior.
-
-The objective is not simply to produce working code. The objective is to build a coherent, long-lived system whose architecture remains understandable as it grows.
+See `philosophy.md` for the principles, `rules.md` for the working
+rules, and `roadmap.md` for what's planned.

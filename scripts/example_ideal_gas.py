@@ -14,9 +14,8 @@ never import volts or ohms:
     Container --gas--> Air --uses_model--> Ideal Air --provider--> ideal_gas
 
 `ideal_gas` (core/ideal_gas_provider.py) is a plain closed-form equation
-of state, not an external library -- see docs/physical_property_proposal
-for why it, rather than a real library like CoolProp, is what proves this
-architecture first.
+of state, not an external library -- it, rather than a real library like
+CoolProp, is what proves this architecture first.
 
 Re-run it and it rebuilds from scratch; delete the garden file to remove.
 """

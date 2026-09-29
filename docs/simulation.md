@@ -1120,9 +1120,3 @@ a rule that doesn't add up.
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
 - **Species inheritance.** Species are flat.
-- **Multi-mote models as roles.** A rule reaches other motes by
-  navigating relationships (`targets('a').voltage`), which works but ties
-  the model to graph topology rather than to named roles. See
-  `docs/modeling_proposal`.
-- **Scenarios.** A garden holds one state, so asking a second question
-  means editing it. See `docs/modeling_proposal`.

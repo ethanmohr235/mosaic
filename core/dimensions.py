@@ -22,7 +22,7 @@ import, testable with dicts.
 The grammar accepted here must stay identical to the one core/formula.py
 evaluates -- it reuses that module's call-name constants rather than
 repeating them, and tests/test_dimensions.py fails if a builtin is added
-there without being handled here. See docs/units_proposal.
+there without being handled here. See docs/simulation.md, Units.
 """
 import ast
 from collections.abc import Callable

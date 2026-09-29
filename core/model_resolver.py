@@ -4,7 +4,7 @@ PropertyProvider. Pure and DB-free, like core/formula.py's Context --
 takes the same plain-callable shapes (`properties`, `targets`) rather
 than a connection, so it stays trivially testable with dicts and never
 gets re-resolved from the database mid-formula-evaluation. See
-docs/physical_property_proposal.
+docs/simulation.md, Physical property models.
 
 Importing this module registers every built-in provider (currently Ideal
 Gas and CoolProp) -- the single explicit registration point. Anything that

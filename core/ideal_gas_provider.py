@@ -4,7 +4,7 @@ T (the intensive form of PV = nRT, using a specific gas constant R in
 J/(kg*K) rather than the universal gas constant). Needs no external
 dependency, which is why it -- not CoolProp -- is what proves the
 property-model architecture end-to-end first. See
-docs/physical_property_proposal.
+docs/simulation.md, Physical property models.
 
 R is generic configuration, not hardcoded to any one gas: dry air is
 287.05 J/(kg*K), but the same provider works for any gas given its own

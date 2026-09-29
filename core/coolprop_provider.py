@@ -2,8 +2,7 @@
 """The first provider backed by a real external library (core/ideal_gas_
 provider.py needs none, which is why it -- not this -- proved the property-
 model architecture first). Wraps CoolProp's high-level PropsSI interface for
-water/steam and anything else CoolProp knows how to compute. See
-docs/physical_property_proposal Sec 16.
+water/steam and anything else CoolProp knows how to compute.
 
 CoolProp's own SI unit system already matches MonOSS's convention (Sec 12:
 Pa, K, J/kg, J/(kg*K), kg/m^3) exactly, so evaluate() does no unit

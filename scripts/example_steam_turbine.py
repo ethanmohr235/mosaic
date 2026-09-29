@@ -18,7 +18,7 @@ calculation: look up inlet enthalpy and entropy from (P_in, T_in), look up
 the enthalpy an isentropic expansion to P_out would reach (P_out, s_in),
 then scale the ideal enthalpy drop by the turbine's efficiency to get
 actual work. Boiler/Condenser are included only so the mote graph looks
-like the real system (see docs/physical_property_proposal Sec 15) -- they
+like the real system -- they
 carry no rules of their own; this example proves the property-model
 architecture, and deliberately stays two independent turbines rather than
 a cycle, because two instances of one species is the shape it is
@@ -29,8 +29,8 @@ together by an assembly mote through declared roles -- see
 `scripts/example_rankine_cycle.py`.
 
 `coolprop` (core/coolprop_provider.py) is MonOSS's first provider backed by
-a real external library -- see docs/physical_property_proposal for why
-core/ideal_gas_provider.py, not this, proved the architecture first.
+a real external library; core/ideal_gas_provider.py, not this, proved the
+architecture first.
 
 Re-run it and it rebuilds from scratch; delete the garden file to remove.
 """

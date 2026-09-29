@@ -24,7 +24,7 @@ still lives in the module that owns the concept -- species_ids_in(),
 model_ids_in(), template_ids_in(), rule_ids_in() + has_equation() --
 and KINDS below just says which is which. A declarative table rather
 than a registry providers-style: there is no plugin story here, and
-docs/style.md rules out the global mutable state a register_kind()
+docs/rules.md rules out the global mutable state a register_kind()
 would need.
 
 Kinds are not exclusive. A template of one species can be an instance

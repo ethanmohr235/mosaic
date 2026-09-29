@@ -15,7 +15,7 @@ below (motes, property models, .modoc) still print directly -- they were
 is a separate cleanup, not a merge.
 
 Printing, not logging, on purpose: this is a CLI's actual output, which
-docs/style.md's "no print debugging" rule is not about.
+docs/rules.md's "no print debugging" rule is not about.
 """
 import json
 import sqlite3
