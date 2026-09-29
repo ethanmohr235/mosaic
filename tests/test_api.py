@@ -9,6 +9,7 @@ from core import query as q
 from core import sync as sync_repo
 from core.gardens import create_garden, set_auto_sync_enabled
 from monarch.api import Api, _coerce_properties
+from tests.conftest import wait_until
 
 
 @pytest.fixture
@@ -196,7 +197,7 @@ def test_best_effort_sync_runs_when_auto_sync_enabled(api, sync_dir, monkeypatch
 
     api.switch_garden("other")
     api.switch_garden("test")
-    assert calls == [1]
+    assert wait_until(lambda: calls == [1])
 
 
 def test_shutdown_skips_sync_when_auto_sync_disabled(sync_dir, monkeypatch):

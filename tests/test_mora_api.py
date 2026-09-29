@@ -19,6 +19,7 @@ from core.sweep import PLOT_KEY
 from core.sync_remote import has_history as sync_has_history
 from mora.api import Api
 from mora.app import DEFAULT_HTTP_PORT
+from tests.conftest import wait_until
 from window_launcher import choose_port
 
 
@@ -303,7 +304,7 @@ def test_opening_mora_pushes_pending_local_changes(sync_dir):
     instance = Api("synced")
     instance.shutdown()
 
-    assert sync_has_history(sync_dir, "synced")
+    assert wait_until(lambda: sync_has_history(sync_dir, "synced"))
 
 
 def test_switching_garden_pushes_the_new_gardens_pending_changes(sync_dir):
@@ -321,7 +322,7 @@ def test_switching_garden_pushes_the_new_gardens_pending_changes(sync_dir):
     instance.switch_garden("synced")
     instance.shutdown()
 
-    assert sync_has_history(sync_dir, "synced")
+    assert wait_until(lambda: sync_has_history(sync_dir, "synced"))
 
 
 def test_opening_mora_on_an_unsynced_garden_does_nothing(api):

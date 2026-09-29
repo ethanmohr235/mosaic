@@ -17,6 +17,7 @@ from core.species import set_species
 from core.sync_remote import has_history as sync_has_history
 from monastery.api import Api
 from monastery.app import DEFAULT_HTTP_PORT
+from tests.conftest import wait_until
 from window_launcher import choose_port
 
 WEEK_START = "2026-08-24T00:00:00"
@@ -369,7 +370,7 @@ def test_opening_monastery_pushes_pending_local_changes(sync_dir):
     instance = Api("synced")
     instance.shutdown()
 
-    assert sync_has_history(sync_dir, "synced")
+    assert wait_until(lambda: sync_has_history(sync_dir, "synced"))
 
 
 # ---- manual refresh ----

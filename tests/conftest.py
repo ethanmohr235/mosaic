@@ -115,3 +115,19 @@ def sync_dir():
         pytest.skip("Docker not available for testcontainers")
     with live_sync_server() as base_url:
         yield base_url
+
+
+def wait_until(predicate, timeout: float = 2.0, interval: float = 0.02) -> bool:
+    """Polls `predicate` (a zero-arg callable) until it's truthy or
+    `timeout` elapses, returning the last value seen. api_common.py's
+    best_effort_sync() runs each app's open/switch/close sync on a
+    background thread (so a slow or offline sync server never blocks
+    the app), so a test asserting it fired has to give that thread a
+    moment rather than checking right after the call that started it
+    returns."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = predicate()
+        if result or time.monotonic() >= deadline:
+            return result
+        time.sleep(interval)
