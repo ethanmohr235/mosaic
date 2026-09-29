@@ -77,7 +77,7 @@ function formatWhen(epochSeconds) {
   return `${Math.round(days / 365)} years ago`;
 }
 
-// ---- the six windows this garden can be opened in --------------------
+// ---- the five windows this garden can be opened in -------------------
 //
 // The same list, names and glyphs the ⌘J switcher carries in each app,
 // so "Motion" is the same mark wherever it is offered. api_common.APPS
@@ -108,15 +108,6 @@ const APPS = [
       <rect x="7" y="9" width="26" height="7" rx="3" fill="var(--fg)" opacity="0.25"></rect>
       <rect x="12" y="21" width="6" height="5" rx="1" fill="var(--accent)"></rect>
       <rect x="22" y="21" width="6" height="5" rx="1" fill="var(--fg)" opacity="0.35"></rect>
-    </svg>`,
-  },
-  {
-    id: "momentum", name: "Momentum",
-    icon: `<svg width="17" height="17" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="8" width="9" height="24" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="20" y="8" width="9" height="16" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="9.5" y="11" width="4" height="3" rx="1" fill="var(--accent)"></rect>
-      <rect x="22.5" y="11" width="4" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
     </svg>`,
   },
   {

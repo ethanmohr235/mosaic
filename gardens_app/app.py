@@ -32,9 +32,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # this window is by definition open alongside others.
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_gardens"
 
-# 42001-42006 belong to Monarch, Mora, Monastery, Momentum, Monolith and
-# Motion. Seventh window, seventh port -- and see window_launcher.choose_port
-# for why asking for a port somebody else holds is worse than it sounds.
+# 42001-42003 belong to Monarch, Mora and Monastery, 42005-42006 to
+# Monolith and Motion. Seventh window, seventh port -- and see
+# window_launcher.choose_port for why asking for a port somebody else
+# holds is worse than it sounds.
 DEFAULT_HTTP_PORT = 42007
 
 

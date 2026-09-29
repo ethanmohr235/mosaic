@@ -127,8 +127,8 @@ function paletteColor(slot, emphatic) {
   return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${entry.h.toFixed(1)})`;
 }
 
-// The four other windows carry these constants and these two functions
-// byte for byte (mora, monastery, momentum, monolith), so a species is
+// The three other windows carry these constants and these two functions
+// byte for byte (mora, monastery, monolith), so a species is
 // the same colour wherever it is drawn. What they cannot share is the
 // slot map below: this one hangs off the graph object and theirs is a
 // module-level Map, because only this window redraws 60 times a second

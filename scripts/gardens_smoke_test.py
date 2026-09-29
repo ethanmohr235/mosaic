@@ -180,9 +180,9 @@ def run_checks(window):
 
     check("selecting a garden fills the detail pane", selecting_a_garden_fills_the_detail_pane)
 
-    def open_in_offers_all_six_windows():
+    def open_in_offers_all_five_windows():
         assert texts(window, "#open-in .app-chip") == [
-            "Monarch", "Mora", "Monastery", "Momentum", "Monolith", "Motion"
+            "Monarch", "Mora", "Monastery", "Monolith", "Motion"
         ], f"got {texts(window, '#open-in .app-chip')}"
 
         js(window, """
@@ -194,7 +194,7 @@ def run_checks(window):
         )
         assert json.loads(js(window, "JSON.stringify(window.__opened)")) == [["motion", "alpha"]]
 
-    check("Open in offers all six windows and launches the one clicked", open_in_offers_all_six_windows)
+    check("Open in offers all five windows and launches the one clicked", open_in_offers_all_five_windows)
 
     def creating_a_garden_adds_and_selects_it():
         click(window, "#new-btn")

@@ -1,11 +1,11 @@
-/* The floating mote inspector -- one surface, seven windows.
+/* The floating mote inspector -- one surface, six windows.
  *
  * Every window here shows motes some particular way: Monarch as a graph,
- * Monolith as a table, Monastery as a calendar, Momentum as a board,
- * Mora as prose, Motion as a solver. What they used to disagree about
- * was what happens once you pick one. Monarch could add a property and
- * set a species; Motion could overwrite the values a mote already had
- * and nothing else; Mora could do neither. The same mote therefore had
+ * Monolith as a table, Monastery as a calendar, Mora as prose, Motion
+ * as a solver. What they used to disagree about was what happens once
+ * you pick one. Monarch could add a property and set a species; Motion
+ * could overwrite the values a mote already had and nothing else; Mora
+ * could do neither. The same mote therefore had
  * six different sets of things you were allowed to do to it, decided by
  * which window you happened to be standing in.
  *
@@ -1235,7 +1235,7 @@ const Inspector = (() => {
   }
 
   /** The default is the upper right of whatever window this is, and it
-   *  is the same default in all seven -- that sameness is the point, since
+   *  is the same default in all six -- that sameness is the point, since
    *  it is what makes the panel feel like one surface you keep meeting
    *  rather than six panels that resemble each other. Where you then
    *  drag it is remembered per app: each window is its own origin, so

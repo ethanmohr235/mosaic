@@ -391,7 +391,7 @@ def test_open_mora_follows_a_garden_switch(api, monkeypatch):
 
 # ---- the ⌘J switcher ----
 #
-# open_mora/open_monastery/open_momentum above stay named the way
+# open_mora/open_monastery above stay named the way
 # Monarch's own Tools menu calls them; open_app is the app-agnostic
 # counterpart the switcher uses instead. Its command-building is
 # api_common.open_app's own test (tests/test_api_common.py) -- what's

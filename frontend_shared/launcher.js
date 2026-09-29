@@ -1,5 +1,5 @@
 /* The app switcher (⌘/Ctrl+J) -- every sibling app but this one, in a
- * fixed order so "Motion is ⌘6" holds regardless of what's typed into
+ * fixed order so "Motion is ⌘5" holds regardless of what's typed into
  * the filter box. See api_common.py::APPS for the id each maps to on
  * the Python side.
  *
@@ -50,15 +50,6 @@ const Launcher = (() => {
         <rect x="7" y="15" width="26" height="1.6" fill="var(--fg)" opacity="0.5"></rect>
         <rect x="12" y="20" width="5" height="5" rx="1" fill="var(--fg)" opacity="0.55"></rect>
         <rect x="21" y="20" width="5" height="5" rx="1" fill="var(--accent)"></rect>
-      </svg>`,
-    },
-    {
-      id: "momentum", name: "Momentum", kind: "tasks",
-      desc: "Task board, week planner and focus timer.",
-      icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-        <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
-        <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
-        <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
       </svg>`,
     },
     {

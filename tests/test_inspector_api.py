@@ -1,13 +1,12 @@
 """The bridge contract the shared floating inspector speaks.
 
-Tested once, here, rather than six times over: api_common.InspectorApi is
+Tested once, here, rather than five times over: api_common.InspectorApi is
 mixed into every window's Api, so the same methods with the same shapes
-are what Monarch, Motion, Monolith, Mora, Monastery and Momentum all
-expose. The last test in this file is the one that holds that claim up.
+are what Monarch, Motion, Monolith, Mora and Monastery all expose. The
+last test in this file is the one that holds that claim up.
 """
 import pytest
 
-import momentum.api
 import monarch.api
 import monastery.api
 import monolith.api
@@ -351,7 +350,7 @@ CONTRACT = [
 
 
 @pytest.mark.parametrize("module", [
-    monarch.api, motion.api, monolith.api, mora.api, monastery.api, momentum.api,
+    monarch.api, motion.api, monolith.api, mora.api, monastery.api,
 ])
 def test_every_window_speaks_the_whole_contract(module):
     """The inspector is one surface in six windows, so it has to find the

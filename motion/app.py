@@ -23,7 +23,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # apps are meant to run at once.
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_motion"
 
-# 42001-42005 belong to Monarch, Mora, Monastery, Momentum and Monolith.
+# 42001-42003 belong to Monarch, Mora and Monastery, and 42005 to Monolith.
 # Asking for a port another window already holds is not a near miss: the
 # loser fails to bind and then loads *the winner's* page against its own
 # bridge -- see window_launcher.choose_port, and mora/app.py for the time

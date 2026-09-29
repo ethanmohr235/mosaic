@@ -52,8 +52,8 @@ from window_launcher import choose_port  # noqa: E402
 FRONTEND_DIR = PROJECT_ROOT / "motion" / "frontend"
 GARDEN = "smoke"
 
-# The ports pywebview pins the other five windows to. The whole run
-# happens with all five occupied, because that is the real condition --
+# The ports pywebview pins the other four windows to. The whole run
+# happens with all four occupied, because that is the real condition --
 # Motion is opened from a running Monarch, possibly alongside all of
 # them -- and because it is the condition that broke for Mora once: it
 # asked for a taken port, lost, and loaded the other app's page against
@@ -62,7 +62,6 @@ OCCUPIED = (
     (42001, "Monarch", "monarch"),
     (42002, "Mora", "mora"),
     (42003, "Monastery", "monastery"),
-    (42004, "Momentum", "momentum"),
     (42005, "Monolith", "monolith"),
 )
 
@@ -621,10 +620,10 @@ def drive():
 
 
 def _occupy(port, directory):
-    """Stand in for a running MonOSS / Mora / Monastery / Momentum /
-    Monolith: hold the port and serve that app's frontend off it, so a
-    Motion that asks for the wrong port doesn't merely fail -- it loads
-    the other app's page, exactly as Mora once did."""
+    """Stand in for a running MonOSS / Mora / Monastery / Monolith: hold
+    the port and serve that app's frontend off it, so a Motion that asks
+    for the wrong port doesn't merely fail -- it loads the other app's
+    page, exactly as Mora once did."""
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
     try:
         server = socketserver.TCPServer(("127.0.0.1", port), handler)

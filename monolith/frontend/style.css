@@ -1,7 +1,7 @@
 /* monolith/frontend/style.css
    Monolith's window, sharing the main app's palette so the five read as
    one product -- the tokens below are monarch/frontend/style.css's, the
-   same copy Mora, Monastery and Momentum carry, for the same reason:
+   same copy Mora and Monastery carry, for the same reason:
    pywebview's http server roots at the directory of the page it serves,
    so a stylesheet one directory over is not reachable.
 

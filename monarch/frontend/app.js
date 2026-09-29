@@ -1845,15 +1845,6 @@ const LAUNCHER_APPS = [
     </svg>`,
   },
   {
-    id: "momentum", name: "Momentum", kind: "tasks",
-    desc: "Task board, week planner and focus timer.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="9" y="26" width="6" height="8" rx="1.5" fill="var(--fg)" opacity="0.5"></rect>
-      <rect x="17" y="18" width="6" height="16" rx="1.5" fill="var(--fg)" opacity="0.65"></rect>
-      <rect x="25" y="9" width="6" height="25" rx="1.5" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
     id: "monolith", name: "Monolith", kind: "table",
     desc: "Every mote as a row: query, bulk-edit and link the garden.",
     icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">

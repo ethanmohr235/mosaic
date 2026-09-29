@@ -21,11 +21,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # apps are meant to run at once.
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_monolith"
 
-# 42001-42004 belong to Monarch, Mora, Monastery and Momentum. Asking for
-# a port another window already holds is not a near miss: the loser fails
-# to bind and then loads *the winner's* page against its own bridge --
-# see window_launcher.choose_port, and mora/app.py for the time that
-# actually shipped.
+# 42001-42003 belong to Monarch, Mora and Monastery. Asking for a port
+# another window already holds is not a near miss: the loser fails to
+# bind and then loads *the winner's* page against its own bridge -- see
+# window_launcher.choose_port, and mora/app.py for the time that actually
+# shipped.
 DEFAULT_HTTP_PORT = 42005
 
 

@@ -1,4 +1,4 @@
-/* The interval picker -- one calendar, seven windows.
+/* The interval picker -- one calendar, six windows.
  *
  * A date in MonOSS is an ISO 8601 interval (core/interval.py): a start,
  * an optional span after a "/", and optional RRULE lines beneath it. A

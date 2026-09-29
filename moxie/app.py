@@ -2,7 +2,7 @@
 """The Moxie window. motion/app.py's twin, and deliberately so -- same
 pywebview settings, same cache workaround, different frontend and
 different Api. window_launcher.py carries the settings and workaround all
-seven apps share.
+six apps share.
 
 Sized like Motion: a grid of plots with a mote rail on one side and a
 bindings rail on the other needs the width, and a plot squeezed below
@@ -20,11 +20,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Its own storage directory, next to but never inside the other windows'
 # -- launch_window()'s cache-clearing deletes it on startup, and all
-# seven apps are meant to run at once.
+# six apps are meant to run at once.
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_moxie"
 
-# 42001-42006 belong to Monarch, Mora, Monastery, Momentum, Monolith and
-# Motion, and **42007 to the Gardens window** -- which is not in
+# 42001-42003 belong to Monarch, Mora and Monastery, 42005-42006 to
+# Monolith and Motion, and **42007 to the Gardens window** -- which is not in
 # api_common.APPS, being a window onto the list of gardens rather than
 # onto a garden, and is therefore easy to miss when counting. Asking for
 # a port another window already holds is not a near miss: the loser fails

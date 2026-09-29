@@ -1,17 +1,16 @@
 # Running the desktop UI
 
-Seven native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Six native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
 (`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
-**Monastery**, the calendar (`run_monastery.py`); **Momentum**, the
-task board and timer (`run_momentum.py`); **Monolith**, the table
+**Monastery**, the calendar (`run_monastery.py`); **Monolith**, the table
 (`run_monolith.py`); **Motion**, the simulator (`run_motion.py`); and
 **Moxie**, the graphing utility (`run_moxie.py`). They share one palette
-and one set of vendored fonts, so the seven read as one product.
+and one set of vendored fonts, so the six read as one product.
 
-An eighth window sits beside rather than among them: **Gardens**
+A seventh window sits beside rather than among them: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
-deleted, imported, exported and synced. Any of the seven opens it from
+deleted, imported, exported and synced. Any of the six opens it from
 its own garden dropdown ("Manage gardens…"); see below.
 
 ---
@@ -19,6 +18,9 @@ its own garden dropdown ("Manage gardens…"); see below.
 # Monarch -- the graph
 
 `./run_monarch.py`, or `.venv/bin/python run_monarch.py`.
+
+Monarch is frozen as a structure debugger: it gets bug fixes only until
+console step U8 (`docs/console.md`).
 
 ```
 ./run_monarch.py                       # the last garden opened
@@ -297,7 +299,7 @@ garden export.
 `url` is a reserved property name: give any mote a `url` property (a
 web address or a local file path) and its inspector row gets an
 "Open" (↗) button that launches it via the OS's default handler. In all
-seven windows -- the button moved into the shared inspector along with
+six windows -- the button moved into the shared inspector along with
 everything else about editing one mote, so following a link is no longer
 something only the graph window could do.
 `core/links.py::classify_link` decides which: a web address goes to the
@@ -749,116 +751,6 @@ fresh temp directory.
 
 ---
 
-# Momentum -- tasks
-
-A fourth window, over the same gardens: `./run_momentum.py`, or
-`.venv/bin/python run_momentum.py`. Same stack and the same terms as the
-other two -- pywebview over a local HTML/CSS/JS frontend, its own
-process, its own garden connection, opening and closing independently.
-
-```
-./run_momentum.py                      # the default garden
-./run_momentum.py --garden reactor     # a specific garden
-./run_momentum.py --focus <mote id>    # open with one mote selected
-```
-
-Three tabs: **Board** (cards in columns by status), **Days** (the week,
-with an undated pool beside it) and **Focus** (a timer, today's queue,
-and the session log).
-
-### It reserves no property names
-
-Momentum has no "task" type, because MonOSS has no types -- and unlike
-the calendar's `date`/`duration`, it adds no reserved names either. It
-*discovers* which of a garden's own properties mean what, the same way
-Monastery discovers its date bindings:
-
-| Role | Recognized by |
-|---|---|
-| status, priority | a key holding a short label out of a small repeating set |
-| estimate | a key holding a duration -- `5h`, `90m`, `1d`, or bare minutes |
-| when | any key whose value parses as a date (Monastery's bindings) |
-
-The sidebar lists every candidate with a count and marks the one in use;
-clicking another switches to it. A garden that calls its status `stage`
-and its values `icebox`/`shipped` gets a board with `icebox` and
-`shipped` columns and needs no migration to get it. Your choice is
-remembered by the window (localStorage), never written to the garden --
-so it survives a restart without becoming data anyone else has to
-respect. Switching gardens forgets it, since another garden's properties
-are another question.
-
-A `1d` estimate means **eight hours** -- a day of work, not of clock.
-
-### Scheduling against the calendar
-
-Drag a card from the pool onto a day. Momentum asks
-`core/calendar.py` for the earliest gap that day with room for the
-task's estimate, reading the very occurrences Monastery draws, and writes
-that time to the date property the mote already uses -- or, for an
-unscheduled one, to the key the garden already organizes itself by.
-
-So the two windows are the same data seen twice. A task scheduled here is
-an event there, immediately, with nothing to sync. All-day motes (a `due`
-date) mark a day without blocking it, so a deadline never makes a day
-unschedulable. A day with no room left still accepts the task, at the
-start of the working day, and says so -- refusing to schedule something
-is not the window's decision to make.
-
-Drop a card back on the pool to unschedule it. The working day defaults
-to 09:00–17:00 and the capacity bar to 6h/day; a mote named `Momentum`
-carrying `work_start`, `work_end` or `capacity_hours` overrides them, and
-being an ordinary mote it is editable from any window.
-
-### The timer
-
-Pick something from today's queue, press Begin (or space). Nothing is
-written while it runs -- the countdown is the window's own state, the
-same preview/commit split simulation keeps. Finishing it (or **Log &
-finish**) writes one ordinary mote: an instance of a `Work Session`
-species carrying `date` and `duration`, pointing at the task with
-`about`. It logs the time actually elapsed, not the nominal length.
-
-Because that mote is ordinary, the session shows up in Monastery and
-Monarch without either knowing Momentum exists. The streak and heatmap
-are computed by reading those motes back, so deleting one anywhere is
-simply a session that no longer happened.
-
-### Keys
-
-| Key | Does |
-|---|---|
-| B / D / F | Board, Days, Focus |
-| Space | Start or pause the timer (Focus) |
-| ← / → | Previous or next week (Days) |
-| T | Back to this week (Days) |
-| Esc | Close the inline input, else the detail panel |
-
-### Ports
-
-A fourth window means a fourth port: `momentum/app.py` asks for
-**42004** (42001 Monarch, 42002 Mora, 42003 Monastery), falling back to
-an ephemeral one if taken -- the same collision the others guard against,
-for the same reason. `.webview_data_momentum/` is its own WebKit storage.
-
-### Smoke test
-
-`scripts/momentum_smoke_test.py`, the same instrument as the others. It
-drives a real window against a seeded throwaway garden -- seeded relative
-to *today*, since the week and the queue are both today's -- and checks
-that the columns are the garden's own statuses, that the sidebar offers
-every candidate key, that dragging a card rewrites the status property,
-that dropping one on a day lands it in the free slot *after* the
-standup, that an estimate becomes a duration, that the pool unschedules,
-and that the timer writes a session only when it finishes. It holds
-42001, 42002 and 42003 for the whole run.
-
-```
-.venv/bin/python scripts/momentum_smoke_test.py
-```
-
----
-
 # Monolith -- the table
 
 A fifth window, over the same gardens: `./run_monolith.py`, or
@@ -947,8 +839,7 @@ because everything else is an edit you can make back.
 ### Ports
 
 A fifth window means a fifth port: `monolith/app.py` asks for **42005**
-(42001 Monarch, 42002 Mora, 42003 Monastery, 42004 Momentum, 42006
-Motion), falling
+(42001 Monarch, 42002 Mora, 42003 Monastery, 42006 Motion), falling
 back to an ephemeral one if taken -- the same collision the others guard
 against, for the same reason. `.webview_data_monolith/` is its own
 WebKit storage.
@@ -962,7 +853,7 @@ clicking the Where bar filters, that editing one cell inside a
 three-row selection writes all three motes, that the bulk bar chains a
 selection into relationships, that a matrix click writes an edge and a
 second one erases it, and that saving a view leaves a mote behind. It
-holds 42001-42004 for the whole run.
+holds 42001-42003 for the whole run.
 
 ```
 .venv/bin/python scripts/monolith_smoke_test.py
@@ -1243,7 +1134,7 @@ Run it alone -- the pywebview window suites interfere with each other.
 # Gardens -- the garden manager
 
 `./run_gardens.py`, or `.venv/bin/python run_gardens.py`. Also reachable
-from every one of the seven windows: the garden dropdown's "Manage
+from every one of the six windows: the garden dropdown's "Manage
 gardens…" footer, plus Monarch's File menu and its Tools → Sync…, which
 opens it straight at the selected garden's sync settings.
 
@@ -1255,7 +1146,7 @@ opens it straight at the selected garden's sync settings.
 
 Garden management used to be Monarch's alone — a modal that only that
 window had — so making a garden from Motion meant opening Monarch first.
-This is that modal pulled out into a window all seven processes share,
+This is that modal pulled out into a window all six processes share,
 and Monarch's copy is gone rather than duplicated.
 
 ### Why a separate window, and a separate process
@@ -1269,7 +1160,7 @@ a short-lived one and closes it), so both are ordinary operations here.
 
 The cost of being its own process is that it cannot switch the garden of
 the app that opened it. It doesn't try: each row's **Open in** launches
-any of the seven windows already on that garden, and an app that is
+any of the app windows already on that garden, and an app that is
 already running finds a newly created garden in its own switcher, which
 reads the directory every time it opens.
 
@@ -1286,7 +1177,7 @@ reads the directory every time it opens.
 
 ### Ports
 
-42007, after the first six windows' 42001-42006 and before Moxie's
+42007, after the app windows' 42001-42003 and 42005-42006 and before Moxie's
 42008, falling back to an ephemeral one if taken.
 `.webview_data_gardens/` is its own WebKit storage. Opening it twice is
 allowed rather than guarded: pywebview cannot raise and focus

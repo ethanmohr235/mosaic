@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression smoke test for Monolith, the table window.
 
-Not named test_*.py, for the same reason scripts/momentum_smoke_test.py
+Not named test_*.py, for the same reason scripts/motion_smoke_test.py
 isn't: it spawns a real pywebview window against a real WebKit/GTK
 display, which the pytest suite deliberately assumes nothing about. Run
 it by hand after touching monolith/:
@@ -56,8 +56,8 @@ from window_launcher import choose_port  # noqa: E402
 FRONTEND_DIR = PROJECT_ROOT / "monolith" / "frontend"
 GARDEN = "smoke"
 
-# The ports pywebview pins the other four windows to. The whole run
-# happens with all four occupied, because that is the real condition --
+# The ports pywebview pins the other three windows to. The whole run
+# happens with all three occupied, because that is the real condition --
 # Monolith is opened from a running MonOSS, possibly alongside all of
 # them -- and because it is the condition that broke for Mora once: it
 # asked for a taken port, lost, and loaded the other app's page against
@@ -66,7 +66,6 @@ OCCUPIED = (
     (42001, "Monarch", "monarch"),
     (42002, "Mora", "mora"),
     (42003, "Monastery", "monastery"),
-    (42004, "Momentum", "momentum"),
 )
 
 ids = {}
@@ -491,7 +490,7 @@ def drive():
 
 
 def _occupy(port, directory):
-    """Stand in for a running MonOSS / Mora / Monastery / Momentum: hold
+    """Stand in for a running MonOSS / Mora / Monastery: hold
     the port and serve that app's frontend off it, so a Monolith that
     asks for the wrong port doesn't merely fail -- it loads the other
     app's page, exactly as Mora once did."""

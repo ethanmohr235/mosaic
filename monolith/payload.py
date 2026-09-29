@@ -43,7 +43,7 @@ _DATE_LENGTHS = (10, 19, 20, 24, 25, 26, 29, 32)
 def describe(index: Index, mote_id: str | None) -> dict:
     """Everything a payload says about a mote beyond its cells: its name,
     the species that colours it, and its kinds. The same three fields
-    mora/payload.py and momentum/payload.py send, so a mote reads the
+    mora/payload.py sends, so a mote reads the
     same colour in every window."""
     if not mote_id or mote_id not in index.motes:
         return {"id": mote_id, "name": mote_id or "", "speciesId": None,
@@ -162,9 +162,8 @@ def kind_of(field: Field, values: tuple) -> str:
 
 def guess_kind(values: tuple) -> str:
     """What a property column holds, decided by looking. Nothing declares
-    it -- the same permissiveness core/task_candidates.py relies on, and
-    the reason `estimate > 3` can mean what it says on a garden where
-    nobody ever said estimate was a number."""
+    it, which is the reason `estimate > 3` can mean what it says on a
+    garden where nobody ever said estimate was a number."""
     present = [v for v in values if v is not None and v != ""]
     if not present:
         return query.TEXT

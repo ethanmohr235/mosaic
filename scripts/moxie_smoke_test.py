@@ -69,7 +69,6 @@ OCCUPIED = (
     (42001, "Monarch", "monarch/frontend"),
     (42002, "Mora", "mora/frontend"),
     (42003, "Monastery", "monastery/frontend"),
-    (42004, "Momentum", "momentum/frontend"),
     (42005, "Monolith", "monolith/frontend"),
     (42006, "Motion", "motion/frontend"),
     (42007, "Gardens", "gardens_app/frontend"),

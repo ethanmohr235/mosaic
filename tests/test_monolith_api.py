@@ -17,7 +17,6 @@ from core.graph import whole_garden
 from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
 from monolith import payload as payload_repo
-from momentum import app as momentum_port
 from monarch import app as monarch_port
 from monastery import app as monastery_port
 from monolith.api import Api
@@ -287,11 +286,9 @@ def test_a_view_mote_is_not_a_kind(api, garden):
 
 
 def test_saving_a_view_makes_it_an_instance_of_saved_view(api, garden):
-    """Same as momentum/api.py::log_session declaring a logged session an
-    instance of `Work Session`: every saved view is an instance of one
-    `Saved View` species, found or created lazily the first time a view is
-    saved -- so a garden's saved views show up as one kind of thing in
-    Monarch and Monastery."""
+    """Every saved view is an instance of one `Saved View` species, found
+    or created lazily the first time a view is saved -- so a garden's
+    saved views show up as one kind of thing in Monarch and Monastery."""
     first = api.save_view("In flight", query_with())
     second = api.save_view("Todo", query_with())
     species = [m for m in species_repo.list_species(api._conn)
@@ -308,13 +305,13 @@ def test_deleting_a_view_removes_only_that_mote(api, garden):
     assert api.table()["views"] == []
     # The view instance is gone; the `Saved View` species it pointed at
     # (created lazily by save_view) is not -- a species persists past its
-    # last instance, same as momentum/api.py's `Work Session`.
+    # last instance.
     assert api.table()["total"] == before + 1
 
 
 # ---- the window ----
 
-def test_monolith_asks_for_a_port_the_other_four_do_not(api):
+def test_monolith_asks_for_a_port_the_other_three_do_not(api):
     """mora/app.py's comment explains what a collision costs: the loser
     of the bind loads the winner's page against its own bridge. What is
     asserted is the *preference*, not that the port is free right now --
@@ -322,7 +319,7 @@ def test_monolith_asks_for_a_port_the_other_four_do_not(api):
     assert DEFAULT_HTTP_PORT == 42005
     assert DEFAULT_HTTP_PORT not in {
         monarch_port.DEFAULT_HTTP_PORT, mora_port.DEFAULT_HTTP_PORT,
-        monastery_port.DEFAULT_HTTP_PORT, momentum_port.DEFAULT_HTTP_PORT,
+        monastery_port.DEFAULT_HTTP_PORT,
     }
     assert choose_port("Monolith", DEFAULT_HTTP_PORT) > 0
 

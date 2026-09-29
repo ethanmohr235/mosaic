@@ -48,9 +48,6 @@ MORA_SCRIPT = Path(__file__).resolve().parent.parent / "run_mora.py"
 # Monastery, the calendar window, on exactly the same terms.
 MONASTERY_SCRIPT = Path(__file__).resolve().parent.parent / "run_monastery.py"
 
-# Momentum, the task board and timer, on the same terms again.
-MOMENTUM_SCRIPT = Path(__file__).resolve().parent.parent / "run_momentum.py"
-
 
 logger = logging.getLogger(__name__)
 
@@ -281,24 +278,11 @@ class Api(InspectorApi, CommandBarApi, UndoableApi, AnnotatableApi):
         return {"garden": self._current_garden, "focus": mote_id}
 
     @_synchronized
-    def open_momentum(self, mote_id: str | None = None) -> dict:
-        """Open Momentum, the task board and timer, on this garden --
-        optionally with one mote already selected. Everything open_mora
-        says applies here unchanged: fire-and-forget through the detached
-        launcher, under `sys.executable` so it comes up in this
-        virtualenv, holding its own connection to the same garden file."""
-        command = [sys.executable, str(MOMENTUM_SCRIPT), "--garden", self._current_garden]
-        if mote_id:
-            command += ["--focus", mote_id]
-        _popen_detached(command, quiet=False)
-        return {"garden": self._current_garden, "focus": mote_id}
-
-    @_synchronized
     def open_app(self, app_id: str, mote_id: str | None = None) -> dict:
         """Launch any MonOSS app on this same garden from the ⌘J switcher
-        -- the app-agnostic counterpart to open_mora/open_monastery/
-        open_momentum above (which stay as they are, since Monarch's own
-        Tools menu already calls each by name). Monarch is the one app
+        -- the app-agnostic counterpart to open_mora/open_monastery
+        above (which stay as they are, since Monarch's own Tools menu
+        already calls each by name). Monarch is the one app
         that can already reach every sibling, so this is also how the
         switcher opens a second Monarch window on itself, same as any
         other app id -- see window_launcher.choose_port for why that's a

@@ -459,7 +459,7 @@ def test_span_of_answers_what_every_placement_lasts():
 
 # ---- finding a free slot ----
 #
-# What Momentum means by dropping a task on a day. Reads the same
+# The earliest gap on a chosen day that fits a duration. Reads the same
 # occurrences the calendar draws, so "busy" means one thing in this app
 # rather than two.
 

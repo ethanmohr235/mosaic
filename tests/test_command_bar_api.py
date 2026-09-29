@@ -4,7 +4,6 @@ CommandBarApi is mixed into every window's Api, so `command_run` behaves
 the same wherever it runs."""
 import pytest
 
-import momentum.api
 import monarch.api
 import monastery.api
 import monolith.api
@@ -53,7 +52,7 @@ def test_delete_a_mote_needs_confirmation(api):
 
 
 @pytest.mark.parametrize("module", [
-    monarch.api, motion.api, monolith.api, mora.api, monastery.api, momentum.api,
+    monarch.api, motion.api, monolith.api, mora.api, monastery.api,
 ])
 def test_every_window_speaks_the_contract(module):
     assert issubclass(module.Api, CommandBarApi)

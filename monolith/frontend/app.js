@@ -162,7 +162,7 @@ function wireResizers() {
 // ---- colour -------------------------------------------------------
 //
 // Byte-for-byte the hash monarch/frontend/graph.js uses, the same copy
-// Mora, Monastery and Momentum carry. Five windows disagreeing about
+// Mora and Monastery carry. Windows disagreeing about
 // what colour "Task" is would be worse than any of them being arbitrary.
 
 function hashString(text) {
@@ -1464,16 +1464,6 @@ const LAUNCHER_APPS = [
       <rect x="7" y="9" width="26" height="7" rx="3" fill="var(--fg)" opacity="0.25"></rect>
       <rect x="12" y="21" width="6" height="5" rx="1" fill="var(--accent)"></rect>
       <rect x="22" y="21" width="6" height="5" rx="1" fill="var(--fg)" opacity="0.35"></rect>
-    </svg>`,
-  },
-  {
-    id: "momentum", name: "Momentum", kind: "tasks",
-    desc: "A board, a week and a focus timer over the garden's tasks.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="8" width="9" height="24" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="20" y="8" width="9" height="16" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="9.5" y="11" width="4" height="3" rx="1" fill="var(--accent)"></rect>
-      <rect x="22.5" y="11" width="4" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
     </svg>`,
   },
   {

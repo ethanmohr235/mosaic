@@ -264,11 +264,11 @@ def earliest_free_slot(
     """The first moment on `day` with `duration` free after it, or None if
     the day cannot fit it.
 
-    This is what Momentum means by dropping a task on a day: the person
-    chooses the day, and the earliest gap that is actually free chooses
-    the time. It reads the same occurrences the calendar draws, through
-    the same bindings, so "busy" means exactly what Monastery shows as
-    busy -- there is no second notion of a booked hour.
+    A building block for Monastery's planned plan-my-week (roadmap phase
+    5): the person chooses the day, and the earliest gap that is actually
+    free chooses the time. It reads the same occurrences the calendar
+    draws, through the same bindings, so "busy" means exactly what
+    Monastery shows as busy -- there is no second notion of a booked hour.
 
     All-day placements are not busy. A task `due` on Thursday marks the
     day rather than occupying it, and treating one as a booking would
@@ -276,8 +276,7 @@ def earliest_free_slot(
 
     Pure like everything above it: motes in, a datetime out. The work
     window is a parameter rather than a constant read from somewhere
-    because whose day this is belongs to the caller
-    (momentum/api.py reads it off the garden's settings mote).
+    because whose day this is belongs to the caller.
     """
     window_start = datetime.combine(day, work_start)
     window_end = datetime.combine(day, work_end)

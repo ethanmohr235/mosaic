@@ -853,7 +853,7 @@ function pinKnob(mote, prop) {
 }
 
 // Inspect and Inspect-in-new-tab come from ContextMenu.inspectItems, so
-// the first entries of a right-click menu read identically in all seven
+// the first entries of a right-click menu read identically in all six
 // windows. What follows them is this window's own.
 
 function moteMenu(event, mote) {

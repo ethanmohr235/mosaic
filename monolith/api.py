@@ -50,10 +50,9 @@ logger = logging.getLogger(__name__)
 
 _SEARCH_LIMIT = 20
 
-# The species a saved view is an instance of, found or created by name --
-# same trick momentum/api.py plays for SESSION_SPECIES_NAME: an ordinary
-# mote, discovered rather than reserved, so a garden that has never saved
-# a view never grows one.
+# The species a saved view is an instance of, found or created by name:
+# an ordinary mote, discovered rather than reserved, so a garden that has
+# never saved a view never grows one.
 VIEW_SPECIES_NAME = "Saved View"
 
 # Same reasoning as mora/api.py: Monolith is opened *from* another window
@@ -389,9 +388,9 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         return sorted(views, key=lambda v: v["name"].casefold())
 
     def _view_species_id(self) -> str:
-        """Finds or creates the `Saved View` species, same lazy pattern as
-        momentum/api.py::_session_species_id -- but creating rather than
-        answering None, since save_view always needs one to point at."""
+        """Finds or creates the `Saved View` species, lazily -- creating
+        rather than answering None, since save_view always needs one to
+        point at."""
         for mote in species_repo.list_species(self._conn):
             name = mote.properties.get("name")
             if isinstance(name, str) and name.casefold() == VIEW_SPECIES_NAME.casefold():
@@ -406,11 +405,9 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         stored as handed in: what is written is what this window can read
         back.
 
-        Every saved view is declared an instance of `Saved View`, the same
-        way momentum/api.py::log_session declares a logged session an
-        instance of `Work Session` -- so a garden's saved views show up as
-        one kind of thing in Monarch and Monastery without either window
-        knowing this one exists."""
+        Every saved view is declared an instance of `Saved View`, so a
+        garden's saved views show up as one kind of thing in Monarch and
+        Monastery without either window knowing this one exists."""
         parsed = Query.from_json(raw_query).to_json()
         properties = {"name": name or "Untitled view", query_repo.QUERY_KEY: parsed}
         if view_id and motes_repo.get_mote(self._conn, view_id) is not None:

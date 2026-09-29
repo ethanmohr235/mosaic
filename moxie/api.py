@@ -20,7 +20,7 @@ what Motion is for; a graphing tool that could quietly change the model
 it is graphing would be a trap, and the one thing it must be is a mirror.
 The only thing Moxie writes is a saved-plot mote, when asked in so many
 words -- and the embedded inspector writes properties exactly as it does
-in the other six windows, which is where that power belongs.
+in the other five windows, which is where that power belongs.
 
 # Why the lock is held so briefly
 

@@ -1,4 +1,4 @@
-/* The right-click menu -- one dropdown, seven windows.
+/* The right-click menu -- one dropdown, six windows.
  *
  * Monarch had one, driven off its canvas. Nothing else did: right-click
  * anywhere in the other five either did nothing or fell through to
@@ -96,7 +96,7 @@ const ContextMenu = (() => {
   }
 
   /** The two items every window's mote menu starts with, so the gesture
-   *  reads the same in all seven. `open` and `openNewTab` are separate
+   *  reads the same in all six. `open` and `openNewTab` are separate
    *  entries rather than one plus a modifier: a menu is where you go when
    *  you do *not* remember the modifier. */
   function inspectItems(moteId, anchor) {

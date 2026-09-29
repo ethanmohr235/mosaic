@@ -1,5 +1,5 @@
 /* Moxie -- the graphing window.
-   Shares the palette, the fonts and the chrome idiom with the other six
+   Shares the palette, the fonts and the chrome idiom with the other five
    windows (see motion/frontend/style.css); everything below the "Moxie's
    own" marker is this window's. */
 
@@ -30,7 +30,7 @@
 
 :root {
   color-scheme: dark;
-  /* ---- shared with the other six windows ---- */
+  /* ---- shared with the other five windows ---- */
   --bg: oklch(0.145 0 0);
   --panel: oklch(0.205 0 0);
   --panel-bg: oklch(0.165 0 0);

@@ -34,7 +34,7 @@ inclusive last day they actually think in.
 
 Pure string <-> structure. No Mote, no connection, not even a notion of a
 property key -- core/calendar.py stays about *placement* and this stays
-about *notation*, the same split core/task_candidates.py already keeps.
+about *notation*.
 """
 import re
 from dataclasses import dataclass, replace
