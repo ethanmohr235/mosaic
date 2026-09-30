@@ -158,7 +158,7 @@ def seed():
 def _seed_view(conn):
     """A crew whose capacity is twelve points a head, and the saved Moxie
     plot of one against the other. Written as the `plot` property of an
-    ordinary mote, which is exactly what moxie/api.py::save_plot writes --
+    ordinary mote, which is exactly what core/plotview.py::save_plot writes --
     the point being that Mora reads a real saved view, not a shape
     invented for this test."""
     crew_species = create_mote(conn, {"name": "Crew", "freedoms": "capacity"})

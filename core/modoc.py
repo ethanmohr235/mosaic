@@ -742,7 +742,7 @@ class _Parser:
         if not view:
             self.diagnostics.append(Diagnostic(
                 number, "bad_graph",
-                "\\graph{} needs the name of a view saved in Moxie",
+                "\\graph{} needs the name of a saved plot (`plot save ‹name›`)",
             ))
         self.blocks.append(Graph(view, number))
 

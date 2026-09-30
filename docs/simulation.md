@@ -23,8 +23,8 @@ preview.
 
 A third question -- how one value moves as another changes -- has an
 answer shaped like a curve rather than like a state, and so has its own
-module and its own window: `core.sweep.run_sweep()`, and **Moxie**
-(`run_moxie.py`). See "Sweeping" below.
+module and its own console pane: `core.sweep.run_sweep()`, and **Moxie**
+(`plot …`, `mo xie`). See "Sweeping" below.
 
 ## The three pieces
 
@@ -707,7 +707,9 @@ of a property's range and reports another property at every step. That
 is a curve rather than a state, which is why it is a module of its own
 rather than an option on `run_simulation()`.
 
-It has its own window, **Moxie** (`run_moxie.py`, and `docs/ui-setup.md`).
+Its surface is Moxie, the console's `plot` pane (`plot bd.sigma vs bd.l
+4:24`; `core/plotcmd.py` turns the line into a specification,
+`core/plotview.py` draws it; `docs/ui-setup.md` → *Plots*).
 
 ```python
 from core.sweep import Axis, Case, run_sweep
@@ -753,8 +755,9 @@ they read* are one case and one solve per step; two that differ in
 scenario or in an override are two.
 
 So the cost of a sweep is `len(cases) * steps`, not `series * steps`,
-and a caller reading eight properties off one solve pays for one. Moxie
-states that number in its run rail rather than capping it.
+and a caller reading eight properties off one solve pays for one. The
+plot pane states the number of solves in its status line rather than
+capping it.
 
 ### Failure is a point, not an end
 
@@ -787,9 +790,10 @@ running anything.
 `read_garden(conn, scenario_ids)` reads everything a sweep needs in one
 go, and every `run_*` above accepts that `Ground` in place of a
 connection. A caller can therefore read under whatever lock guards its
-connection and solve outside it -- which is what lets Moxie stay
-responsive, since a sweep holding the connection for its whole run would
-also be holding it against the keystroke meant to cancel it. `indices`
+connection and solve outside it, so a sweep need not hold the connection
+against the keystroke meant to cancel it. (The console's plot pane does
+not do this yet: `console/moxie.py` solves under the session lock, draws
+a coarse pass first, and drops any reply a newer request overtook.) `indices`
 (and `run_surface`'s `stride`) compute a subset of the points, so a
 coarse pass can be drawn before a fine one refines it, and
 `should_cancel` is polled between points.
@@ -800,8 +804,18 @@ coarse pass can be drawn before a fine one refines it, and
 is a saved plot: **the specification** -- which motes, which keys, which
 ranges, which scenarios -- and never the points it produced. Reopening
 one therefore re-solves the garden as it stands now, which is the whole
-difference between a saved plot and a screenshot. Written and read in
-Moxie, and shaped exactly like `query`, Monolith's saved view.
+difference between a saved plot and a screenshot. Written by `plot save
+‹name›` (`core/plotview.py::save_plot`, an instance of `Saved Plot`),
+opened by `plot ‹name›`, drawn in notes by `\graph{name}`, and shaped
+exactly like `query`, Monolith's saved view. The console's `plot` line
+is the same specification typed out (`core/plotcmd.py`):
+
+| Line | Specification |
+|---|---|
+| `plot A.y B.z vs A.x 0:10 --steps 50` | `mode: sweep`, `x: {mote, key, lo, hi, steps}`, `series: [{id, mote, key, scenario}]` |
+| `… by A.w 1:3` | `mode: surface`, `x`, `y`, `output: {mote, key}` |
+| `y vs x --across` | `mode: correlate`, `xKey`, `yKey` |
+| `--set A.k=5`, `--scenario s`, `--log` | `knobs: [{mote, key, value}]`, `scenario` (each series', and a surface's or correlation's own), `yScale` |
 
 ## The worksheet
 

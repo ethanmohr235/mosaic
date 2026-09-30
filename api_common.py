@@ -118,7 +118,6 @@ APPS = {
     "mora": ("Mora", REPO_ROOT / "run_mora.py", "--note"),
     "monastery": ("Monastery", REPO_ROOT / "run_monastery.py", "--focus"),
     "motion": ("Motion", REPO_ROOT / "run_motion.py", "--focus"),
-    "moxie": ("Moxie", REPO_ROOT / "run_moxie.py", "--focus"),
     # The console (docs/console.md): the one window the others are
     # being ported into. Listed so an old window can open it; it takes
     # no focus flag -- selection lives in the console's own store.

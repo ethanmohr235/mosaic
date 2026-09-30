@@ -451,10 +451,13 @@ def run_surface(
         y = y_axis.at(row)
         for col in range(0, x_axis.count, stride):
             x = x_axis.at(col)
+            # Merged, not a dict literal: two axes on one mote (`C1.voltage`
+            # by `C1.r_a`) would otherwise share a key, and y's entry would
+            # silently replace x's.
+            point = {x_axis.mote_id: {x_axis.key: x}}
+            point.setdefault(y_axis.mote_id, {})[y_axis.key] = y
             solved, error = _solve(
-                ground, scenario, overrides,
-                {x_axis.mote_id: {x_axis.key: x}, y_axis.mote_id: {y_axis.key: y}},
-                solver, solver_configuration,
+                ground, scenario, overrides, point, solver, solver_configuration,
             )
             cells.append(Cell(
                 row=row, col=col, x=x, y=y,

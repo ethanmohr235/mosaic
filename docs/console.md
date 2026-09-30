@@ -140,7 +140,7 @@ These are user-facing names. Python packages keep their current names
 |---|---|---|---|
 | `mo nolith` | Monolith | `monolith:table`, `monolith:vars` | General table. Project variables pane per roadmap. |
 | `mo te` | Inspector | `mote:props` | `open @sel` follows the selection; `open #id` is pinned. |
-| `mo xie` | Moxie | `moxie:plot`, `moxie:fit` | |
+| `mo xie` | Moxie | `moxie:plot` (`plot …`), `moxie:fit` (next step) | |
 | `mo tion` | Motion | `motion:scenarios`, `motion:state`, `motion:rule` | Timeline sits under state. No runs list. |
 | `mo ra` | Mora | `mora:doc` | Text-editing pane (see *Keyboard*). |
 | `mo nastery` | Monastery | `monastery:agenda` | A table or grid pane on the `--line` grid. |
@@ -345,7 +345,7 @@ own plan-mode phase and ships something usable.
 | U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
 | U2 | **Done.** **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
 | U3 | **Done.** **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
-| U4 | **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*). `fit` is the step after. | Commands carry view state (ranges, series). |
+| U4 | **Done.** **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*). `fit` is the step after. | Commands carry view state (ranges, series). |
 | U5 | **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list. | A live, ticking view inside the contract. |
 | U6 | **Mora → `mo ra`.** Document pane as a text-editing pane. | Keyboard capture and `esc` work for editors. |
 | U7 | **Monastery → `mo nastery`.** Agenda pane. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
@@ -409,7 +409,15 @@ Each step's done-check is the same:
   canvas rather than the handoff README. Confirm or replace them:
   `--popup-mo` 36px, `--popup-app` 90px, `--picker-key` 150px,
   `--divider-hit` 3px (invisible grab margin), `--popup-rows` 12,
-  `--prompt-gap` 6px, `--bar-gap` 8px, `--border` 1px.
+  `--prompt-gap` 6px, `--bar-gap` 8px, `--border` 1px. U4 added
+  `--plot-rail` 240px (the plot pane's legend/knob column; the design
+  draws 320px) and the series hues `--s5` (195°) and `--s6` (40°), which
+  are not colour-vision-checked against the other four.
+- **Plot keys.** The handoff's Moxie keys were `f x z t e ?`. `x` and `e`
+  are shell keys (close pane, edit command), so the plot pane uses `t`
+  to show/hide a series, `z`/`Z` to zoom, `y` for log y, `[ ]` to pick
+  a series, `j k` / `- +` for knobs. `f` waits for `fit`; export is
+  `plot export`. Confirm.
 - **Pane header style.** Every header uses 2a's filled 24px
   `$ command` bar, not 2b's quieter 22px tiled header. Is that right?
 - **Result colours in `log`.** Successful results are `--fg`; only

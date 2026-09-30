@@ -259,7 +259,16 @@ answers a range of them: solve the whole garden once per step of a
 property's range, and report another property at every step. The answer
 is a curve rather than a state, which is why it is a module beside
 `core/simulation.py` rather than an option on `run_simulation()`, and
-why it has its own window (**Moxie**, `run_moxie.py`).
+why it has its own surface (**Moxie**, the console's `plot` pane).
+
+The console reaches it through a line, never through a hand-built spec:
+`core/plotcmd.py` parses `plot y… vs x lo:hi [by y lo:hi] [--across]
+[--set m.k=v] [--scenario s] [--log] [--hide m.k]`, rewrites a line for
+a pane's gesture (a knob dragged, a zoom), and resolves it to the same
+specification a saved plot holds; `core/plotview.py::figure_from_spec`
+draws it, `sensitivity` ranks the knobs at a cursor, `save_plot` is the
+one write (`plot save`, undoable), and `console/moxie.py` is the bridge
+(`api.moxie`). Because the pane is its line, a layout restores the plot.
 
 Sweeping cost nothing structurally, for the same reason scenarios did.
 The run machinery was already driven from a properties dict, so a sweep
@@ -597,8 +606,8 @@ the user should approve in the app, or need a live window. See
 # What belongs on which surface
 
 `core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/`,
-`motion/`, `moxie/`, `gardens_app/`, `console/` and `mcp_server/` are
-nine adapters over it, and each one's job is a
+`motion/`, `gardens_app/`, `console/` and `mcp_server/` are
+eight adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -830,12 +839,14 @@ convention rather than needing its own. The solver never reads it: where a
 value came from changes nothing about how it is used.
 
 `\graph{...}` is the same idea for a figure, and is the one macro that
-resolves to something another *window* made: it names a view saved in
-Moxie, and `core/plotview.py` re-solves that view's saved specification
+resolves to something another *surface* made: it names a plot saved
+with `plot save`, and `core/plotview.py` re-solves that view's saved specification
 against the garden as it stands. A note therefore never describes a
 figure of its own -- there is one place a figure is designed, one place
-it is computed (`core/sweep.py`), and one renderer that draws it in both
-windows (`frontend_shared/plot.js`). The note refers.
+it is computed (`core/sweep.py`), and one figure payload
+(`plotview.figure_json`) that both the console's renderer
+(`console/frontend/js/plot.js`) and Mora's old window
+(`frontend_shared/plot.js`, until U6) draw. The note refers.
 
 **A document can span several notes, and is numbered as one.**
 `\include{Method}` is the only macro that changes the *document* rather

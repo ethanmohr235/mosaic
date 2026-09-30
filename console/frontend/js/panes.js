@@ -314,6 +314,15 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
       for (const [id, pane] of panes) if (pane.view && pane.view.id === viewId) return id;
       return null;
     },
+    /** Where a `pane_action` effect goes (`plot save ‹name›`, `plot
+     * export …`): the focused pane when it shows `viewId`, else the first
+     * pane that does. Null when none does. */
+    instanceFor(viewId) {
+      const focused = panes.get(store.state.focusedId);
+      if (focused && focused.view && focused.view.id === viewId) return focused.instance;
+      const id = this.findView(viewId);
+      return id ? panes.get(id).instance : null;
+    },
     linkedCount: () => [...panes.values()].filter(isLinked).length,
     count: () => panes.size,
     /** Pane id → its on-screen rect, for ^w h/j/k/l. */

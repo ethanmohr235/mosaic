@@ -602,7 +602,7 @@ function buildLegend(block) {
   return legend;
 }
 
-/** The palette moxie/frontend/style.css defines, copied for the same
+/** The palette the old Moxie window defined (deleted in console U4), copied for the same
  *  reason this file copies Monarch's mote colours: a stylesheet one
  *  directory over is not fetchable, and a curve must read as the same
  *  curve in both windows. */

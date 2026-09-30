@@ -1,17 +1,17 @@
 # Running the desktop UI
 
-Five native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Four native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
 (`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
-**Monastery**, the calendar (`run_monastery.py`); **Motion**, the
-simulator (`run_motion.py`); and **Moxie**, the graphing utility
-(`run_moxie.py`). They share one palette and one set of vendored fonts,
-so they read as one product. Monolith, the table, was the first to move
-into the console (below) and has no window of its own any more.
+**Monastery**, the calendar (`run_monastery.py`); and **Motion**, the
+simulator (`run_motion.py`). They share one palette and one set of
+vendored fonts, so they read as one product. Monolith, the table, and
+Moxie, the plots, have moved into the console (below) and have no
+windows of their own any more.
 
 A seventh window sits beside rather than among them: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
-deleted, imported, exported and synced. Any of the six opens it from
+deleted, imported, exported and synced. Any of the windows opens it from
 its own garden dropdown ("Manage gardens…"); see below.
 
 The windows are being folded into one tiled window, **the console**
@@ -29,8 +29,8 @@ once its app is ported. New UI is built only in the console.
 
 One window, one garden at a time, every pane the output of a command.
 Its design, grammar and view contract are in `docs/console.md`. This
-section covers what it does today (steps U1–U3): the shell, the `log`
-view, the `find` table and the props pane.
+section covers what it does today (steps U1–U4): the shell, the `log`
+view, the `find` table, the props pane and plots.
 
 ### The shell
 
@@ -57,6 +57,8 @@ view, the `find` table and the props pane.
 | `rename <target> <old> <new>` | Rename a property, keeping its value and unit. Refuses to overwrite a key that exists. |
 | `unlink <target> <type> <other>` or `unlink <target> #<rel>` | Remove a relationship (either direction). |
 | `template <mote> <species>` | Make a mote the one its species' new instances start from. |
+| `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `mo xie` is `plot` with nothing to plot yet. |
+| `plot save <name>`, `plot export csv\|png [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
 | `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. |
 | `log` | The command and error log for this session. |
 | `cd <garden>` | Switch the workspace to another garden, with its own layouts and history. |
@@ -143,6 +145,65 @@ unselected row it runs `set #id …` and writes that one. Either way it is
 a command: in the history, the log and undo. An empty value clears the
 key.
 
+### Plots (`plot`, `mo xie`)
+
+A value against another, with the whole garden re-solved at every point
+of the range, in memory. **Nothing is written** -- not a value, not a
+run -- which is what makes it safe to redraw on every drag of a knob.
+Either side can be any numeric property of any mote, given or solved;
+sweeping one the solver would determine is allowed, and the status line
+says **x pinned**, because the answer is then "what if this were so".
+
+| Line | Draws |
+|---|---|
+| `plot bd.sigma bd.tau vs bd.l 4:24` | Both against `bd.l` from 4 to 24. Without `lo:hi` the range is half to double the current value. |
+| `… --steps 200` | Points across the range (default 200; 40 per axis for a surface). |
+| `… --set bd.E=200e9` | A **knob**: that value for every point, never written. |
+| `… --scenario hot` | Solve under a garden scenario (`core/scenarios.py`). |
+| `… --log`, `… --hide bd.tau` | Log y; keep a series in the legend without drawing it. |
+| `plot bd.sigma vs bd.l 4:24 by bd.w 1:3` | A **surface**: one value over two axes, dark to light. |
+| `plot sigma vs l --across` | A **correlation**: one dot per mote carrying both keys, after one solve. |
+| `plot "Load curve"`, `plot #id` | A saved plot, re-solved as the garden stands now. |
+
+The line is the pane's command, so every gesture rewrites it (a drag,
+a zoom, a knob move), and a layout restores exactly the plot you left.
+A pane draws a coarse pass first and then the full one.
+
+| Key | Does |
+|---|---|
+| `h` `l`, `H` `L` / click | Move the cursor one point / ten; the status line reads every series there |
+| `z` then `z` / drag across the plot | Zoom to the range between the two ends |
+| `Z` / double-click | Zoom out twice as wide |
+| `y` | Log y |
+| `[` `]`, `t` / a legend click | Pick a series; show or hide it |
+| `j` `k`, `-` `+` / drag a knob's bar | Pick a knob; move it a twentieth of its range |
+| `esc` | Clear the cursor |
+
+With knobs set, the rail ranks them by **sensitivity** at the cursor:
+each is nudged by 5% and the fractional change in the first series is
+divided by that 5%, one extra solve per knob.
+
+What the plot could not do shows as such: a point that failed to solve
+leaves a **gap** (hatched, with the solver's message on hover), never a
+line across it, and where the answer breaks one of the garden's own
+constraints the span is shaded and edged in `--fault` dashes. Series
+that measure the same dimension share a y axis, a second dimension takes
+the right one (`core/units.py` decides commensurability). Series colours
+are `--s1`…`--s6`, by the series' place in the command so hiding one
+never repaints the others; a seventh repeats the first, dashed.
+
+**`plot save <name>`** writes the focused pane's line as a saved plot:
+an ordinary mote with a `plot` property holding the *specification*
+(what to solve, never the points), an instance of `Saved Plot`. Saving
+a name again updates that plot. `\graph{name}` in a Mora note draws it,
+re-solved at every render (`docs/modoc.md`). **`plot export csv`** writes
+the full-resolution points and **`plot export png`** the pane's picture,
+to `path` or through a save dialog.
+
+Not ported from the old window: baselines (a scenario's curve drawn
+dashed beside each series) and the plot grid, which tiling replaces.
+`fit` is the step after U4.
+
 ### Tiling
 
 `^w` is the prefix: `v`/`s` split side by side or stacked, `h j k l`
@@ -185,6 +246,11 @@ Boots on a seeded temp garden and checks the following:
   `d d` delete and `⏎` on a link from the props pane
 - `p` opens the float on the selection and `esc` closes it
 - an `open @sel` pane survives a relaunch
+- `mo xie` opens a plot pane; a `plot` line draws the solved curve and the
+  cursor reads it; zoom, `y` and `t` rewrite the line; a knob moves the
+  curve and never writes; `plot save` writes a saved plot that one `undo`
+  removes; `plot export csv` and `png` write files
+- a plot pane survives a relaunch
 
 ---
 
@@ -746,7 +812,7 @@ the window.
 | Pane | |
 |---|---|
 | Source | a textarea over a syntax-highlight layer. `@` opens a mote picker that inserts `\mote{<id>}{<name>}` |
-| Rendered | the note with every macro resolved. Clicking a `\mote` link opens the shared floating inspector (`frontend_shared/inspector.js`) on that mote -- the same editing surface every other window uses. A `\graph{<saved view>}` draws as a figure, through the same renderer Moxie uses (`frontend_shared/plot.js`) |
+| Rendered | the note with every macro resolved. Clicking a `\mote` link opens the shared floating inspector (`frontend_shared/inspector.js`) on that mote -- the same editing surface every other window uses. A `\graph{<saved view>}` draws as a figure, through `frontend_shared/plot.js`, the renderer the console's plot pane (`console/frontend/js/plot.js`) was ported from |
 
 `Source` / `Split` / `Read` choose which panes are shown. Mora has no
 docked data panel of its own; a mote's properties and relationships are
@@ -771,7 +837,7 @@ window rather than a rule two buttons were keeping.
 above, and exists for the same reason -- the half of the app pytest
 cannot reach. It drives a real window against a seeded throwaway garden
 and checks that the note renders, that `\val` and `\mote` resolve (and
-visibly fail when they can't), that a `\graph` naming a saved Moxie view
+visibly fail when they can't), that a `\graph` naming a saved plot
 draws and re-solves rather than replaying stored points, that a link
 opens the shared inspector, that the footer offers no clock,
 that Save writes only the note, and that no uncaught JS errors were
@@ -1030,177 +1096,6 @@ the code.
 
 ---
 
-# Moxie -- the graphing utility
-
-`./run_moxie.py`, or `.venv/bin/python run_moxie.py`.
-
-```
-./run_moxie.py                          # the last garden opened
-./run_moxie.py --garden circuit-example # a specific garden
-./run_moxie.py --focus <mote-id>        # open with that mote plotted
-```
-
-Motion solves the garden as it stands, or forward through time. Neither
-answers the question a model is usually built for -- *how does this
-value move as that one changes* -- because that question's answer is not
-a state. It is a curve.
-
-Moxie draws the curve. Pick a property to sweep and a property to plot,
-and it re-solves the whole garden once per step of the range, in memory.
-**Nothing is written and nothing is logged** -- not a value, not a run
-entry. That is what makes it safe to fire on every frame of a dragged
-slider, and it is the line the window is built around: the only thing
-Moxie ever writes is a saved-plot mote, when asked in so many words. To
-*change* the model you are looking at, use the inspector, which is the
-same panel here as everywhere else.
-
-### The grid
-
-Plots live in a grid, not one at a time. Comparing σ against E with σ
-against Γ is the reason the window exists, and a tab strip cannot do it.
-`＋ plot` adds one; `×` on a plot removes it; clicking a plot makes it
-the active one that the rails and the mode chips act on.
-
-### Picking what to plot
-
-Every mote in the left rail that holds a number is listed, with its
-numeric properties as chips. A chip marked with `·` is one of that
-mote's **freedoms** -- something the solver determines -- and a freedom
-nothing has solved yet is listed too, since in a garden that has never
-been run those are precisely the interesting curves.
-
-| Gesture on a chip | Action |
-|---|---|
-| Click | Plot it as y (click again to remove it) |
-| Alt-click | Sweep it as x |
-| Shift-click | Pin it as a knob |
-| Right-click | All three, plus Inspect / Inspect in new tab |
-
-Either side can be any numeric property of any mote -- there is no rule
-that x must be an input. Sweeping a property the solver would otherwise
-determine is allowed and says so: the plot reports **x pinned**, because
-the answer under it is "what if this were so" rather than "what the
-model determines".
-
-### Series, cases, and what a plot costs
-
-A series is a mote, a property, a scenario and an override. Several
-series differing only in which property they read share **one solve per
-point**, so a plot's cost is *cases* × points rather than series ×
-points. The topbar states the number it works out to rather than
-capping it -- adding a twelfth series should show you what you just
-bought. At the scale MonOSS is built for it is rarely an issue: 201
-solves of the voltage-divider example take about a tenth of a second.
-
-Every sweep runs twice. A coarse pass takes every eighth point and lands
-in about the time of a frame; the rest follows and sharpens it. So
-dragging a knob always redraws immediately rather than freezing and then
-jumping, and a newer request cancels the one still running -- per plot,
-so plots in the grid never cancel each other.
-
-### Knobs
-
-A pinned property becomes a slider in the right rail. Dragging it
-overrides that value for every sweep, and **never writes it to the
-garden**: it is a question, not an edit. Hovering a plot with knobs
-pinned fills the sensitivity panel, which nudges each knob by 5% and
-ranks them by how much they move the plotted value at the cursor -- one
-extra solve per knob, not per point, and local to that x.
-
-### Baselines
-
-The baseline dropdown lists the garden's own **scenarios**
-(`core/scenarios.py`), not a Moxie setting. Choosing one draws its curve
-dashed beside each series and puts the difference in the cursor
-readout. A baseline is therefore a real, named, shareable thing in the
-garden rather than a slider position someone has to remember.
-
-### What the plot tells you it could not do
-
-A point that fails to solve leaves a **gap** -- never a line
-interpolated across a region where the model has no answer -- and the
-failed span is hatched, with the solver's own message on hover. A span
-where the answer breaks one of the garden's own **constraints** (a rule
-whose relation is `<=` rather than `==`) is shaded, and the rule is
-named once in the run rail. That is why there is no "threshold" control:
-a limit on a value is already a thing in MonOSS, every solve checks it,
-and shading where it actually broke stays right even where the bound
-itself moves with the sweep.
-
-### Three modes
-
-* **Sweep** -- one axis, one or more curves. The main event.
-* **Surface** -- one output over *two* swept properties, as a heatmap.
-  A full grid is the square of a sweep, so it draws a coarse grid first
-  (every fourth point of both axes) and refines.
-* **Correlate** -- one dot per mote carrying both named properties, from
-  a single solve. Nothing is swept; the solve is there so a freedom
-  shows its solved value rather than a stale one. Dots are labelled
-  directly, since a scatter has no legend to lean on.
-
-### Axes and colour
-
-Series sharing a dimension share a y axis; a second dimension takes the
-right-hand one; three or more has no honest shared scale and the plot
-normalizes. Commensurability comes from `core/units.py`, so `kohm` and
-`ohm` agree and `ohm` and `volt` do not.
-
-Six series colours, assigned by the series' own identity and never by
-its position, so switching one off never repaints the others. Six is not
-a round number: it is how many marks stay separable on this background
-under every pairwise colour-vision check when any series may overlap any
-other. A seventh series takes the first hue again with a dash pattern --
-a second channel rather than a colour nobody could tell from another.
-
-### Saving
-
-Closing the window keeps the grid, per garden, in its own storage --
-axes, series, knobs and ranges, but never the points, which are
-re-solved on open. **Save as mote** is the durable version: an ordinary
-mote carrying a `plot` property, declared an instance of `Saved Plot`,
-exactly as a saved view (`core/views.py`) is. What it stores is the *specification*
--- which motes, which keys, which ranges -- and never the numbers, so
-reopening a saved plot re-solves the garden as it stands now. A plot
-embedded in a note therefore cannot go stale the way a pasted number
-does, which is the whole reason to save one.
-
-That is not a figure of speech: a saved view is what `\graph{...}` in a
-.modoc note names. Save a plot here as **Load curve**, write
-`\graph{Load curve}` in Mora, and the note draws it -- re-solved on
-every render, by this same renderer (`frontend_shared/plot.js`), at a
-coarser sampling than this window uses (`core/plotview.py`). Designing a
-figure is Moxie's job; a note refers to one. See `docs/modoc.md`.
-
-### Exporting
-
-`csv` writes the points you are looking at; `png` rasterizes the plot's
-own SVG. Both go through a native save dialog. They are for taking an
-answer out of the ecosystem -- inside it, a saved plot mote is the
-better currency.
-
-A seventh window means a seventh port: `moxie/app.py` asks for **42008**,
-falling back to an ephemeral one if taken -- 42007 is the Gardens
-window's, which is easy to miss when counting because Gardens is not in
-`api_common.APPS`. `.webview_data_moxie/` is its own WebKit storage.
-
-### Smoke test
-
-`scripts/moxie_smoke_test.py`, the same instrument as the others. It
-drives a real window against a seeded throwaway garden and checks that a
-sweep draws a curve with the right numbers in it, that it writes nothing
-(provenance included), that a knob moves the curve without touching the
-garden, that a failed point leaves a gap rather than a line, that the
-grid holds two independent plots, and that saving a plot writes a
-specification rather than points.
-
-```
-.venv/bin/python scripts/moxie_smoke_test.py
-```
-
-Run it alone -- the pywebview window suites interfere with each other.
-
----
-
 # Gardens -- the garden manager
 
 `./run_gardens.py`, or `.venv/bin/python run_gardens.py`. Also reachable
@@ -1247,9 +1142,9 @@ reads the directory every time it opens.
 
 ### Ports
 
-42007, after the app windows' 42001-42003 and 42006 (42005 was
-Monolith's, before it moved into the console) and before Moxie's
-42008, falling back to an ephemeral one if taken.
+42007, after the app windows' 42001-42003 and 42006 (42005 and 42008
+were Monolith's and Moxie's, before they moved into the console),
+falling back to an ephemeral one if taken.
 `.webview_data_gardens/` is its own WebKit storage. Opening it twice is
 allowed rather than guarded: pywebview cannot raise and focus
 a window belonging to another process, so a menu item that silently did

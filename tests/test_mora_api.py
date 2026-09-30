@@ -189,7 +189,7 @@ def test_render_counts_references_for_the_linked_in_text_list(api, project):
 @pytest.fixture
 def view(api):
     """A crew whose capacity follows its size, and the Moxie view saved
-    over it -- the same shape moxie/api.py::save_plot writes."""
+    over it -- the same shape core/plotview.py::save_plot writes."""
     conn = api._conn
     species = create_mote(conn, {"name": "Crew", "freedoms": "capacity"})
     rule = create_mote(conn, {"name": "Throughput", "equation": "capacity == team * 12"})

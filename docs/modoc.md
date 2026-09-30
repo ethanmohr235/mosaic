@@ -167,7 +167,8 @@ expression_context()` clears them for exactly that reason.
 ### `\graph` -- a saved Moxie view
 
 Block-level, one per line, and it takes one thing: the name (or id) of a
-view saved in [Moxie](ui-setup.md#moxie).
+plot saved in Moxie, the console's plot pane, with `plot save ‹name›`
+([Plots](ui-setup.md#plots-plot-mo-xie)).
 
     \graph{Burndown}
     \graph{Capacity by team}

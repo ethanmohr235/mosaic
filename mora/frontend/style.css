@@ -50,7 +50,7 @@
   --accent-bright: oklch(0.82 0.11 68);
   --accent-soft: oklch(0.74 0.10 68 / 0.12);
   --danger: oklch(0.65 0.15 25);
-  /* Figures. moxie/frontend/style.css's tokens, copied for the reason
+  /* Figures. The old Moxie window's tokens (deleted in console U4), copied for the reason
      the header gives -- a stylesheet one directory over is not
      fetchable, and a curve must read as the same curve in both
      windows (frontend_shared/plot.js draws from these names). */

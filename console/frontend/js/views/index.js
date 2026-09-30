@@ -63,8 +63,9 @@
 import log from "./log.js";
 import monolithTable from "./monolith-table.js";
 import moteProps from "./mote-props.js";
+import moxiePlot from "./moxie-plot.js";
 
-export const VIEWS = [log, monolithTable, moteProps];
+export const VIEWS = [log, monolithTable, moteProps, moxiePlot];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;

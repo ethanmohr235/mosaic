@@ -19,7 +19,10 @@ also drives the find table: a table appears, click + j j + shift-click
 selects three rows, `set @sel` writes them and one `undo` reverts them,
 a header click rewrites the pane's command, an inline edit writes, and
 the sorted find pane survives a relaunch. Without the namespace those
-checks are skipped (and say so). Everything is driven the way a person does it -- key
+checks are skipped (and say so). U3 drives the props pane and the `p`
+float; U4 drives the plot pane: `mo xie`, a solved curve the cursor
+reads, zoom / log / hide rewriting the line, a knob that never writes,
+`plot save` + `undo`, `plot export csv|png`, and a relaunch. Everything is driven the way a person does it -- key
 events, clicks and drags -- because tests/test_console_api.py already
 covers the bridge on its own.
 
@@ -47,6 +50,8 @@ from core.db import get_connection, initialize_database  # noqa: E402
 from core.gardens import create_garden  # noqa: E402
 from core.motes import create_mote, get_mote  # noqa: E402
 from core.relationships import create_relationship  # noqa: E402
+from core.rules import APPLIES_TO, FREEDOMS_KEY  # noqa: E402
+from core.species import set_species  # noqa: E402
 from window_launcher import choose_port  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "console" / "frontend"
@@ -180,6 +185,12 @@ def seed():
         for i in range(4):
             ids[f"c{i}"] = create_mote(conn, {"name": f"chore{i}", "status": "open"})
             create_relationship(conn, ids[f"c{i}"], ids["chore"], "instance_of")
+        # U4: a circuit whose current is voltage / (r_a + r_b) = voltage / 300.
+        divider = create_mote(conn, {"name": "Divider", FREEDOMS_KEY: "current"})
+        rule = create_mote(conn, {"name": "series", "equation": "current * (r_a + r_b) == voltage"})
+        create_relationship(conn, rule, divider, APPLIES_TO)
+        ids["C1"] = create_mote(conn, {"name": "C1", "voltage": 10, "r_a": 100, "r_b": 200})
+        set_species(conn, ids["C1"], divider)
     finally:
         conn.close()
 
@@ -579,6 +590,109 @@ def u2_restored_checks(window):
     check("U2: a layout with a `find …` pane survives a relaunch", restored)
 
 
+# ---------- U4: the plot pane ----------
+
+PLOT = "plot C1.current vs C1.voltage 0:300 --steps 30"
+
+
+def plot_command(window):
+    """The plot pane's command, from its header."""
+    return next((h for h in headers(window) if h.startswith("plot")), "")
+
+
+def plot_status(window):
+    return js(window, "(() => { const s = document.querySelector('.plot-status'); return s ? s.textContent : ''; })()")
+
+
+def saved_plots():
+    conn = get_connection(GARDEN)
+    try:
+        from core.motes import list_motes
+        return [m.properties.get("name") for m in list_motes(conn) if "plot" in m.properties]
+    finally:
+        conn.close()
+
+
+def u4_checks(window):
+    def mo_xie_opens():
+        type_command(window, "mo xie", alt=True)
+        assert wait_until(lambda: count(window, ".view-plot .plot-empty") == 1), "`mo xie` should open an empty plot pane"
+        no_errors(window)
+
+    check("U4: `mo xie` opens the plot pane", mo_xie_opens)
+
+    def draws_a_curve():
+        type_command(window, PLOT)
+        assert wait_until(lambda: plot_command(window) == PLOT), f"header should be the line, got {headers(window)}"
+        assert wait_until(lambda: count(window, ".view-plot path.plot-series") >= 1), "no curve drawn"
+        assert wait_until(lambda: "31 solves" in plot_status(window)), f"status: {plot_status(window)!r}"
+        # The cursor reads the curve: x = 0 then ten steps on, x = 100 -> current 1/3.
+        press(window, "l")
+        press(window, "L")
+        assert wait_until(lambda: "x 100" in plot_status(window) and "current 0.333" in plot_status(window)), \
+            f"readout: {plot_status(window)!r}"
+        no_errors(window)
+
+    check("U4: a plot line draws the solved curve, and the cursor reads it", draws_a_curve)
+
+    def zoom_log_hide():
+        press(window, "Escape")
+        press(window, "l")      # x = 0
+        press(window, "z")      # mark
+        press(window, "L")      # x = 100
+        press(window, "z")      # zoom to 0:100
+        assert wait_until(lambda: " 0:100 " in plot_command(window)), f"zoom should rewrite the range: {plot_command(window)}"
+        press(window, "y")
+        assert wait_until(lambda: plot_command(window).endswith("--log")), plot_command(window)
+        press(window, "y")
+        press(window, "t")
+        assert wait_until(lambda: "--hide C1.current" in plot_command(window)), plot_command(window)
+        assert wait_until(lambda: count(window, ".view-plot path.plot-series") == 0)
+        press(window, "t")
+        assert wait_until(lambda: "--hide" not in plot_command(window) and count(window, ".view-plot path.plot-series") >= 1)
+        no_errors(window)
+
+    check("U4: zoom, log y and hiding a series rewrite the command", zoom_log_hide)
+
+    def knob_moves_without_writing():
+        type_command(window, PLOT + " --set C1.r_a=100")
+        assert wait_until(lambda: count(window, ".plot-knob") == 1), "the --set knob should be in the rail"
+        press(window, "+")
+        assert wait_until(lambda: "--set C1.r_a=107.5" in plot_command(window)), plot_command(window)
+        assert prop(ids["C1"], "r_a") == 100, "a knob must never write to the garden"
+        assert wait_until(lambda: count(window, ".plot-rail-section .plot-num") >= 1)
+        no_errors(window)
+
+    check("U4: a knob moves the curve and never writes", knob_moves_without_writing)
+
+    def save_and_export():
+        type_command(window, "plot save Load")
+        assert wait_until(lambda: saved_plots() == ["Load"]), f"saved plots: {saved_plots()}"
+        type_command(window, "undo")
+        assert wait_until(lambda: saved_plots() == []), "undo should take the saved plot back"
+        csv_path = _TMP / "plot.csv"
+        png_path = _TMP / "plot.png"
+        type_command(window, f"plot export csv {csv_path}")
+        assert wait_until(lambda: csv_path.exists()), "csv export wrote nothing"
+        assert len(csv_path.read_text().splitlines()) == 32
+        type_command(window, f"plot export png {png_path}")
+        assert wait_until(lambda: png_path.exists() and png_path.read_bytes().startswith(b"\x89PNG"), timeout=10), \
+            "png export wrote no PNG"
+        no_errors(window)
+
+    check("U4: `plot save` writes an undoable saved plot; `plot export` writes csv and png", save_and_export)
+
+
+def u4_restored_checks(window):
+    def restored():
+        assert wait_until(lambda: plot_command(window).startswith(PLOT), timeout=10), \
+            f"the plot pane should survive a relaunch, got {headers(window)}"
+        assert wait_until(lambda: count(window, ".view-plot path.plot-series") >= 1)
+        no_errors(window)
+
+    check("U4: a layout with a plot pane survives a relaunch", restored)
+
+
 # ---------- driving ----------
 
 def open_window(title):
@@ -631,6 +745,7 @@ def drive(first, first_loaded):
             return
         u2_checks(second)
         u3_checks(second)
+        u4_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)
@@ -640,6 +755,7 @@ def drive(first, first_loaded):
         install_collector(third)
         u2_restored_checks(third)
         u3_restored_checks(third)
+        u4_restored_checks(third)
     finally:
         for window in opened:
             window.destroy()

@@ -9,6 +9,8 @@
  *   garden     `cd`: the whole workspace is re-booted on the new garden
  *   undo/redo  log what was undone; every pane re-runs
  *   refresh    every pane re-runs
+ *   pane_action  a line that acts on a pane of one view (`plot save ‹name›`,
+ *              `plot export png`): the focused such pane's instance.action()
  *   error      shown in --fault on the command line and in the log */
 
 import * as T from "./tree.js";
@@ -17,7 +19,7 @@ function message(err) {
   return String(err && err.message ? err.message : err);
 }
 
-export function createRunner({ store, api, actions, autosave, bootWorkspace }) {
+export function createRunner({ store, api, actions, panes, autosave, bootWorkspace }) {
   function statement(e) {
     if (e.needsConfirm) {
       store.log("result", e.message, { level: "warn", moteId: e.moteId });
@@ -85,7 +87,19 @@ export function createRunner({ store, api, actions, autosave, bootWorkspace }) {
     return { message: text, level };
   }
 
+  async function paneAction(e) {
+    const instance = panes && panes.instanceFor(e.view);
+    if (!instance || typeof instance.action !== "function") {
+      return simple({ effect: "error", message: `no ${e.view} pane to ${e.action} -- open one first` });
+    }
+    const outcome = (await instance.action(e)) || { message: "", level: "ok" };
+    // A pane that ran its own line (the full `plot save …`) was logged by it.
+    if (!outcome.logged) store.log("result", outcome.message || e.action, { level: outcome.level === "fault" ? "fault" : "ok" });
+    return { message: outcome.message, level: outcome.level };
+  }
+
   const HANDLERS = {
+    pane_action: paneAction,
     statement,
     open_view: openView,
     layout,

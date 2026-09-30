@@ -99,7 +99,8 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "transient overrides. It holds no computed points, only what to "
         "compute, so reopening it re-solves the garden as it stands rather "
         "than showing what it looked like when saved. Written and read in "
-        "Moxie (run_moxie.py); the solving itself is core/sweep.py.",
+        "the console by `plot save` / `plot ‹name›` (core/plotcmd.py) and drawn "
+        "in notes by `\\graph{name}`; the solving itself is core/sweep.py.",
     SOURCE_KEY: "Where each of a mote's values came from, as a per-property "
         "map in exactly the shape `units` has: {'x': 'assumed', 'sigma': "
         "'external'}. An entry may be the bare word or {'kind': ..., 'note': "

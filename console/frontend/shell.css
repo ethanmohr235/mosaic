@@ -669,3 +669,47 @@ body.dragging-col { cursor: row-resize; }
 
 .props-float .view-props { overflow: auto; min-height: 0; }
 .props-float[hidden] { display: none; }
+
+/* ---------- moxie:plot (U4) ---------- */
+
+.view-plot { display: flex; height: 100%; min-height: 0; }
+/* The plot keeps at least half a narrow pane; the rail gives way first. */
+.plot-main { flex: 1 1 0; min-width: 50%; display: flex; flex-direction: column; }
+.plot-area { position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: crosshair; }
+.plot-svg { position: absolute; inset: 0; display: block; }
+.plot-labels { position: absolute; inset: 0; pointer-events: none; }
+.plot-tick, .plot-title, .plot-dot-label {
+  position: absolute; line-height: var(--lh-body); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; color: var(--dim);
+}
+.plot-title { color: var(--fg); }
+.plot-dot-label { color: var(--fg); }
+.plot-status {
+  display: flex; gap: var(--bar-gap); padding: 0 var(--pad-x); height: var(--row-h);
+  border-top: var(--border) solid var(--line); color: var(--dim); white-space: nowrap; overflow: hidden;
+}
+.plot-status-fill { flex: 1; }
+.plot-dot-status.lvl-ok { color: var(--ok); }
+.plot-rail {
+  flex: 0 1 var(--plot-rail); min-width: 0; border-left: var(--border) solid var(--line);
+  overflow: auto; min-height: 0;
+}
+.plot-rail-section { padding: var(--table-head-pad) var(--pad-x); border-bottom: var(--border) solid var(--line); }
+.plot-rail-head { display: flex; justify-content: space-between; font-weight: var(--w-bold); }
+.plot-rail-meta { color: var(--dim); font-weight: var(--w-regular); }
+.plot-rail-row { display: flex; align-items: center; gap: var(--header-gap); height: var(--row-h); cursor: default; }
+.plot-rail-row.hidden { color: var(--dim); }
+.plot-rail-section > .plot-rail-row.cursor,
+.plot-knob.cursor > .plot-rail-row { color: var(--bright); }
+.plot-rail-section > .plot-rail-row.cursor::before,
+.plot-knob.cursor > .plot-rail-row::before { content: "›"; margin-left: calc(-1 * var(--cursor-w)); width: var(--cursor-w); }
+.plot-ref { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plot-num { color: var(--fg); }
+.plot-swatch { width: var(--cursor-w); height: var(--cursor-w); border: var(--border) solid; flex: none; }
+.plot-swatch.dashed { border-style: dashed; }
+.plot-knob-track { height: var(--cursor-w); background: var(--track); margin: 0 0 var(--table-head-pad); cursor: ew-resize; }
+.plot-knob-fill { height: 100%; background: var(--line-strong); }
+.plot-knob.cursor .plot-knob-fill { background: var(--fg); }
+.plot-rail-note { padding: var(--table-head-pad) var(--pad-x); color: var(--dim); }
+.plot-empty { padding: var(--picker-pad-y) var(--pad-x); color: var(--dim); }
+.plot-usage { color: var(--fg); }

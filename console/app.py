@@ -19,8 +19,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_console"
 
 # 42001-42003 and 42005-42008 belong to the old windows (Monarch, Mora,
-# Monastery, Monolith, Motion, Gardens, Moxie), which keep running beside
-# this one until each is ported -- see window_launcher.choose_port.
+# Monastery, Motion, Gardens; Monolith's and Moxie's are deleted), which
+# keep running beside this one until each is ported -- see window_launcher.choose_port.
 DEFAULT_HTTP_PORT = 42009
 
 

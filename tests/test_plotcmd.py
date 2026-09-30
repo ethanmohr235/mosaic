@@ -186,6 +186,15 @@ def test_a_surface_and_a_correlation_draw(conn, divider):
     assert sorted(d["name"] for d in dots.dots) == ["C1", "C2"]
 
 
+def test_a_surface_with_both_axes_on_one_mote_varies_along_both(conn, divider):
+    """Regression: the point's overrides were a dict literal keyed by mote,
+    so y's entry replaced x's when both axes were on C1."""
+    surface = draw(conn, "plot C1.current vs C1.voltage 0:300 by C1.r_a 0:100 --steps 2", points=3)
+    by_cell = {(c["x"], c["y"]): c["v"] for c in surface.cells}
+    assert by_cell[(300.0, 0.0)] == pytest.approx(300 / 200)
+    assert by_cell[(150.0, 100.0)] == pytest.approx(150 / 300)
+
+
 def test_a_scenario_is_found_by_name(conn, divider):
     hot = create_mote(conn, {"name": "hot", OVERRIDES: {"voltage": 30}})
     create_relationship(conn, hot, divider, VARIES)

@@ -5,9 +5,9 @@
  * docs/console.md → *Visual system*: don't add a color, font, size,
  * radius, shadow or animation that isn't here -- raise it as a question.
  *
- * Dark only. Not used yet: the handoff's --c-task/--c-note/--c-event/
- * --c-source type colors (motes are colored by species, below) and the
- * plot series colors (U4). */
+ * Dark only. Not used: the handoff's --c-task/--c-note/--c-event/
+ * --c-source as *type* colors (motes are colored by species, below);
+ * they live on as the first four plot series. */
 
 @font-face {
   font-family: "Geist Mono";
@@ -61,6 +61,17 @@
   --species-lift: 0.08;
   --species-hue-offset: 25;
 
+  /* Plot series (U4, docs/console.md → Settled for U4). --s1/--s2 are the
+   * handoff's series 1 and 2 (--c-note, --c-event), --s3/--s4 its
+   * --c-source and --c-task, and --s5/--s6 fill the two widest remaining
+   * hue gaps in the same band. A 7th series repeats --s1 dashed. */
+  --s1: oklch(0.80 0.11 240);
+  --s2: oklch(0.82 0.12 85);
+  --s3: oklch(0.78 0.13 320);
+  --s4: oklch(0.80 0.13 150);
+  --s5: oklch(0.80 0.11 195);
+  --s6: oklch(0.78 0.13 40);
+
   /* Type. One family, one body size; hierarchy is weight + brightness. */
   --font: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --fs-body: 12px;
@@ -95,6 +106,7 @@
   --col-max: 32ch;           /* a data table column never grows past this (monolith:table) */
   --kv-key: 84px;
   --kv-key-wide: 104px;
+  --plot-rail: 240px;        /* moxie:plot's legend / knobs / readout column (U4) */
   --gap: 1px;                /* tiled panes: 1px gaps over --line */
   --divider-hit: 3px;        /* invisible grab margin either side of a divider */
   --picker-pad-y: 6px;

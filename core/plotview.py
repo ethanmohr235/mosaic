@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 NAME_KEY = "name"
 
-# How many points a figure outside Moxie is sampled at. Enough that a
+# How many points a figure in a note is sampled at. Enough that a
 # curve reads as a curve and a kink in it is visible; few enough that a
 # note carrying three figures re-renders while you are still typing.
 NOTE_POINTS = 60
@@ -145,8 +145,8 @@ class Figure:
 
 def list_views(motes: list[Mote]) -> list[Mote]:
     """Every mote carrying a saved plot. Asked of the property rather
-    than of core/kinds.py, for the reason moxie/api.py::_plots gives:
-    carrying a plot is data, like a url."""
+    than of core/kinds.py, because carrying a plot is data, like
+    a url -- a kind would displace the mote's real species everywhere."""
     return [m for m in motes if has_plot(m.properties)]
 
 
@@ -381,8 +381,8 @@ def _surface(
         spec.get("solverConfiguration"),
     )
     span = result.span
-    # Real row/col indices are Moxie's business (a finer pass lands on top
-    # of a coarser one); a figure is drawn once, so the grid is dense and
+    # The sweep's own row/col indices are the axis's (a coarse pass skips
+    # some); a figure is drawn once, so the grid is dense and
     # the cells are numbered from zero.
     cols = sorted({c.col for c in result.cells})
     rows = sorted({c.row for c in result.cells})
@@ -418,12 +418,16 @@ def _correlate(
     )
     xs = [d.x for d in dots]
     ys = [d.y for d in dots]
+    log = spec.get("yScale") == "log"
+    # Padded like a sweep's bands, so motes that agree on a value still
+    # get a y range with height rather than sitting on the axis.
+    x_lo, x_hi = _padded(min(xs), max(xs), False) if xs else (0.0, 1.0)
+    y_lo, y_hi = _padded(min(ys), max(ys), log) if ys else (0.0, 1.0)
     return Figure(
         mode="correlate", name=name, view_id=view_id,
         x_label=x_key, y_label=y_key,
-        y_scale="log" if spec.get("yScale") == "log" else "linear",
-        x_lo=min(xs) if xs else 0.0, x_hi=max(xs) if xs else 1.0,
-        y_lo=min(ys) if ys else 0.0, y_hi=max(ys) if ys else 1.0,
+        y_scale="log" if log else "linear",
+        x_lo=x_lo, x_hi=x_hi, y_lo=y_lo, y_hi=y_hi,
         dots=[{"id": d.mote_id, "name": d.name, "x": d.x, "y": d.y} for d in dots],
         solves=1,
         error=None if dots else f"no mote carries both {x_key!r} and {y_key!r}",
@@ -457,8 +461,8 @@ def _axis(spec, max_points: int) -> Axis | None:
 
 
 def _case_key(series: dict) -> str:
-    """Moxie's own key, character for character (moxie/frontend/app.js::
-    caseKeyOf). Two series that differ only in which property they read
+    """A series' case key -- the same string the old Moxie window built,
+    so saved plots written by it keep their meaning. Two series that differ only in which property they read
     share a case and therefore one solve per point; the string is how
     they recognize each other, so it has to be the same string on both
     sides."""
@@ -485,8 +489,7 @@ def _overrides(spec: dict, extra=None) -> dict[str, dict[str, float]]:
 
 
 def _cases(spec: dict, series_specs: list[dict]) -> list[Case]:
-    """The distinct what-ifs this view asks for -- Moxie's casesFor(),
-    server side. A view with no series still asks one question (the
+    """The distinct what-ifs this view asks for. A view with no series still asks one question (the
     garden as it stands, under its knobs), which is what a surface and a
     correlation are."""
     cases: dict[str, Case] = {}
@@ -516,9 +519,7 @@ def _bands(rows: list[dict], log: bool) -> list[Band]:
     members actually cover. One band is one Y axis; the first is the
     left-hand one.
 
-    moxie/payload.py::unit_bands answers the same question for the live
-    window, from the rail's property rows. This answers it from points,
-    because a figure has no rail behind it."""
+    Answered from the points, since a figure carries nothing else."""
     groups: list[dict] = []
     for row in rows:
         found = next((g for g in groups if g["dimension"] == row["dimension"]), None)
@@ -557,7 +558,7 @@ def _bands(rows: list[dict], log: bool) -> list[Band]:
 def _padded(lo, hi, log: bool) -> tuple[float, float]:
     """A band's range with breathing room, and never a degenerate one.
 
-    The same reasoning as moxie/frontend/app.js::padBand: several points
+    Several points
     agreeing to fourteen decimal places are one value as far as an axis
     goes, and padding by a proportion of a span that small leaves the
     axis labelled with sixteen identical numbers."""

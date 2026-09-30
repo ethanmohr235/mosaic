@@ -52,7 +52,7 @@ function wire(api) {
     const tree = initialTree(boot);
     store.setTree(tree, T.firstLeaf(tree).id);
   };
-  const runner = createRunner({ store, api, actions: shell.actions, autosave, bootWorkspace });
+  const runner = createRunner({ store, api, actions: shell.actions, panes: shell.panes, autosave, bootWorkspace });
 
   // ctx.runCommand: a view's own line (an inline edit's `set …`) runs
   // exactly as if typed (history, log, effects) and reports on the

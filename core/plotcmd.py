@@ -445,7 +445,7 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
         spec["y"] = _axis(garden, *garden.ref(line.by), line.by_range, steps)
         out_mote, out_key = garden.ref(line.ys[0])
         spec["output"] = {"mote": out_mote, "key": out_key}
-        return Resolved(spec, knobs=knobs,
+        return Resolved(spec, series=(SeriesRef("s0", line.ys[0], False),), knobs=knobs,
                         x_pinned=x_key in freedoms.get(x_mote, set()))
 
     spec["x"] = _axis(garden, x_mote, x_key, line.range, line.steps or DEFAULT_STEPS)

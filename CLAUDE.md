@@ -60,7 +60,7 @@ code.
   `monoss project start|stop|tree|check`; MCP `project_tree`,
   `start_project`.
 - Roadmap **phase 7's backend is done** (Moxie's publication export is
-  UI and stays with the local session):
+  UI and still to do; `plot export csv|png` exists):
   - checks: reserved `check: true` / `tolerance` on a rule, `?=` in the
     worksheet (`core/rules.py`, `core/simulation.py`)
   - the V&V table: `source: {..., checks: <key>}`, `calc.verification`,
@@ -87,8 +87,13 @@ code.
   `mo te`) and the `p` float over the same view; `core/inspect.py` is the
   payload both it and the old floating panel draw; `rename`, `unlink`
   and `template` verbs; every typed statement is undoable
-  (`core/command_bar.py`'s write journal). The next UI step is U4
-  (Moxie).
+  (`core/command_bar.py`'s write journal).
+- Console **U4 is done**: the `moxie:plot` pane (`plot …`, `mo xie`) over
+  `core/plotcmd.py` (the grammar, rewrites, line → saved-plot spec) and
+  `core/plotview.py` (`figure_from_spec`, `sensitivity`, `save_plot`);
+  `console/moxie.py` is `api.moxie`; `plot save`/`plot export` without a
+  line are a `pane_action` for the focused plot pane. Moxie's old window
+  is deleted. The next UI step is `fit` (its own plan), then U5 (Motion).
 
 ## Split of work: cloud backend, local frontend
 
