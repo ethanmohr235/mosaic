@@ -62,7 +62,6 @@ OCCUPIED = (
     (42001, "Monarch", "monarch"),
     (42002, "Mora", "mora"),
     (42003, "Monastery", "monastery"),
-    (42005, "Monolith", "monolith"),
 )
 
 ids = {}

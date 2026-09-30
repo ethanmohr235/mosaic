@@ -3,8 +3,8 @@
 how.
 
 The language, not the window. `core/modoc.py` is the note language and
-Mora is merely an editor for it; this is the same split -- Monolith
-(monolith/) is a table editor over the queries defined here, and the CLI
+Mora is merely an editor for it; this is the same split -- the console's
+`find` table (console/monolith.py) is a view over the queries defined here, and the CLI
 or an MCP tool can run the very same saved query without importing an
 app. A saved query is an ordinary mote carrying a `query` property, the
 way a note is an ordinary mote carrying `modoc`; carrying one is data,

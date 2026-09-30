@@ -25,6 +25,7 @@ from typing import Any
 
 import api_common
 from console import state as state_repo
+from console.monolith import MonolithApi
 from console.session import Session, locked
 from core import commands
 from core import gardens as gardens_repo
@@ -48,6 +49,8 @@ class Api:
         self._session = Session.open(garden)
         self._state = state_repo.load(self._session.garden)
         self._window = None  # set by window_launcher.launch_window
+        # App namespaces over the same session (docs/console.md -> Architecture).
+        self.monolith = MonolithApi(self._session)
 
     # ---- boot and gardens ----
 
@@ -169,6 +172,11 @@ class Api:
     # ---- private: dispatch ----
 
     def _dispatch(self, text: str, selection: list[str], confirm: bool) -> dict:
+        # `set` is read before @sel is expanded: its `@sel` is the whole
+        # selection, where everywhere else it is the primary.
+        literal = commands.parse(text)
+        if literal.kind == commands.VERB and literal.head == commands.SET_VERB:
+            return self._verb_set(literal.args, selection)
         expanded = commands.expand_sel(text, selection)
         if expanded != text and motes_repo.get_mote(self._session.conn, selection[0]) is None:
             # command_bar reads an `#id` that matches nothing as a *name*
@@ -211,6 +219,9 @@ class Api:
             return self._verb_cd(parsed.args)
         if parsed.head == "layout":
             return self._verb_layout(parsed.args)
+        if parsed.head in commands.ARG_VIEWS:
+            return {"effect": "open_view", "view": commands.ARG_VIEWS[parsed.head],
+                    "command": parsed.text}
         if parsed.args:
             return _error(_no_arguments(parsed.head))
         if parsed.head in commands.VERB_VIEWS:
@@ -240,6 +251,14 @@ class Api:
             api_common.open_app(app.legacy, garden)
         return {"effect": "legacy", "app": app.legacy,
                 "message": f"opened {app.name} (old window)"}
+
+    def _verb_set(self, args: tuple[str, ...], selection: list[str]) -> dict:
+        result = commands.run_set(self._session.conn, args, selection)
+        if result.command is not None:
+            self._session.undo.push(result.command)
+        return {"effect": "statement", "ok": True, "message": result.message,
+                "moteId": None, "moteName": None, "created": False,
+                "needsConfirm": False, "choices": [], "wrote": result.count > 0}
 
     def _verb_cd(self, args: tuple[str, ...]) -> dict:
         if len(args) != 1:

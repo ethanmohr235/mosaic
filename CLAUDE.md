@@ -77,7 +77,12 @@ code.
   (`core/materials_provider.py` over `core/data/materials.json`).
 - Every roadmap phase's backend through 9 is done except phases 5 and 6,
   which the user's brief did not assign to the cloud session.
-- The next UI step is U2's frontend.
+- Console **U2 is done**: the `find` table (`monolith:table`,
+  `console/monolith.py` over `core/table.py`/`findtext.py`), the `find`
+  and `set` verbs (`core/commands.py`; `set @sel` writes the whole
+  selection as one undo step), and Monolith's old window is deleted.
+  At the user's direction the cloud session now does frontend work too,
+  since the local session stopped. The next UI step is U3 (props).
 
 ## Split of work: cloud backend, local frontend
 

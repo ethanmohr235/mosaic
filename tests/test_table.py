@@ -254,3 +254,19 @@ def test_answer_is_the_rows_half_of_table(conn, garden):
     schema = Schema.of(index, motes, relationships)
     the_query = table_repo.default_query(schema)
     assert answer(index, schema, the_query, motes)["matched"] == table(conn, the_query)["matched"]
+
+
+def test_updated_reads_to_the_minute_and_keeps_its_raw_value(conn):
+    create_mote(conn, {"name": "a"})
+    payload = table(conn, q.Query(columns=(table_repo.UPDATED_FIELD,)))
+    (cell,) = payload["rows"][0]["cells"]
+    assert len(cell["text"]) == 16 and cell["text"][10] == " "
+    assert cell["value"].startswith(cell["text"][:10]) and "T" in cell["value"]
+
+
+def test_field_of_reads_back_every_column_key(conn, garden):
+    motes, relationships, index = read(conn)
+    for column in Schema.of(index, motes, relationships).columns:
+        assert table_repo.field_of(table_repo.column_key(column.field)) == column.field
+    with pytest.raises(ValueError):
+        table_repo.field_of("nonsense")

@@ -343,7 +343,9 @@ def _field_vocabulary(schema: table_repo.Schema) -> list[tuple[str, str]]:
     vocabulary = [(TYPE_ALIASES[0], "the species a mote is an instance of")]
     for column in schema.columns:
         spelling = format_field(column.field)
-        if spelling == TYPE_ALIASES[0]:
+        # A column whose spelling reads back as another field (the
+        # `species` builtin reads as `type`) has no written form to offer.
+        if spelling == TYPE_ALIASES[0] or parse_field(spelling) != column.field:
             continue
         vocabulary.append((spelling, f"{column.label} ({column.kind}, {column.fill})"))
     return vocabulary
@@ -367,6 +369,35 @@ def _value_completions(
     if not needle:
         found.append((prefix + EMPTY_VALUE, f"{column.label} is empty"))
     return found
+
+
+# ---- rewriting a line for a gesture ----
+
+_UNSET = object()
+
+
+def rewrite(text: str, sort: Field | None | object = _UNSET,
+            group: Field | None | object = _UNSET) -> str:
+    """`text` with its sort or grouping changed, in canonical form -- what
+    a header click or a `g` in the table turns into, so the pane's command
+    stays the whole truth about what it shows and JS never writes find
+    syntax.
+
+    Sorting by the field already sorted on flips its direction; any other
+    field sorts ascending. `group=None` removes the grouping."""
+    spec = parse_find(text)
+    the_query = spec.query
+    if sort is not _UNSET:
+        if sort is None:
+            the_query = replace(the_query, sort=None)
+        elif the_query.sort is not None and the_query.sort.field == sort:
+            flipped = query.ASC if the_query.sort.direction == query.DESC else query.DESC
+            the_query = replace(the_query, sort=Sort(sort, flipped))
+        else:
+            the_query = replace(the_query, sort=Sort(sort, query.ASC))
+    if group is not _UNSET:
+        the_query = replace(the_query, group=group)
+    return format_find(FindSpec(the_query, spec.view))
 
 
 def with_view(spec: FindSpec, saved: Query) -> Query:

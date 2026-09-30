@@ -52,7 +52,8 @@ def test_reserved_words_are_the_verbs_plus_the_app_suffixes():
     assert reserved_words() == set(RESERVED_VERBS) | {
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic",
     }
-    assert list(RESERVED_VERBS) == ["cd", "layout", "refresh", "undo", "redo", "log"]
+    assert list(RESERVED_VERBS) == [
+        "find", "set", "cd", "layout", "refresh", "undo", "redo", "log"]
 
 
 def test_resolve_view():
@@ -184,3 +185,23 @@ def test_nothing_completes_after_an_app_suffix_or_argumentless_verb(conn):
     assert complete(conn, "tion ").rows == ()
     result = complete(conn, "undo ")
     assert result.rows == () and result.hint == "undo"
+
+
+# ---- U2: find and set --------------------------------------------------------
+
+def test_find_and_set_resolve_and_complete(conn):
+    from core import motes as motes_repo
+    motes_repo.create_mote(conn, {"name": "a", "status": "open"})
+    motes_repo.create_mote(conn, {"name": "b", "status": "done"})
+    assert commands.resolve_view("find status:open") == ("monolith:table", "find status:open")
+
+    def values(line):
+        return [row.value for row in commands.complete(conn, line).rows]
+
+    assert values("find st") == ["status:"]
+    assert values("find status:o") == ["status:open"]
+    assert values("find --") == ["--sort", "--group", "--cols", "--view"]
+    assert "species" not in values("find --sort ")  # it would read back as `type`
+    assert values("set ") == ["@sel", "a", "b"]
+    assert values("set @sel st") == ["status"]
+    assert values("set @sel status d") == ["done"]

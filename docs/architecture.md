@@ -597,8 +597,8 @@ the user should approve in the app, or need a live window. See
 # What belongs on which surface
 
 `core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/`,
-`monolith/`, `motion/`, `moxie/`, `gardens_app/`, `console/` and
-`mcp_server/` are ten adapters over it, and each one's job is a
+`motion/`, `moxie/`, `gardens_app/`, `console/` and `mcp_server/` are
+nine adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -626,10 +626,10 @@ The charter:
   calendar below). A third window on the same terms, and for the same
   reason: a week is a shape a graph canvas cannot draw.
 * **Monolith** -- likewise once more, for the garden as a whole rather
-  than for any one kind of mote (see The table below). A fifth window,
-  because a query across every mote and an edit applied to two hundred
-  of them are shapes a graph, a page and a week all lack: each
-  of those shows a mote at a time, and this one shows the set.
+  than for any one kind of mote (see The table below): a query across
+  every mote and an edit applied to two hundred of them are shapes a
+  graph, a page and a week all lack. It is the console's `find` pane
+  now, not a window.
 * **Motion** -- likewise a sixth time, for the garden as a system that
   runs (see Simulation below, and `docs/simulation.md`). A sixth window,
   because a scenario rail, a tick-by-tick timeline and a rule's own
@@ -1181,8 +1181,8 @@ calendar stranded at the coordinates the field used to be at.
 The garden as rows and columns: where large edits happen -- forty motes
 given an owner in one gesture -- and where structured questions get asked
 across everything at once, rather than one mote at a time. It was a
-window of its own (`monolith/`) and is becoming the console's `find` view
-(`docs/console.md`, step U2); **all of it lives in `core/` now**, in four
+window of its own (`monolith/`) and is now the console's `find` view
+(`docs/console.md`, step U2); **all of it lives in `core/`**, in five
 modules, because the console, the CLI and an MCP tool all have to agree
 about what columns a garden has and what "set `status` on these forty"
 does:
@@ -1195,9 +1195,18 @@ does:
 | `core/batch.py` | one edit applied to many motes, as one undo step |
 | `core/views.py` | a query kept under a name |
 
-`monolith/payload.py` is what is left of the window's own shaping -- the
-relationship matrix and the row detail panel -- and re-exports the rest
-from `core/table.py` so the window keeps working until U2 deletes it.
+The console's side is thin. `console/monolith.py` is the `api.monolith`
+bridge: `table(command)` reads a `find …` line (filling in the garden's
+default columns when it names none, and `--view` from a saved view) and
+answers `core/table.py::table`'s payload plus `sort` and `group` as column
+keys; `rewrite(command, change)` turns a header click or `g` into the new
+line through `core/findtext.py::rewrite`, so JavaScript never writes find
+syntax. Edits are commands, not bridge calls: a cell edit runs `set @sel
+<key> <value>` (the whole selection) or `set #id …`, which
+`core/commands.py::run_set` applies through `core/batch.py` as one undo
+step. Every column a table shows has a written form -- which is why the
+default Species column is `type` (`instance_of`), sorting and grouping by
+species name -- and `core/table.py::field_of` reads a column key back.
 
 **Columns are discovered, never declared.** A garden has no schema, so
 there is nothing to read a column list off. `core/table.py::Schema`
@@ -1321,12 +1330,8 @@ instance of a `Saved View` species -- an ordinary mote, found or created by
 name rather than reserved, so a garden that has never saved a view never
 grows one.
 
-While it still exists, Monolith is a fifth process on the same terms as
-the other three: `monolith/app.py::choose_port` asks for 42005 and falls
-back to an ephemeral port, `.webview_data_monolith/` is its own WebKit
-storage, and the draft query -- the one being edited before it is saved as
-a view -- is the window's own state in `localStorage`, not the garden's.
-See `docs/ui-setup.md`.
+The query being looked at is the pane's command, so it is saved with the
+layout (`console/state.py`), never in the garden. See `docs/ui-setup.md`.
 
 # Simulation
 

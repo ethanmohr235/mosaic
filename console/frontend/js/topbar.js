@@ -2,7 +2,7 @@
  * pane's app suffix (`saic` for shell views), and `/ garden` in --dim.
  * Right: the saved layouts as `1:name` tabs (the active one inverted,
  * with `*` when the tree has drifted from it), then `unsaved layout` in
- * --warn, or `sel X +N · linked in N panes`, or the pane count. A tab
+ * --warn, and `sel X +N · linked in N panes` or the pane count. A tab
  * click switches layout, like its number key. */
 
 export function createTopbar({ root, store, panes, actions, components }) {
@@ -22,14 +22,20 @@ export function createTopbar({ root, store, panes, actions, components }) {
     });
   }
 
+  /** `unsaved layout` and the selection side by side: a drifted layout
+   * must not hide what is selected, since the next command acts on it. */
   function summary(dirty) {
-    if (dirty) return h("span", "lvl-warn", "unsaved layout");
+    const parts = dirty ? [h("span", "lvl-warn", "unsaved layout")] : [];
     const sel = store.state.selection;
     const count = panes.count();
-    if (!sel.length) return h("span", "dim", `${count} pane${count === 1 ? "" : "s"}`);
+    if (!sel.length) {
+      if (!dirty) parts.push(h("span", "dim", `${count} pane${count === 1 ? "" : "s"}`));
+      return parts;
+    }
     const more = sel.length > 1 ? ` +${sel.length - 1}` : "";
     const linked = panes.linkedCount();
-    return h("span", "dim", `sel ${store.label(sel[0])}${more} · linked in ${linked} pane${linked === 1 ? "" : "s"}`);
+    parts.push(h("span", "dim", `sel ${store.label(sel[0])}${more} · linked in ${linked} pane${linked === 1 ? "" : "s"}`));
+    return parts;
   }
 
   function render() {
@@ -40,7 +46,7 @@ export function createTopbar({ root, store, panes, actions, components }) {
       h("span", "breadcrumb", `/ ${store.state.garden}`),
       h("span", "grow"),
       h("span", "tabs", tabs(dirty)),
-      summary(dirty),
+      ...summary(dirty),
     );
   }
 

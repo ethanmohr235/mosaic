@@ -216,7 +216,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
 
     def _plots(self, motes: list) -> list[dict]:
         """Every mote carrying a `plot`. Asked of the property rather than
-        of core/kinds.py, for the reason monolith/api.py::_views gives
+        of core/kinds.py, for the reason core/views.py::list_views gives
         about saved views: carrying a saved plot is data, like a url, and
         making it a kind would displace the mote's real species in every
         other window's type label."""
@@ -373,7 +373,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
 
     def _plot_species_id(self) -> str:
         """Finds or creates the `Saved Plot` species, the same lazy
-        pattern monolith/api.py::_view_species_id uses -- creating rather
+        pattern core/views.py::_view_species_id uses -- creating rather
         than answering None, since save_plot always needs one."""
         for mote in species_repo.list_species(self._conn):
             name = mote.properties.get("name")

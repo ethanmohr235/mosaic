@@ -1,12 +1,13 @@
 # Running the desktop UI
 
-Six native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Five native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
 (`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
-**Monastery**, the calendar (`run_monastery.py`); **Monolith**, the table
-(`run_monolith.py`); **Motion**, the simulator (`run_motion.py`); and
-**Moxie**, the graphing utility (`run_moxie.py`). They share one palette
-and one set of vendored fonts, so the six read as one product.
+**Monastery**, the calendar (`run_monastery.py`); **Motion**, the
+simulator (`run_motion.py`); and **Moxie**, the graphing utility
+(`run_moxie.py`). They share one palette and one set of vendored fonts,
+so they read as one product. Monolith, the table, was the first to move
+into the console (below) and has no window of its own any more.
 
 A seventh window sits beside rather than among them: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
@@ -28,15 +29,16 @@ once its app is ported. New UI is built only in the console.
 
 One window, one garden at a time, every pane the output of a command.
 Its design, grammar and view contract are in `docs/console.md`. This
-section covers what it does today (step U1): the shell and the `log`
-view.
+section covers what it does today (steps U1–U2): the shell, the `log`
+view and the `find` table.
 
 ### The shell
 
 - **Top bar:** the `[mo]` box, the focused pane's app, and `/ garden`.
   On the right, saved layouts as tabs (`1:two`) with `*` and
-  *unsaved layout* once the panes drift from the active one, or the
-  selection (`sel bd · linked in N panes`).
+  *unsaved layout* once the panes drift from the active one, then the
+  selection (`sel bd +2 · linked in N panes`) or, with nothing selected,
+  the pane count.
 - **Command line** (`[mo]` prompt): `:` or `/` focuses it and `esc`
   leaves. `⏎` runs in the focused pane, `⌥⏎` in a new pane. `tab`
   completes, and the best match shows as ghost text. `↑` on an empty
@@ -50,6 +52,8 @@ view.
 | Line | Does |
 |---|---|
 | `tion`, `xie`, `nolith`, … | Open that app. Unported apps open their old window. |
+| `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). `nolith` is `find` with no conditions. |
+| `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. |
 | `log` | The command and error log for this session. |
 | `cd <garden>` | Switch the workspace to another garden, with its own layouts and history. |
 | `layout save\|load\|list\|rm <name>` | Save or restore the pane layout. |
@@ -57,8 +61,50 @@ view.
 | `undo`, `redo` | Same as Ctrl+Z / Ctrl+Shift+Z. |
 | anything else | A modeling statement, as in the old `/` bar: `R1.x = 5 ohm`, `A -> B`, `R1 : Resistor`, `R1.x ?`, `delete R1`. |
 
-`@sel` stands for the selected mote anywhere a mote is expected. A
-mote named like a verb (`log`) is reached as `"log"` or `#id`.
+`@sel` stands for the selected mote (the primary) anywhere a mote is
+expected, except after `set`, where it is the whole selection. A mote
+named like a verb (`log`, `find`) is reached as `"log"` or `#id`.
+
+### The table (`find`, `mo nolith`)
+
+Every mote the line asks for, one row each. The query language is
+`core/findtext.py` over `core/query.py`:
+
+| Write | Means |
+|---|---|
+| `status:todo` | is (includes, on a list column) |
+| `name~truss` | contains |
+| `due:>2026-10-01`, `due:<7d` | after / before (greater / less on numbers); `7d`, `2w`, `today` are relative |
+| `status!:done` | is not |
+| `due:?`, `due!:?` | is empty / is not empty |
+| `type:task` | an instance of the species named `task` |
+| `->depends_on:…`, `<-owns:…` | a relationship, out of or into the mote |
+| `a:1 or b:2` | OR instead of AND |
+| `--sort due`, `--sort -due` | ascending / descending |
+| `--group status` | rows under a heading per value |
+| `--cols name,type,status` | these columns (default: the garden's commonest) |
+| `--view <name>` | start from a saved view's query |
+
+The whole line is the pane's command, so a sorted, grouped table
+survives a layout save and a restart.
+
+| Key | Does |
+|---|---|
+| `j` `k` / `h` `l` | Move the cursor by row / column |
+| `space` | Toggle the row in the selection |
+| `V` | Select from the anchor to the cursor |
+| `a` | Select every row |
+| `esc` | Clear the selection |
+| `s` / a header click | Sort by the cursor's column; again to reverse |
+| `g` | Group by the cursor's column; again to ungroup |
+| `i` / `⏎` / double-click | Edit the cell |
+
+Click selects a row, shift-click a range, ctrl-click toggles one. A
+group heading's *select all* selects its rows. Editing a cell in a
+selected row runs `set @sel …` and writes every selected mote; in an
+unselected row it runs `set #id …` and writes that one. Either way it is
+a command: in the history, the log and undo. An empty value clears the
+key.
 
 ### Tiling
 
@@ -93,6 +139,11 @@ Boots on a seeded temp garden and checks the following:
 - the layout and history survive both a reload and a relaunch on a fresh `Api`
 - `cd` swaps gardens
 - no JavaScript errors
+- `find type:chore` shows a table; click, `j j`, shift-click selects three rows
+- `set @sel` writes all three and one `undo` reverts them
+- a header click rewrites the pane's command with `--sort`
+- an inline cell edit writes through `set`
+- a sorted `find` pane survives a relaunch
 
 ---
 
@@ -830,116 +881,6 @@ fresh temp directory.
 
 ---
 
-# Monolith -- the table
-
-A fifth window, over the same gardens: `./run_monolith.py`, or
-`.venv/bin/python run_monolith.py`. Same stack and the same terms as the
-other three -- pywebview over a local HTML/CSS/JS frontend, its own
-process, its own garden connection, opening and closing independently.
-
-```
-./run_monolith.py                      # the default garden
-./run_monolith.py --garden reactor     # a specific garden
-./run_monolith.py --view <mote id>     # open on a saved view
-```
-
-Every mote is a row. It is the window for the two things the other four
-are bad at: editing a lot of motes at once, and asking a question of the
-whole garden rather than of one mote.
-
-### The columns are your garden's own
-
-Nothing is declared. Monolith reads the garden and offers, in the rail:
-
-| Column kind | Where it comes from |
-|---|---|
-| a property key | every key any mote carries, commonest first, with its fill count |
-| `→ type` / `← type` | every relationship type anyone has drawn, in each direction |
-| Name, ID, Species, Links, Updated | things every mote has |
-| Instance of, Kinds, Related by | what the graph makes the mote (`core/kinds.py`) |
-
-Click a column to add it to the table; click a header to sort by it.
-Clicking a cell opens the editor, and its options are that column's own
-distinct values -- so a `status` column offers `todo`/`doing`/`blocked`
-without anyone having declared a status type, and a column of forty
-different values just gives you a text field. What you type is read as
-JSON where it parses (`api_common.coerce`), so `5` is stored as a number.
-
-### Asking the graph, not just the properties
-
-The Where bar builds a query out of conditions joined by AND or OR. A
-condition can name a property (`estimate > 3`), a builtin (`Updated
-after 2026-08-01`), a relationship (`→ depends_on includes "Schema
-translation"`) or the graph itself (`Kinds includes species`, `Related
-by is empty` -- which is how you list orphans). The language is
-`core/query.py`, not the window's; the window only edits it.
-
-### Editing many motes at once
-
-Tick rows (shift-click for a range, ⌘A for everything the query
-matched). Then **editing any cell inside the selection writes every
-selected mote** -- the footer says so while a selection is up. The bulk
-bar adds: set a property, clear one, link, and delete.
-
-Clicking a cell *outside* the selection edits that one mote and leaves
-the selection alone. That is deliberate: the alternative silently writes
-forty motes because a click missed.
-
-### Writing relationships in bulk
-
-**Link…** relates the whole selection at once: chained in row order, all
-pointing at the first row, or all pointing at one mote you search for.
-**relations** opens the matrix -- the visible rows on both axes, one
-click per edge, painting whichever type is selected above it. Clicking a
-linked cell erases that edge. It covers the first 24 rows and says so.
-
-### Saved views
-
-A view is an ordinary mote carrying the query as its `query` property --
-the only reserved name this window adds. So it syncs, it shows up in
-Monarch, and a Mora note can link to it. The rail lists them with a
-one-line summary of what each asks. The query you are editing right now
-is *not* a mote: it lives in `localStorage`, per garden, so the window
-reopens where you left it.
-
-Deleting rows asks for a typed confirmation. Nothing else here does,
-because everything else is an edit you can make back.
-
-### Keys
-
-| Key | Does |
-|---|---|
-| ⌘A | Select every row the query matched |
-| Shift-click | Select a range of rows |
-| Double-click a row | Inspect it: every property and every relationship |
-| R | Show or hide the relationship matrix |
-| Esc | Close the popover, else clear the selection |
-
-### Ports
-
-A fifth window means a fifth port: `monolith/app.py` asks for **42005**
-(42001 Monarch, 42002 Mora, 42003 Monastery, 42006 Motion), falling
-back to an ephemeral one if taken -- the same collision the others guard
-against, for the same reason. `.webview_data_monolith/` is its own
-WebKit storage.
-
-### Smoke test
-
-`scripts/monolith_smoke_test.py`, the same instrument as the others. It
-drives a real window against a seeded throwaway garden and checks that
-the discovered keys really become columns, that a condition built by
-clicking the Where bar filters, that editing one cell inside a
-three-row selection writes all three motes, that the bulk bar chains a
-selection into relationships, that a matrix click writes an edge and a
-second one erases it, and that saving a view leaves a mote behind. It
-holds 42001-42003 for the whole run.
-
-```
-.venv/bin/python scripts/monolith_smoke_test.py
-```
-
----
-
 # Motion -- the simulator
 
 A sixth window, over the same gardens: `./run_motion.py`, or
@@ -1035,7 +976,7 @@ on the node cards, that a preview writes nothing, that Solve reaches the
 engine and reports a refusal without writing, that picking a scenario
 re-runs and disables Solve, that a comparison pane draws a second
 board, and that editing an
-equation in the panel writes the rule mote. It holds 42001-42005 for the
+equation in the panel writes the rule mote. It holds 42001-42003 for the
 whole run.
 
 ```
@@ -1176,7 +1117,7 @@ Closing the window keeps the grid, per garden, in its own storage --
 axes, series, knobs and ranges, but never the points, which are
 re-solved on open. **Save as mote** is the durable version: an ordinary
 mote carrying a `plot` property, declared an instance of `Saved Plot`,
-exactly as Monolith saves a view. What it stores is the *specification*
+exactly as a saved view (`core/views.py`) is. What it stores is the *specification*
 -- which motes, which keys, which ranges -- and never the numbers, so
 reopening a saved plot re-solves the garden as it stands now. A plot
 embedded in a note therefore cannot go stale the way a pasted number
@@ -1265,7 +1206,8 @@ reads the directory every time it opens.
 
 ### Ports
 
-42007, after the app windows' 42001-42003 and 42005-42006 and before Moxie's
+42007, after the app windows' 42001-42003 and 42006 (42005 was
+Monolith's, before it moved into the console) and before Moxie's
 42008, falling back to an ephemeral one if taken.
 `.webview_data_gardens/` is its own WebKit storage. Opening it twice is
 allowed rather than guarded: pywebview cannot raise and focus

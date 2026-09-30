@@ -91,8 +91,8 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "core/query.py for the shape. A field in it names a property key, a "
         "builtin (name/id/species/degree/updated), a relationship type in one "
         "direction, or the graph itself (instance_of/kind/related), which is "
-        "how a query asks about shape and not only about properties. Written "
-        "and read in Monolith (run_monolith.py).",
+        "how a query asks about shape and not only about properties. Read by "
+        "the console's table as `find --view <name>` (core/findtext.py).",
     PLOT_KEY: "A saved plot: the specification a graph of the garden is "
         "drawn from, as JSON -- which property is swept and over what range, "
         "which properties are plotted against it, which scenarios and which "
@@ -264,6 +264,10 @@ PROPERTY_MODEL_PROVIDERS: dict[str, dict] = describe_providers()
 # its own verbs here (`find` in U2, ...). Ordered as the completion popup
 # lists them, and kept in sync by hand with docs/architecture.md.
 RESERVED_VERBS: dict[str, dict[str, str]] = {
+    "find": {"usage": "find ‹key:value …› [--sort k] [--group k] [--cols a,b]",
+             "describe": "table of motes"},
+    "set": {"usage": "set @sel|#id|‹name› ‹key› ‹value›|--clear",
+            "describe": "set a property on one mote or the whole selection"},
     "cd": {"usage": "cd ‹garden›", "describe": "switch this workspace's garden"},
     "layout": {"usage": "layout save|load|list|rm ‹name›",
                "describe": "save or restore pane layouts"},

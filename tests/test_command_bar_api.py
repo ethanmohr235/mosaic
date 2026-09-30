@@ -6,7 +6,6 @@ import pytest
 
 import monarch.api
 import monastery.api
-import monolith.api
 import mora.api
 import motion.api
 from api_common import CommandBarApi
@@ -52,7 +51,7 @@ def test_delete_a_mote_needs_confirmation(api):
 
 
 @pytest.mark.parametrize("module", [
-    monarch.api, motion.api, monolith.api, mora.api, monastery.api,
+    monarch.api, motion.api, mora.api, monastery.api,
 ])
 def test_every_window_speaks_the_contract(module):
     assert issubclass(module.Api, CommandBarApi)

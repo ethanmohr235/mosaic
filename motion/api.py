@@ -65,7 +65,7 @@ from motion import payload as payload_repo
 
 logger = logging.getLogger(__name__)
 
-# Same reasoning as monolith/api.py: Motion is opened *from* Monarch as
+# A busy timeout rather than failing on the first lock: Motion is opened *from* Monarch as
 # often as on its own, so two processes holding the same garden file
 # open at once is the normal case here, not the exception.
 _BUSY_TIMEOUT_MS = 5000
@@ -165,7 +165,7 @@ def _explanation_payload(explanation) -> dict | None:
 
 class Api(InspectorApi, CommandBarApi, UndoableApi):
     """Every read re-reads the whole garden, the same choice the other
-    windows make (monarch/api.py::focus, monolith/api.py::table):
+    windows make (monarch/api.py::focus, console/monolith.py::table):
     Motion is routinely open beside Monarch on the same garden file, and
     a board showing a rule that was edited in the other window a minute
     ago is worse than a read costing a few milliseconds."""

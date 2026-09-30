@@ -381,7 +381,7 @@ function resetViewAndUnhideAll() {
 
 // ---- saved view filter ----
 //
-// A saved view (monolith/api.py::save_view) is an ordinary mote carrying
+// A saved view (core/views.py::save_view) is an ordinary mote carrying
 // a `query` property -- core/query.py's language, not this app's. Rather
 // than teach the frontend that language, evaluating one is a single
 // round trip to Api.view_filter_ids(), which asks core/query.py to name
@@ -1842,16 +1842,6 @@ const LAUNCHER_APPS = [
       <rect x="7" y="15" width="26" height="1.6" fill="var(--fg)" opacity="0.5"></rect>
       <rect x="12" y="20" width="5" height="5" rx="1" fill="var(--fg)" opacity="0.55"></rect>
       <rect x="21" y="20" width="5" height="5" rx="1" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
-    id: "monolith", name: "Monolith", kind: "table",
-    desc: "Every mote as a row: query, bulk-edit and link the garden.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="13" y="6" width="14" height="28" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
-      <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-      <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
     </svg>`,
   },
   {

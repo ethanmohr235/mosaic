@@ -174,7 +174,7 @@ phase that builds them.
 - **Every** pane re-runs its command after any write made from the
   window (command line, props edit, a view's own edit).
 - Writes from outside the window (MCP, CLI, sync) are picked up when
-  the window regains focus, as Monolith does today, and by an explicit
+  the window regains focus, as the old windows do, and by an explicit
   `refresh`.
 - Re-running must be cheap enough for this. A view that's too slow to
   re-run gets a cache in its API namespace, not a stale-output mode.
@@ -293,7 +293,7 @@ own plan-mode phase and ships something usable.
 | # | Step | Proves |
 |---|---|---|
 | U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
-| U2 | **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
+| U2 | **Done.** **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
 | U3 | **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
 | U4 | **Moxie → `mo xie`.** `plot` / `fit` panes on the restyled `plot.js`. | Commands carry view state (ranges, series). |
 | U5 | **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list. | A live, ticking view inside the contract. |
@@ -341,7 +341,13 @@ Each step's done-check is the same:
 ## Open questions
 
 - **Verb list and view ids.** The tables above are proposals. Confirm
-  each app's canonical commands in its port step.
+  each app's canonical commands in its port step. U2 built `find …`
+  (view `monolith:table`, `mo nolith` = `find`) and `set
+  @sel|#id|‹name› ‹key› ‹value›|--clear`, where `set`'s `@sel` is the
+  whole selection and everywhere else `@sel` is the primary. Confirm
+  those, and whether the old window's bulk link, relationship matrix,
+  bulk delete and *save view* come back as commands (`link @sel …`,
+  `delete @sel`, `view save ‹name›`) -- U2 did not port them.
 - **Worksheet and command line.** Worksheet lines (`bd.x = 80 in`) are
   the same statements the command line accepts. Is the worksheet a
   pane that's just a persistent, editable list of them? Settle this in

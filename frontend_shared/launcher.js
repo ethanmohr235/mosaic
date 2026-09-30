@@ -53,16 +53,6 @@ const Launcher = (() => {
       </svg>`,
     },
     {
-      id: "monolith", name: "Monolith", kind: "table",
-      desc: "Every mote as a row: query, bulk-edit and link the garden.",
-      icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-        <rect x="13" y="6" width="14" height="28" rx="2.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-        <rect x="16" y="11" width="8" height="3" rx="1" fill="var(--accent)"></rect>
-        <rect x="16" y="18" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-        <rect x="16" y="25" width="8" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-      </svg>`,
-    },
-    {
       id: "motion", name: "Motion", kind: "simulation",
       desc: "Run the garden's rules and scrub the result tick by tick.",
       icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">

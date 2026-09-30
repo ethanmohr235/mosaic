@@ -202,7 +202,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi, AnnotatableApi):
     def delete_motes(self, mote_ids: list[str]) -> dict:
         """The canvas's multi-select delete: every mote in one call, so
         the whole batch is one undo step (api.undo()) instead of one per
-        mote -- the same reasoning monolith/api.py::delete_motes gives.
+        mote -- the same reasoning core/batch.py::delete_motes gives.
         Relationships are recorded before each delete, not after -- they
         cascade with the mote (core/db.py's ON DELETE CASCADE)."""
         commands = []
@@ -398,7 +398,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi, AnnotatableApi):
     # ---- saved view filter ----
 
     def _updated(self) -> dict[str, str]:
-        """Mirrors monolith/api.py::_updated -- when each mote last
+        """Mirrors core/table.py::updated_at -- when each mote last
         changed, for the `updated` builtin a saved view's query can
         filter or sort on."""
         rows = self._conn.execute(

@@ -116,7 +116,6 @@ APPS = {
     "monarch": ("Monarch", REPO_ROOT / "run_monarch.py", None),
     "mora": ("Mora", REPO_ROOT / "run_mora.py", "--note"),
     "monastery": ("Monastery", REPO_ROOT / "run_monastery.py", "--focus"),
-    "monolith": ("Monolith", REPO_ROOT / "run_monolith.py", "--view"),
     "motion": ("Motion", REPO_ROOT / "run_motion.py", "--focus"),
     "moxie": ("Moxie", REPO_ROOT / "run_moxie.py", "--focus"),
     # The console (docs/console.md): the one window the others are

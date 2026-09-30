@@ -238,7 +238,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         # Deleting the mote (this command's undo) cascades away the
         # instance_of relationship set_species just made, so one
         # for_create_mote is the whole undo step -- same reasoning as
-        # monolith/api.py::save_view.
+        # core/views.py::save_view.
         self.undo_manager.push(undo.for_create_mote(self._conn, mote_id, properties, label="create a mote"))
         return self._panel(mote_id)
 

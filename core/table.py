@@ -129,6 +129,20 @@ def column_key(field: Field) -> str:
     return f"{field.source}:{field.key}"
 
 
+def field_of(key: str) -> Field:
+    """`column_key` read back: what a surface hands in when a gesture names
+    a column it was sent (a header click sorts by `property:due`). Raises
+    ValueError for a key `column_key` could not have written."""
+    source, _, rest = (key or "").partition(":")
+    if source == query.REL:
+        direction, _, name = rest.partition(":")
+        if direction in (query.OUT, query.IN) and name:
+            return Field(query.REL, name, direction)
+    elif source in (query.PROPERTY, query.BUILTIN, query.GRAPH) and rest:
+        return Field(source, rest)
+    raise ValueError(f"not a column key: {key!r}")
+
+
 BUILTIN_LABELS = {
     query.BUILTIN_NAME: "Name",
     query.BUILTIN_ID: "ID",
@@ -137,10 +151,12 @@ BUILTIN_LABELS = {
     query.BUILTIN_UPDATED: "Updated",
 }
 GRAPH_LABELS = {
-    query.GRAPH_INSTANCE_OF: "Instance of",
+    query.GRAPH_INSTANCE_OF: "Species",
     query.GRAPH_KIND: "Kinds",
     query.GRAPH_RELATED: "Related by",
 }
+UPDATED_FIELD = Field(query.BUILTIN, query.BUILTIN_UPDATED)
+
 # Only `name` is a property under the hood, so only `name` can be typed
 # into. The rest are the graph's own answers -- a degree is edited by
 # drawing an edge, not by typing 4 into a cell.
@@ -340,7 +356,11 @@ def default_query(schema: Schema) -> Query:
     ][:DEFAULT_PROPERTY_COLUMNS]
     columns = (
         Field(query.BUILTIN, query.BUILTIN_NAME),
-        Field(query.BUILTIN, query.BUILTIN_SPECIES),
+        # `instance_of`, not the `species` builtin: every column a default
+        # table shows has to have a written form, since a header click
+        # rewrites the pane's `find` line, and `species` is spelled `type`
+        # there (core/findtext.py). It sorts and groups by species name.
+        Field(query.GRAPH, query.GRAPH_INSTANCE_OF),
         *properties,
         Field(query.BUILTIN, query.BUILTIN_DEGREE),
         Field(query.BUILTIN, query.BUILTIN_UPDATED),
@@ -474,7 +494,7 @@ def answer(
 
     Separate from `table()` because two callers need exactly this and
     nothing else around it: `table()` itself, and a surface adding its own
-    shape to the same rows (Monolith's relationship matrix)."""
+    shape to the same rows."""
     resolved, problems = resolve_query(the_query, schema, today)
     columns = [schema.column(f) for f in the_query.columns] or [schema.columns[0]]
     matched = query.evaluate(index, motes, resolved)
@@ -516,9 +536,14 @@ def _cell(index: Index, mote: Mote, column: Column) -> dict:
     a date cell reading "Aug 25" still edits 2026-08-25."""
     value = query.value_of(index, mote, column.field)
     empty = value is None or value == "" or value == []
+    text = query.text_of(index, value)
+    if column.field == UPDATED_FIELD and isinstance(value, str):
+        # A write time to the minute: the stored stamp carries microseconds
+        # and an offset, which is precision nobody reads in a table.
+        text = value[:16].replace("T", " ")
     return {
         "key": column_key(column.field),
-        "text": query.text_of(index, value),
+        "text": text,
         "value": None if empty else value,
         "kind": column.kind,
         "editable": column.editable,

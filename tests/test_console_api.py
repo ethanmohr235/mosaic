@@ -21,6 +21,8 @@ BRIDGE = {
     "layout_delete", "layout_set_active", "working_put", "undo", "redo",
     "refresh", "switch_garden", "shutdown",
 }
+# api.monolith (U2). The walk collects bare method names.
+MONOLITH_BRIDGE = {"table", "rewrite"}
 
 
 @pytest.fixture
@@ -52,7 +54,9 @@ def test_boot_shape(api):
                                "defaultView": None, "legacy": "motion"}
     assert [a["suffix"] for a in boot["apps"]] == [
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
-    assert boot["verbs"][0] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
+                               "defaultView": "monolith:table", "legacy": None}
+    assert boot["verbs"][2] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"]) == (
         [], None, None, [])
@@ -81,10 +85,10 @@ def _reachable(obj, seen=None):
 
 def test_pywebview_walk_reaches_no_connection(api):
     seen = _reachable(api)
-    assert seen["functions"] == BRIDGE
+    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api]
+    assert seen["objects"] == [api, api.monolith]
 
 
 # ---- statements --------------------------------------------------------------
@@ -291,3 +295,109 @@ def test_complete_shape(api):
 def test_complete_layout_names(api):
     api.layout_put("two", TREE)
     assert [r["value"] for r in api.complete("layout load ")["rows"]] == ["two"]
+
+
+# ---- U2: find and set (api.monolith) -----------------------------------------
+
+@pytest.fixture
+def chores(api):
+    conn = api._session.conn
+    species = motes_repo.create_mote(conn, {"name": "chore"})
+    ids = []
+    for i in range(4):
+        mote = motes_repo.create_mote(conn, {"name": f"chore{i}", "status": "open", "rank": 4 - i})
+        from core.relationships import create_relationship
+        create_relationship(conn, mote, species, "instance_of")
+        ids.append(mote)
+    return ids
+
+
+def _keys(payload):
+    return [row["id"] for group in payload["groups"] for row in group["rows"]]
+
+
+def test_find_opens_the_table_with_the_whole_line_as_its_command(api):
+    effect = api.run("find status:open --sort rank")
+    assert effect == {"effect": "open_view", "view": "monolith:table",
+                      "command": "find status:open --sort rank"}
+    assert api.resolve("find status:open") == {"view": "monolith:table",
+                                               "command": "find status:open"}
+    assert api.run("nolith") == {"effect": "open_view", "view": "monolith:table",
+                                 "command": "find"}
+
+
+def test_table_answers_a_find_line(api, chores):
+    payload = api.monolith.table("find type:chore --sort rank")
+    assert _keys(payload) == list(reversed(chores))
+    assert payload["sort"] == {"key": "property:rank", "dir": "asc"}
+    assert payload["group"] is None
+    assert payload["matched"] == 4 and payload["total"] == 5
+    assert {"columns", "groups", "speciesIds", "problems"} <= set(payload)
+    # No --cols: the garden's default columns, species among them.
+    assert [c["label"] for c in payload["columns"]][:2] == ["Name", "Species"]
+    row = payload["groups"][0]["rows"][0]
+    assert {"id", "name", "speciesId", "kinds", "cells"} <= set(row)
+
+
+def test_table_groups_and_reports_a_bad_line(api, chores):
+    grouped = api.monolith.table("find --group type")
+    assert grouped["group"] == "graph:instance_of"
+    assert any(g["label"] == "chore" and g["count"] == 4 for g in grouped["groups"])
+    assert "error" in api.monolith.table('find "unclosed')
+    assert "error" in api.monolith.table("find --view nothing")
+    assert "error" in api.monolith.table("log")
+
+
+def test_rewrite_sorts_flips_and_groups(api):
+    first = api.monolith.rewrite("find status:open", {"sort": "property:rank"})
+    assert first == {"command": "find status:open --sort rank"}
+    again = api.monolith.rewrite(first["command"], {"sort": "property:rank"})
+    assert again == {"command": "find status:open --sort -rank"}
+    grouped = api.monolith.rewrite("find", {"group": "graph:instance_of"})
+    assert grouped == {"command": "find --group type"}
+    assert api.monolith.rewrite(grouped["command"], {"group": None}) == {"command": "find"}
+    assert "error" in api.monolith.rewrite("find", {"sort": "nonsense"})
+
+
+def test_the_default_species_column_sorts_by_what_it_shows(api, chores):
+    payload = api.monolith.table("find")
+    species = next(c for c in payload["columns"] if c["label"] == "Species")
+    command = api.monolith.rewrite("find", {"sort": species["key"]})["command"]
+    assert api.monolith.table(command)["sort"]["key"] == species["key"]
+
+
+def test_set_at_sel_writes_the_whole_selection_and_one_undo_reverts_it(api, chores):
+    chosen = chores[:3]
+    effect = api.run("set @sel status done", selection=chosen)
+    assert effect["effect"] == "statement" and effect["ok"] and effect["wrote"]
+    assert effect["message"] == "set status on 3 motes"
+    assert effect["moteId"] is None  # a batch edit leaves the selection alone
+    conn = api._session.conn
+    assert [motes_repo.get_mote(conn, i).properties["status"] for i in chores] == [
+        "done", "done", "done", "open"]
+    assert api.run("undo")["label"] == "set status on 3 motes"
+    assert all(motes_repo.get_mote(conn, i).properties["status"] == "open" for i in chores)
+
+
+def test_set_by_id_and_name_reads_values_like_the_command_bar(api, chores):
+    api.run(f'set #{chores[0]} name "renamed chore"')
+    conn = api._session.conn
+    assert motes_repo.get_mote(conn, chores[0]).properties["name"] == "renamed chore"
+    api.run("set chore1 length 5 mm")
+    props = motes_repo.get_mote(conn, chores[1]).properties
+    assert props["length"] == 5 and props["units"]["length"] == "mm"
+    cleared = api.run(f"set #{chores[1]} length --clear")
+    assert cleared["message"] == "cleared length on 1 mote"
+    assert "length" not in motes_repo.get_mote(conn, chores[1]).properties
+
+
+@pytest.mark.parametrize("line, selection, message", [
+    ("set @sel status", [], "usage: set"),
+    ("set @sel status done", [], "@sel is empty"),
+    ("set #nope status done", [], "no mote #nope"),
+    ("set ghost status done", [], "no mote named 'ghost'"),
+    ("set chore1 status --clear x", [], "--clear takes no value"),
+])
+def test_set_says_what_is_wrong(api, chores, line, selection, message):
+    effect = api.run(line, selection=selection)
+    assert effect["effect"] == "error" and message in effect["message"]

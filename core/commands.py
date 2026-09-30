@@ -25,8 +25,10 @@ import sqlite3
 from dataclasses import dataclass, replace
 from typing import Sequence
 
+from core import batch
 from core import command_bar
 from core import motes as motes_repo
+from core import undo
 from core.command_bar import CommandError, CommandResult
 from core.reserved import RESERVED_VERBS, reserved_words
 
@@ -47,7 +49,7 @@ class ConsoleApp:
 
 
 CONSOLE_APPS: tuple[ConsoleApp, ...] = (
-    ConsoleApp("nolith", "Monolith", legacy="monolith"),
+    ConsoleApp("nolith", "Monolith", default_view="monolith:table", default_command="find"),
     ConsoleApp("te", "Inspector"),
     ConsoleApp("xie", "Moxie", legacy="moxie"),
     ConsoleApp("tion", "Motion", legacy="motion"),
@@ -59,6 +61,12 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
 
 # Verbs a view answers directly, rather than the root API acting on them.
 VERB_VIEWS: dict[str, str] = {"log": "log"}
+# Verbs a view answers *with* their arguments: the whole line is the
+# pane's command (`find status:open --sort due`).
+ARG_VIEWS: dict[str, str] = {"find": "monolith:table"}
+
+SET_VERB = "set"
+CLEAR_FLAG = "--clear"
 
 LAYOUT_OPS: dict[str, str] = {
     "save": "save the current panes as ‹name›",
@@ -154,6 +162,8 @@ def resolve_view(command: str) -> tuple[str, str]:
         return "", ""
     if parsed.kind == VERB and parsed.head in VERB_VIEWS and not parsed.args:
         return VERB_VIEWS[parsed.head], parsed.text
+    if parsed.kind == VERB and parsed.head in ARG_VIEWS:
+        return ARG_VIEWS[parsed.head], parsed.text
     if parsed.kind == APP and not parsed.args:
         app = find_app(parsed.head)
         if app.default_view:
@@ -172,6 +182,60 @@ def _sel_at(line: str, i: int) -> bool:
 
 def _is_word_char(ch: str) -> bool:
     return ch.isalnum() or ch == "_"
+
+
+# ---- set ----------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SetResult:
+    message: str
+    count: int
+    command: "undo.Command | None" = None  # push it: the whole batch is one undo step
+
+
+def run_set(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
+    """`set <target> <key> <value…>` or `set <target> <key> --clear`.
+
+    `<target>` is `@sel` -- the **whole** selection, not just its primary,
+    which is what makes `set` the batch edit (docs/console.md ->
+    Selection) -- or `#<id>`, or a mote's name. The value is read the way
+    `R1.x = 5 ohm` is (core/batch.py), so a unit lands in `units`.
+    Raises CommandError for a line that says nothing it can do."""
+    usage = f"usage: {RESERVED_VERBS[SET_VERB]['usage']}"
+    if len(args) < 3:
+        raise CommandError(usage)
+    target, key, rest = args[0], args[1], list(args[2:])
+    ids = _set_targets(conn, target, selection)
+    if rest == [CLEAR_FLAG]:
+        count, command = batch.clear_property(conn, ids, key)
+        verb = "cleared"
+    elif CLEAR_FLAG in rest:
+        raise CommandError(f"{CLEAR_FLAG} takes no value -- {usage}")
+    else:
+        count, command = batch.set_property(conn, ids, key, " ".join(rest))
+        verb = "set"
+    if count == 0 and verb == "set":
+        raise CommandError("nothing to set -- the target no longer exists")
+    noun = "mote" if count == 1 else "motes"
+    return SetResult(f"{verb} {key} on {count} {noun}", count, command)
+
+
+def _set_targets(conn: sqlite3.Connection, target: str, selection: Sequence[str]) -> list[str]:
+    if target == _SEL:
+        if not selection:
+            raise CommandError("@sel is empty -- select a mote first")
+        return list(selection)
+    if target.startswith("#"):
+        mote_id = target[1:]
+        if motes_repo.get_mote(conn, mote_id) is None:
+            raise CommandError(f"no mote {target}")
+        return [mote_id]
+    named = [m.id for m in motes_repo.list_motes(conn) if m.properties.get("name") == target]
+    if not named:
+        raise CommandError(f"no mote named {target!r}")
+    if len(named) > 1:
+        raise CommandError(f"{len(named)} motes are named {target!r} -- use #id or @sel")
+    return named
 
 
 # ---- statements ---------------------------------------------------------
@@ -246,6 +310,10 @@ def complete(
         if _WORD_PREFIX_RE.fullmatch(word):
             return _complete_first(conn, line, cursor, word, lead)
         return _complete_statement(conn, line, cursor)
+    if word == "find":
+        return _complete_from(RESERVED_VERBS[word]["usage"], _find_choices(conn, rest), rest, cursor)
+    if word == SET_VERB:
+        return _complete_from(RESERVED_VERBS[word]["usage"], _set_choices(conn, rest), rest, cursor)
     if word in RESERVED_VERBS:
         choices = _verb_choices(word, rest, gardens, layouts, current_garden)
         return _complete_from(RESERVED_VERBS[word]["usage"], choices, rest, cursor)
@@ -291,6 +359,49 @@ def _verb_choices(verb, rest, gardens, layouts, current_garden) -> list[Completi
         return [CompletionRow(op, desc) for op, desc in LAYOUT_OPS.items()]
     if verb == "layout" and len(done) == 1 and done[0] in ("save", "load", "rm"):
         return [CompletionRow(name) for name in layouts]
+    return []
+
+
+def _schema(conn):
+    from core import table as table_repo  # core.table imports this module's neighbours
+    motes, relationships, index = table_repo.read(conn)
+    return table_repo.Schema.of(index, motes, relationships)
+
+
+def _find_choices(conn, rest: str) -> list[CompletionRow]:
+    """Field names, then a field's own values once it has an operator
+    (core/findtext.py::find_completions); after `--sort`, `--group` or
+    `--cols`, bare field names; a `-` starts a flag."""
+    from core import findtext
+    words = rest.split()
+    partial = "" if not rest or rest[-1].isspace() else words[-1]
+    before = words[-2] if partial and len(words) > 1 else (words[-1] if words and not partial else None)
+    schema = _schema(conn)
+    if partial.startswith("-") and before not in findtext.FLAGS:
+        return [CompletionRow(flag) for flag in findtext.FLAGS]
+    if before in (findtext.SORT_FLAG, findtext.GROUP_FLAG, findtext.COLS_FLAG):
+        return [CompletionRow(value.rstrip(":"), description)
+                for value, description in findtext.find_completions(schema, "")]
+    return [CompletionRow(value, description)
+            for value, description in findtext.find_completions(schema, partial)]
+
+
+def _set_choices(conn, rest: str) -> list[CompletionRow]:
+    """`@sel` and mote names for the target, then property keys."""
+    done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
+    if not done:
+        names = sorted({m.properties["name"] for m in motes_repo.list_motes(conn)
+                        if isinstance(m.properties.get("name"), str)})
+        return [CompletionRow(_SEL, "the whole selection")] + [CompletionRow(n) for n in names]
+    from core import query
+    if len(done) == 1:
+        return [CompletionRow(c.field.key, f"{c.kind}, {c.fill}")
+                for c in _schema(conn).columns
+                if c.field.source == query.PROPERTY and not c.reserved]
+    if len(done) == 2:
+        column = _schema(conn).column(query.Field(query.PROPERTY, done[1]))
+        return [CompletionRow(value) for value in column.values] + [
+            CompletionRow("--clear", "remove the property")]
     return []
 
 
