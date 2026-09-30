@@ -362,3 +362,35 @@ def test_retyping_a_check_with_double_equals_makes_it_an_equation_again(conn):
     worksheet.apply(conn, BEAM)
     worksheet.apply(conn, BEAM.replace("?=", "=="))
     assert not any(r.is_check for r in list_rules(conn))
+
+
+# ---- a given's ± ----
+
+@pytest.mark.parametrize("rhs, value, unit, spread", [
+    ("80 ± 0.5 in", 80, "in", 0.5),
+    ("80 +- 0.5 in", 80, "in", 0.5),
+    ("80 +/- 0.5", 80, None, 0.5),
+    ("80 ± 2% in", 80, "in", "2%"),
+    ("80 in ± 0.5", 80, "in", 0.5),
+])
+def test_a_given_line_reads_its_spread(rhs, value, unit, spread):
+    (line,) = worksheet.parse(f"bd.x = {rhs}").lines
+    assert (line.kind, line.value, line.unit, line.spread) == (worksheet.GIVEN, value, unit, spread)
+
+
+def test_an_equation_cannot_carry_a_spread():
+    (line,) = worksheet.parse("bd.l = bd.x * 2 ± 1").lines
+    assert "only a given can carry a ±" in line.problem
+
+
+def test_a_spread_round_trips_and_a_removed_one_is_cleared(conn):
+    text = "bd.x = 80 ± 0.5 in\nbd.y = 60 ± 2% in\nbd.l = sqrt(bd.x^2 + bd.y^2)\n"
+    worksheet.apply(conn, text)
+    assert named(conn, "bd").properties["uncertainty"] == {"x": 0.5, "y": "2%"}
+    read = worksheet.read(conn)
+    assert "bd.x = 80 ± 0.5 in" in read and "bd.y = 60 ± 2% in" in read
+    worksheet.apply(conn, read)
+    assert named(conn, "bd").properties["uncertainty"] == {"x": 0.5, "y": "2%"}
+
+    worksheet.apply(conn, read.replace(" ± 0.5", "").replace(" ± 2%", ""))
+    assert "uncertainty" not in named(conn, "bd").properties

@@ -39,6 +39,7 @@ surface can say so rather than implying a worksheet is the whole garden.
 | line | means |
 | --- | --- |
 | `bd.x = 80 in` | a **given**: the property, and `in` in the mote's `units` map |
+| `bd.x = 80 ± 0.5 in` | a given with a ±, written to its `uncertainty` entry (`+-` also works; `± 2%` is relative) |
 | `bd.l = sqrt(...)` | an **equation**: a rule mote, `applies_to bd`, and `l` free on `bd` |
 | `bd.Ax = ?` | an **unknown**: `Ax` free on `bd`, with no value |
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
@@ -86,6 +87,7 @@ from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import rules as rules_repo
 from core import simulation
+from core import uncertainty as uncertainty_repo
 from core import species as species_repo
 from core import units as units_repo
 from core.entities import Mote
@@ -99,6 +101,14 @@ BLANK = "blank"
 
 COMMENT_MARKER = "!"
 CHECK_MARKER = "?="
+SPREAD_MARKER = "±"
+
+# `<value> ± <spread> [unit]`: the spread is a number (in the value's unit)
+# or a percentage. `+-` and `+/-` are the ASCII spellings.
+_SPREAD_RE = re.compile(
+    r"^(?P<value>.+?)\s*(?:±|\+/-|\+-)\s*"
+    r"(?P<spread>[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?\s*%?)\s*(?P<unit>.*)$"
+)
 ASSIGN = "="
 UNKNOWN_MARKER = "?"
 
@@ -125,6 +135,7 @@ class Line:
     relation: str = ""      # an equation's text, as core/formula.py reads it
     name: str = ""          # the trailing `! ...`
     free: bool = False      # whether this line makes `key` a freedom of `mote`
+    spread: object = None   # a given's ±: a number in `unit`, or "2%"
     check: bool = False     # written `?=`: an equality checked, never solved
     problem: str = ""
 
@@ -217,11 +228,22 @@ def _read(number: int, text: str, body: str, name: str) -> Line:
     if rhs.strip() == UNKNOWN_MARKER:
         mote, key = _target(lhs)
         return Line(number, text, UNKNOWN, mote=mote, key=key, name=name, free=True)
+    spread = None
+    with_spread = _SPREAD_RE.match(rhs)
+    if with_spread:
+        rhs = f"{with_spread['value']} {with_spread['unit']}".strip()
+        spread = with_spread["spread"].replace(" ", "")
+        spread = spread if spread.endswith("%") else float(spread)
     value, unit = _as_number(rhs)
     if value is None:
+        if spread is not None:
+            raise FormulaError(
+                f"only a given can carry a ± -- {rhs!r} is not a number; an "
+                f"equation's ± is propagated from its inputs, never written")
         return _equation(number, text, f"{lhs} == {rhs}", name, lhs, assigns=True)
     mote, key = _target(lhs)
-    return Line(number, text, GIVEN, mote=mote, key=key, value=value, unit=unit, name=name)
+    return Line(number, text, GIVEN, mote=mote, key=key, value=value, unit=unit, name=name,
+                spread=spread)
 
 
 def _as_number(rhs: str) -> tuple[float | int | None, str | None]:
@@ -356,13 +378,25 @@ def _resolve(conn, index: dict[str, list[str]], created: list[str], name: str) -
 
 def _write_given(conn, index, created: list[str], line: Line) -> None:
     mote_id = _resolve(conn, index, created, line.mote)
+    properties = motes_repo.get_mote(conn, mote_id).properties
     new = {line.key: line.value}
     if line.unit:
-        unit_map = units_repo.parse_units_property(
-            motes_repo.get_mote(conn, mote_id).properties.get(units_repo.UNITS_KEY))
+        unit_map = units_repo.parse_units_property(properties.get(units_repo.UNITS_KEY))
         unit_map[line.key] = line.unit
         new[units_repo.UNITS_KEY] = unit_map
+    # The line is the whole account of this given, so a ± it no longer
+    # carries is removed -- the same replacing a deleted line does to a rule.
+    spreads = properties.get(uncertainty_repo.UNCERTAINTY_KEY)
+    spreads = dict(spreads) if isinstance(spreads, dict) else {}
+    if line.spread is not None:
+        spreads[line.key] = line.spread
+    else:
+        spreads.pop(line.key, None)
+    if spreads:
+        new[uncertainty_repo.UNCERTAINTY_KEY] = spreads
     motes_repo.update_mote(conn, mote_id, new)
+    if not spreads and uncertainty_repo.UNCERTAINTY_KEY in properties:
+        motes_repo.delete_property(conn, mote_id, uncertainty_repo.UNCERTAINTY_KEY)
 
 
 def _write_rule(conn, index, created: list[str], line: Line) -> str:
@@ -553,6 +587,8 @@ def _render_givens(
         if not isinstance(name, str) or name not in referenced:
             continue
         unit_map = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+        spreads = uncertainty_repo.parse_uncertainty_property(
+            mote.properties.get(uncertainty_repo.UNCERTAINTY_KEY))[0]
         solved = free.get(mote.id, set())
         for key, value in sorted(mote.properties.items()):
             if key == units_repo.UNITS_KEY or key in solved:
@@ -560,7 +596,12 @@ def _render_givens(
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
             unit = unit_map.get(key)
-            lines.append(f"{name}.{key} {ASSIGN} {value}{f' {unit}' if unit else ''}")
+            spread = spreads.get(key)
+            pm = ""
+            if spread is not None:
+                pm = (f" {SPREAD_MARKER} {spread.absolute:g}" if spread.absolute is not None
+                      else f" {SPREAD_MARKER} {spread.relative * 100:g}%")
+            lines.append(f"{name}.{key} {ASSIGN} {value}{pm}{f' {unit}' if unit else ''}")
     return lines
 
 

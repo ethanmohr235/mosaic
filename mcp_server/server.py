@@ -28,6 +28,7 @@ from core import derivations as derivations_repo
 from core import garden_io
 from core import health as health_repo
 from core import csv_import as csv_import_repo
+from core import uncertainty as uncertainty_repo
 from core import projects as projects_repo
 from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
@@ -730,6 +731,31 @@ def start_project(mote_id: str, name: str | None = None, garden: str | None = No
         return {"garden": created, "owner": mote_id}
 
 
+def propagate_uncertainty(solver: str = "linear", garden: str | None = None) -> dict[str, Any]:
+    """Each solved value's ±, propagated from the givens' ± -- computed on
+    read, never stored. A given carries its ± in the reserved `uncertainty`
+    map ({x: 0.5} absolute in x's unit, {x: "2%"} relative). First order,
+    givens independent, combined root-sum-square; each sensitivity is a
+    central difference of the solve itself, so it works with every solver.
+    `contributions` is each result's budget, largest `share` of variance
+    first. Values and ± are in each result's declared unit (`unit` null =
+    base SI, i.e. never solved -- solve first)."""
+    with _connect(garden) as conn:
+        report = uncertainty_repo.propagate(conn, solver)
+    return {
+        "results": [
+            {"label": r.label, "moteId": r.mote_id, "key": r.key, "value": r.value,
+             "sigma": r.sigma, "unit": r.unit,
+             "contributions": [
+                 {"label": c.label, "sigma": c.sigma, "sensitivity": c.sensitivity,
+                  "share": c.share} for c in r.contributions]}
+            for r in report.results
+        ],
+        "inputs": [{"label": c.label, "sigma": c.sigma} for c in report.inputs],
+        "problems": list(report.problems),
+    }
+
+
 def import_csv(
     text: str,
     file: str,
@@ -845,6 +871,7 @@ def _calc_row(row, unit: str | None, figures: int | None) -> dict[str, Any]:
         "value": row.quantity.value,
         "unit": shown.unit,
         "text": shown.text(figures),
+        "sigma": shown.sigma,
         "source": row.source.kind if row.source else None,
         "note": row.source.note if row.source else None,
     }
@@ -928,7 +955,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
-    project_tree, start_project, import_csv,
+    project_tree, start_project, import_csv, propagate_uncertainty,
     calc_sections, shown_work,
     resolve_modoc,
     reserved_names,

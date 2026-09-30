@@ -303,6 +303,17 @@ computed (the hand value not solved yet, an external of zero, units of two
 dimensions) says why instead of printing a number. An external value that
 names nothing is not a comparison and is left out.
 
+### ±
+
+Where a given carries a ± (the reserved `uncertainty` map, see
+`simulation.md` -> *Uncertainty*), `\val`, `\given` and `\answers` print
+it: `\val{bd.l}{in, 4}` reads `100.0 ± 0.54 in`. A result's ± is
+propagated from the givens' when the note is resolved, at most once per
+note, and only in a garden where some given carries one; a garden with
+none prints exactly what it did before. The ± is quoted to two
+significant figures whatever the value is, and converts with it (by scale,
+never offset: ± 1 °C is ± 1 K).
+
 ## Numbers and cross-references
 
 Equations, figures and tables are numbered, and a `\label` inside one is

@@ -53,6 +53,8 @@ from mcp_server.server import (
     project_tree,
     start_project,
     import_csv,
+    propagate_uncertainty,
+    write_worksheet as _ww,
 )
 
 # Every tool takes `garden` last and opens its own connection, so tests
@@ -769,3 +771,12 @@ def test_calc_sections_carries_the_verification_table(garden):
     (row,) = calc_sections(garden=GARDEN)["verification"]
     assert row["label"] == "bd.sigma" and row["externalKey"] == "sigma_fea"
     assert row["errorPercent"] == pytest.approx(5.0)
+
+
+def test_propagate_uncertainty_returns_each_result_with_its_budget(garden):
+    _ww("s.a = 3 ± 0.3\ns.b = 4 ± 0.4\ns.c = s.a + 2 * s.b\n", GARDEN)
+    report = propagate_uncertainty(garden=GARDEN)
+    (c,) = report["results"]
+    assert c["label"] == "s.c" and c["sigma"] == pytest.approx((0.3**2 + 0.8**2) ** 0.5)
+    assert [p["label"] for p in c["contributions"]] == ["s.b", "s.a"]
+    assert {i["label"] for i in report["inputs"]} == {"s.a", "s.b"}

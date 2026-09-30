@@ -22,6 +22,7 @@ written down."""
 from core.calc import SOURCE_KEY
 from core.links import URL_PROPERTY
 from core.projects import GARDEN_KEY
+from core.uncertainty import UNCERTAINTY_KEY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
 from core.providers import describe_providers
@@ -37,7 +38,7 @@ RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
     ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY, GARDEN_KEY,
-    CHECK_KEY, TOLERANCE_KEY,
+    CHECK_KEY, TOLERANCE_KEY, UNCERTAINTY_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -114,6 +115,12 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "a claim on a garden that doesn't exist, or a loop are flagged by "
         "`project_tree`'s problems, never enforced. Written by `start_project`, "
         "which creates the garden in the same step.",
+    UNCERTAINTY_KEY: "A given's ±, as a per-property map in exactly the "
+        "shape `units` has: {'x': 0.5} is ± 0.5 in x's own unit, {'x': '2%'} "
+        "is ± 2% of its value. The value stays a plain number. A result's ± is "
+        "never written here -- it is propagated on read (first order, "
+        "root-sum-square, givens independent) by `propagate_uncertainty`, and "
+        "an entry on a freedom is ignored.",
     "url": "A web address or local file path. core/links.py classifies it "
         "as a URL (has a scheme, or looks like a bare domain) or an "
         "explicit local path ('/', '~', './', '../', or a drive letter) "

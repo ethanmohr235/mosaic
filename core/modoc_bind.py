@@ -33,11 +33,12 @@ from core import modoc
 from core import kinds as kinds_repo
 from core import plotview
 from core import rules as rules_repo
+from core import uncertainty
 from core.entities import Mote, Relationship
 from core.formula import Context, FormulaError, evaluate_expression
 from core.motes import list_motes
 from core.relationships import list_relationships
-from core.simulation import expression_context
+from core.simulation import expression_context, garden_freedoms
 from core.units import UNITS_KEY, format_unit, parse_units_property
 
 NAME_KEY = "name"
@@ -143,6 +144,26 @@ class _Garden:
     def __init__(self, conn: sqlite3.Connection, motes: list[Mote]) -> None:
         self.relationships: list[Relationship] = list_relationships(conn)
         self.properties: dict[str, dict] = {m.id: dict(m.properties) for m in motes}
+        self._conn = conn
+        self._freedoms = None
+        self._spreads = None
+
+    def sigma(self, mote_id: str, key: str) -> float | None:
+        """A value's ±: a given's own, or a result's as propagated. The
+        propagation is two solves per uncertain given, so it is run at most
+        once per note, and only when a `\val` asks about a result in a
+        garden where some given carries a ±."""
+        if self._freedoms is None:
+            self._freedoms = garden_freedoms(self._conn)
+        if key not in self._freedoms.get(mote_id, set()):
+            return uncertainty.sigma_of(self.at(mote_id), key)
+        if self._spreads is None:
+            self._spreads = (
+                uncertainty.propagate(self._conn)
+                if uncertainty.has_uncertainty(self._conn) else uncertainty.Report()
+            )
+        found = self._spreads.of(mote_id, key)
+        return None if found is None else found.sigma
 
     def at(self, mote_id: str) -> dict:
         return self.properties.get(mote_id, {})
@@ -525,7 +546,8 @@ def _value(
         # The fast path, and the reason \val{due} can be a date at all:
         # core/formula.py is numeric by construction, so a plain property
         # read has to happen before the expression evaluator sees it.
-        return _property_result(properties, node.expression, node.format)
+        return _property_result(properties, node.expression, node.format,
+                                garden.sigma(mote_id, node.expression))
 
     dotted = _DOTTED_REF_RE.match(node.expression)
     if dotted:
@@ -534,7 +556,8 @@ def _value(
         if other is not None:
             other_properties = garden.at(other.id)
             if other_key in other_properties:
-                return _property_result(other_properties, other_key, node.format)
+                return _property_result(other_properties, other_key, node.format,
+                                        garden.sigma(other.id, other_key))
         # No mote named `other_ref` (or it doesn't carry `other_key`) --
         # fall through to the formula evaluator, which also resolves
         # `role.property` and a name-matched relationship neighbor.
@@ -553,7 +576,8 @@ def _value(
 
 
 def _property_result(
-    properties: dict, key: str, spec: modoc.Format | None = None
+    properties: dict, key: str, spec: modoc.Format | None = None,
+    sigma: float | None = None,
 ) -> ValueResult:
     """A plain property read off some mote's properties, written in its own
     declared unit. Shared by the anchor-property fast path and the
@@ -570,6 +594,6 @@ def _property_result(
     unit_name = parse_units_property(properties.get(UNITS_KEY)).get(key)
     # "1" means truly unitless (core/units.py: DIMENSIONLESS with scale 1),
     # not a unit with the symbol "1" -- nothing to show after the number.
-    quantity = calc.Quantity(raw, unit_name if unit_name != "1" else None)
+    quantity = calc.Quantity(raw, unit_name if unit_name != "1" else None, sigma)
     converted = quantity.converted(spec.unit)
     return ValueResult(converted.text(spec.figures), raw)

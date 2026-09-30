@@ -86,7 +86,12 @@ Each one was a separate act of filing. That lesson became a rule in
   in its own `source` entry, and the % error is relative to the external
   value. See `modoc.md` -> *`\verification`*.
 - **Uncertainty.** A given can carry `±`. First-order propagation uses
-  the Newton Jacobian, and every result shows its ±.
+  the Newton Jacobian, and every result shows its ±. **Decided:** the ±
+  is the reserved `uncertainty` map (`{x: 0.5}`, `{x: "2%"}`); a result's
+  ± is derived on read and never stored; givens combine root-sum-square.
+  The derivative is taken as a central difference of the solve, which to
+  first order *is* the Jacobian's and works for every backend. See
+  `simulation.md` -> *Uncertainty*.
 - **Materials provider.** A built-in provider supplies E, ν, Sy, and ρ
   for common alloys, shaped like the CoolProp provider.
 - **Time simulation** keeps ticks, but runs become curves to plot. Cut
@@ -155,7 +160,7 @@ alongside all of them.
 | 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
 | 7 | **Backend done except Moxie export.** Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
-| 8 | Uncertainty propagation | Lab reports |
+| 8 | **Backend done.** Uncertainty propagation | Lab reports |
 | 9 | Cross-garden search, archive, materials provider | Payoff of many small gardens |
 
 ## Acceptance workflows

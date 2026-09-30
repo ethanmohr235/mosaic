@@ -973,3 +973,13 @@ def test_calc_verification_prints_hand_external_and_error(conn, capsys):
     assert "hand" in out and "external" in out
     assert "bd.sigma  210   200       +5.00%" in out
     assert "bd.sigma external: FEA" in out
+
+
+def test_uncertainty_prints_each_result_and_its_budget(conn, capsys):
+    from cli.main import _handle_uncertainty
+    from core import worksheet
+    worksheet.apply(conn, "s.a = 3 ± 0.3\ns.b = 4 ± 0.4\ns.c = s.a + 2 * s.b\n")
+    _handle_uncertainty(conn, parse(["uncertainty"]))
+    out = capsys.readouterr().out
+    assert "s.c = 11.00 ± 0.85" in out
+    assert "87.7%  s.b" in out

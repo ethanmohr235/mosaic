@@ -46,6 +46,7 @@ for the same reason `roles` accepts two: the short one is what somebody
 types, and the long one is what they need the moment a value deserves a
 sentence.
 """
+import dataclasses
 import json
 import re
 import sqlite3
@@ -54,6 +55,7 @@ from dataclasses import dataclass
 from core import derivations as derivations_repo
 from core import motes as motes_repo
 from core import simulation
+from core import uncertainty as uncertainty_repo
 from core import units as units_repo
 from core import worksheet as worksheet_repo
 from core.units import UnitError
@@ -118,9 +120,13 @@ def parse_source_property(value) -> dict[str, Source]:
 @dataclass(frozen=True)
 class Quantity:
     """A number and the unit it is recorded in. `None` for a property no
-    mote holds yet, which reads as an empty cell rather than as a zero."""
+    mote holds yet, which reads as an empty cell rather than as a zero.
+
+    `sigma` is its ± in the same unit, where it has one: a given's own
+    (`uncertainty`), or a result's as `core/uncertainty.py` propagated it."""
     value: object = None
     unit: str | None = None
+    sigma: float | None = None
 
     @property
     def numeric(self) -> bool:
@@ -134,7 +140,12 @@ class Quantity:
         if not unit or not self.unit or unit == self.unit or not self.numeric:
             return self
         try:
-            return Quantity(units_repo.convert(float(self.value), self.unit, unit), unit)
+            value = units_repo.convert(float(self.value), self.unit, unit)
+            # A spread scales and never shifts: ± 1 °C is ± 1 K, not ± 274.
+            sigma = None if self.sigma is None else abs(
+                units_repo.convert(self.sigma, self.unit, unit)
+                - units_repo.convert(0.0, self.unit, unit))
+            return Quantity(value, unit, sigma)
         except UnitError:
             return self
 
@@ -145,6 +156,10 @@ class Quantity:
             return ""
         shown = round_to(self.value, figures) if self.numeric and figures else self.value
         text = format_value(shown) if not self.numeric else _number(shown, figures)
+        if self.numeric and self.sigma is not None:
+            # A ± to two significant figures, whatever the value is quoted
+            # to: more would claim to know the uncertainty's uncertainty.
+            text = f"{text} ± {_number(self.sigma, _SIGMA_FIGURES) if self.sigma else '0'}"
         if self.unit and self.unit != "1" and self.numeric:
             return f"{text} {units_repo.format_unit(self.unit)}"
         return text
@@ -230,11 +245,15 @@ def _number(value, figures: int | None) -> str:
 # Past ten million a number reads better in scientific notation than as a
 # row of digits; below a ten-thousandth, likewise. Between the two, fixed.
 _FIXED_LIMIT = 7
+_SIGMA_FIGURES = 2
 
 
 def quantity(properties: dict, key: str) -> Quantity:
+    """A property as a Quantity, with the ± its own `uncertainty` entry
+    declares. A result's propagated ± is added by the callers that asked
+    for one (`answers`), since finding it costs solves."""
     unit = units_repo.parse_units_property(properties.get(units_repo.UNITS_KEY)).get(key)
-    return Quantity(properties.get(key), unit)
+    return Quantity(properties.get(key), unit, uncertainty_repo.sigma_of(properties, key))
 
 
 # ---- the sections ----
@@ -273,8 +292,25 @@ def answers(conn: sqlite3.Connection) -> tuple[Row, ...]:
     """Every value the solver is free to determine, with what it currently
     holds. A freedom with no value yet comes back with an empty quantity
     rather than being hidden -- an answer nobody has computed is exactly
-    what a reader needs to notice."""
-    return _rows(conn, free=True)
+    what a reader needs to notice.
+
+    Where any given carries a ±, each answer carries its propagated one
+    (`core/uncertainty.py`). A hand-written `uncertainty` entry on a
+    freedom is never shown: it is not what the ± is."""
+    rows = _rows(conn, free=True)
+    if not uncertainty_repo.has_uncertainty(conn):
+        return rows
+    report = uncertainty_repo.propagate(conn)
+    return tuple(
+        dataclasses.replace(r, quantity=dataclasses.replace(
+            r.quantity, sigma=_propagated(report, r.mote_id, r.key)))
+        for r in rows
+    )
+
+
+def _propagated(report, mote_id: str, key: str) -> float | None:
+    found = report.of(mote_id, key)
+    return None if found is None else found.sigma
 
 
 def assumptions(conn: sqlite3.Connection) -> tuple[Row, ...]:

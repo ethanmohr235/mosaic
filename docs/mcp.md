@@ -46,8 +46,8 @@ absolute path.
 
 ## Tools
 
-52 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), projects (`project_tree`, `start_project`), `import_csv`, motes (`list_motes`, `search_motes`, `get_mote`,
+53 tools, grouped: gardens (`list_gardens`, `create_garden`,
+`export_garden`), projects (`project_tree`, `start_project`), `import_csv`, `propagate_uncertainty`, motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
@@ -181,6 +181,12 @@ checks: sigma}}`), with both values and `errorPercent`, relative to the
 external value. A rule marked `check: true` (with an optional relative
 `tolerance`, default 0.001) is evaluated, never solved, and appears under
 `checks` with the comparisons.
+
+`propagate_uncertainty` gives each solved value's ± from the givens'
+(the reserved `uncertainty` map: `{x: 0.5}` or `{x: "2%"}`), with its
+budget. Derived on read, never stored; first order, root-sum-square. Row
+shapes from `calc_sections` carry `sigma` too. See `docs/simulation.md` ->
+*Uncertainty*.
 
 `import_csv` takes the file's text and its name, and makes one mote per
 row; `load [kN]` in the header gives a column its unit, and each value is

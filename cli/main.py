@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core import calc
 from core import csv_import
+from core import uncertainty
 from core import health
 from core import projects
 from core import modoc
@@ -296,6 +297,12 @@ def build_parser() -> argparse.ArgumentParser:
         "health", help="Whether the model is solvable, and which values are not"
     )
     health_parser.add_argument("--scenario", help="Ask the same question of a scenario")
+
+    ### Uncertainty
+    unc_parser = subparsers.add_parser(
+        "uncertainty", help="Each result's ±, propagated from the givens' ±, with its budget"
+    )
+    unc_parser.add_argument("--solver", default="linear", help="Solver backend (default linear)")
 
     ### Import
     import_parser = subparsers.add_parser(
@@ -793,6 +800,22 @@ def _handle_health(conn, args) -> None:
             print(f"  {inert.label} on {inert.anchor}")
 
 
+def _handle_uncertainty(conn, args) -> None:
+    report = uncertainty.propagate(conn, args.solver)
+    for problem in report.problems:
+        print(f"  problem: {problem}")
+    if not report.inputs:
+        print("No given carries a ± -- write one as `uncertainty: {x: 0.5}` or "
+              "`bd.x = 80 ± 0.5 in` in the worksheet.")
+        return
+    for result in report.results:
+        shown = calc.Quantity(result.value, result.unit, result.sigma)
+        print(f"{result.label} = {shown.text(4)}")
+        for part in result.contributions:
+            print(f"    {part.share * 100:5.1f}%  {part.label} (± {part.sigma:g}, "
+                  f"sensitivity {part.sensitivity:.4g})")
+
+
 def _handle_import(conn, args) -> None:
     path = Path(args.file)
     parsed = csv_import.parse(
@@ -939,6 +962,8 @@ def main() -> None:
                 _handle_health(conn, args)
             elif args.command == "calc":
                 _handle_calc(conn, args)
+            elif args.command == "uncertainty":
+                _handle_uncertainty(conn, args)
             elif args.command == "import":
                 _handle_import(conn, args)
             elif args.command == "why":

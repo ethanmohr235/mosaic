@@ -391,6 +391,45 @@ allowed 1 (0.001 relative)`. A comparison ignores `tolerance`.
 In the worksheet an equality check is written `?=`:
 `b.R1 + b.R2 ?= b.W  ! ΣFy`.
 
+## Uncertainty
+
+A given carries its ± in the reserved `uncertainty` property, a
+per-property map shaped like `units`: `{"x": 0.5}` is ± 0.5 in x's own
+unit, `{"x": "2%"}` is ± 2% of its value. The value itself stays a plain
+number, so the solver and everything else that reads it are unchanged.
+In the worksheet: `bd.x = 80 ± 0.5 in` (or `+-`, or `± 2%`).
+
+A result's ± is **derived on read and never stored** --
+`core/uncertainty.py::propagate(conn)`, like solve health, answers from
+the garden as it stands, so there is nothing to go stale when a given's ±
+is edited. It is first order with the givens independent, combined
+root-sum-square:
+
+    σ_y = sqrt( Σ_i (∂y/∂x_i · σ_i)² )
+
+Each ∂y/∂x_i is a **central difference of the solve itself**: the garden
+is solved on copies with x_i nudged up and down by 10⁻⁴ of max(|x|, σ),
+writing nothing. To first order that is exactly the implicit-function
+derivative −J_y⁻¹·J_x a Newton step would give, and it works for every
+solver backend (the linear one has no Jacobian to hand over), including
+units, substitution and property models, because it *is* the solve. It
+costs two solves per uncertain given.
+
+Each result carries its **budget**: every given's sensitivity and share of
+the variance, largest first, the shares summing to 1. A result nothing
+uncertain reaches is ± 0, not "no ±". An `uncertainty` entry on a freedom
+is ignored, since a result's ± is what this computes. An unreadable entry
+is reported, never dropped: a ± that vanished would make an answer look
+more certain than it is.
+
+Values and ± come back in each result's declared unit. A result that has
+never been solved declares none yet (a solve infers it), and comes back in
+base SI -- solve first.
+
+`\val`, `\given` and `\answers` print a value with its ± (`100.0 ± 0.54
+in`), the ± to two significant figures whatever the value is quoted to.
+`monoss uncertainty`; MCP `propagate_uncertainty`.
+
 ## Name references
 
 A dotted identifier that isn't a declared role reaches a mote by its
@@ -798,6 +837,7 @@ a mote and a rule per line. Eight lines say the same thing.
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
 | `bd.sigma <= 250` | a **check**: evaluated, never solved |
 | `b.R1 + b.R2 ?= b.W` | an **equality check**: stored as `==` with `check: true` |
+| `bd.x = 80 ± 0.5 in` | a given with a ±, in its `uncertainty` entry (`± 2%` is relative) |
 | `... ! ΣFx` | names the rule that line makes |
 | (blank) | ignored |
 
