@@ -59,9 +59,11 @@ through plan mode, questions and approval before any code. Anything under
   Revisit the no-framework choice only if views start duplicating update
   logic that the contract should have absorbed, and ask before adding
   any dependency.
-- **Layout on disk.** One new frontend directory (name it in the U1
-  plan) holds the shell, the store, the components and one file per
-  view. `frontend_shared/`'s symlink scheme goes away once every window
+- **Layout on disk.** `console/` holds the root API (`api.py`), the
+  shared garden session (`session.py`), layouts and history
+  (`state.py`) and the launcher (`app.py`, run by `run_console.py`).
+  `console/frontend/` holds the shell, the store, the components and
+  one ES module per view under `js/views/`. There is no build step. `frontend_shared/`'s symlink scheme goes away once every window
   is gone, because one window needs no symlinks.
 - **Strangler migration.** Build the shell first, then port the apps
   one at a time. An app's old window (`run_<app>.py`, `<app>/app.py`,
@@ -101,10 +103,18 @@ else.
      statements in `core/command_bar.py` (`R1.x = 5 ohm`, `A -> B`,
      `R1 : Resistor`, `R1.x ?`, `delete R1`).
 
-  Parsing lives in `core/`, never in JS, so the CLI and MCP can run the
-  same commands. Verbs must not shadow a plausible mote name. Check this
-  against `core/reserved.py` and say how collisions resolve in the U1
-  plan.
+  Parsing lives in `core/commands.py`, never in JS, so the CLI and MCP
+  can run the same commands.
+- **Verbs win, quoting escapes.** Verbs (`core/reserved.py` →
+  `RESERVED_VERBS`) and app suffixes are reserved words. A line whose
+  first token is one of them is that word. A mote with a reserved name
+  is still reachable as `"find"` (quoted) or `#id`, and creating one
+  from the command line warns about exactly that. Each port step adds
+  its own verbs to `RESERVED_VERBS`.
+- **An unported app** opens its old window (`api_common.open_app`)
+  until its port step gives it a default view (`CONSOLE_APPS` in
+  `core/commands.py` is the single record of what's ported).
+- **`cd <garden>`** switches the workspace's garden.
 - `find` query syntax (`type:task due:<7d`) builds on `core/query.py`,
   which Monolith already uses. Don't write a second query language.
 - Completion and history popups, inline ghost text, the grammar hint
@@ -237,27 +247,31 @@ phase that builds them.
 ### Persistence
 
 - Layouts and per-context command history are **UI state, not
-  knowledge**. They go in a JSON file in the app's data directory (next
-  to the webview storage dir), keyed by garden name.
+  knowledge**. They go in a sidecar next to the garden,
+  `gardens/<name>.db.console.json` (`console/state.py`).
 - They are not motes. They don't live in the `.db`, and they don't
   sync.
-- Renaming a garden must carry its key along, and deleting a garden
-  drops its entry.
+- `core/gardens.py` moves, trashes and restores the sidecar with its
+  garden, so a rename carries it and a delete drops it, from the CLI
+  too.
 - `localStorage` is only for trivial per-view conveniences, such as a
   collapsed section, that are fine to lose.
 
 ### The view contract
 
-Every view is one JS module that registers itself with the shell. Pin
-down the exact shape in the U1 plan. It must cover:
+Every view is one ES module that registers itself with the shell. The
+exact shape is documented at the top of
+`console/frontend/js/views/index.js`. It covers:
 
 - **`id`, `app`, `describe`**: the id and one-line description that
   appear in the view picker and the completion popup.
 - **`commands`**: the verbs this view answers, and a completer for
   their arguments (driven by `core/` data, not hard-coded lists).
-- **`mount(el, command, ctx)` / `unmount()`**: render into the pane
-  body, and on unmount remove every listener, timer and animation
-  frame. Leaks are bugs.
+- **`create(ctx)`** returns one instance per pane, so two panes can
+  show the same view.
+- **`mount(el, command)` / `unmount()`**: render into the pane body,
+  and on unmount remove every listener, timer and animation frame.
+  Leaks are bugs.
 - **`run(command)`**: re-run in place (for `⏎`, a selection change or a
   data change). It returns the header summary (`16 motes`, `0.4s`,
   `1 clamped`) and an ok/warn/fault level.
@@ -278,7 +292,7 @@ own plan-mode phase and ships something usable.
 
 | # | Step | Proves |
 |---|---|---|
-| U1 | **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
+| U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
 | U2 | **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
 | U3 | **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
 | U4 | **Moxie → `mo xie`.** `plot` / `fit` panes on the restyled `plot.js`. | Commands carry view state (ranges, series). |
@@ -328,13 +342,14 @@ Each step's done-check is the same:
 
 - **Verb list and view ids.** The tables above are proposals. Confirm
   each app's canonical commands in its port step.
-- **Verbs vs. mote names.** How the grammar tells `find` the verb from a
-  mote named `find` (reserved words, a sigil, or verb-first
-  precedence). Settle this in U1.
 - **Worksheet and command line.** Worksheet lines (`bd.x = 80 in`) are
   the same statements the command line accepts. Is the worksheet a
   pane that's just a persistent, editable list of them? Settle this in
   roadmap phase 2.
 - **Floating inspector key.** Settle it in U3.
 - **Species palette retune.** Confirm how many entries fit the narrower
-  band before hues become hard to tell apart. Settle it in U1 or U3.
+  band before hues become hard to tell apart. Settle it in U3.
+- **Command-line undo.** Statements run through `core/command_bar.py`
+  record no undo command, so `undo` can't reverse a typed edit yet
+  (the old windows' `/` bar has the same gap). Close it in U3, where
+  editing a mote becomes the same everywhere.

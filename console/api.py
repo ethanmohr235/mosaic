@@ -193,11 +193,18 @@ class Api:
             "ok": result.ok,
             "message": result.message,
             "moteId": result.mote_id,
+            "moteName": self._mote_name(result.mote_id),
             "created": result.created,
             "needsConfirm": result.needs_confirm,
             "choices": result.choices,
             "wrote": result.ok and not result.needs_confirm,
         }
+
+    def _mote_name(self, mote_id: str | None) -> str | None:
+        """What the top bar calls the selection (`sel bd`, not `sel #4541ef2b`)."""
+        mote = motes_repo.get_mote(self._session.conn, mote_id) if mote_id else None
+        name = mote.properties.get("name") if mote else None
+        return name if isinstance(name, str) else None
 
     def _run_verb(self, parsed: commands.ParsedLine) -> dict:
         if parsed.head == "cd":

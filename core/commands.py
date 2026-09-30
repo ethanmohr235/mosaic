@@ -255,7 +255,10 @@ def complete(
 
 
 def _complete_first(conn, line: str, cursor: int, partial: str, lead: int) -> Completion:
-    apps = [_app_row(app) for app in CONSOLE_APPS if app.suffix.startswith(partial)]
+    # An app you can open outranks one that isn't available yet, so `t`
+    # offers `tion` before `te` (3e) and the ghost never suggests a dead end.
+    matching = [app for app in CONSOLE_APPS if app.suffix.startswith(partial)]
+    apps = [_app_row(app) for app in sorted(matching, key=_unavailable)]
     verbs = [
         CompletionRow(verb, meta["describe"])
         for verb, meta in RESERVED_VERBS.items() if verb.startswith(partial)
@@ -270,6 +273,10 @@ def _complete_first(conn, line: str, cursor: int, partial: str, lead: int) -> Co
     ]
     rows = tuple(apps + verbs + motes + dim)
     return Completion("mo ‹app›", rows, _ghost(rows, partial), lead)
+
+
+def _unavailable(app: ConsoleApp) -> bool:
+    return not (app.default_view or app.legacy)
 
 
 def _app_row(app: ConsoleApp, dim: bool = False) -> CompletionRow:

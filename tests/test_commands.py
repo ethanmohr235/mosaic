@@ -118,9 +118,17 @@ def test_first_token_lists_matching_apps_then_verbs_then_dim_apps(conn):
     assert (result.ghost, result.replace_from) == ("a", 0)
 
 
+def test_an_app_you_can_open_outranks_one_that_is_not_available(conn):
+    result = complete(conn, "t")
+    assert [r.value for r in result.rows if not r.dim][:2] == ["tion", "te"]
+    assert result.ghost == "ion"
+
+
 def test_an_empty_line_lists_every_app_then_every_verb(conn):
     result = complete(conn, "")
-    assert _values(result) == [a.suffix for a in commands.CONSOLE_APPS] + list(RESERVED_VERBS)
+    apps = [a.suffix for a in commands.CONSOLE_APPS if a.default_view or a.legacy]
+    apps += [a.suffix for a in commands.CONSOLE_APPS if not (a.default_view or a.legacy)]
+    assert _values(result) == apps + list(RESERVED_VERBS)
     assert not any(r.dim for r in result.rows)
     assert result.ghost == ""
 

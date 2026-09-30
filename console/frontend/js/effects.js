@@ -25,7 +25,9 @@ export function createRunner({ store, api, actions, autosave, bootWorkspace }) {
     }
     const level = e.ok ? "ok" : "fault";
     store.log("result", e.message || (e.ok ? "ok" : "failed"), { level, moteId: e.moteId });
-    if (e.ok && e.moteId) store.setSelection([e.moteId]);
+    if (e.ok && e.moteId) {
+      store.setSelection([e.moteId], e.moteName ? { [e.moteId]: e.moteName } : {});
+    }
     if (e.wrote) store.emit("write");
     return { message: e.message, level };
   }

@@ -93,8 +93,9 @@ def test_a_statement_writes(api):
     effect = api.run("R1.x = 5 ohm")
     assert effect["effect"] == "statement"
     assert effect["ok"] and effect["created"] and effect["wrote"]
-    assert set(effect) == {"effect", "ok", "message", "moteId", "created",
+    assert set(effect) == {"effect", "ok", "message", "moteId", "moteName", "created",
                            "needsConfirm", "choices", "wrote"}
+    assert effect["moteName"] == "R1"
 
 
 def test_a_delete_needs_confirm_and_confirm_is_not_new_history(api):

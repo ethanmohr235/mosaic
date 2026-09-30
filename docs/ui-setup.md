@@ -13,6 +13,87 @@ A seventh window sits beside rather than among them: **Gardens**
 deleted, imported, exported and synced. Any of the six opens it from
 its own garden dropdown ("Manage gardens…"); see below.
 
+The windows are being folded into one tiled window, **the console**
+(`run_console.py`, window title *Mosaic*). Apps move into it one at a
+time (`docs/console.md`, steps U1–U9), and each old window is deleted
+once its app is ported. New UI is built only in the console.
+
+---
+
+# The console -- one tiled window
+
+```sh
+.venv/bin/python run_console.py --garden FEA-Homework-4
+```
+
+One window, one garden at a time, every pane the output of a command.
+Its design, grammar and view contract are in `docs/console.md`. This
+section covers what it does today (step U1): the shell and the `log`
+view.
+
+### The shell
+
+- **Top bar:** the `[mo]` box, the focused pane's app, and `/ garden`.
+  On the right, saved layouts as tabs (`1:two`) with `*` and
+  *unsaved layout* once the panes drift from the active one, or the
+  selection (`sel bd · linked in N panes`).
+- **Command line** (`[mo]` prompt): `:` or `/` focuses it and `esc`
+  leaves. `⏎` runs in the focused pane, `⌥⏎` in a new pane. `tab`
+  completes, and the best match shows as ghost text. `↑` on an empty
+  line opens this garden's history (`^r` searches it). Errors show in
+  red on the right. A delete asks for a second `⏎`.
+- **Key-hint bar:** always shows the focused view's keys, then the
+  shell's.
+
+### What you can type
+
+| Line | Does |
+|---|---|
+| `tion`, `xie`, `nolith`, … | Open that app. Unported apps open their old window. |
+| `log` | The command and error log for this session. |
+| `cd <garden>` | Switch the workspace to another garden, with its own layouts and history. |
+| `layout save\|load\|list\|rm <name>` | Save or restore the pane layout. |
+| `refresh` | Re-read the garden (picks up MCP, CLI and sync edits). |
+| `undo`, `redo` | Same as Ctrl+Z / Ctrl+Shift+Z. |
+| anything else | A modeling statement, as in the old `/` bar: `R1.x = 5 ohm`, `A -> B`, `R1 : Resistor`, `R1.x ?`, `delete R1`. |
+
+`@sel` stands for the selected mote anywhere a mote is expected. A
+mote named like a verb (`log`) is reached as `"log"` or `#id`.
+
+### Tiling
+
+`^w` is the prefix: `v`/`s` split side by side or stacked, `h j k l`
+move focus, `<`/`>` resize, `o` only this pane, `=` equalize, `x`
+swap. `1`–`9` switch saved layouts, `e` (or a click on a header)
+loads a pane's command into the command line, and `x` closes the
+pane. A new pane opens the `view>` picker. Dividers drag with the
+mouse.
+
+Layouts and history are UI state, not knowledge: they live in
+`gardens/<name>.db.console.json`, never in the garden or in sync, and
+they follow the garden through rename, delete and restore.
+
+### Ports
+
+The console asks for port **42009**, with WebKit storage in
+`.webview_data_console/` (see *Ports* under the other windows for
+why each app pins its own).
+
+### Smoke test
+
+```sh
+.venv/bin/python scripts/console_smoke_test.py
+```
+
+Boots on a seeded temp garden and checks the following:
+- `^w v` splits, and the picker places `log`
+- a divider drag and `^w >` resize
+- a statement lands in the log and selects its mote
+- `layout save` works and drift marks the layout unsaved
+- the layout and history survive both a reload and a relaunch on a fresh `Api`
+- `cd` swaps gardens
+- no JavaScript errors
+
 ---
 
 # Monarch -- the graph
