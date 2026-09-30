@@ -202,7 +202,7 @@ def figure(
     max_points: int = NOTE_POINTS,
 ) -> Figure:
     """The saved view `ref` names, re-solved against the garden as it
-    stands. Writes nothing and logs no run -- a sweep never does."""
+    stands. Writes nothing -- a sweep never does."""
     motes = list_motes(conn) if motes is None else motes
     view, error = find_view(ref, motes)
     if view is None:

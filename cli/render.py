@@ -206,23 +206,6 @@ def change_lines(changes) -> list[str]:
     ]
 
 
-def run_summary_line(conn: sqlite3.Connection, run) -> str:
-    """One logged run, as a single line.
-
-    A run made under a scenario names it, because that is the only thing
-    distinguishing two runs that solved the same rules to different
-    answers -- and comparing those is what scenarios are for."""
-    applied = "applied" if run.committed else "saved"
-    line = f"[{run.run_id}] run=#{run.run_number} {run.ran_at} {run.status} ({applied})"
-    if run.scenario_id is not None:
-        line += f" scenario={label(conn, run.scenario_id)}"
-    if run.status == "ok":
-        line += f" ({run.change_count} change{'' if run.change_count == 1 else 's'})"
-    else:
-        line += f": {run.detail}"
-    return line
-
-
 def print_models(conn: sqlite3.Connection, mote_id: str) -> None:
     """`Models: <name>, ...` for a mote's outgoing uses_model relationships,
     printed after `mote get` so the property model attached to a mote is

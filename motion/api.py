@@ -7,18 +7,17 @@ serialized behind a lock because pywebview calls in from a pool of
 worker threads, and a best-effort sync on the way in and out.
 
 This window is where simulation lives now. It was Monarch's -- a
-settings panel, a scrub bar and a runs list bolted onto a graph editor
-that is not about simulation -- and moving it here is the whole point of
-the app: scenarios, solvers, runs, provenance and rule authoring are one
+settings panel and a scrub bar bolted onto a graph editor that is not
+about simulation -- and moving it here is the whole point of the app:
+scenarios, solvers, previews, provenance and rule authoring are one
 subject, and they were the one subject Monarch could not give a full
 window to.
 
 Three lines this bridge does not cross. It computes no simulation --
 core/simulation.py does, and this only chooses the arguments. It shapes
 no board -- motion/payload.py does. And it never writes a value it did
-not recompute itself: `commit` re-runs the requested ticks rather than
-trusting numbers a preview handed back to the frontend -- the refusal
-Monarch's own commit made before this moved, and for the same reason.
+not compute itself: `solve` re-solves the garden rather than trusting
+numbers a preview handed back to the frontend.
 
 # What is deliberately absent
 
@@ -99,17 +98,31 @@ def _time_series_payload(result: "simulation_repo.TimeSeriesResult") -> dict:
         "events": payload_repo.build_events(steps),
         "failed_at": result.failed_at,
         "error": result.error,
-        "run_id": result.run_id,
-        "run_number": result.run_number,
         "dimension_warnings": result.dimension_warnings,
         "constraint_violations": result.constraint_violations,
+    }
+
+
+def _simulation_payload(result: "simulation_repo.SimulationResult") -> dict:
+    """Shapes a SimulationResult for the JS bridge. `values` and
+    `unsolved` are keyed by (mote_id, key) tuples, which don't survive
+    JSON, so the changes carry the values and unsolved becomes a list of
+    named fields."""
+    return {
+        "summary": result.summary,
+        "changes": [dataclasses.asdict(c) for c in result.changes],
+        "equation_count": result.equation_count,
+        "unsolved": [{"mote_id": m, "key": k} for m, k in result.unsolved],
+        "dimension_warnings": result.dimension_warnings,
+        "constraint_violations": result.constraint_violations,
+        "error": None,
     }
 
 
 def _explanation_payload(explanation) -> dict | None:
     """Shapes a core/derivations.py Explanation for the JS bridge.
 
-    Recursive, mirroring the structure itself: an input this run derived
+    Recursive, mirroring the structure itself: an input the solve derived
     carries its own explanation, and one it did not carries None, which
     is where the panel stops expanding. `also_determined` is flattened
     from tuples into dicts, since tuples reach JS as arrays and a value's
@@ -120,7 +133,6 @@ def _explanation_payload(explanation) -> dict | None:
         "mote_id": explanation.mote_id,
         "key": explanation.key,
         "value": explanation.value,
-        "step": explanation.step,
         "method": explanation.method,
         "detail": explanation.detail,
         "note": explanation.note,
@@ -274,7 +286,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
     @_synchronized
     def board(self, scenario: str | None = None) -> dict:
         """The window's whole answer in one call: nodes, edges, rules,
-        scenarios, runs and the solver registry.
+        scenarios and the solver registry.
 
         One call rather than six because they must agree. A node's kind
         depends on which scenario is active (see payload.varied_ids), and
@@ -308,7 +320,6 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
             "scenarios": payload_repo.scenario_payload(scenarios),
             "activeScenario": scenario,
             "solvers": solvers_repo.list_solvers(),
-            "runs": [dataclasses.asdict(r) for r in simulation_repo.list_runs(self._conn, limit=40)],
             # The palette universe rides along with the answer rather
             # than being a call of its own -- see api_common.species_ids.
             "speciesIds": _species_ids(self._conn),
@@ -381,7 +392,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
     ) -> dict:
         """Runs step_count ticks entirely in memory -- nothing is written
         to this garden. The frontend scrubs through the returned steps
-        client-side; committing a chosen tick is a separate call.
+        client-side; writing an answer back is solve()'s job.
 
         `scenario` names a mote gathering overrides (see board()): the
         garden is previewed as that scenario would have it. A preview
@@ -393,7 +404,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         logged warning to a run-stopping error, surfaced to the frontend
         the same way any other failed preview is."""
         result = simulation_repo.run_time_series(
-            self._conn, step_count, commit=False, solver=solver,
+            self._conn, step_count, solver=solver,
             solver_configuration=solver_configuration, scenario=scenario,
             strict_units=strict_units,
         )
@@ -421,14 +432,14 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
             "a": {
                 "scenario": scenario_a,
                 **_time_series_payload(simulation_repo.run_time_series(
-                    self._conn, step_count, commit=False,
+                    self._conn, step_count,
                     solver=solver, scenario=scenario_a, strict_units=strict_units,
                 )),
             },
             "b": {
                 "scenario": scenario_b,
                 **_time_series_payload(simulation_repo.run_time_series(
-                    self._conn, step_count, commit=False,
+                    self._conn, step_count,
                     solver=solver, scenario=scenario_b, strict_units=strict_units,
                 )),
             },
@@ -440,11 +451,10 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         holds.
 
         Takes the steps back rather than re-running, because the caller
-        got them from preview()/compare()/run_ticks() and re-solving to
-        redraw a lane list would make a scenario switch cost two runs.
-        Nothing here is written, so echoed-back numbers are only ever
-        drawn -- the refusal to trust them applies to `commit`, which
-        recomputes instead (see commit())."""
+        got them from preview()/compare() and re-solving to redraw a lane
+        list would make a scenario switch cost two runs. Nothing here is
+        written, so echoed-back numbers are only ever drawn -- writing is
+        solve()'s job, and it computes its own."""
         motes, _relationships = self._simulable()
         labels = {m.id: str(m.properties.get("name", m.id[:8])) for m in motes}
         base = {m.id: m.properties for m in motes}
@@ -458,98 +468,42 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         return [lane.to_json() for lane in built]
 
     @_synchronized
-    def commit(
-        self, step_count: int, solver: str = "linear", solver_configuration: dict | None = None,
-        detail: str | None = None, strict_units: bool = False,
-    ) -> dict:
-        """Re-runs step_count ticks (deterministic given the same garden
-        and rules) and this time writes the final cumulative result,
-        logging one entry the same way a single run_simulation() always
-        has. Never trusts step values echoed back from a prior preview
-        call -- the only numbers that ever reach the database are ones
-        this recomputes itself.
-
-        Takes no scenario: committing one is refused by the engine, since
-        a scenario answers what *would* happen and that is not the
-        garden's state. Use save() to keep a scenario run.
-
-        `detail` is passed straight through to run_time_series() -- see
-        there. Fast mode passes "fast" so its own auto-commits can be
-        told apart from an ordinary manual commit."""
-        result = simulation_repo.run_time_series(
-            self._conn, step_count, commit=True, solver=solver,
-            solver_configuration=solver_configuration, detail=detail,
-            strict_units=strict_units,
-        )
-        return _time_series_payload(result)
-
-    @_synchronized
-    def save(
-        self, step_count: int, solver: str = "linear",
-        solver_configuration: dict | None = None, scenario: str | None = None,
+    def solve(
+        self, solver: str = "linear", solver_configuration: dict | None = None,
         strict_units: bool = False,
     ) -> dict:
-        """Like commit, but never writes the graph -- logs every computed
-        tick for later review without any of them becoming the garden's
-        canonical state. Always re-runs the full step_count (unlike
-        commit, which only re-runs up to whichever tick was scrubbed to),
-        since there's no "committed position" for a save.
+        """Solve the garden once and write the answer back -- the static
+        solve Fast mode runs after every edit and Advanced mode's Solve
+        button runs on demand. Also replaces the garden's provenance, so
+        why() explains the values this wrote.
 
-        This is the only way a scenario run can be kept."""
-        result = simulation_repo.run_time_series(
-            self._conn, step_count, commit=False, save=True,
-            solver=solver, solver_configuration=solver_configuration, scenario=scenario,
-            strict_units=strict_units,
-        )
-        return _time_series_payload(result)
-
-    # ---- runs ----
-
-    @_synchronized
-    def list_runs(self, limit: int | None = None) -> list[dict]:
-        """Every logged run, most recent first -- backs the saved-runs
-        list in the left rail."""
-        return [dataclasses.asdict(r) for r in simulation_repo.list_runs(self._conn, limit=limit)]
-
-    @_synchronized
-    def get_run(self, run_id: str) -> dict | None:
-        run = simulation_repo.get_run(self._conn, run_id)
-        return dataclasses.asdict(run) if run is not None else None
-
-    @_synchronized
-    def run_changes(self, run_id: str) -> list[dict]:
-        """A logged run's net old->new changes. For the tick-by-tick
-        breakdown, see run_ticks."""
-        return [dataclasses.asdict(c) for c in simulation_repo.run_changes(self._conn, run_id)]
-
-    @_synchronized
-    def run_ticks(self, run_id: str) -> dict:
-        """A logged run's own internal ticks, shaped exactly like
-        preview()'s so loading a saved run into the dock needs no second
-        rendering path -- the scrubber cannot tell the two apart, which
-        is the point."""
-        steps = simulation_repo.step_payloads(simulation_repo.run_ticks(self._conn, run_id))
-        return {
-            "steps": steps,
-            "axis": payload_repo.tick_axis(len(steps)),
-            "events": payload_repo.build_events(steps),
-            "run_id": run_id,
-        }
+        Takes no scenario: a scenario is a hypothetical and is never
+        written, which is what preview() is for. A solve that fails
+        writes nothing and comes back as {"error": ...}, the same field a
+        failed preview reports, rather than raising across the bridge."""
+        try:
+            result = simulation_repo.run_simulation(
+                self._conn, solver=solver,
+                solver_configuration=solver_configuration, strict_units=strict_units,
+            )
+        except simulation_repo.SimulationError as e:
+            return {"error": str(e)}
+        return _simulation_payload(result)
 
     # ---- explanation ----
 
     @_synchronized
-    def why(self, mote_id: str, key: str, run_id: str | None = None) -> dict | None:
+    def why(self, mote_id: str, key: str) -> dict | None:
         """How a solved value was determined: the equations that produced
         it, the known values they read, and -- recursively -- how each of
         those was itself determined (see core/derivations.py).
 
-        Reads the run log, so it needs a run to have happened; a
-        discarded preview leaves nothing to read. Values come back in
-        base SI units, which is what the solver worked in, so the numbers
-        beside an equation multiply out -- unlike the inspector, which
-        shows each mote's own declared unit."""
-        explanation = derivations_repo.explain(self._conn, mote_id, key, run_id=run_id)
+        Explains the last solve that wrote to the garden -- a preview
+        leaves nothing to read. Values come back in base SI units, which
+        is what the solver worked in, so the numbers beside an equation
+        multiply out -- unlike the inspector, which shows each mote's own
+        declared unit."""
+        explanation = derivations_repo.explain(self._conn, mote_id, key)
         return _explanation_payload(explanation)
 
     @_synchronized
@@ -596,12 +550,6 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
             "problems": report.problems,
             "once_scoped": report.once_scoped,
         }
-
-    @_synchronized
-    def mote_history(self, mote_id: str) -> dict[str, list[float]]:
-        """Every value a mote's properties have taken across the garden's
-        committed run history -- backs the inspector's sparklines."""
-        return simulation_repo.mote_history(self._conn, mote_id)
 
     # ---- authoring ----
 
@@ -762,14 +710,14 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         can print without knowing what a derivation is.
 
         Motion is the only window that can answer this -- it is the one
-        with a solver and a run log -- so api_common.InspectorApi returns
-        None and the other five never draw the control.
+        with a solver -- so api_common.InspectorApi returns None and the
+        other windows never draw the control.
 
         Values are in base SI, which is what the solver worked in, so the
         numbers beside an equation multiply out."""
         explanation = derivations_repo.explain(self._conn, mote_id, key)
-        if explanation is None:
-            return None
+        if not explanation.derived:
+            return {"lines": [explanation.note or "not determined by the last solve"]}
 
         lines = [f"{explanation.method}: {explanation.detail or ''}".strip()]
         for equation in explanation.equations:

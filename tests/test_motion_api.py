@@ -8,7 +8,7 @@ node-kind tests are new, since nothing shaped a garden this way before.
 import pytest
 
 from core.gardens import create_garden
-from core.simulation import SimulationError, run_simulation
+from core.simulation import SimulationError
 from motion import payload as payload_repo
 from motion.api import Api
 
@@ -66,7 +66,6 @@ def test_preview_returns_a_step_per_requested_count(api):
     result = api.preview(4)
     assert result["failed_at"] is None
     assert result["error"] is None
-    assert result["run_id"] is None
     assert [s["step"] for s in result["steps"]] == [0, 1, 2, 3]
     assert result["steps"][0]["changes"][0]["new_value"] == pytest.approx(105.0)
 
@@ -78,11 +77,37 @@ def test_preview_never_writes(api):
     assert api.inspect(mote_id) == before
 
 
-def test_commit_writes_the_final_step_and_returns_a_run_id(api):
+def test_solve_writes_back_and_reports_what_changed(api):
+    garden = _seed_ohm(api)
+    result = api.solve()
+
+    assert result["error"] is None
+    assert result["summary"].startswith("Solved 1 value")
+    assert [(c["key"], c["new_value"]) for c in result["changes"]] == [("voltage", 6)]
+    assert result["equation_count"] >= 0
+    assert result["unsolved"] == []
+    assert api.inspect(garden["mote"])["properties"]["voltage"] == 6
+
+
+def test_solve_reports_a_failure_as_an_error_and_writes_nothing(api):
+    species = api.create_mote({"name": "S", "freedoms": "a, b"})
+    rule = api.create_mote({"name": "underdetermined", "equation": "a + b == 10"})
+    api.create_relationship(rule["id"], species["id"], "applies_to")
+    mote = api.create_mote({"name": "m"})
+    _set_species(api, mote["id"], species["id"])
+
+    result = api.solve()
+    assert "underdetermined" in result["error"]
+    assert "a" not in api.inspect(mote["id"])["properties"]
+
+
+def test_solve_refuses_a_recurrence_rather_than_advancing_it(api):
+    """prev() needs a previous step, which only a preview has. Solving is
+    one-shot, so a recurrence is refused -- never quietly stepped."""
     mote_id = _seed_compounding_rule(api)
-    result = api.commit(3)
-    assert result["run_id"] is not None
-    assert api.inspect(mote_id)["properties"]["balance"] == pytest.approx(115.7625)
+    result = api.solve()
+    assert "previous value" in result["error"]
+    assert api.inspect(mote_id)["properties"]["balance"] == 100.0
 
 
 def test_preview_reports_a_failure_without_raising(api):
@@ -132,10 +157,11 @@ def test_preview_honours_strict_units(api):
         api.preview(1, strict_units=True)
 
 
-def test_commit_honours_strict_units(api):
-    _seed_mismatched_units(api)
-    with pytest.raises(SimulationError, match="dimensional check failed"):
-        api.commit(1, strict_units=True)
+def test_solve_honours_strict_units(api):
+    mote_id = _seed_mismatched_units(api)
+    result = api.solve(strict_units=True)
+    assert "dimensional check failed" in result["error"]
+    assert "total" not in api.inspect(mote_id)["properties"]
 
 
 def test_compare_honours_strict_units(api):
@@ -143,111 +169,6 @@ def test_compare_honours_strict_units(api):
     scenario = _scenario_over(api, mote_id, current=3)
     with pytest.raises(SimulationError, match="dimensional check failed"):
         api.compare(1, "linear", None, scenario, strict_units=True)
-
-
-def test_save_honours_strict_units(api):
-    _seed_mismatched_units(api)
-    with pytest.raises(SimulationError, match="dimensional check failed"):
-        api.save(1, strict_units=True)
-
-
-# ---- run history ----
-
-def test_list_runs_and_get_run_see_a_committed_run(api):
-    mote_id = _seed_compounding_rule(api)
-    result = api.commit(3)
-
-    runs = api.list_runs()
-    assert [r["run_id"] for r in runs] == [result["run_id"]]
-    assert runs[0]["status"] == "ok"
-
-    run = api.get_run(result["run_id"])
-    assert run == runs[0]
-
-    changes = api.run_changes(result["run_id"])
-    assert any(c["mote_id"] == mote_id and c["key"] == "balance" for c in changes)
-
-
-def test_list_runs_respects_limit(api):
-    _seed_compounding_rule(api)
-    api.commit(1)
-    api.commit(1)
-    assert len(api.list_runs(limit=1)) == 1
-
-
-def test_get_run_returns_none_for_an_unknown_id(api):
-    assert api.get_run("nonexistent") is None
-
-
-def test_list_runs_includes_a_failed_run_with_no_changes(api):
-    species = api.create_mote({"name": "S", "freedoms": "a, b"})
-    rule = api.create_mote({"name": "underdetermined", "equation": "a + b == 10"})
-    api.create_relationship(rule["id"], species["id"], "applies_to")
-    mote = api.create_mote({"name": "m"})
-    _set_species(api, mote["id"], species["id"])
-
-    # run_simulation (unlike commit/run_time_series, which never logs a
-    # run that fails on its very first step) always logs failures --
-    # exercised directly here since Api has no bare run_simulation wrapper.
-    with pytest.raises(SimulationError):
-        run_simulation(api._conn)
-
-    [run] = api.list_runs()
-    assert run["status"] == "error"
-    assert "underdetermined" in run["detail"]
-    assert api.run_changes(run["run_id"]) == []
-
-
-def test_save_logs_without_writing_the_graph(api):
-    mote_id = _seed_compounding_rule(api)
-    before = api.inspect(mote_id)
-
-    result = api.save(3)
-
-    assert result["run_id"] is not None
-    assert api.inspect(mote_id) == before          # graph untouched
-
-    run = api.get_run(result["run_id"])
-    assert run["committed"] is False
-
-    ticks = api.run_ticks(result["run_id"])
-    assert [s["step"] for s in ticks["steps"]] == [0, 1, 2]
-
-
-def test_committed_run_has_committed_true(api):
-    _seed_compounding_rule(api)
-    result = api.commit(1)
-    assert api.get_run(result["run_id"])["committed"] is True
-
-
-def test_run_ticks_is_shaped_exactly_like_a_preview(api):
-    """The dock cannot tell a replayed run from a fresh preview, which is
-    the point -- one rendering path for both."""
-    mote_id = _seed_compounding_rule(api)
-    result = api.commit(3)
-
-    ticks = api.run_ticks(result["run_id"])
-    assert set(ticks) >= {"steps", "axis", "events"}
-    assert ticks["axis"]["unit"] == "tick"
-    balances = [
-        next(c["new_value"] for c in s["changes"]
-             if c["mote_id"] == mote_id and c["key"] == "balance")
-        for s in ticks["steps"]
-    ]
-    assert balances == pytest.approx([105.0, 110.25, 115.7625])
-
-
-def test_mote_history_tracks_a_property_across_committed_runs(api):
-    mote_id = _seed_compounding_rule(api)
-    api.commit(1)
-    api.commit(1)
-    assert api.mote_history(mote_id)["balance"] == pytest.approx([105.0, 110.25])
-
-
-def test_mote_history_excludes_saved_runs(api):
-    mote_id = _seed_compounding_rule(api)
-    api.save(2)
-    assert api.mote_history(mote_id) == {}
 
 
 # ---- scenarios ----
@@ -261,15 +182,6 @@ def test_preview_under_a_scenario_writes_nothing(api):
 
     varied = api.preview(1, scenario=scenario_id)
     assert varied["steps"][0]["changes"][0]["new_value"] == 30
-    assert "voltage" not in api.inspect(garden["mote"])["properties"]
-
-
-def test_save_can_keep_a_scenario_run(api):
-    garden = _seed_ohm(api)
-    scenario_id = _scenario_over(api, garden["mote"], current=10)
-
-    result = api.save(1, scenario=scenario_id)
-    assert result["run_id"] is not None
     assert "voltage" not in api.inspect(garden["mote"])["properties"]
 
 
@@ -304,7 +216,7 @@ def test_preview_reports_constraint_violations(api):
 
 def test_why_explains_a_solved_value(api):
     garden = _seed_ohm(api)
-    api.commit(1)
+    api.solve()
 
     explanation = api.why(garden["mote"], "voltage")
     assert explanation["value"] == 6
@@ -320,6 +232,32 @@ def test_why_before_any_run_returns_a_note_rather_than_failing(api):
     explanation = api.why(garden["mote"], "voltage")
     assert explanation["note"]
     assert explanation["equations"] == []
+
+
+def test_why_follows_the_latest_solve(api):
+    garden = _seed_ohm(api)
+    api.solve()
+    api.update_mote(garden["mote"], {"current": "10"})
+    api.solve()
+    assert api.why(garden["mote"], "voltage")["value"] == 30
+
+
+def test_a_preview_or_failed_solve_leaves_why_on_the_last_solve(api):
+    garden = _seed_ohm(api)
+    api.solve()
+    api.preview(2)
+    assert api.why(garden["mote"], "voltage")["value"] == 6
+
+
+def test_inspector_why_prints_the_note_for_an_underived_value(api):
+    garden = _seed_ohm(api)
+    api.solve()
+    assert api.inspector_why(garden["mote"], "current") == {
+        "lines": ["not determined by the last solve -- set directly, or unchanged since"]
+    }
+    lines = api.inspector_why(garden["mote"], "voltage")["lines"]
+    assert lines[0].startswith("substitution")
+    assert any("Ohm" in line for line in lines)
 
 
 def test_dependencies_answers_without_a_run(api):
@@ -365,7 +303,7 @@ def test_board_answers_the_whole_window_in_one_call(api):
     assert {n["label"] for n in board["nodes"]} == {"Resistor", "Ohm", "R1"}
     assert [r["name"] for r in board["rules"]] == ["Ohm"]
     assert "linear" in board["solvers"]
-    assert board["runs"] == []
+    assert "runs" not in board
 
 
 def test_solvers_come_from_the_registry_not_a_fixed_menu(api):
@@ -500,13 +438,3 @@ def test_lanes_are_capped_and_ordered_by_how_far_the_value_moved(api):
     lanes = api.lanes(result["steps"])
     assert [lane["key"] for lane in lanes] == ["big", "small"]
     assert len(api.lanes(result["steps"], limit=1)) == 1
-
-
-def test_lanes_from_a_logged_run_read_the_same_as_a_preview(api):
-    """build_lanes takes the payload form of a step precisely so a replay
-    and a preview share one path."""
-    _seed_compounding_rule(api)
-    result = api.save(2)
-    ticks = api.run_ticks(result["run_id"])
-    [lane] = api.lanes(ticks["steps"])
-    assert lane["points"] == pytest.approx([100.0, 105.0, 110.25])

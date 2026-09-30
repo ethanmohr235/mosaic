@@ -565,7 +565,7 @@ class InspectorApi:
     @synchronized
     def inspector_why(self, mote_id: str, key: str) -> dict | None:
         """Where a value came from. Only Motion can answer this -- it is
-        the window with a solver and a run log -- so the base answer is
+        the window with a solver and its provenance -- so the base answer is
         None and the Advanced section simply doesn't draw the control.
         Declared here rather than only in motion/api.py so the frontend
         can call it unconditionally instead of sniffing the bridge."""

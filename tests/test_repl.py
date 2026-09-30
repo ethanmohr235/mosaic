@@ -177,15 +177,17 @@ def test_simulate_runs_and_prints_changes(run_repl, conn):
     assert c1[:8] in out and "pressure:" in out
 
 
-def test_simulate_history_then_show_prints_the_same_run(run_repl, conn):
-    _wire_solvable_container(conn)
-    history = run_repl(["simulate", "simulate history"])
-    run_id = [line for line in history.splitlines() if line.startswith("[")][0].split("]")[0].lstrip("[")
+def test_simulate_keeps_no_run_history(run_repl, conn):
+    assert "Unknown simulate action: history" in run_repl(["simulate history"])
 
-    out = run_repl([f"simulate show id={run_id}"])
-    assert f"Run {run_id}" in out
-    assert "status=ok" in out
-    assert "applied to graph" in out
+
+def test_why_explains_the_last_solve(run_repl, conn):
+    c1 = _wire_solvable_container(conn)
+    assert "no solve has been recorded" in run_repl([f"why id={c1} key=pressure"])
+
+    out = run_repl(["simulate", f"why id={c1} key=pressure"])
+    assert "Ideal gas law" in out
+    assert "[substitution]" in out
 
 
 def test_model_list_and_show_match_the_argparse_front_end(run_repl, conn):

@@ -121,13 +121,13 @@ def test_a_sweep_returns_a_curve_keyed_by_series_id(api, divider):
     assert last["v"]["s1"] == pytest.approx(20 / 300)
 
 
-def test_a_sweep_writes_nothing_and_logs_nothing(api, divider):
+def test_a_sweep_writes_nothing(api, divider):
     before = dict(get_mote(api._conn, divider["circuit"]).properties)
 
     api.sweep(sweep_spec(divider))
 
     assert get_mote(api._conn, divider["circuit"]).properties == before
-    assert api._conn.execute("SELECT COUNT(*) FROM simulation_runs").fetchone()[0] == 0
+    assert api._conn.execute("SELECT COUNT(*) FROM simulation_derivations").fetchone()[0] == 0
 
 
 def test_a_knob_is_coerced_from_the_string_a_slider_sends(api, divider):

@@ -16,7 +16,6 @@ from cli.main import (
 )
 from core.gardens import garden_exists
 from core.motes import create_mote, get_mote
-from core.simulation import list_runs
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
 from core.species import set_species
@@ -146,58 +145,11 @@ def test_simulate_reports_failure_without_raising(conn, capsys):
     assert "Simulation failed:" in capsys.readouterr().out
 
 
-def test_simulate_history_lists_ok_and_failed_runs(conn, capsys):
-    _wire_solvable_container(conn)
-    _handle_simulate(conn, parse(["simulate"]))  # ok run
+def test_simulate_keeps_no_run_history(conn, capsys):
+    """`simulate` only solves; there is no log of past runs to list."""
+    with pytest.raises(SystemExit):
+        parse(["simulate", "history"])
     capsys.readouterr()
-
-    container = create_mote(conn, {"name": "Bad Container", "freedoms": "pressure"})
-    rule = create_mote(conn, {"name": "Bad rule", "equation": "pressure == missing_value"})
-    create_relationship(conn, rule, container, APPLIES_TO)
-    set_species(conn, create_mote(conn, {"name": "C2"}), container)
-    _handle_simulate(conn, parse(["simulate"]))  # failed run
-    capsys.readouterr()
-
-    _handle_simulate(conn, parse(["simulate", "history"]))
-    out = capsys.readouterr().out
-    lines = [line for line in out.splitlines() if line.startswith("[")]
-    assert len(lines) == 2
-    # Most-recent-first: the failed run (run second) is listed before the ok one.
-    assert "error" in lines[0] and "missing_value" in lines[0]
-    assert "ok (applied)" in lines[1] and "1 change" in lines[1]
-
-
-def test_simulate_history_respects_limit(conn, capsys):
-    _wire_solvable_container(conn)
-    _handle_simulate(conn, parse(["simulate"]))
-    _handle_simulate(conn, parse(["simulate"]))
-    capsys.readouterr()
-
-    _handle_simulate(conn, parse(["simulate", "history", "--limit", "1"]))
-    out = capsys.readouterr().out
-    assert len(out.strip().splitlines()) == 1
-
-
-def test_simulate_show_prints_run_detail_and_changes(conn, capsys):
-    c1 = _wire_solvable_container(conn)
-    _handle_simulate(conn, parse(["simulate"]))
-    capsys.readouterr()
-
-    _handle_simulate(conn, parse(["simulate", "history"]))
-    history_line = capsys.readouterr().out.strip().splitlines()[0]
-    run_id = history_line.split("]")[0].lstrip("[")
-
-    _handle_simulate(conn, parse(["simulate", "show", "--id", run_id]))
-    out = capsys.readouterr().out
-    assert f"Run {run_id}" in out
-    assert "status=ok" in out
-    assert c1[:8] in out
-    assert "pressure:" in out
-
-
-def test_simulate_show_reports_no_run_found(conn, capsys):
-    _handle_simulate(conn, parse(["simulate", "show", "--id", "nonexistent"]))
-    assert "No run found." in capsys.readouterr().out
 
 
 # ---- garden delete/restore ----
@@ -499,6 +451,19 @@ def test_why_on_an_underived_value_says_so_without_the_unit_note(conn, capsys):
     assert "base SI unit" not in out
 
 
+def test_why_before_any_solve_says_none_is_recorded(conn, capsys):
+    mote = _solved_chain(conn)
+    _handle_why(conn, parse(["why", mote, "c"]))
+    assert "no solve has been recorded" in capsys.readouterr().out
+
+
+def test_why_takes_no_run_or_step(conn, capsys):
+    mote = _solved_chain(conn)
+    with pytest.raises(SystemExit):
+        parse(["why", mote, "c", "--run", "abc"])
+    capsys.readouterr()
+
+
 def test_why_respects_an_explicit_depth(conn, capsys):
     mote = _solved_chain(conn)
     _handle_simulate(conn, parse(["simulate", "run"]))
@@ -571,7 +536,7 @@ def test_consumers_lists_the_equations_that_read_a_value(conn, capsys):
 
 def test_the_queries_need_no_simulation_run(conn, capsys):
     """The index is derived from the rules, so it answers before anything
-    has ever been solved -- unlike `why`, which reads the run log."""
+    has ever been solved -- unlike `why`, which reads the last solve."""
     mote = _solved_chain(conn)
     _handle_incidence(conn, parse(["producers", mote, "c"]))
     assert "C rule on L1" in capsys.readouterr().out
@@ -677,31 +642,6 @@ def test_simulate_run_with_a_scenario_writes_nothing(conn, capsys):
     assert "Nothing was written" in out
     assert "-> 30" in out
     assert "voltage" not in get_mote(conn, garden["resistor"]).properties
-
-
-def test_simulate_history_names_the_scenario_a_run_used(conn, capsys):
-    """Two runs over the same rules differ only by which scenario they
-    answered, so the listing has to say."""
-    garden = _scenario_garden(conn)
-    _handle_simulate(conn, parse(["simulate", "run"]))
-    _handle_simulate(conn, parse(["simulate", "run", "--scenario", garden["scenario"]]))
-    capsys.readouterr()
-
-    _handle_simulate(conn, parse(["simulate", "history"]))
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-
-    assert any("scenario=High Load" in line and "(saved)" in line for line in lines)
-    assert any("scenario=" not in line and "(applied)" in line for line in lines)
-
-
-def test_simulate_show_names_the_scenario(conn, capsys):
-    garden = _scenario_garden(conn)
-    _handle_simulate(conn, parse(["simulate", "run", "--scenario", garden["scenario"]]))
-    capsys.readouterr()
-
-    run_id = list_runs(conn)[0].run_id
-    _handle_simulate(conn, parse(["simulate", "show", "--id", run_id]))
-    assert "scenario: High Load" in capsys.readouterr().out
 
 
 ### constraints

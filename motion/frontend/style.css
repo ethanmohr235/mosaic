@@ -183,16 +183,16 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .pill-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 
 /* The run-state chip: which question the dock is currently answering.
-   A scenario or a replayed run is never the garden's state, and the
-   chip is the standing reminder of that -- see setRunState(). */
+   A scenario or a preview is never the garden's state, and the chip is
+   the standing reminder of that -- see setRunState(). `.alert` marks a
+   failed Fast-mode solve. */
 .state-chip {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.11em;
   text-transform: uppercase; border-radius: 5px; padding: 2px 7px;
   border: 1px solid oklch(0.5 0.08 68 / 0.55); color: var(--accent-bright);
   white-space: nowrap; flex-shrink: 0;
 }
-.state-chip.replay { border-color: oklch(0.5 0.08 305 / 0.6); color: oklch(0.78 0.10 305); }
-.state-chip.committed { border-color: oklch(0.5 0.08 150 / 0.6); color: oklch(0.78 0.09 150); }
+.state-chip.alert { border-color: oklch(0.5 0.08 305 / 0.6); color: oklch(0.78 0.10 305); }
 
 /* ---- body and resizers ---- */
 
@@ -258,7 +258,6 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .card.on .card-label { color: var(--fg-bright); font-weight: 600; }
-.card-meta { font-family: var(--mono); font-size: 9.5px; color: var(--faint); }
 .card-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip {
   font-family: var(--mono); font-size: 9.5px; color: var(--muted);

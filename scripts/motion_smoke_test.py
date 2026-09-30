@@ -16,7 +16,7 @@ What it is for is the half of Motion that Python tests cannot reach --
 that pressing Run really draws lanes, that dragging the playhead really
 moves the numbers on the node cards, that picking a scenario really
 re-runs against it, that a comparison pane really draws a second board,
-and that Commit really writes the tick that was scrubbed to. The bridge
+and that Solve really reaches the engine. The bridge
 itself is tests/test_motion_api.py's job; what is untested anywhere else
 is the wiring between the two.
 """
@@ -324,25 +324,28 @@ def run_checks(window):
     check("stepping the dock moves the values on the node cards",
           scrubbing_moves_the_numbers_on_the_cards)
 
-    def the_run_is_a_preview_until_committed():
+    def the_run_is_a_preview_until_solved():
         assert text(window, "#run-state") == "preview", \
-            "an uncommitted run must say so"
+            "a preview must say so"
         assert balance_of("acct1") == 100.0, \
             "a preview must not have written the graph"
 
-    check("a run is a preview and writes nothing", the_run_is_a_preview_until_committed)
+    check("a run is a preview and writes nothing", the_run_is_a_preview_until_solved)
 
-    def committing_writes_the_scrubbed_tick():
-        click(window, "#commit-btn")
-        assert wait_until(lambda: balance_of("acct1") != 100.0), \
-            "Commit did not write the graph"
-        assert abs(balance_of("acct1") - 105.0) < 1e-9, \
-            f"tick 1 of a 5% compounding rule is 105, got {balance_of('acct1')}"
-        assert wait_until(lambda: count(window, "#run-list .card") == 1), \
-            "the committed run never reached the saved-runs rail"
+    def solving_a_recurrence_refuses_and_writes_nothing():
+        # This garden is a recurrence -- prev(balance) -- and a static
+        # solve has no previous step, so the engine refuses. What this
+        # proves is the wiring: the button reaches api.solve and the
+        # refusal comes back as a toast rather than a silent no-op.
+        click(window, "#solve-btn")
+        assert wait_until(lambda: "Solve failed" in text(window, "#toast")), \
+            f"a refused solve should say so, toast was {text(window, '#toast')!r}"
+        assert "previous value" in text(window, "#toast")
+        assert balance_of("acct1") == 100.0, \
+            "a refused solve must not have written the graph"
 
-    check("Commit writes exactly the tick that was scrubbed to",
-          committing_writes_the_scrubbed_tick)
+    check("Solve on a recurrence refuses and writes nothing",
+          solving_a_recurrence_refuses_and_writes_nothing)
 
     # ---- scenarios ----
 
@@ -353,14 +356,14 @@ def run_checks(window):
         click(window, "#run-btn")
         assert wait_until(lambda: count(window, "#lanes .lane") >= 1), \
             "the scenario run drew no lanes"
-        assert js(window, "document.getElementById('commit-btn').disabled") is True, \
-            "a scenario run is hypothetical and must not offer Commit"
+        assert js(window, "document.getElementById('solve-btn').disabled") is True, \
+            "a scenario is hypothetical and must not offer Solve"
 
-    check("picking a scenario re-runs against it and refuses to commit",
+    check("picking a scenario re-runs against it and refuses to solve",
           picking_a_scenario_re_runs_against_it)
 
     def a_scenario_run_leaves_the_graph_alone():
-        assert abs(balance_of("acct1") - 105.0) < 1e-9, \
+        assert balance_of("acct1") == 100.0, \
             "the scenario run must not have written the graph"
 
     check("a scenario run writes nothing", a_scenario_run_leaves_the_graph_alone)

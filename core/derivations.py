@@ -1,17 +1,20 @@
 # core/derivations.py
-"""Persisting and reading back what a solve did, and explaining a value.
+"""Persisting and reading back what the last solve did, and explaining a
+value.
 
-The write side takes a cursor rather than a connection so a run's
-derivations land in the same transaction as its changes (see
-core/simulation.py's `_log_run`) -- the two describe one event and must
-never be separable.
+A garden keeps provenance for exactly one solve: the last one that wrote
+its answer back (core/simulation.py's run_simulation()). That is the
+solve whose values are on the motes, so it is the only one `why` needs
+to explain. The write side replaces the whole set at once and takes a
+cursor rather than a connection, so the caller commits it together with
+the write-back it describes.
 
 The read side answers `why`. Explaining is a traversal, not a
 reconstruction: each value names the block that produced it, each block
-names its inputs, and an input that this run derived is itself a value to
-explain. The recursion terminates on anything the run did not derive --
-a stored property, a property-model evaluation, the state entering the
-first step -- which is exactly the set of things that need no
+names its inputs, and an input that the solve derived is itself a value
+to explain. The recursion terminates on anything the solve did not
+derive -- a stored property, a property-model evaluation, a prev() read
+of the garden -- which is exactly the set of things that need no
 explanation.
 
 Values here are in each dimension's base SI unit, the units the solver
@@ -21,17 +24,21 @@ import sqlite3
 from dataclasses import dataclass
 
 from core.formula import Unknown
-from core.provenance import (
-    DERIVED_READ,
-    PREVIOUS_READ,
-    Derivation,
-    Journal,
-)
+from core.provenance import DERIVED_READ, Derivation, Journal
 
 # How deep `explain` follows derived inputs before saying so rather than
 # recursing further. Generous -- this is a guard against a pathological
 # model, not a display limit.
 DEFAULT_DEPTH = 32
+
+_TABLES = (
+    "simulation_derivations",
+    "simulation_derivation_equations",
+    "simulation_derivation_inputs",
+)
+
+NO_SOLVE_NOTE = "no solve has been recorded for this garden yet"
+UNDETERMINED_NOTE = "not determined by the last solve -- set directly, or unchanged since"
 
 
 @dataclass(frozen=True)
@@ -46,7 +53,7 @@ class EquationRecord:
 @dataclass(frozen=True)
 class ExplainedInput:
     """One known value a block consumed. `derivation` is filled in when
-    this run determined it too, which is what makes `why` recursive."""
+    the solve determined it too, which is what makes `why` recursive."""
     kind: str
     mote_id: str
     key: str
@@ -68,7 +75,6 @@ class Explanation:
     mote_id: str
     key: str
     value: float | None
-    step: int | None = None
     method: str | None = None
     detail: str | None = None
     equations: tuple[EquationRecord, ...] = ()
@@ -82,8 +88,8 @@ class Explanation:
 
 
 def _text(value: float) -> str:
-    """Same representation core/simulation.py's change log uses, so the
-    two halves of a run's record read identically."""
+    """Stored as text, like mote_properties.value, so a value round-trips
+    exactly rather than through SQLite's REAL affinity."""
     return repr(float(value))
 
 
@@ -91,157 +97,122 @@ def _number(text: str) -> float:
     return float(text)
 
 
-def log_journal(
-    cursor: sqlite3.Cursor, run_id: str, step: int, journal: Journal
-) -> None:
-    """Write one step's derivations. Takes a cursor, not a connection, and
-    does not commit -- the caller owns the transaction."""
+def replace_journal(cursor: sqlite3.Cursor, journal: Journal) -> None:
+    """Replace the garden's derivations with one solve's. Takes a cursor,
+    not a connection, and does not commit -- the caller owns the
+    transaction."""
+    for table in _TABLES:
+        cursor.execute(f"DELETE FROM {table}")
     for derivation in journal.derivations:
-        _log_derivation(cursor, run_id, step, derivation)
+        _log_derivation(cursor, derivation)
 
 
-def _log_derivation(
-    cursor: sqlite3.Cursor, run_id: str, step: int, derivation: Derivation
-) -> None:
+def _log_derivation(cursor: sqlite3.Cursor, derivation: Derivation) -> None:
     cursor.executemany(
         "INSERT INTO simulation_derivations "
-        "(run_id, step, block, mote_id, key, value, method, detail) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(block, mote_id, key, value, method, detail) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         [
-            (run_id, step, derivation.block, mote_id, key,
+            (derivation.block, mote_id, key,
              _text(value), derivation.method, derivation.detail)
             for (mote_id, key), value in derivation.values.items()
         ],
     )
     cursor.executemany(
         "INSERT INTO simulation_derivation_equations "
-        "(run_id, step, block, rule_mote_id, rule_name, anchor_mote_id, equation) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(block, rule_mote_id, rule_name, anchor_mote_id, equation) "
+        "VALUES (?, ?, ?, ?, ?)",
         [
-            (run_id, step, derivation.block, o.rule_mote_id, o.rule_name,
-             o.anchor_mote_id, o.equation)
+            (derivation.block, o.rule_mote_id, o.rule_name, o.anchor_mote_id, o.equation)
             for o in derivation.equations
         ],
     )
     cursor.executemany(
         "INSERT INTO simulation_derivation_inputs "
-        "(run_id, step, block, kind, mote_id, key, value) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(block, kind, mote_id, key, value) "
+        "VALUES (?, ?, ?, ?, ?)",
         [
-            (run_id, step, derivation.block, r.kind, r.mote_id, r.key, _text(r.value))
+            (derivation.block, r.kind, r.mote_id, r.key, _text(r.value))
             for r in derivation.inputs
         ],
     )
 
 
-def latest_run_id(conn: sqlite3.Connection) -> str | None:
-    """The most recent logged run. `why` with no run named explains the
-    garden as it currently stands, which is that run."""
+def _has_solve(conn: sqlite3.Connection) -> bool:
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id FROM simulation_runs WHERE status = 'ok' "
-        "ORDER BY run_number DESC LIMIT 1"
-    )
-    row = cursor.fetchone()
-    return row["id"] if row is not None else None
+    cursor.execute("SELECT 1 FROM simulation_derivations LIMIT 1")
+    return cursor.fetchone() is not None
 
 
 def explain(
     conn: sqlite3.Connection,
     mote_id: str,
     key: str,
-    run_id: str | None = None,
-    step: int | None = None,
     depth: int = DEFAULT_DEPTH,
 ) -> Explanation:
-    """Why `mote_id.key` holds the value it does, as of one run.
-
-    With no run named, the garden's most recent successful run is used --
-    the one whose values are currently on the motes. With no step named,
-    the last step of that run that determined this value, since a
-    time-series run may have determined it repeatedly."""
-    if run_id is None:
-        run_id = latest_run_id(conn)
-    if run_id is None:
-        return Explanation(mote_id, key, None, note="this garden has no logged runs")
-    return _explain(conn, run_id, mote_id, key, step, depth, visited=frozenset())
+    """Why `mote_id.key` holds the value it does, as of the last solve
+    that wrote to the garden -- the one whose values are on the motes."""
+    if not _has_solve(conn):
+        return Explanation(mote_id, key, None, note=NO_SOLVE_NOTE)
+    return _explain(conn, mote_id, key, depth, visited=frozenset())
 
 
 def _explain(
     conn: sqlite3.Connection,
-    run_id: str,
     mote_id: str,
     key: str,
-    step: int | None,
     depth: int,
-    visited: frozenset[tuple[str, str, int]],
+    visited: frozenset[Unknown],
 ) -> Explanation:
-    row = _derivation_row(conn, run_id, mote_id, key, step)
+    row = _derivation_row(conn, mote_id, key)
     if row is None:
-        return Explanation(mote_id, key, None, step=step, note=_undetermined_note(step))
+        return Explanation(mote_id, key, None, note=UNDETERMINED_NOTE)
 
-    found = (mote_id, key, row["step"])
+    found = (mote_id, key)
     if found in visited:
         return Explanation(
-            mote_id, key, _number(row["value"]), step=row["step"],
+            mote_id, key, _number(row["value"]),
             method=row["method"], note="already explained above",
         )
     if depth <= 0:
         return Explanation(
-            mote_id, key, _number(row["value"]), step=row["step"],
+            mote_id, key, _number(row["value"]),
             method=row["method"], note="beyond the requested depth",
         )
 
-    block, block_step = row["block"], row["step"]
+    block = row["block"]
     return Explanation(
         mote_id=mote_id,
         key=key,
         value=_number(row["value"]),
-        step=block_step,
         method=row["method"],
         detail=row["detail"],
-        equations=_block_equations(conn, run_id, block_step, block),
-        inputs=_block_inputs(
-            conn, run_id, block_step, block, depth - 1, visited | {found}
-        ),
-        also_determined=_block_siblings(conn, run_id, block_step, block, mote_id, key),
+        equations=_block_equations(conn, block),
+        inputs=_block_inputs(conn, block, depth - 1, visited | {found}),
+        also_determined=_block_siblings(conn, block, mote_id, key),
     )
-
-
-def _undetermined_note(step: int | None) -> str:
-    if step is not None:
-        return f"not determined at step {step} of this run"
-    return "not determined by this run -- set directly, or unchanged since"
 
 
 def _derivation_row(
-    conn: sqlite3.Connection, run_id: str, mote_id: str, key: str, step: int | None
+    conn: sqlite3.Connection, mote_id: str, key: str
 ) -> sqlite3.Row | None:
-    """The block that determined this value. Without a step, the last one
-    to do so -- in a time-series run every step re-determines it, and the
-    latest is the one whose value the garden ended up with."""
+    """The block that determined this value, if the last solve did."""
     cursor = conn.cursor()
-    query = (
-        "SELECT step, block, value, method, detail FROM simulation_derivations "
-        "WHERE run_id = ? AND mote_id = ? AND key = ?"
+    cursor.execute(
+        "SELECT block, value, method, detail FROM simulation_derivations "
+        "WHERE mote_id = ? AND key = ? ORDER BY block DESC LIMIT 1",
+        (mote_id, key),
     )
-    params: tuple = (run_id, mote_id, key)
-    if step is not None:
-        query += " AND step = ?"
-        params += (step,)
-    cursor.execute(query + " ORDER BY step DESC, block DESC LIMIT 1", params)
     return cursor.fetchone()
 
 
-def _block_equations(
-    conn: sqlite3.Connection, run_id: str, step: int, block: int
-) -> tuple[EquationRecord, ...]:
+def _block_equations(conn: sqlite3.Connection, block: int) -> tuple[EquationRecord, ...]:
     cursor = conn.cursor()
     cursor.execute(
         "SELECT rule_mote_id, rule_name, anchor_mote_id, equation "
         "FROM simulation_derivation_equations "
-        "WHERE run_id = ? AND step = ? AND block = ? ORDER BY rule_name, anchor_mote_id",
-        (run_id, step, block),
+        "WHERE block = ? ORDER BY rule_name, anchor_mote_id",
+        (block,),
     )
     return tuple(
         EquationRecord(
@@ -252,15 +223,15 @@ def _block_equations(
 
 
 def _block_siblings(
-    conn: sqlite3.Connection, run_id: str, step: int, block: int, mote_id: str, key: str
+    conn: sqlite3.Connection, block: int, mote_id: str, key: str
 ) -> tuple[Unknown, ...]:
     """The other values this block determined -- empty for a substitution
     step, and the whole point for a solver block."""
     cursor = conn.cursor()
     cursor.execute(
         "SELECT mote_id, key FROM simulation_derivations "
-        "WHERE run_id = ? AND step = ? AND block = ? ORDER BY mote_id, key",
-        (run_id, step, block),
+        "WHERE block = ? ORDER BY mote_id, key",
+        (block,),
     )
     return tuple(
         (row["mote_id"], row["key"])
@@ -271,24 +242,20 @@ def _block_siblings(
 
 def _block_inputs(
     conn: sqlite3.Connection,
-    run_id: str,
-    step: int,
     block: int,
     depth: int,
-    visited: frozenset[tuple[str, str, int]],
+    visited: frozenset[Unknown],
 ) -> tuple[ExplainedInput, ...]:
     cursor = conn.cursor()
     cursor.execute(
         "SELECT kind, mote_id, key, value FROM simulation_derivation_inputs "
-        "WHERE run_id = ? AND step = ? AND block = ? ORDER BY kind, mote_id, key",
-        (run_id, step, block),
+        "WHERE block = ? ORDER BY kind, mote_id, key",
+        (block,),
     )
     return tuple(
         ExplainedInput(
             row["kind"], row["mote_id"], row["key"], _number(row["value"]),
-            _input_derivation(
-                conn, run_id, step, row["kind"], row["mote_id"], row["key"], depth, visited
-            ),
+            _input_derivation(conn, row["kind"], row["mote_id"], row["key"], depth, visited),
         )
         for row in cursor.fetchall()
     )
@@ -296,23 +263,15 @@ def _block_inputs(
 
 def _input_derivation(
     conn: sqlite3.Connection,
-    run_id: str,
-    step: int,
     kind: str,
     mote_id: str,
     key: str,
     depth: int,
-    visited: frozenset[tuple[str, str, int]],
+    visited: frozenset[Unknown],
 ) -> Explanation | None:
-    """Only a value this run derived is worth following.
-
-    A `previous` read is followed into the step before, because that is
-    literally where it came from: prev(x) is the value x had entering
-    this step, which the last step determined. At step 0 there is no
-    earlier step, and the honest answer is that it came from the garden.
-    """
+    """Only a value the solve itself derived is worth following. A prev()
+    read in a static solve is the value the garden held going in, which
+    is as much a given as any stored property."""
     if kind == DERIVED_READ:
-        return _explain(conn, run_id, mote_id, key, step, depth, visited)
-    if kind == PREVIOUS_READ and step > 0:
-        return _explain(conn, run_id, mote_id, key, step - 1, depth, visited)
+        return _explain(conn, mote_id, key, depth, visited)
     return None

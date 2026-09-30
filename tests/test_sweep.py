@@ -85,10 +85,10 @@ def test_a_sweep_writes_nothing_to_the_garden(conn, divider):
     assert "current" not in before
 
 
-def test_a_sweep_logs_no_run(conn, divider):
+def test_a_sweep_records_no_provenance(conn, divider):
     run_sweep(conn, axis_of(divider), [Case("base")], [(divider["circuit"], "current")])
 
-    rows = conn.execute("SELECT COUNT(*) FROM simulation_runs").fetchone()[0]
+    rows = conn.execute("SELECT COUNT(*) FROM simulation_derivations").fetchone()[0]
     assert rows == 0
 
 
@@ -284,7 +284,7 @@ def test_a_correlation_writes_nothing(conn, divider):
     run_correlation(conn, "voltage", "current")
 
     assert "current" not in get_mote(conn, divider["circuit"]).properties
-    assert conn.execute("SELECT COUNT(*) FROM simulation_runs").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM simulation_derivations").fetchone()[0] == 0
 
 
 ### the axis itself

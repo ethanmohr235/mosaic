@@ -380,10 +380,9 @@ def build_lanes(
     """Turn a run's steps into one line per value that moved.
 
     Takes the *payload* form of steps (core/simulation.py's
-    step_payloads) rather than StepResult, because a logged run read back
-    through run_ticks only ever exists in that form -- one code path for
-    a live preview and a replayed run, which is the same reason
-    monarch's scrub bar took its steps that way.
+    step_payloads) rather than StepResult, because that is the form the
+    frontend already holds and hands back (see motion/api.py's lanes()):
+    redrawing the traces never costs a second solve.
 
     Point 0 is the value before the run, read off the garden, so a lane
     shows where a value started rather than beginning at its first

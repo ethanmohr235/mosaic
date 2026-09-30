@@ -17,10 +17,11 @@
 //               dragging the playhead costs nothing and never re-solves.
 //   the overlay a node's value at that tick, folded from the run's
 //               changes over the values the board shipped (valuesAt).
-//   the mode    fast (auto-run, edit anywhere, no run/scenario
-//               bookkeeping) or advanced (manual run/save/commit, saved
-//               runs, and side-by-side scenario comparison) -- which is
-//               a question about this window and not about the garden.
+//   the mode    fast (auto-solve after every edit, no scenario
+//               bookkeeping) or advanced (manual preview runs, a Solve
+//               button, and side-by-side scenario comparison) -- which
+//               is a question about this window and not about the
+//               garden.
 //
 // # Ticks, not seconds
 //
@@ -63,10 +64,9 @@ let mode = "fast";         // fast | advanced
 let scenario = null;       // active scenario mote id, or null for the garden as it stands
 // Display-only scenario boards shown alongside the primary one in
 // Advanced mode, for side-by-side comparison -- never selectable or
-// independently run (see onPanDown). { scenarioId, runId, run } each;
-// runId stands in a saved run for a live preview, same idea as
-// replayRunId but per pane. Not persisted: a fresh load always starts
-// with none, same as `mode` itself.
+// independently run (see onPanDown). { scenarioId, run } each. Not
+// persisted: a fresh load always starts with none, same as `mode`
+// itself.
 let comparePanes = [];
 let panelTab = "rules";
 let activeRule = null;
@@ -92,7 +92,6 @@ let armCompare = false;
 let solver = "linear";
 let strictUnits = false;   // promotes a dimensional mismatch from a logged warning to a run-stopping error
 let steps = DEFAULT_STEPS;
-let replayRunId = null;    // set while the dock is showing a logged run rather than a preview
 let toastTimer = null;
 let drag = null;
 let pan = null;
@@ -501,40 +500,29 @@ function renderTopbar() {
     ? `${solver} · ${stepCount()} ${runA.axis.label}`
     : "";
 
-  // Fast mode solves and commits on its own -- the manual Run/Save/
-  // Commit trio would otherwise still kick off the old preview flow
-  // into a dock that Fast mode has hidden.
+  // Fast mode solves on its own -- the manual Run/Solve pair would
+  // otherwise still kick off the preview flow into a dock that Fast
+  // mode has hidden.
   const fast = mode === "fast";
   $("run-btn").classList.toggle("hidden", fast);
-  $("save-btn").classList.toggle("hidden", fast);
-  $("commit-btn").classList.toggle("hidden", fast);
+  $("solve-btn").classList.toggle("hidden", fast);
   if (fast) { setRunState(); return; }
 
-  // Saving is the only way to keep a scenario run, so it is offered
-  // wherever there is a run to keep -- including the cases Commit
-  // refuses.
-  const save = $("save-btn");
-  save.disabled = !runA || !!replayRunId;
-  save.title = replayRunId
-    ? "This run is already logged."
-    : "Log the whole run for later review, without writing it to the graph";
-
-  const canCommit = !!runA && tick > 0 && !scenario && !replayRunId;
-  const commit = $("commit-btn");
-  commit.disabled = !canCommit;
-  commit.textContent = tick > 0 ? `Commit tick ${tick}` : "Commit tick";
-  commit.title = scenario
-    ? "A scenario run is hypothetical and is never written to the graph. Save it instead."
-    : replayRunId
-      ? "This is a logged run being replayed. Run the garden again to commit."
-      : "Re-run to this tick and write the result to the graph";
+  // Solve writes the garden as it stands. Under a scenario that would
+  // quietly answer a different question than the one on screen, and a
+  // scenario is never written anyway (core/simulation.py), so it waits.
+  const solve = $("solve-btn");
+  solve.disabled = !!scenario;
+  solve.title = scenario
+    ? "A scenario is hypothetical and is never written to the graph. Switch to the garden as it stands to solve."
+    : "Solve the garden and write the answer to the graph";
   setRunState();
 }
 
-/** The chip that says which question the dock is answering. Three
- *  states worth telling apart, and all three mean "what you are looking
- *  at is not necessarily the garden": a scenario never will be, a
- *  replay already happened, and a preview has not been written. */
+/** The chip that says which question the dock is answering. Two
+ *  states worth telling apart, and both mean "what you are looking at
+ *  is not necessarily the garden": a scenario never will be, and a
+ *  preview has not been written. */
 function setRunState() {
   const chip = $("run-state");
   chip.className = "state-chip";
@@ -542,7 +530,7 @@ function setRunState() {
     chip.classList.remove("hidden");
     chip.textContent = fastStatus === "solving" ? "solving…" : fastStatus === "error" ? "error" : "solved";
     chip.title = fastStatus === "error" && fastError ? fastError : "";
-    if (fastStatus === "error") chip.classList.add("replay");
+    if (fastStatus === "error") chip.classList.add("alert");
     return;
   }
   // A selected scenario is worth saying before anything has been run:
@@ -550,10 +538,7 @@ function setRunState() {
   // no visible acknowledgement is how you end up reading a scenario's
   // numbers as the garden's.
   if (!runA && !scenario) { chip.classList.add("hidden"); return; }
-  if (replayRunId) {
-    chip.textContent = "replay";
-    chip.classList.add("replay");
-  } else if (scenario) {
+  if (scenario) {
     const sc = board.scenarios.find((s) => s.id === scenario);
     chip.textContent = `scenario · ${sc ? sc.name : "?"}`;
   } else {
@@ -580,7 +565,6 @@ function setMode(next) {
   if (mode === "fast") {
     runA = null;
     tick = 0;
-    replayRunId = null;
     panelTab = "rules";
     scheduleFastRun();
   }
@@ -588,11 +572,10 @@ function setMode(next) {
 }
 
 function renderRail() {
-  // Fast mode's edits commit straight away, so none of the rail earns
-  // its space: a scenario can never be committed (core/simulation.py
-  // refuses one), the saved-run history is exactly what Fast mode is
-  // trying not to accumulate, and pre-flight role checking is a
-  // build-time concern.
+  // Fast mode's edits are solved and written straight away, so none of
+  // the rail earns its space: a scenario is never written
+  // (core/simulation.py), and pre-flight role checking is a build-time
+  // concern.
   const fast = mode === "fast";
   $("rail").classList.toggle("hidden", fast);
   $("rail-resize").classList.toggle("hidden", fast);
@@ -622,67 +605,13 @@ function renderRail() {
       "No scenarios yet. A scenario is a mote with `varies` arrows to override motes — see core/scenarios.py.";
     scenarios.appendChild(note);
   }
-
-  const runs = $("run-list");
-  runs.innerHTML = "";
-  // Fast mode auto-commits on every debounced edit and tags each one
-  // "fast" (see runFastCommit) precisely so they don't pile up here --
-  // they're still logged for the audit trail, just not worth a card.
-  const keptRuns = board.runs.filter((r) => r.detail !== "fast");
-  $("run-count").textContent = keptRuns.length ? `${keptRuns.length} kept` : "";
-  for (const run of keptRuns) {
-    const card = document.createElement("button");
-    card.type = "button";
-    const paneIdx = comparePaneIndices((p) => p.runId === run.run_id);
-    card.className = "card" + (replayRunId === run.run_id || paneIdx.length ? " on" : "");
-    card.innerHTML =
-      `<div class="card-top"><span class="card-label"></span>` +
-      paneIdx.map((i) => `<span class="chip b">${i + 1}</span>`).join("") +
-      `</div>` +
-      `<div class="card-meta"></div>`;
-    card.querySelector(".card-label").textContent = runLabel(run);
-    card.querySelector(".card-meta").textContent =
-      [run.status, run.committed ? "committed" : "saved",
-       `${run.change_count} value${run.change_count === 1 ? "" : "s"}`,
-       (run.ran_at || "").slice(0, 16).replace("T", " ")].filter(Boolean).join(" · ");
-    if (run.scenario_id) {
-      const chips = document.createElement("div");
-      chips.className = "card-chips";
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      const sc = board.scenarios.find((s) => s.id === run.scenario_id);
-      chip.textContent = sc ? sc.name : "scenario";
-      chips.appendChild(chip);
-      card.appendChild(chips);
-    }
-    if (run.detail) card.title = run.detail;
-    // A saved run can stand in for a live scenario preview in a
-    // comparison pane -- right-click adds one, mirroring how scenario
-    // cards themselves are added (see scenarioCard).
-    card.title = (card.title ? card.title + " -- " : "") +
-      "Click to replay, right-click to add as a comparison pane.";
-    card.onclick = () => enterRun(run.run_id);
-    card.oncontextmenu = (e) => {
-      e.preventDefault();
-      comparePanes.push({ scenarioId: null, runId: run.run_id, run: null });
-      render();
-      if (runA) runSimulation();
-    };
-    runs.appendChild(card);
-  }
-  if (!keptRuns.length) {
-    const note = document.createElement("div");
-    note.className = "rail-empty";
-    note.textContent = "No runs logged yet. Commit or save a run to keep it here.";
-    runs.appendChild(note);
-  }
 }
 
 function scenarioCard(sc, on) {
   const card = document.createElement("button");
   card.type = "button";
   card.className = "card" + (on ? " on" : "");
-  const paneIdx = comparePaneIndices((p) => !p.runId && p.scenarioId === sc.id);
+  const paneIdx = comparePaneIndices((p) => p.scenarioId === sc.id);
   card.innerHTML =
     `<div class="card-top">` +
     `<span class="card-dot"></span><span class="card-label"></span>` +
@@ -706,35 +635,27 @@ function scenarioCard(sc, on) {
   card.onclick = () => {
     if (armCompare) {
       armCompare = false;
-      comparePanes.push({ scenarioId: sc.id, runId: null, run: null });
+      comparePanes.push({ scenarioId: sc.id, run: null });
       render();
       if (runA) runSimulation();
       return;
     }
     scenario = sc.id;
-    replayRunId = null;
     render();
     if (runA) runSimulation();
   };
   card.oncontextmenu = (e) => {
     e.preventDefault();
-    comparePanes.push({ scenarioId: sc.id, runId: null, run: null });
+    comparePanes.push({ scenarioId: sc.id, run: null });
     render();
     if (runA) runSimulation();
   };
   return card;
 }
 
-/** A run's label the way the rail lists it -- "run-0004" -- shared by
- *  the run card and, once a run stands in for a scenario, a comparison
- *  board head. */
-function runLabel(run) {
-  return `run-${String(run.run_number).padStart(4, "0")}`;
-}
-
 /** Indices into comparePanes matching a predicate -- used to badge a
- *  scenario or run card with which comparison pane(s), if any, it
- *  currently fills (see scenarioCard and renderRail's run cards). */
+ *  scenario card with which comparison pane(s), if any, it currently
+ *  fills (see scenarioCard). */
 function comparePaneIndices(matchFn) {
   const idx = [];
   comparePanes.forEach((p, i) => { if (matchFn(p)) idx.push(i); });
@@ -754,12 +675,12 @@ function renderBoards() {
     host.appendChild(empty);
     return;
   }
-  const boardA = buildBoard(runA, scenario, false, null, -1);
+  const boardA = buildBoard(runA, scenario, false, -1);
   host.appendChild(boardA);
   finishEdges(boardA, false);
   if (mode === "advanced") {
     comparePanes.forEach((pane, i) => {
-      const el = buildBoard(pane.run, pane.scenarioId, true, pane.runId, i);
+      const el = buildBoard(pane.run, pane.scenarioId, true, i);
       host.appendChild(el);
       finishEdges(el, true);
     });
@@ -785,12 +706,11 @@ function updateGridOverlay() {
   }
 }
 
-function buildBoard(run, scenarioId, isB, runId, paneIndex) {
+function buildBoard(run, scenarioId, isB, paneIndex) {
   const el = document.createElement("div");
   el.className = "board";
 
-  const sc = runId ? null : board.scenarios.find((s) => s.id === scenarioId);
-  const savedRun = runId ? board.runs.find((r) => r.run_id === runId) : null;
+  const sc = board.scenarios.find((s) => s.id === scenarioId);
   const head = document.createElement("div");
   head.className = "board-head";
   head.innerHTML =
@@ -799,15 +719,14 @@ function buildBoard(run, scenarioId, isB, runId, paneIndex) {
     `<span class="board-readout"></span>` +
     (isB ? `<button type="button" class="board-close" title="Remove this comparison pane">×</button>` : "");
   head.querySelector(".card-dot").style.background =
-    runId || scenarioId !== null ? "var(--node-varied)" : "var(--node-fixed)";
+    scenarioId !== null ? "var(--node-varied)" : "var(--node-fixed)";
   head.querySelector(".board-label").textContent =
-    savedRun ? runLabel(savedRun) : sc ? sc.name : "Garden as it stands";
-  // Only comparison panes carry a badge: they're display-only stand-ins
-  // (a saved run, or a live scenario preview) shown alongside the
-  // primary board, so the ordinal is what tells two panes apart once
-  // their labels happen to match.
+    sc ? sc.name : "Garden as it stands";
+  // Only comparison panes carry a badge: they're display-only scenario
+  // previews shown alongside the primary board, so the ordinal is what
+  // tells two panes apart once their labels happen to match.
   const badge = head.querySelector(".board-badge");
-  badge.textContent = isB ? (runId ? `run ${paneIndex + 1}` : `pane ${paneIndex + 1}`) : "";
+  badge.textContent = isB ? `pane ${paneIndex + 1}` : "";
   badge.classList.toggle("hidden", !badge.textContent);
   head.querySelector(".board-readout").textContent = run
     ? `${run.steps.length} ${run.axis.label} · tick ${tick}`
@@ -1311,17 +1230,13 @@ async function runSimulation() {
   const btn = $("run-btn");
   btn.disabled = true;
   btn.textContent = "Running…";
-  replayRunId = null;
   try {
-    // Comparison panes are fetched alongside the primary run -- a saved
-    // run stands in via run_ticks (the same call enterRun uses), since a
-    // logged run has already happened and re-previewing it would be
-    // asking the engine a question it was never asked; otherwise it's an
-    // ordinary live preview under that pane's own scenario.
+    // Comparison panes are fetched alongside the primary run, each an
+    // ordinary preview under that pane's own scenario.
     const [primary, ...paneRuns] = await Promise.all([
       call(api.preview(steps, solver, null, scenario, strictUnits)),
       ...comparePanes.map((p) =>
-        p.runId ? call(api.run_ticks(p.runId)) : call(api.preview(steps, solver, null, p.scenarioId, strictUnits))
+        call(api.preview(steps, solver, null, p.scenarioId, strictUnits))
       ),
     ]);
     if (!primary) return;
@@ -1339,26 +1254,26 @@ async function runSimulation() {
   }
 }
 
-// Fast mode's own run loop: no preview/dock, just a one-step commit
-// debounced after every edit. `fastStatus` drives the run-state chip
-// the same way scenario/replay do in the other three modes.
+// Fast mode's own run loop: no preview/dock, just a solve that writes
+// back, debounced after every edit. `fastStatus` drives the run-state
+// chip the same way a scenario or preview does in Advanced mode.
 let fastRunTimer = null;
 const FAST_RUN_DEBOUNCE_MS = 400;
 let fastStatus = "solved"; // "solving" | "solved" | "error"
-let fastError = null; // last commit failure, shown on hover over the chip
+let fastError = null; // last solve failure, shown on hover over the chip
 
 function scheduleFastRun() {
   if (mode !== "fast") return;
   clearTimeout(fastRunTimer);
-  fastRunTimer = setTimeout(runFastCommit, FAST_RUN_DEBOUNCE_MS);
+  fastRunTimer = setTimeout(runFastSolve, FAST_RUN_DEBOUNCE_MS);
 }
 
-async function runFastCommit() {
+async function runFastSolve() {
   fastStatus = "solving";
   renderTopbar();
   let result = null;
   try {
-    result = await api.commit(1, solver, null, "fast", strictUnits);
+    result = await api.solve(solver, null, strictUnits);
   } catch (error) {
     fastError = String(error && error.message ? error.message : error);
   }
@@ -1368,44 +1283,24 @@ async function runFastCommit() {
   else renderTopbar();
 }
 
-/** Load a logged run into the same dock a preview uses. Nothing is
- *  written, and the run-state chip says `replay` so a scrub through
- *  history is never mistaken for a pending change. */
-async function enterRun(runId) {
-  const result = await call(api.run_ticks(runId));
-  if (!result) return;
-  stopPlay();
-  runA = { ...result, constraint_violations: [], dimension_warnings: [] };
-  lanesA = (await call(api.lanes(result.steps))) || [];
-  replayRunId = runId;
-  tick = 0;
-  render();
-}
-
-async function commitRun() {
-  if (!runA || tick === 0) return;
-  const btn = $("commit-btn");
+/** Advanced mode's Solve: the same static solve Fast mode runs, on
+ *  demand. It writes the garden, so whatever preview was on screen is
+ *  stale afterwards and is dropped rather than left looking current. */
+async function solveGarden() {
+  if (scenario) return;
+  const btn = $("solve-btn");
   btn.disabled = true;
-  const result = await call(api.commit(tick, solver, null, null, strictUnits));
-  if (result) {
-    const last = result.steps[result.steps.length - 1];
-    toast(last ? last.summary : `Committed tick ${tick}.`);
-    runA = null;
-    lanesA = [];
-    tick = 0;
-    await refresh();
-  } else {
-    btn.disabled = false;
-  }
-}
-
-async function saveRun() {
-  if (!runA) return;
-  const btn = $("save-btn");
-  btn.disabled = true;
-  const result = await call(api.save(stepCount(), solver, null, scenario, strictUnits));
+  const result = await call(api.solve(solver, null, strictUnits));
   if (!result) { btn.disabled = false; return; }
-  toast(result.run_id ? "Run saved for later review." : "Nothing to save.");
+  if (result.error) {
+    toast(`Solve failed: ${result.error}`, true);
+    btn.disabled = false;
+    return;
+  }
+  toast(result.summary);
+  runA = null;
+  lanesA = [];
+  tick = 0;
   await refresh();
 }
 
@@ -2268,7 +2163,7 @@ async function openGardenMenu() {
     btn.onclick = async () => {
       menu.classList.add("hidden");
       await call(api.switch_garden(name));
-      runA = null; lanesA = []; tick = 0; replayRunId = null;
+      runA = null; lanesA = []; tick = 0;
       scenario = null; comparePanes = []; equationSuggestions = {};
       setSelection([]);
       await refresh();
@@ -2300,8 +2195,7 @@ function wire() {
 
   $("run-btn").onclick = runSimulation;
   $("dock-run").onclick = runSimulation;
-  $("commit-btn").onclick = commitRun;
-  $("save-btn").onclick = saveRun;
+  $("solve-btn").onclick = solveGarden;
   $("solver-btn").onclick = openSettings;
   $("settings-close").onclick = closeSettings;
   $("settings-cancel").onclick = closeSettings;
@@ -2445,10 +2339,6 @@ function wire() {
     else if (event.key === "Home") { stopPlay(); setTick(0); }
     else if (event.key === "End") { stopPlay(); setTick(stepCount()); }
     else if (event.key.toLowerCase() === "r" && !event.metaKey && !event.ctrlKey) runSimulation();
-    else if (event.key.toLowerCase() === "s" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      saveRun();
-    }
   });
 }
 

@@ -11,7 +11,7 @@ from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
 from core.scenarios import OVERRIDES, VARIES
-from core.simulation import SimulationError, list_runs, run_simulation, run_time_series
+from core.simulation import SimulationError, run_simulation, run_time_series
 from core.species import set_species
 
 
@@ -168,10 +168,11 @@ def test_a_recurrence_does_not_drift_across_steps(conn):
     })
     set_species(conn, account, species)
 
-    result = run_time_series(conn, step_count=3, commit=True)
+    result = run_time_series(conn, step_count=3)
     assert result.failed_at is None
     # Doubling three times from 1 kohm, still expressed in kohm.
-    assert prop(conn, account, "balance") == pytest.approx(8.0)
+    [last] = result.steps[-1].changes
+    assert last.new_value == pytest.approx(8.0)
 
 
 def test_time_series_changes_are_logged_in_the_declared_unit(conn):
@@ -182,7 +183,7 @@ def test_time_series_changes_are_logged_in_the_declared_unit(conn):
     })
     set_species(conn, account, species)
 
-    result = run_time_series(conn, step_count=2, commit=False)
+    result = run_time_series(conn, step_count=2)
     values = [c.new_value for step in result.steps for c in step.changes]
     assert values == pytest.approx([2.0, 4.0])
 
@@ -268,13 +269,13 @@ def test_a_consistent_garden_passes_strict_units(conn):
 
 
 def test_time_series_reports_warnings_once_not_per_step(conn, mismatched):
-    result = run_time_series(conn, step_count=3, commit=False)
+    result = run_time_series(conn, step_count=3)
     assert len(result.dimension_warnings) == 1
 
 
 def test_time_series_honours_strict_units(conn, mismatched):
     with pytest.raises(SimulationError, match="dimensional check failed"):
-        run_time_series(conn, step_count=2, commit=False, strict_units=True)
+        run_time_series(conn, step_count=2, strict_units=True)
 
 
 # ---- a solved freedom with no declared unit gets a reasonable one ----
@@ -380,20 +381,6 @@ def test_a_scenario_run_never_persists_an_inferred_unit(conn):
     assert "resistance" not in get_mote(conn, element).properties
 
 
-def test_an_inferred_unit_is_also_applied_by_a_committed_time_series(conn):
-    species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
-    add_rule(conn, species, "Ohm", "resistance == voltage / current")
-    element = create_mote(conn, {
-        "name": "E", "voltage": 10, "current": 2,
-        "units": {"voltage": "V", "current": "A"},
-    })
-    set_species(conn, element, species)
-
-    run_time_series(conn, step_count=1, commit=True)
-    assert prop(conn, element, "resistance") == pytest.approx(5.0)
-    assert get_mote(conn, element).properties["units"]["resistance"] == "ohm"
-
-
 # ---- backward compatibility ----
 
 def test_an_unannotated_garden_is_untouched(conn, totals):
@@ -427,10 +414,11 @@ def test_removing_the_units_property_restores_raw_behaviour(conn):
     assert prop(conn, element, "total") == pytest.approx(2.0)
 
 
-def test_a_bad_unit_on_a_solved_unknown_is_caught_and_logged(conn):
+def test_a_bad_unit_on_a_solved_unknown_is_caught_before_writing(conn):
     """The write-back conversion happens after a run's error handling, so
     an unrecognized unit there has to be caught before solving starts --
-    otherwise the failure escapes unlogged."""
+    otherwise the failure escapes as something other than a
+    SimulationError, part-way through writing."""
     species = create_mote(conn, {"name": "S", "freedoms": "total"})
     add_rule(conn, species, "Assign", "total == 5")
     element = create_mote(conn, {"name": "E", "units": {"total": "kilohms"}})
@@ -438,8 +426,7 @@ def test_a_bad_unit_on_a_solved_unknown_is_caught_and_logged(conn):
 
     with pytest.raises(SimulationError, match="kilohms"):
         run_simulation(conn)
-    # Logged like any other failed run.
-    assert [r.status for r in list_runs(conn)] == ["error"]
+    assert "total" not in get_mote(conn, element).properties
 
 
 def test_a_bad_unit_on_an_unrelated_mote_does_not_fail_the_run(conn, totals):

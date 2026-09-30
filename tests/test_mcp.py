@@ -1,8 +1,8 @@
 import pytest
 
 from core.db import get_connection
+from core.derivations import NO_SOLVE_NOTE
 from core.rules import APPLIES_TO
-from core.simulation import list_runs as core_list_runs
 from core.simulation import run_simulation as core_run_simulation
 from core.species import INSTANCE_OF, TEMPLATE_OF
 from mcp_server.server import (
@@ -17,13 +17,11 @@ from mcp_server.server import (
     delete_relationship,
     export_garden,
     get_mote,
-    get_run,
     impact,
     instances_of,
     list_gardens,
     list_motes,
     list_relationships,
-    list_runs,
     list_scenarios,
     list_species,
     mote_relationships,
@@ -33,7 +31,6 @@ from mcp_server.server import (
     requires,
     reserved_names,
     resolve_modoc,
-    run_ticks,
     search_motes,
     set_species,
     set_template,
@@ -103,7 +100,6 @@ def test_missing_ids_return_empty_rather_than_raising():
     assert delete_mote("does-not-exist", GARDEN) is False
     assert delete_property("does-not-exist", "name", GARDEN) is False
     assert delete_relationship("does-not-exist", GARDEN) is False
-    assert get_run("does-not-exist", GARDEN) is None
     assert update_relationship("does-not-exist", to_id="x", garden=GARDEN) is None
 
 
@@ -280,14 +276,16 @@ def test_preview_simulation_reports_changes(box):
 def test_preview_simulation_writes_nothing(box):
     preview_simulation(3, GARDEN)
 
-    # Neither the graph nor the audit log moves: a preview is in-memory only.
+    # Neither the graph nor its provenance moves: a preview is in-memory only.
     assert "area" not in get_mote(box["id"], GARDEN)["properties"]
-    assert list_runs(garden=GARDEN) == []
-    conn = get_connection(GARDEN)
-    try:
-        assert core_list_runs(conn) == []
-    finally:
-        conn.close()
+    assert why(box["id"], "area", garden=GARDEN)["note"] == NO_SOLVE_NOTE
+
+
+def test_preview_steps_carry_the_same_shape_every_adapter_gets(box):
+    step = preview_simulation(1, GARDEN)["steps"][0]
+    assert set(step) == {
+        "step", "changes", "summary", "equation_count", "constraint_violations",
+    }
 
 
 def test_preview_simulation_rejects_a_zero_step_count(box):
@@ -337,7 +335,6 @@ def test_resolve_modoc_reads_the_garden_without_running_it(box):
     result = resolve_modoc(box["id"], garden=GARDEN)
     assert result["values"]["width"]["text"] == "3"
     assert "area" not in get_mote(box["id"], GARDEN)["properties"]
-    assert list_runs(garden=GARDEN) == []
 
 
 def test_resolve_modoc_on_a_mote_with_no_note_is_empty_not_an_error():
@@ -371,37 +368,6 @@ def test_reserved_names_includes_the_equation_and_provider_reference():
     assert "coolprop" in names["propertyModelProviders"]
 
 
-# ---- run_ticks: the same steps, the same shape ----
-
-def test_run_ticks_matches_preview_simulations_shape(box):
-    """A run's steps are the same steps whether freshly solved or read
-    back out of the log, so an MCP client shouldn't have to unpack them
-    two different ways -- run_ticks used to return a bare list while
-    preview_simulation returned {"steps": [...]}."""
-    from core.db import initialize_database
-    from core.simulation import run_simulation
-
-    conn = get_connection(GARDEN)
-    try:
-        initialize_database(conn)
-        result = run_simulation(conn)
-    finally:
-        conn.close()
-
-    preview = preview_simulation(1, GARDEN)
-    logged = run_ticks(result.run_id, GARDEN)
-
-    assert set(logged) == {"steps"}
-    assert len(logged["steps"]) == 1
-    assert set(logged["steps"][0]) <= set(preview["steps"][0])
-    assert {"step", "changes", "summary"} <= set(logged["steps"][0])
-
-
-def test_run_ticks_for_an_unknown_run_is_empty(box):
-    assert run_ticks("nonexistent", GARDEN) == {"steps": []}
-
-
-
 # ---- provenance ----
 
 
@@ -433,8 +399,16 @@ def test_why_on_an_underived_value_returns_a_note_not_an_error(box):
     assert explanation["note"]
 
 
-def test_why_before_any_run_says_the_garden_has_no_runs(box):
-    assert why(box["id"], "area", garden=GARDEN)["note"] == "this garden has no logged runs"
+def test_why_before_any_solve_says_none_is_recorded(box):
+    assert why(box["id"], "area", garden=GARDEN)["note"] == NO_SOLVE_NOTE
+
+
+def test_the_run_history_tools_are_gone():
+    import mcp_server.server as server
+
+    names = {tool.__name__ for tool in server._TOOLS}
+    assert not {"list_runs", "get_run", "run_changes", "run_ticks", "mote_history"} & names
+    assert "preview_simulation" in names
 
 
 # ---- dependency queries ----
@@ -468,8 +442,8 @@ def test_producers_and_consumers_read_the_same_index(box):
 
 def test_the_queries_answer_before_any_run(box):
     """No simulation has been run in this garden -- the index comes from
-    the rules, not the run log."""
-    assert list_runs(garden=GARDEN) == []
+    the rules, not from any solve."""
+    assert why(box["id"], "area", garden=GARDEN)["note"] == NO_SOLVE_NOTE
     assert producers(box["id"], "area", garden=GARDEN)
 
 

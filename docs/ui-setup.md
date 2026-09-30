@@ -81,8 +81,8 @@ In it:
   copy button, a `name` marker under the title (the title is that
   property, in a bigger font), whether this mote is its species'
   template, the door to its note in Mora, the raw JSON, and -- in Motion
-  only -- a `why` button per property that reads the run log for where a
-  solved value came from.
+  only -- a `why` button per property that reads the last solve's record
+  of where a solved value came from.
 
 Everything autosaves as you type, debounced, with a `saved` flash in the
 header.
@@ -210,10 +210,11 @@ Every **numeric** property in the detail panel carries a `?` button that
 opens a block underneath it answering two different questions from two
 different sources:
 
-- **How it was found** comes from the run log (`why`), so it needs a run
-  to have happened -- a discarded preview leaves nothing to read. It
-  names the equations that produced the value, the known values they
-  read, and expands recursively into any of those this run also derived.
+- **How it was found** comes from the last solve that wrote to the
+  garden (`why`), so it needs one to have happened -- a preview leaves
+  nothing to read. It names the equations that produced the value, the
+  known values they read, and expands recursively into any of those the
+  solve also derived.
   A value found together with others in a coupled solve says so rather
   than pretending to a single cause. Numbers here are in **base SI
   units**, which is what the solver worked in, so the numbers beside an
@@ -235,10 +236,8 @@ something (see `docs/simulation.md`), defaulting to "Garden as it
 stands". Running under a scenario previews the garden as that scenario
 would have it, and the sim bar says so.
 
-A scenario run is never written to the graph, so **Commit is hidden**
-while one is open -- the engine refuses it outright. "Save simulation"
-still applies, and is how a hypothetical is kept for comparison against
-the real run.
+A scenario run is never written to the graph; to weigh a hypothetical
+against the real garden, preview both side by side.
 
 ### Warnings and constraints
 
@@ -246,15 +245,14 @@ Below the sim bar's error line (which only appears when a run actually
 stopped) is an advisory area for things that did not stop it: dimensional
 warnings about the *model*, and unsatisfied comparison relations about
 the *answer*. They are labelled apart because they are different kinds
-of problem, and neither prevents committing.
+of problem, and neither prevents solving.
 
 ### Advanced view settings
 
 Everything the graph's layout and colouring used to hardcode is
 adjustable per garden, from a panel opened by the control panel's
 "⚙ Advanced view settings" button or the View menu's matching item. It
-docks on the left (sharing that corner with the run-history panel, so
-opening one closes the other) rather than opening as a modal: every
+docks on the left rather than opening as a modal: every
 control in it is judged by what it does to the graph, so the graph has to
 stay visible while you drag a slider.
 
@@ -987,18 +985,19 @@ popover, a bottom scrub bar and a runs panel — and it is gone from there
 entirely: Monarch is a graph editor, and a window that has to be
 "committed or discarded" before you can edit anything is not one.
 
-### The three modes
+### The two modes
 
 | Mode | What it is for |
 |---|---|
-| **Build** | placing motes, writing rules, drawing `applies_to` |
-| **Run** | one scenario, played and scrubbed tick by tick |
-| **Compare** | two scenarios side by side, with the delta shaded between their traces |
+| **Fast** | editing the model with the answer kept current: every edit is followed, debounced, by a solve that writes back. No rail, no dock. |
+| **Advanced** | previewing: **Run** solves N ticks in memory for the dock to scrub, **Solve** writes one static solve on demand, and the rail holds scenarios, comparison panes and the pre-flight role check |
 
-The left rail holds scenarios and saved runs; the dock at the bottom is
-the timeline; the right panel is Rules or Inspector. Everything except
-the run itself is local — dragging the playhead never re-solves, because
-the whole run came back in one payload.
+In Advanced mode the left rail holds scenarios; the dock at the bottom
+is the timeline; the right panel is Rules or Inspector. **+ compare**
+(or right-clicking a scenario) adds a comparison pane, a second board
+previewing that scenario beside the primary one. Everything except the
+run itself is local — dragging the playhead never re-solves, because the
+whole run came back in one payload.
 
 ### What a node is, and where it sits
 
@@ -1035,17 +1034,24 @@ that is really a sine wave is worse than an absent one. Both attach at
 named seams when they exist: `motion/payload.py::tick_axis` for a real
 time axis, the solver registry for an integrator.
 
-### Committing
+### Solving
 
-`Commit tick N` re-runs N ticks and writes the result. It never trusts
-the numbers the preview handed the frontend — the only values that reach
-the database are ones Python recomputed. A scenario run can't be
-committed at all (a scenario answers what *would* happen); `Save` logs
-one for later review without touching the graph.
+**Solve** (and Fast mode after each edit) runs one static solve and
+writes the answer back. It never trusts the numbers a preview handed the
+frontend — the only values that reach the database are ones Python
+computed for this solve — and it replaces the record `why` reads, so
+the inspector's explanation always matches the values on the motes.
+Solve is disabled while a scenario is selected, since a scenario answers
+what *would* happen and is never written. A rule using `prev()` is
+refused by a solve (there is no previous step outside a preview) and the
+refusal shows as a toast, or on the Fast-mode status chip.
+
+Nothing keeps a history of past runs: a run is a preview you scrub, not
+a record you revisit.
 
 A sixth window means a sixth port: `motion/app.py` asks for **42006**,
 falling back to an ephemeral one if taken. `.webview_data_motion/` is
-its own WebKit storage. A commit here is not seen by an open Monarch
+its own WebKit storage. A solve here is not seen by an open Monarch
 until it refetches — the same rule every adapter lives under.
 
 ### Smoke test
@@ -1053,9 +1059,10 @@ until it refetches — the same rule every adapter lives under.
 `scripts/motion_smoke_test.py`, the same instrument as the others. It
 drives a real window against a seeded throwaway garden and checks that
 Run really draws lanes, that stepping the dock really moves the numbers
-on the node cards, that a preview writes nothing and Commit writes
-exactly the tick scrubbed to, that picking a scenario re-runs and
-refuses to commit, that Compare draws two boards, and that editing an
+on the node cards, that a preview writes nothing, that Solve reaches the
+engine and reports a refusal without writing, that picking a scenario
+re-runs and disables Solve, that a comparison pane draws a second
+board, and that editing an
 equation in the panel writes the rule mote. It holds 42001-42005 for the
 whole run.
 
@@ -1227,7 +1234,7 @@ window's, which is easy to miss when counting because Gardens is not in
 `scripts/moxie_smoke_test.py`, the same instrument as the others. It
 drives a real window against a seeded throwaway garden and checks that a
 sweep draws a curve with the right numbers in it, that it writes nothing
-and logs nothing, that a knob moves the curve without touching the
+(provenance included), that a knob moves the curve without touching the
 garden, that a failed point leaves a gap rather than a line, that the
 grid holds two independent plots, and that saving a plot writes a
 specification rather than points.
