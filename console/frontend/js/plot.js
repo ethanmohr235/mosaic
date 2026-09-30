@@ -242,6 +242,18 @@ function renderLines(host, svg, g, model) {
     }
   }
 
+  // Measured points over the curves (moxie:fit): open rings, so a curve
+  // passing through a point still shows where the point is.
+  for (const pt of model.points || []) {
+    const Y = (bands[pt.band || 0] || bands[0]).Y;
+    const ring = el("circle", { cx: X(pt.x), cy: Y(pt.y), r: 3.5, fill: "var(--bg)", stroke: pt.color || "var(--fg)",
+      "stroke-width": 1.5, class: "plot-point" });
+    const title = el("title", {});
+    title.textContent = `${pt.label}: ${fmt(pt.x)}, ${fmt(pt.y)}`;
+    ring.appendChild(title);
+    svg.appendChild(ring);
+  }
+
   if (model.cursor && isFinite(model.cursor.x)) {
     const cx = X(model.cursor.x);
     svg.appendChild(el("line", { x1: cx, y1: g.top, x2: cx, y2: g.bottom, stroke: "var(--line-strong)", "stroke-width": 1, class: "plot-cursor" }));

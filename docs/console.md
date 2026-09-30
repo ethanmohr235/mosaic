@@ -140,7 +140,7 @@ These are user-facing names. Python packages keep their current names
 |---|---|---|---|
 | `mo nolith` | Monolith | `monolith:table`, `monolith:vars` | General table. Project variables pane per roadmap. |
 | `mo te` | Inspector | `mote:props` | `open @sel` follows the selection; `open #id` is pinned. |
-| `mo xie` | Moxie | `moxie:plot` (`plot …`), `moxie:fit` (next step) | |
+| `mo xie` | Moxie | `moxie:plot` (`plot …`), `moxie:fit` (`fit …`) | |
 | `mo tion` | Motion | `motion:scenarios`, `motion:state`, `motion:rule` | Timeline sits under state. No runs list. |
 | `mo ra` | Mora | `mora:doc` | Text-editing pane (see *Keyboard*). |
 | `mo nastery` | Monastery | `monastery:agenda` | A table or grid pane on the `--line` grid. |
@@ -375,7 +375,7 @@ own plan-mode phase and ships something usable.
 | U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
 | U2 | **Done.** **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
 | U3 | **Done.** **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
-| U4 | **Done.** **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*). `fit` is the step after. | Commands carry view state (ranges, series). |
+| U4 | **Done.** **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*), then `fit` and the follow-up fixes (*Settled for `fit`*), also done. | Commands carry view state (ranges, series). |
 | U5 | **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list. | A live, ticking view inside the contract. |
 | U6 | **Mora → `mo ra`.** Document pane as a text-editing pane. | Keyboard capture and `esc` work for editors. |
 | U7 | **Monastery → `mo nastery`.** Agenda pane. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |

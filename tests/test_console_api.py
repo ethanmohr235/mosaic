@@ -23,7 +23,7 @@ BRIDGE = {
 }
 # api.monolith (U2). The walk collects bare method names.
 MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
-MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png"}  # U4
+MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "fit"}  # U4
 
 
 @pytest.fixture
@@ -636,4 +636,17 @@ def test_fit_apply_writes_and_undoes(api, divider):
     assert effect["message"].startswith("fitted C1.r_a = 50")
     assert motes_repo.get_mote(api._session.conn, divider).properties["r_a"] == pytest.approx(50)
     assert api.undo()["label"] == "fit"
+    assert motes_repo.get_mote(api._session.conn, divider).properties["r_a"] == 100
+
+
+def test_the_fit_payload(api, divider):
+    for i, v in enumerate([5, 10, 20]):
+        motes_repo.create_mote(api._session.conn, {"name": f"m{i}", "V": v, "I": v / 250})
+    p = api.moxie.fit(FIT)
+    assert p["params"][0]["ref"] == "C1.r_a" and p["params"][0]["value"] == pytest.approx(50)
+    assert [pt["name"] for pt in p["points"]] == ["m0", "m1", "m2"]
+    assert p["points"][0]["fitted"] == pytest.approx(5 / 250)
+    assert p["converged"] and p["applyCommand"] == FIT + " --apply"
+    assert api.moxie.fit("fit")["empty"]
+    assert "error" in api.moxie.fit(FIT + " --apply")
     assert motes_repo.get_mote(api._session.conn, divider).properties["r_a"] == 100

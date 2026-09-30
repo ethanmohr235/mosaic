@@ -714,3 +714,5 @@ body.dragging-col { cursor: row-resize; }
 .plot-rail-note { padding: var(--table-head-pad) var(--pad-x); color: var(--dim); }
 .plot-empty { padding: var(--picker-pad-y) var(--pad-x); color: var(--dim); }
 .plot-usage { color: var(--fg); }
+.plot-apply { color: var(--bright); cursor: pointer; height: auto; min-height: var(--row-h); }
+.plot-apply:hover { background: var(--bg-raised); }

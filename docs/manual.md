@@ -54,12 +54,16 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `plot "‹saved›"` / `plot #id` | Open a saved plot |
 | `plot save ‹name›` | Save the focused plot as a mote |
 | `plot export csv\|png [path]` | Export the focused plot |
+| `fit ‹m.y› vs ‹m.x› --data ‹Y› vs ‹X› --free ‹m.k›…` | Fit inputs to measured points (every mote with `Y` and `X`); shows, never writes |
+| `fit … --apply` | Write the fitted values, their σ and `source: fitted` (undoable) |
 | `cd ‹garden›` | Switch garden |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |
 | `undo`, `redo` | Undo / redo the last write |
 | `log` | Command and error log |
 | anything else | Statement: `R1.x = 5 ohm`, `A -> B`, `A -> type -> B`, `R1 : Resistor`, `R1.x ?`, `delete R1` |
+
+Fit flags: `--from ‹import›` (one CSV import's rows) · `--scenario name`.
 
 Plot flags: `--steps N` · `--set m.k=v` (knob, never written) ·
 `--scenario name` · `--log` · `--hide m.k`.
@@ -107,6 +111,14 @@ Click selects, shift-click a range, ctrl-click toggles.
 | `[` `]`, `t` / legend click | Pick series, show/hide it |
 | `j` `k`, `-` `+` / drag knob bar | Pick knob, move it 1/20 of its range |
 | `r` | Show/hide the side column (hidden automatically in a narrow pane; knobs then show in the status line) |
+| `esc` | Clear cursor |
+
+**Fit** (`fit`)
+
+| Key | Does |
+|---|---|
+| `a` / click *apply* | Apply the fit (runs the line with `--apply`) |
+| `h` `l` / click | Step through the points; status line shows point vs fit |
 | `esc` | Clear cursor |
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.

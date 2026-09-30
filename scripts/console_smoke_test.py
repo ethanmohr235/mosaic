@@ -191,6 +191,9 @@ def seed():
         create_relationship(conn, rule, divider, APPLIES_TO)
         ids["C1"] = create_mote(conn, {"name": "C1", "voltage": 10, "r_a": 100, "r_b": 200})
         set_species(conn, ids["C1"], divider)
+        # U4 fit: points measured with r_a = 50, i.e. I = V / 250.
+        for i, v in enumerate([5, 10, 20, 40]):
+            create_mote(conn, {"name": f"meas{i}", "V": v, "I": v / 250})
     finally:
         conn.close()
 
@@ -683,6 +686,36 @@ def u4_checks(window):
     check("U4: `plot save` writes an undoable saved plot; `plot export` writes csv and png", save_and_export)
 
 
+FIT = "fit C1.current vs C1.voltage --data I vs V --free C1.r_a"
+
+
+def rail_text(window):
+    return js(window, "[...document.querySelectorAll('.view-plot .plot-rail')].map(r => r.textContent).join(' | ')")
+
+
+def fit_checks(window):
+    def fit_pane():
+        type_command(window, FIT, alt=True)
+        assert wait_until(lambda: FIT in headers(window)), f"headers: {headers(window)}"
+        assert wait_until(lambda: count(window, ".view-plot circle.plot-point") == 4), "the four measured points"
+        assert wait_until(lambda: count(window, ".view-plot path.plot-series") >= 1), "the fitted curve"
+        assert wait_until(lambda: "C1.r_a" in rail_text(window) and "50" in rail_text(window)), rail_text(window)
+        assert prop(ids["C1"], "r_a") == 100, "a fit pane must not write"
+        no_errors(window)
+
+    check("fit: a fit line shows the points, the fitted curve and r_a = 50", fit_pane)
+
+    def apply_and_undo():
+        press(window, "a")
+        assert wait_until(lambda: abs((prop(ids["C1"], "r_a") or 0) - 50) < 1e-6), "`a` should apply the fit"
+        assert prop(ids["C1"], "source") == {"r_a": {"kind": "fitted", "note": FIT}}
+        type_command(window, "undo")
+        assert wait_until(lambda: prop(ids["C1"], "r_a") == 100), "undo should take the fit back"
+        no_errors(window)
+
+    check("fit: `a` applies value and source as one undoable write", apply_and_undo)
+
+
 def u4_restored_checks(window):
     def restored():
         assert wait_until(lambda: plot_command(window).startswith(PLOT), timeout=10), \
@@ -746,6 +779,7 @@ def drive(first, first_loaded):
         u2_checks(second)
         u3_checks(second)
         u4_checks(second)
+        fit_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)

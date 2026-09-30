@@ -60,6 +60,7 @@ view, the `find` table, the props pane and plots.
 | `template <mote> <species>` | Make a mote the one its species' new instances start from. |
 | `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `mo xie` is `plot` with nothing to plot yet. |
 | `plot save <name>`, `plot export csv\|png [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
+| `fit <m.y> vs <m.x> --data <Y> vs <X> --free <m.k>…` | Fit inputs to measured points (below). `--apply` writes the result. |
 | `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. |
 | `log` | The command and error log for this session. |
 | `cd <garden>` | Switch the workspace to another garden, with its own layouts and history. |
@@ -168,7 +169,7 @@ says **x pinned**, because the answer is then "what if this were so".
 
 The line is the pane's command, so every gesture rewrites it (a drag,
 a zoom, a knob move), and a layout restores exactly the plot you left.
-A pane draws a coarse pass first and then the full one. It reads the
+A plot pane draws a coarse pass first and then the full one. It reads the
 garden under the session lock and solves outside it, so a long sweep
 never holds up another pane, and a newer request from the same pane
 cancels the older one between points.
@@ -204,6 +205,32 @@ a name again updates that plot. `\graph{name}` in a Mora note draws it,
 re-solved at every render (`docs/modoc.md`). **`plot export csv`** writes
 the full-resolution points and **`plot export png`** the pane's picture,
 to `path` or through a save dialog.
+
+### Fitting (`fit`)
+
+```
+fit C1.current vs C1.voltage --data I vs V --free C1.r_a [--from bench.csv] [--scenario hot]
+```
+
+The model is `C1.current` as the garden solves it with `C1.voltage` set
+to each point's x; the points are every mote carrying `I` and `V` (with
+`--from`, only that CSV import's rows), converted into the model's units.
+The fit moves the `--free` inputs by least squares (`core/fit.py`,
+`docs/simulation.md` → *Fitting*). The pane draws the points as rings and
+the fitted curve through them; the side column gives each value with its
+σ (hover: where it started), RMS, R² and the points used, and says so
+when a point wouldn't solve or the data can't tell two inputs apart.
+
+**Nothing is written** until you apply it: `a`, a click on *apply*, or
+`fit … --apply` typed. That writes each value, its σ into
+`uncertainty`, and `source: {kind: fitted, note: ‹the line›}`, as one
+undo step.
+
+| Key | Does |
+|---|---|
+| `a` / click *apply* | Apply the fit |
+| `h` `l` / click | Step through the points; the status line shows the point and the fit there |
+| `esc` | Clear the cursor |
 
 Not ported from the old window: baselines (a scenario's curve drawn
 dashed beside each series) and the plot grid, which tiling replaces.
@@ -255,6 +282,9 @@ Boots on a seeded temp garden and checks the following:
   cursor reads it; zoom, `y` and `t` rewrite the line; a knob moves the
   curve and never writes; `plot save` writes a saved plot that one `undo`
   removes; `plot export csv` and `png` write files
+- a `fit` pane shows the four measured points, the fitted curve and
+  `r_a = 50` without writing; `a` applies it with `source: fitted` and one
+  `undo` takes it back
 - a plot pane survives a relaunch
 
 ---

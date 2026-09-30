@@ -223,6 +223,13 @@ class _Model:
 def run(conn: sqlite3.Connection, line: FitLine) -> FitResult:
     """The fit `line` asks for. Writes nothing. Raises CommandError for a
     name, scenario or import the garden doesn't have."""
+    return prepare(conn, line)()
+
+
+def prepare(conn: sqlite3.Connection, line: FitLine):
+    """Everything the fit reads from the garden, read now; returns the
+    fit itself as a call that touches no connection -- so a caller can
+    read under its lock and solve outside it."""
     if line.empty:
         raise CommandError(usage())
     garden = _Garden(conn)
@@ -238,7 +245,8 @@ def run(conn: sqlite3.Connection, line: FitLine) -> FitResult:
         starts.append(start)
     model = _Model(sweep_repo.read_garden(conn, [scenario_id] if scenario_id else []),
                    scenario_id, x_ref, y_ref, free)
-    return _fit(line, garden, model, points, starts, free)
+    units = [garden.unit(mote, key) for mote, key in free]
+    return lambda: _fit(line, units, model, points, starts, free)
 
 
 def _data(conn, garden: _Garden, line: FitLine, x_ref, y_ref) -> list[DataPoint]:
@@ -280,7 +288,7 @@ def _convert(value: float, have: str | None, want: str | None) -> float:
     return value
 
 
-def _fit(line, garden, model: _Model, points, starts, free) -> FitResult:
+def _fit(line, units, model: _Model, points, starts, free) -> FitResult:
     values = np.array(starts, dtype=float)
     # Points the model can't solve even at the start are left out, and said.
     usable, skipped = [], []
@@ -290,7 +298,7 @@ def _fit(line, garden, model: _Model, points, starts, free) -> FitResult:
     common = dict(line=line, points=tuple(points), skipped=tuple(skipped),
                   x_label=line.x, y_label=line.y)
     if len(usable) < len(values):
-        return FitResult(**common, params=_params(line, garden, free, starts, starts, None),
+        return FitResult(**common, params=_params(line, units, free, starts, starts, None),
                          solves=model.solves,
                          message=f"{len(usable)} usable point(s) for {len(values)} free input(s) -- "
                                  f"a fit needs at least as many points as inputs")
@@ -331,7 +339,7 @@ def _fit(line, garden, model: _Model, points, starts, free) -> FitResult:
     sst = float(((ys - ys.mean()) ** 2).sum())
     fitted = tuple(float(p.y + ri) for p, ri in zip(usable, r))
     return FitResult(
-        **common, params=_params(line, garden, free, starts, list(values), sigmas),
+        **common, params=_params(line, units, free, starts, list(values), sigmas),
         fitted=fitted, curve=_curve(model, values, points),
         rms=math.sqrt(sse / len(usable)), r2=(1 - sse / sst) if sst > 0 else None,
         iterations=iterations, converged=converged, solves=model.solves,
@@ -365,10 +373,10 @@ def _sigmas(jacobian, sse, n, m, line: FitLine):
     return [math.sqrt(max(v, 0.0)) for v in np.diag(covariance)], ""
 
 
-def _params(line, garden, free, starts, values, sigmas) -> tuple[Param, ...]:
+def _params(line, units, free, starts, values, sigmas) -> tuple[Param, ...]:
     return tuple(
         Param(ref, mote, key, float(start), float(value),
-              None if sigmas is None else float(sigmas[i]), garden.unit(mote, key))
+              None if sigmas is None else float(sigmas[i]), units[i])
         for i, (ref, (mote, key), start, value) in enumerate(zip(line.free, free, starts, values))
     )
 

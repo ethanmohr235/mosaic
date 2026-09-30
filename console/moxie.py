@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from console.session import Session, locked
+from core import fit as fit_repo
 from core import plotcmd
 from core import plotview
 from core.command_bar import CommandError
@@ -58,6 +59,41 @@ class MoxieApi:
         except Exception as e:  # never a traceback across the bridge
             logger.exception("plot failed: %r", command)
             return {"error": f"internal error: {e}"}
+
+    def fit(self, command: str) -> dict[str, Any]:
+        """The `moxie:fit` pane's answer: the fit a `fit …` line asks for,
+        read under the session lock and solved outside it. Writes nothing
+        -- `fit … --apply` is a command the root runs."""
+        try:
+            with self._session.lock:
+                line = fit_repo.parse_text(command)
+                if line.empty:
+                    return {"empty": True, "usage": fit_repo.usage()}
+                if line.apply:
+                    raise CommandError("a pane shows a fit; run `--apply` from the command line")
+                solve = fit_repo.prepare(self._session.conn, line)
+            started = time.perf_counter()
+            result = solve()
+        except (CommandError, ValueError, LookupError) as e:
+            return {"error": str(e)}
+        except Exception as e:  # never a traceback across the bridge
+            logger.exception("fit failed: %r", command)
+            return {"error": f"internal error: {e}"}
+        fitted = dict(zip((p.mote for p in result.points if p.name not in dict(result.skipped)),
+                          result.fitted))
+        return {
+            "params": [{"ref": p.ref, "start": p.start, "value": p.value, "sigma": p.sigma,
+                        "unit": p.unit} for p in result.params],
+            "points": [{"name": p.name, "x": p.x, "y": p.y, "fitted": fitted.get(p.mote)}
+                       for p in result.points],
+            "skipped": [{"name": n, "why": w} for n, w in result.skipped],
+            "curve": [list(c) for c in result.curve],
+            "rms": result.rms, "r2": result.r2, "iterations": result.iterations,
+            "converged": result.converged, "solves": result.solves,
+            "message": result.message, "xLabel": result.x_label, "yLabel": result.y_label,
+            "applyCommand": line.text(apply=True),
+            "seconds": round(time.perf_counter() - started, 3),
+        }
 
     @locked
     def rewrite(self, command: str, change: dict) -> dict[str, Any]:

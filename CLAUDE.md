@@ -97,7 +97,12 @@ updates it in the same commit. Keep it compact: tables, no prose.
   `core/plotview.py` (`figure_from_spec`, `sensitivity`, `save_plot`);
   `console/moxie.py` is `api.moxie`; `plot save`/`plot export` without a
   line are a `pane_action` for the focused plot pane. Moxie's old window
-  is deleted. The next UI step is `fit` (its own plan), then U5 (Motion).
+  is deleted.
+- **`fit` is done** (`core/fit.py`: Levenberg–Marquardt over the sweep's
+  solve, numpy only; `fit … --apply` writes value, σ and `source:
+  fitted`): the `moxie:fit` pane, `monoss fit`, MCP `fit_model`. The plot
+  pane's follow-up fixes are in too (narrow rail, solves off the lock,
+  magnitude-split axes). The next UI step is U5 (Motion).
 
 ## Split of work: cloud backend, local frontend
 
