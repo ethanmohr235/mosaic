@@ -807,7 +807,12 @@ def _handle_project(args) -> None:
 
 
 def _print_project_node(node, depth: int) -> None:
-    label = node.garden if node.loose else f"{node.name}  [{node.garden}]"
+    if node.loose:
+        label = node.garden
+    else:
+        cover = node.owner.cover
+        extra = [f"{key} {getattr(cover, key)}" for key in ("status", "due") if getattr(cover, key)]
+        label = f"{node.name}  [{node.garden}]" + (f"  ({', '.join(extra)})" if extra else "")
     print("  " * depth + label)
     for child in node.children:
         _print_project_node(child, depth + 1)

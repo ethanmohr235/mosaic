@@ -228,3 +228,21 @@ def test_stop_owning_clears_the_claim_and_keeps_the_garden(conn):
 def test_stop_owning_a_mote_that_owns_nothing_is_a_no_op(conn):
     mid = motes_repo.create_mote(conn, {"name": "HW 4"})
     assert projects.stop_owning(conn, mid) == (None, None)
+
+
+# --- the cover --------------------------------------------------------
+
+def test_the_cover_reads_name_due_status_author_revision():
+    _garden("college", {"name": "HW 4", "garden": "hw4", "due": "2026-10-02",
+                        "status": "todo", "author": "E. M.", "revision": 3, "points": 10})
+    (owner,) = projects.owners()["hw4"]
+    assert owner.cover == projects.Cover(
+        name="HW 4", due="2026-10-02", status="todo", author="E. M.", revision="3"
+    )
+    assert owner.cover.to_json()["revision"] == "3"
+
+
+def test_a_bare_cover_is_just_a_name():
+    (mid,) = _garden("a", {"garden": "b", "status": "  ", "due": True, "author": ["x"]})
+    (owner,) = projects.owners()["b"]
+    assert owner.cover == projects.Cover(name=mid[:8])

@@ -39,6 +39,12 @@ Each one was a separate act of filing. That lesson became a rule in
   name given explicitly adopts a loose one. Undo of *Start project* clears
   the property and leaves the garden on disk. See `architecture.md` ->
   *Projects*.
+- **Cover fields (decided 2026-09-30):** `name`, plus `due`, `status`,
+  `author` and `revision` as ordinary, unreserved properties. *Submit*
+  (phase 6) writes `revision`; nobody types it.
+- **Archive (decided 2026-09-30):** a property on the owner, `archived:
+  true`, archives its whole subtree. A loose garden is archived by a
+  marker mote inside it carrying the same property.
 
 ### Calculation
 - **Garden-scope names.** A formula reference `bd.l` falls back, after
@@ -69,7 +75,11 @@ Each one was a separate act of filing. That lesson became a rule in
   comparison constraints.
 - **External values / V&V.** A given can be marked `source: external`
   with a note (e.g. an FEA probe). Mora gets a hand vs. external vs. %
-  error table. Measured data can be imported from CSV.
+  error table. Measured data can be imported from CSV. **Decided:** one
+  mote per row, the header naming properties with an optional unit in
+  brackets (`load [kN]`), each value marked `source: measured` with the
+  file as its note, and every row linked to one import mote recording the
+  file.
 - **Uncertainty.** A given can carry `±`. First-order propagation uses
   the Newton Jacobian, and every result shows its ±.
 - **Materials provider.** A built-in provider supplies E, ν, Sy, and ρ
@@ -136,7 +146,7 @@ alongside all of them.
 | 1 | **Done.** Cleanup: remove Momentum; freeze Monarch; cut commit-tick and run history | Fewer surfaces, less code |
 | 2 | **Backend done.** Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
 | 3 | **Backend done.** Mora calc macros and LaTeX basics | A gradeable homework document |
-| 4 | **Backend done, less the cover.** Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
+| 4 | **Backend done.** Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
 | 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
 | 7 | Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
@@ -175,8 +185,4 @@ asking.
 
 ## Open questions
 
-- **Cover fields.** What exact property names does the cover use
-  (`title` vs. `name`, `revision`, `author`)? Are they reserved?
-- **Archive mechanics** when the disk layout is flat: a property on the
-  owner, a filename suffix, or something else?
 - **Renaming to Mosaic** in code, packages, and MCP: when, and how much.

@@ -47,9 +47,11 @@ property owns that garden and is its cover.
   that already has an owner. Undo clears the property and leaves the
   garden on disk, loose: a garden is a file another surface may have
   open. `stop_owning` is the property half alone.
-- `Owner.properties` is the cover's whole property dict. Which of them a
-  cover shows (`roadmap.md` -> *Cover fields*) is still open, so no field
-  is picked out here yet.
+- `Owner.cover` is what Home lists and Mora's title block prints: `name`,
+  `due`, `status`, `author`, `revision`, each None when absent. They are
+  ordinary properties, not reserved -- a Canvas-synced homework mote
+  already carries `due` and `status`. A number is read as its text, so a
+  hand-typed `revision: 3` is `"3"`.
 
 `monoss project start|stop|tree|check`; MCP `project_tree`, `start_project`.
 

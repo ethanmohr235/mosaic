@@ -689,7 +689,8 @@ def _owner_json(owner: "projects_repo.Owner | None") -> dict[str, Any] | None:
     if owner is None:
         return None
     return {"garden": owner.garden, "moteId": owner.mote_id, "name": owner.name,
-            "owns": owner.owns, "properties": owner.properties}
+            "owns": owner.owns, "cover": owner.cover.to_json(),
+            "properties": owner.properties}
 
 
 def _node_json(node: "projects_repo.Node") -> dict[str, Any]:

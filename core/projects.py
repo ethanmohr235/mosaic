@@ -41,10 +41,8 @@ class Owner:
     """A mote that owns a garden -- the project's cover.
 
     `garden` is where the owner itself lives; `owns` is what it owns.
-    `properties` is the owner's whole property dict rather than a fixed
-    set of cover fields, because which properties a cover shows is still
-    an open question in `roadmap.md` and a surface can decide for
-    itself in the meantime."""
+    `cover` is the handful of fields Home lists and Mora's title block
+    prints; `properties` is everything else the mote carries."""
     garden: str
     mote_id: str
     name: str
@@ -56,6 +54,49 @@ class Owner:
         """Whether the garden this mote claims is actually on disk. False
         is a dangling claim -- check() reports it as MISSING."""
         return gardens_repo.garden_exists(self.owns)
+
+    @property
+    def cover(self) -> "Cover":
+        return cover_of(self.properties, self.mote_id)
+
+
+# The cover's fields. Ordinary, unreserved properties -- a homework mote
+# synced from Canvas already carries `due` and `status`, and reserving
+# them would flag every such mote in the inspector as if it were special.
+# `revision` is written by Submit (phase 6), not by hand.
+COVER_FIELDS = ("due", "status", "author", "revision")
+
+
+@dataclass(frozen=True)
+class Cover:
+    """What a project is called and where it stands. Each field is None
+    when the owner doesn't carry it; a cover with nothing but a name is a
+    perfectly good cover."""
+    name: str
+    due: str | None = None
+    status: str | None = None
+    author: str | None = None
+    revision: str | None = None
+
+    def to_json(self) -> dict:
+        return {"name": self.name, **{key: getattr(self, key) for key in COVER_FIELDS}}
+
+
+def cover_of(properties: dict, mote_id: str) -> Cover:
+    """A mote's cover fields. A number where text was expected (`revision:
+    3`) is read as its text rather than dropped, since a hand-typed
+    revision is exactly that."""
+    def text(key: str) -> str | None:
+        value = properties.get(key)
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, str):
+            return value.strip() or None
+        return None
+
+    return Cover(name=_name(properties, mote_id), **{key: text(key) for key in COVER_FIELDS})
 
 
 @dataclass(frozen=True)
