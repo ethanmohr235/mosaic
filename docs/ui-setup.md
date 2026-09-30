@@ -39,7 +39,7 @@ view, the `find` table and the props pane.
   *unsaved layout* once the panes drift from the active one, then the
   selection (`sel bd +2 · linked in N panes`) or, with nothing selected,
   the pane count.
-- **Command line** (`[mo]` prompt): `:` or `/` focuses it and `esc`
+- **Command line** (`$` prompt; a typed `mo ` shows as the `[mo]` box): `:` or `/` focuses it and `esc`
   leaves. `⏎` runs in the focused pane, `⌥⏎` in a new pane. `tab`
   completes, and the best match shows as ghost text. `↑` on an empty
   line opens this garden's history (`^r` searches it). Errors show in
@@ -51,9 +51,9 @@ view, the `find` table and the props pane.
 
 | Line | Does |
 |---|---|
-| `tion`, `xie`, `nolith`, … | Open that app. Unported apps open their old window. |
-| `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). `nolith` is `find` with no conditions. |
-| `open @sel\|#id\|<name>` | A mote's properties and links (below). `te` is `open @sel`. |
+| `mo tion`, `mo xie`, `mo nolith`, … | Open that app (`mo` then `tab` lists them). Unported apps open their old window. |
+| `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). `mo nolith` is `find` with no conditions. |
+| `open @sel\|#id\|<name>` | A mote's properties and links (below). `mo te` is `open @sel`. |
 | `rename <target> <old> <new>` | Rename a property, keeping its value and unit. Refuses to overwrite a key that exists. |
 | `unlink <target> <type> <other>` or `unlink <target> #<rel>` | Remove a relationship (either direction). |
 | `template <mote> <species>` | Make a mote the one its species' new instances start from. |

@@ -255,7 +255,7 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
 PROPERTY_MODEL_PROVIDERS: dict[str, dict] = describe_providers()
 
 # The console's verbs (docs/console.md -> Command line and grammar): the
-# first word of a line typed at the `[mo]` prompt. Reserved in a
+# first word of a line typed at the `$` prompt. Reserved in a
 # different sense from the sets above -- a verb names no property and no
 # relationship type, but it *does* shadow a mote of the same name as the
 # first token of a line, because the console reads verb-first. A mote
@@ -264,6 +264,9 @@ PROPERTY_MODEL_PROVIDERS: dict[str, dict] = describe_providers()
 # its own verbs here (`find` in U2, ...). Ordered as the completion popup
 # lists them, and kept in sync by hand with docs/architecture.md.
 RESERVED_VERBS: dict[str, dict[str, str]] = {
+    # `mo` is the verb that opens an app, its suffix the argument
+    # (`mo tion`); the command line draws the typed `mo ` as the [mo] box.
+    "mo": {"usage": "mo ‹app›", "describe": "open an app (mo tion, mo xie, …)"},
     "find": {"usage": "find ‹key:value …› [--sort k] [--group k] [--cols a,b]",
              "describe": "table of motes"},
     "set": {"usage": "set @sel|#id|‹name› ‹key› ‹value›|--clear",
@@ -289,10 +292,6 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
 
 def reserved_words() -> set[str]:
     """Every word the console reads as its own when it opens a line: the
-    verbs above plus the app suffixes (`tion`, `xie`, ...). The suffixes
-    live with the rest of each app's console entry in
-    core/commands.py::CONSOLE_APPS, which imports this module -- hence
-    the import here rather than at the top."""
-    from core.commands import CONSOLE_APPS
-
-    return set(RESERVED_VERBS) | {app.suffix for app in CONSOLE_APPS}
+    verbs above. An app suffix is not one -- it is `mo`'s argument
+    (`mo tion`), so a mote named `tion` is an ordinary name."""
+    return set(RESERVED_VERBS)

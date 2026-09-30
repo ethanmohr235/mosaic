@@ -242,7 +242,7 @@ export function paneHeader({ onClick = null } = {}) {
  * the mirror.
  *   {el, input, value(), set(text, caret?), setGhost(text), refresh(), destroy()}
  */
-export function promptInput({ placeholder = "" } = {}) {
+export function promptInput({ placeholder = "", lockup = false } = {}) {
   const input = h("input", "c-input-native");
   input.type = "text";
   input.spellcheck = false;
@@ -258,7 +258,8 @@ export function promptInput({ placeholder = "" } = {}) {
     const start = input.selectionStart ?? text.length;
     const end = input.selectionEnd ?? start;
     const focused = document.activeElement === input;
-    const parts = mirrorParts(text, start, end, focused);
+    const marks = lockup && LOCKUP.test(text) ? [{ from: 0, to: 2, cls: "c-input-mo" }] : [];
+    const parts = mirrorParts(text, start, end, focused, marks);
     const showGhost = ghost && focused && start === end && start === text.length;
     if (showGhost) parts.push(h("span", "c-input-ghost", ghost));
     else if (!text && placeholder) parts.push(h("span", "c-input-ghost", placeholder));
@@ -298,13 +299,34 @@ export function promptInput({ placeholder = "" } = {}) {
   };
 }
 
-function mirrorParts(text, start, end, focused) {
-  if (!focused) return [h("span", "", text)];
-  if (start !== end) {
-    return [h("span", "", text.slice(0, start)), h("span", "c-input-sel", text.slice(start, end)),
-      h("span", "", text.slice(end))];
+/* `mo ` opening the line: the verb that opens an app, drawn as the [mo]
+ * box (docs/console.md → *Command line and grammar*). */
+const LOCKUP = /^mo /;
+
+/**
+ * The mirror's spans: the text cut at the selection or cursor, and at
+ * each mark ({from, to, cls}: a range drawn with an extra class, e.g. the
+ * [mo] box). A mark only restyles its characters -- it never adds width,
+ * so the invisible native input's caret and clicks stay on the same
+ * character as what is drawn.
+ */
+function mirrorParts(text, start, end, focused, marks = []) {
+  const cuts = new Set([0, text.length]);
+  marks.forEach((m) => { cuts.add(m.from); cuts.add(m.to); });
+  if (focused) {
+    cuts.add(start);
+    cuts.add(end);
+    if (start === end) cuts.add(Math.min(start + 1, text.length));
   }
-  const under = text.slice(start, start + 1);
-  return [h("span", "", text.slice(0, start)), h("span", `c-input-cursor${under ? " on-char" : ""}`, under),
-    h("span", "", text.slice(start + 1))];
+  const points = [...cuts].filter((n) => n >= 0 && n <= text.length).sort((a, b) => a - b);
+  const parts = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const [a, b] = [points[i], points[i + 1]];
+    const classes = marks.filter((m) => m.from <= a && b <= m.to).map((m) => m.cls);
+    if (focused && start !== end && start <= a && b <= end) classes.push("c-input-sel");
+    if (focused && start === end && a === start) classes.push("c-input-cursor", "on-char");
+    parts.push(h("span", classes.join(" "), text.slice(a, b)));
+  }
+  if (focused && start === end && start === text.length) parts.push(h("span", "c-input-cursor", ""));
+  return parts;
 }

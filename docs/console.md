@@ -33,6 +33,7 @@ through plan mode, questions and approval before any code. Anything under
 | Fixed mote-type colors: task, note, event, source | Mosaic privileges no type. Motes are colored by **species**, using the existing probed palette retuned into the design's band. See *Color*. |
 | Motion *runs* list, `diff vs #0412`, Moxie `run #0414` | Saved run history and *commit tick* are cut (`roadmap.md`). Motion lists **scenarios**. A run is a curve you plot, not a record you diff. |
 | `hil disconnected` hardware row | Not a feature. Ignore it. |
+| The prompt is always `mo`; the first token is an app suffix or a command | The prompt is `$`. `mo` is the verb that opens an app (`mo tion`), drawn as the `[mo]` box once typed; a bare suffix is an ordinary word. The top bar keeps the `[mo]` box. |
 | Selection is one mote id | Selection is an **ordered set with a primary**. See *Selection*. |
 | Inspector is only the `mote:props` pane | The props pane plus a floating inspector on demand. See *Inspector*. |
 | Google Fonts for Geist Mono | Vendored, like the current fonts. Nothing is fetched at runtime. |
@@ -93,10 +94,13 @@ else.
 
 ### Command line and grammar
 
-- **One line, one merged grammar.** The prompt is `[mo]`. The first
-  token is one of three things:
-  1. an **app suffix**, which opens that app's default view (`mo tion`,
-     `mo xie`).
+- **One line, one merged grammar.** The prompt is `$`, as in a pane
+  header. The first token is one of three things:
+  1. **`mo` and an app suffix**, which opens that app's default view
+     (`mo tion`, `mo xie`). `mo` is the verb; once `mo ` is typed, the
+     command line draws those two letters as the `[mo]` box, so the line
+     reads as the app's lockup (`[mo]tion`). Decided 2026-09-30, replacing
+     the handoff's always-visible `[mo]` prompt.
   2. a **verb** (`find`, `open`, `graph`, `plot`, `fit`, `new`, `link`,
      `set`, `layout save`, …).
   3. anything else, which falls through to the existing modeling
@@ -106,7 +110,8 @@ else.
   Parsing lives in `core/commands.py`, never in JS, so the CLI and MCP
   can run the same commands.
 - **Verbs win, quoting escapes.** Verbs (`core/reserved.py` →
-  `RESERVED_VERBS`) and app suffixes are reserved words. A line whose
+  `RESERVED_VERBS`, `mo` among them) are reserved words; an app suffix
+  is not, since it is only ever `mo`'s argument. A line whose
   first token is one of them is that word. A mote with a reserved name
   is still reachable as `"find"` (quoted) or `#id`, and creating one
   from the command line warns about exactly that. Each port step adds
@@ -125,7 +130,9 @@ else.
 
 ### App names
 
-The prompt box is always `mo`, and the app is the rest of the word.
+An app is opened with the verb `mo` and its suffix, `mo tion`, which the
+command line draws as the lockup `[mo]tion`; the top bar shows the
+focused pane's app the same way.
 These are user-facing names. Python packages keep their current names
 (see *Rename*).
 

@@ -25,9 +25,11 @@ const HINTS = {
 
 export function createCommandLine({ root, popupEl, store, api, components, onSubmit, onLeave }) {
   const { h } = components;
-  const field = components.promptInput();
+  // `$` like a pane header's command; `mo ` typed at the start of the line
+  // is drawn as the [mo] box, so `mo tion` reads as the app's lockup.
+  const field = components.promptInput({ lockup: true });
   const status = h("span", "cmd-status");
-  root.replaceChildren(h("span", "mo-box", "mo"), field.el, status);
+  root.replaceChildren(h("span", "cmd-prompt", "$"), field.el, status);
 
   const st = { mode: null, comp: null, hist: null, confirmLine: null, seq: 0 };
 

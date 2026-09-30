@@ -240,9 +240,14 @@ class Api:
         return _error(f"{parsed.head} isn't available yet")
 
     def _run_app(self, parsed: commands.ParsedLine) -> dict:
-        if parsed.args:
-            return _error(_no_arguments(parsed.head))
+        if not parsed.head:
+            return _error(f"usage: {RESERVED_VERBS['mo']['usage']}")
         app = commands.find_app(parsed.head)
+        if app is None:
+            suffixes = ", ".join(a.suffix for a in commands.CONSOLE_APPS)
+            return _error(f"no app mo {parsed.head} -- try {suffixes}")
+        if parsed.args:
+            return _error(f"mo {parsed.head} takes nothing after the app")
         if app.default_view:
             return {"effect": "open_view", "view": app.default_view,
                     "command": app.default_command or app.suffix}

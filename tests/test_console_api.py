@@ -56,7 +56,7 @@ def test_boot_shape(api):
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None}
-    assert boot["verbs"][6] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][7] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"]) == (
         [], None, None, [])
@@ -144,7 +144,7 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
 
 
 def test_an_unported_app_opens_its_old_window(api, launched):
-    effect = api.run("tion")
+    effect = api.run("mo tion")
     assert effect == {"effect": "legacy", "app": "motion",
                       "message": "opened Motion (old window)"}
     assert launched[-1][0] == sys.executable
@@ -153,12 +153,12 @@ def test_an_unported_app_opens_its_old_window(api, launched):
 
 
 def test_saic_opens_the_gardens_window(api, launched):
-    assert api.run("saic")["app"] == "gardens"
+    assert api.run("mo saic")["app"] == "gardens"
     assert launched[-1][1].endswith("run_gardens.py")
 
 
 def test_te_opens_the_props_pane_on_the_selection(api, launched):
-    assert api.run("te") == {"effect": "open_view", "view": "mote:props", "command": "open @sel"}
+    assert api.run("mo te") == {"effect": "open_view", "view": "mote:props", "command": "open @sel"}
     assert launched == []
 
 
@@ -322,7 +322,7 @@ def test_find_opens_the_table_with_the_whole_line_as_its_command(api):
                       "command": "find status:open --sort rank"}
     assert api.resolve("find status:open") == {"view": "monolith:table",
                                                "command": "find status:open"}
-    assert api.run("nolith") == {"effect": "open_view", "view": "monolith:table",
+    assert api.run("mo nolith") == {"effect": "open_view", "view": "monolith:table",
                                  "command": "find"}
 
 
@@ -487,3 +487,19 @@ def test_mote_inspect_follows_the_selection_or_a_named_mote(api, chores):
     assert pinned["id"] == chores[2] and not pinned["follows"]
     assert "error" in api.mote.inspect("open ghost", [])
     assert "error" in api.mote.inspect("find", [])
+
+
+
+@pytest.mark.parametrize("line, message", [
+    ("mo", "usage: mo"),
+    ("mo nope", "no app mo nope"),
+    ("mo tion now", "takes nothing after the app"),
+])
+def test_mo_says_what_is_wrong(api, line, message):
+    effect = api.run(line)
+    assert effect["effect"] == "error" and message in effect["message"]
+
+
+def test_a_bare_suffix_is_a_statement_now(api):
+    effect = api.run("tion")
+    assert effect["effect"] == "statement" and effect["moteName"] == "tion"

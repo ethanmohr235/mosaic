@@ -1,9 +1,11 @@
 # core/commands.py
 """The console's merged grammar (docs/console.md -> Command line and
-grammar). One line typed at the `[mo]` prompt opens with one of three
+grammar). One line typed at the `$` prompt opens with one of three
 things, decided by its first token alone:
 
-    tion                an app suffix: open that app (CONSOLE_APPS below)
+    mo tion             `mo` and an app suffix: open that app (CONSOLE_APPS
+                        below). The command line draws the typed `mo ` as
+                        the [mo] box, so the line reads as the lockup.
     layout save two     a verb (core/reserved.py::RESERVED_VERBS)
     R1.x = 5 ohm        anything else: a modeling statement, handed to
                         core/command_bar.py::run_command unchanged
@@ -79,6 +81,7 @@ LAYOUT_OPS: dict[str, str] = {
 }
 
 APP, VERB, STATEMENT = "app", "verb", "statement"
+APP_VERB = "mo"
 
 _ESCAPE_CHARS = ("'", '"', "#")
 _FIRST_TOKEN_RE = re.compile(r"(\S*)(\s*)(.*)", re.DOTALL)
@@ -116,17 +119,16 @@ def parse(line: str) -> ParsedLine:
     word, _sep, rest = _FIRST_TOKEN_RE.match(text).groups()
     if not word or word.startswith(_ESCAPE_CHARS):
         return ParsedLine(STATEMENT, "", (), text)
-    if word in RESERVED_VERBS:
-        kind = VERB
-    elif find_app(word) is not None:
-        kind = APP
-    else:
+    if word not in RESERVED_VERBS:
         return ParsedLine(STATEMENT, "", (), text)
     try:
         args = tuple(shlex.split(rest))
     except ValueError as e:
         raise CommandError(f"{word}: {e}") from None
-    return ParsedLine(kind, word, args, text)
+    if word == APP_VERB:
+        # `mo tion`: the suffix is the head, anything after it the args.
+        return ParsedLine(APP, args[0] if args else "", args[1:], text)
+    return ParsedLine(VERB, word, args, text)
 
 
 def expand_sel(line: str, selection: Sequence[str]) -> str:
@@ -169,7 +171,7 @@ def resolve_view(command: str) -> tuple[str, str]:
         return ARG_VIEWS[parsed.head], parsed.text
     if parsed.kind == APP and not parsed.args:
         app = find_app(parsed.head)
-        if app.default_view:
+        if app is not None and app.default_view:
             return app.default_view, app.default_command or app.suffix
     raise CommandError(f"no view answers {parsed.text!r}")
 
@@ -441,6 +443,11 @@ def complete(
         if _WORD_PREFIX_RE.fullmatch(word):
             return _complete_first(conn, line, cursor, word, lead)
         return _complete_statement(conn, line, cursor)
+    if word == APP_VERB:
+        done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
+        if done:
+            return Completion(replace_from=cursor)
+        return _complete_app("" if not rest or rest[-1].isspace() else rest.split()[-1], cursor)
     if word == "find":
         return _complete_from(RESERVED_VERBS[word]["usage"], _find_choices(conn, rest), rest, cursor)
     if word == SET_VERB:
@@ -450,16 +457,12 @@ def complete(
     if word in RESERVED_VERBS:
         choices = _verb_choices(word, rest, gardens, layouts, current_garden)
         return _complete_from(RESERVED_VERBS[word]["usage"], choices, rest, cursor)
-    if find_app(word) is not None:
-        return Completion(replace_from=cursor)
     return _complete_statement(conn, line, cursor)
 
 
 def _complete_first(conn, line: str, cursor: int, partial: str, lead: int) -> Completion:
     # An app you can open outranks one that isn't available yet, so `t`
     # offers `tion` before `te` (3e) and the ghost never suggests a dead end.
-    matching = [app for app in CONSOLE_APPS if app.suffix.startswith(partial)]
-    apps = [_app_row(app) for app in sorted(matching, key=_unavailable)]
     verbs = [
         CompletionRow(verb, meta["describe"])
         for verb, meta in RESERVED_VERBS.items() if verb.startswith(partial)
@@ -469,11 +472,21 @@ def _complete_first(conn, line: str, cursor: int, partial: str, lead: int) -> Co
         CompletionRow(name)
         for name in command_bar.suggest(conn, line, cursor) if name not in words
     ]
+    rows = tuple(verbs + motes)
+    return Completion("", rows, _ghost(rows, partial), lead)
+
+
+def _complete_app(partial: str, cursor: int) -> Completion:
+    """After `mo `: the apps. One you can open outranks one that isn't
+    available yet, so `mo t` offers `tion` before a dead end (3e), and the
+    apps that don't match stay listed, dimmed."""
+    matching = [app for app in CONSOLE_APPS if app.suffix.startswith(partial)]
+    apps = [_app_row(app) for app in sorted(matching, key=_unavailable)]
     dim = [
         _app_row(app, dim=True) for app in CONSOLE_APPS if not app.suffix.startswith(partial)
     ]
-    rows = tuple(apps + verbs + motes + dim)
-    return Completion("mo ‹app›", rows, _ghost(rows, partial), lead)
+    rows = tuple(apps + dim)
+    return Completion("mo ‹app›", rows, _ghost(rows, partial), cursor - len(partial))
 
 
 def _unavailable(app: ConsoleApp) -> bool:

@@ -543,6 +543,22 @@ def u3_checks(window):
 
     check("U3: `p` opens the props float and `esc` closes it", float_toggles)
 
+    def mo_is_a_verb():
+        press(window, ":")
+        js(window, """
+            (() => { const i = document.activeElement; i.value = 'mo t';
+                     i.setSelectionRange(4, 4); i.dispatchEvent(new Event('input', {bubbles: true})); })();
+        """)
+        assert wait_until(lambda: texts(window, "#cmdline .c-input-mo") == ["mo"]), \
+            "typing `mo ` should draw the [mo] box"
+        assert texts(window, "#cmdline .cmd-prompt") == ["$"], "the command line's prompt is `$`"
+        press(window, "Escape")
+        type_command(window, "mo te", alt=True)
+        assert wait_until(lambda: "open @sel" in headers(window)), "`mo te` should open the props view"
+        no_errors(window)
+
+    check("U3: `mo` is the verb that opens an app, drawn as the [mo] box", mo_is_a_verb)
+
 
 def u3_restored_checks(window):
     def restored():

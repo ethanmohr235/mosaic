@@ -106,7 +106,21 @@ body {
   cursor: text;
 }
 
-.cmdline .mo-box { margin-right: var(--prompt-gap); }
+.cmd-prompt {
+  flex-shrink: 0;
+  padding-left: var(--pad-x);
+  margin-right: var(--prompt-gap);
+  color: var(--dim);
+}
+
+/* `mo ` typed at the start of the command line: the two letters inverted
+ * like the top bar's [mo] box, the space after them the lockup's gap.
+ * Restyled in place -- no padding -- so the text keeps its metrics. */
+.c-input-mo {
+  background: var(--bright);
+  color: var(--bg);
+  font-weight: var(--w-bold);
+}
 
 .cmd-status {
   flex-shrink: 1;

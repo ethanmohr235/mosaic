@@ -17,9 +17,14 @@ def test_a_verb_first_token_is_a_verb():
     assert (parsed.kind, parsed.head, parsed.args) == (VERB, "layout", ("save", "two"))
 
 
-def test_an_app_suffix_is_an_app():
-    parsed = parse("  tion  ")
-    assert (parsed.kind, parsed.head, parsed.args, parsed.text) == (APP, "tion", (), "tion")
+def test_mo_and_a_suffix_is_an_app():
+    parsed = parse("  mo tion  ")
+    assert (parsed.kind, parsed.head, parsed.args, parsed.text) == (APP, "tion", (), "mo tion")
+    assert parse("mo").head == ""
+
+
+def test_a_bare_suffix_is_an_ordinary_name():
+    assert parse("tion").kind == STATEMENT
 
 
 def test_a_verb_wins_over_a_mote_of_the_same_name():
@@ -48,12 +53,10 @@ def test_verb_arguments_tokenize_like_a_shell():
         parse('cd "unclosed')
 
 
-def test_reserved_words_are_the_verbs_plus_the_app_suffixes():
-    assert reserved_words() == set(RESERVED_VERBS) | {
-        "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic",
-    }
+def test_reserved_words_are_the_verbs_and_mo():
+    assert reserved_words() == set(RESERVED_VERBS)
     assert list(RESERVED_VERBS) == [
-        "find", "set", "open", "rename", "unlink", "template",
+        "mo", "find", "set", "open", "rename", "unlink", "template",
         "cd", "layout", "refresh", "undo", "redo", "log"]
 
 
@@ -92,8 +95,9 @@ def test_creating_a_mote_named_like_a_verb_warns(conn):
     assert f"#{result.mote_id[:8]}" in result.message
 
 
-def test_creating_a_mote_named_like_an_app_suffix_warns(conn):
-    assert "console word" in commands.run_statement(conn, "'tion'").message
+def test_creating_a_mote_named_like_a_verb_warns_but_a_suffix_does_not(conn):
+    assert "console word" in commands.run_statement(conn, "'mo'").message
+    assert "console word" not in commands.run_statement(conn, "tion").message
 
 
 def test_ordinary_or_existing_motes_get_no_warning(conn):
@@ -109,15 +113,21 @@ def _values(completion):
     return [row.value for row in completion.rows]
 
 
-def test_first_token_lists_matching_apps_then_verbs_then_dim_apps(conn):
+def test_first_token_lists_verbs(conn):
     result = complete(conn, "r")
+    assert [r.value for r in result.rows] == ["rename", "refresh", "redo"]
+    assert (result.ghost, result.replace_from) == ("ename", 0)
+
+
+def test_after_mo_lists_matching_apps_then_dim_apps(conn):
+    result = complete(conn, "mo r")
     rows = result.rows
-    assert [r.value for r in rows if not r.dim] == ["ra", "rename", "refresh", "redo"]
+    assert [r.value for r in rows if not r.dim] == ["ra"]
     dim = [r.value for r in rows if r.dim]
     assert dim == ["nolith", "te", "xie", "tion", "nastery", "narch", "saic"]
     assert rows[0].description == "Mora — old window"
     assert result.hint == "mo ‹app›"
-    assert (result.ghost, result.replace_from) == ("a", 0)
+    assert (result.ghost, result.replace_from) == ("a", 3)
 
 
 def test_an_app_you_can_open_outranks_one_that_is_not_available(conn, monkeypatch):
@@ -126,18 +136,18 @@ def test_an_app_you_can_open_outranks_one_that_is_not_available(conn, monkeypatc
         commands_module.ConsoleApp("te", "Inspector"),
         commands_module.ConsoleApp("tion", "Motion", legacy="motion"),
     ))
-    result = complete(conn, "t")
+    result = complete(conn, "mo t")
     assert [r.value for r in result.rows if not r.dim][:2] == ["tion", "te"]
     assert result.ghost == "ion"
 
 
-def test_an_empty_line_lists_every_app_then_every_verb(conn):
+def test_an_empty_line_lists_every_verb_and_mo_lists_every_app(conn):
     result = complete(conn, "")
+    assert _values(result) == list(RESERVED_VERBS)
+    assert result.ghost == ""
     apps = [a.suffix for a in commands.CONSOLE_APPS if a.default_view or a.legacy]
     apps += [a.suffix for a in commands.CONSOLE_APPS if not (a.default_view or a.legacy)]
-    assert _values(result) == apps + list(RESERVED_VERBS)
-    assert not any(r.dim for r in result.rows)
-    assert result.ghost == ""
+    assert _values(complete(conn, "mo ")) == apps
 
 
 def test_first_token_also_offers_mote_names_but_not_reserved_ones(conn):
