@@ -429,3 +429,68 @@ def test_suggest_respects_cursor_not_just_text_end(conn):
 def test_suggest_is_empty_with_no_partial_token(conn):
     run_command(conn, "R1.resistance = 500 ohms")
     assert suggest(conn, "R1 -> ") == []
+
+
+# ---- undo: every form hands back its writes as one step ----------------------
+
+import pytest as _pytest
+
+from core import motes as _motes, relationships as _rels
+from core.command_bar import run_command as _run
+
+
+def _snapshot(conn):
+    return (
+        sorted((m.id, sorted(m.properties.items(), key=str)) for m in _motes.list_motes(conn)),
+        sorted((r.from_id, r.to_id, r.type) for r in _rels.list_relationships(conn)),
+    )
+
+
+@_pytest.mark.parametrize("setup, line", [
+    ([], "R1.resistance = 500 ohm"),
+    (["R1.resistance = 500"], "R1.resistance = 2 kohm"),
+    (["R1.resistance = 500"], "R1.resistance units kohm"),
+    (["R1.x = 1"], "R1.x ?"),
+    ([], "R1.v == R1.i * R1.r"),
+    ([], "A -> B"),
+    ([], "A -> owns -> B"),
+    (["A : S1"], "A : S2"),
+    (["R1.x = 1"], "delete R1.x"),
+    ([], "Newbie"),
+])
+def test_undo_reverses_every_statement_form(conn, setup, line):
+    for step in setup:
+        assert _run(conn, step).ok
+    before = _snapshot(conn)
+    result = _run(conn, line)
+    assert result.ok and result.command is not None
+    assert result.command.label == line
+    assert _snapshot(conn) != before
+    result.command.undo()
+    assert _snapshot(conn) == before
+    result.command.redo()
+    assert _snapshot(conn) != before
+
+
+def test_undo_restores_a_deleted_mote_with_its_relationships(conn):
+    _run(conn, "A -> owns -> B")
+    before = _snapshot(conn)
+    assert _run(conn, "delete A").needs_confirm
+    result = _run(conn, "delete A", confirm=True)
+    result.command.undo()
+    assert _snapshot(conn) == before
+
+
+def test_a_line_that_fails_halfway_takes_back_what_it_wrote(conn):
+    _motes.create_mote(conn, {"name": "B"})
+    _motes.create_mote(conn, {"name": "B"})
+    before = _snapshot(conn)
+    result = _run(conn, "Fresh -> B")  # Fresh is created, then B is ambiguous
+    assert not result.ok and result.choices
+    assert result.command is None
+    assert _snapshot(conn) == before
+
+
+def test_a_line_that_writes_nothing_has_no_undo(conn):
+    _run(conn, "R1")
+    assert _run(conn, "R1").command is None

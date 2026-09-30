@@ -56,7 +56,7 @@ def test_boot_shape(api):
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None}
-    assert boot["verbs"][2] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][6] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"]) == (
         [], None, None, [])
@@ -157,8 +157,8 @@ def test_saic_opens_the_gardens_window(api, launched):
     assert launched[-1][1].endswith("run_gardens.py")
 
 
-def test_te_is_not_available_yet(api, launched):
-    assert api.run("te") == {"effect": "error", "message": "Inspector isn't available yet"}
+def test_te_opens_the_props_pane_on_the_selection(api, launched):
+    assert api.run("te") == {"effect": "open_view", "view": "mote:props", "command": "open @sel"}
     assert launched == []
 
 
@@ -400,4 +400,77 @@ def test_set_by_id_and_name_reads_values_like_the_command_bar(api, chores):
 ])
 def test_set_says_what_is_wrong(api, chores, line, selection, message):
     effect = api.run(line, selection=selection)
+    assert effect["effect"] == "error" and message in effect["message"]
+
+
+def test_a_typed_statement_is_undone_by_undo(api):
+    api.run("R1.x = 5 ohm")
+    conn = api._session.conn
+    (r1,) = motes_repo.list_motes(conn)
+    assert r1.properties["x"] == 5
+    assert api.run("undo")["label"] == "R1.x = 5 ohm"
+    assert motes_repo.list_motes(conn) == []
+    api.run("redo")
+    assert motes_repo.list_motes(conn)[0].properties["units"] == {"x": "ohm"}
+
+
+# ---- U3: open, rename, unlink, template ----------------------------------------
+
+def test_open_keeps_at_sel_literal_so_the_pane_follows(api, chores):
+    effect = api.run("open @sel", selection=[chores[0]])
+    assert effect == {"effect": "open_view", "view": "mote:props", "command": "open @sel"}
+    assert api.resolve("open #abc") == {"view": "mote:props", "command": "open #abc"}
+
+
+def test_rename_moves_value_and_unit_and_undoes(api, chores):
+    conn = api._session.conn
+    api.run(f"set #{chores[0]} length 5 mm")
+    effect = api.run(f"rename #{chores[0]} length span")
+    assert effect["ok"] and effect["wrote"]
+    props = motes_repo.get_mote(conn, chores[0]).properties
+    assert props["span"] == 5 and "length" not in props and props["units"] == {"span": "mm"}
+    api.run("undo")
+    props = motes_repo.get_mote(conn, chores[0]).properties
+    assert props["length"] == 5 and "span" not in props and props["units"] == {"length": "mm"}
+
+
+def test_rename_across_the_selection_refuses_to_overwrite(api, chores):
+    conn = api._session.conn
+    api.run(f"set #{chores[1]} done yes")
+    effect = api.run("rename @sel status done", selection=chores[:2])
+    assert effect["effect"] == "error" and "already has 'done'" in effect["message"]
+    # Nothing half-renamed: the first mote was taken back.
+    assert motes_repo.get_mote(conn, chores[0]).properties["status"] == "open"
+
+
+def test_unlink_by_type_and_by_id_and_template(api, chores):
+    from core import relationships as rel_repo
+    conn = api._session.conn
+    api.run("chore0 -> blocks -> chore1")
+    assert api.run("unlink chore1 blocks chore0")["message"] == "removed 1 relationship"
+    assert not [r for r in rel_repo.list_relationships(conn) if r.type == "blocks"]
+    api.run("undo")
+    (rel,) = [r for r in rel_repo.list_relationships(conn) if r.type == "blocks"]
+    assert api.run(f"unlink chore0 #{rel.id}")["ok"]
+
+    assert api.run("template chore2 chore")["ok"]
+    (tmpl,) = [r for r in rel_repo.list_relationships(conn) if r.type == "template_of"]
+    assert tmpl.from_id == chores[2]
+    api.run("template chore3 chore")
+    (tmpl,) = [r for r in rel_repo.list_relationships(conn) if r.type == "template_of"]
+    assert tmpl.from_id == chores[3]
+    api.run("undo")
+    (tmpl,) = [r for r in rel_repo.list_relationships(conn) if r.type == "template_of"]
+    assert tmpl.from_id == chores[2]
+
+
+@pytest.mark.parametrize("line, message", [
+    ("rename chore0 status", "usage: rename"),
+    ("rename chore0 nothing else", "no 'nothing' to rename"),
+    ("unlink chore0 blocks", "usage: unlink"),
+    ("unlink chore0 blocks chore1", "no 'blocks' relationship"),
+    ("template chore0", "usage: template"),
+])
+def test_u3_verbs_say_what_is_wrong(api, chores, line, message):
+    effect = api.run(line)
     assert effect["effect"] == "error" and message in effect["message"]

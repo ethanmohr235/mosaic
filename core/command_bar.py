@@ -54,14 +54,16 @@ time, and only deletes when the caller resubmits the identical command
 with `confirm=True` -- the bar's "press Enter again" affordance.
 """
 import ast
+import contextvars
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import rules as rules_repo
 from core import species as species_repo
+from core import undo
 from core import units
 from core.formula import MATH_CONSTANTS, FormulaError, attribute_bases, parse_equation
 from core.entities import Mote
@@ -110,6 +112,10 @@ class CommandResult:
     needs_confirm: bool = False
     choices: list[dict] | None = None
     created: bool = False  # whether `mote_id` is a mote this command just made
+    # Everything this line wrote, as one undo step, or None if it wrote
+    # nothing. Returned rather than pushed: the undo stack belongs to the
+    # surface that ran the line (core/undo.py).
+    command: "undo.Command | None" = None
 
 
 _SUGGEST_LIMIT = 20
@@ -162,16 +168,95 @@ def run_command(conn: sqlite3.Connection, text: str, confirm: bool = False) -> C
     text = (text or "").strip()
     if not text:
         return CommandResult(ok=False, message="")
+    journal: list[undo.Command] = []
+    token = _JOURNAL.set(journal)
     try:
-        return _dispatch(conn, text, confirm)
+        result = _dispatch(conn, text, confirm)
     except AmbiguousName as e:
+        _roll_back(journal)
         return CommandResult(
             ok=False,
             message=str(e),
             choices=[_choice(conn, m) for m in e.candidates],
         )
     except CommandError as e:
+        _roll_back(journal)
         return CommandResult(ok=False, message=str(e))
+    finally:
+        _JOURNAL.reset(token)
+    if journal:
+        result = replace(result, command=undo.combine(text, journal))
+    return result
+
+
+# ---- the journal: every write, and how to take it back --------------
+#
+# Each primitive write below records its inverse while a line runs, so
+# `run_command` can hand back the whole line as one undo step whichever of
+# the forms it took -- and so a line that fails halfway (`A -> B` where B
+# turns out to be ambiguous after A was created) takes back what it had
+# already written rather than leaving half a statement in the garden.
+
+_JOURNAL: contextvars.ContextVar = contextvars.ContextVar("command_bar_journal", default=None)
+
+
+def _record(command: undo.Command) -> None:
+    journal = _JOURNAL.get()
+    if journal is not None:
+        journal.append(command)
+
+
+def _roll_back(journal: list) -> None:
+    for command in reversed(journal):
+        command.undo()
+    journal.clear()
+
+
+def _create_mote(conn, properties: dict) -> str:
+    mote_id = motes_repo.create_mote(conn, properties)
+    _record(undo.for_create_mote(conn, mote_id, dict(properties), label="create"))
+    return mote_id
+
+
+def _update_mote(conn, mote_id: str, new_props: dict) -> None:
+    old = motes_repo.get_mote(conn, mote_id).properties
+    before = {k: old[k] for k in new_props if k in old}
+    motes_repo.update_mote(conn, mote_id, new_props)
+    _record(undo.for_update_mote(conn, mote_id, before, dict(new_props), label="set"))
+
+
+def _delete_property(conn, mote_id: str, key: str) -> bool:
+    old = motes_repo.get_mote(conn, mote_id).properties
+    if key not in old:
+        return False
+    deleted = motes_repo.delete_property(conn, mote_id, key)
+    if deleted:
+        _record(undo.for_delete_property(conn, mote_id, key, old[key], label="delete"))
+    return deleted
+
+
+def _create_relationship(conn, from_id: str, to_id: str, type_: str) -> str:
+    rel_id = rel_repo.create_relationship(conn, from_id, to_id, type_)
+    _record(undo.for_create_relationship(conn, rel_id, from_id, to_id, type_, label="link"))
+    return rel_id
+
+
+def _delete_relationship(conn, rel) -> None:
+    if rel_repo.delete_relationship(conn, rel.id):
+        _record(undo.for_delete_relationship(conn, rel.id, rel.from_id, rel.to_id, rel.type,
+                                             label="unlink"))
+
+
+def _delete_mote(conn, mote_id: str) -> None:
+    """Relationships are read before the delete, since they cascade with it."""
+    mote = motes_repo.get_mote(conn, mote_id)
+    touching = [
+        {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
+        for r in rel_repo.list_relationships(conn)
+        if mote_id in (r.from_id, r.to_id)
+    ]
+    motes_repo.delete_mote(conn, mote_id)
+    _record(undo.for_delete_mote(conn, mote_id, dict(mote.properties), touching, label="delete"))
 
 
 def _dispatch(conn: sqlite3.Connection, text: str, confirm: bool) -> CommandResult:
@@ -231,7 +316,7 @@ def _run_property(conn, mote_token: str, key: str, value_text: str) -> CommandRe
         unit_map = units.parse_units_property(mote.properties.get(units.UNITS_KEY))
         unit_map[key] = unit_name
         new_props[units.UNITS_KEY] = unit_map
-    motes_repo.update_mote(conn, mote_id, new_props)
+    _update_mote(conn, mote_id, new_props)
 
     label = _label_for(mote_token, created)
     display = f"{value} {unit_name}" if unit_name else str(value)
@@ -250,7 +335,7 @@ def _run_units(conn, mote_token: str, key: str, unit_text: str) -> CommandResult
     mote = motes_repo.get_mote(conn, mote_id)
     unit_map = units.parse_units_property(mote.properties.get(units.UNITS_KEY))
     unit_map[key] = unit_name
-    motes_repo.update_mote(conn, mote_id, {units.UNITS_KEY: unit_map})
+    _update_mote(conn, mote_id, {units.UNITS_KEY: unit_map})
 
     label = _label_for(mote_token, created)
     return CommandResult(
@@ -271,7 +356,7 @@ def _run_freedom(conn, mote_token: str, key: str) -> CommandResult:
     else:
         freedoms.append(key)
         verb = "free"
-    motes_repo.update_mote(conn, mote_id, {rules_repo.FREEDOMS_KEY: freedoms})
+    _update_mote(conn, mote_id, {rules_repo.FREEDOMS_KEY: freedoms})
 
     return CommandResult(
         ok=True, mote_id=mote_id, created=created,
@@ -299,11 +384,11 @@ def _run_rule(conn, lhs: str, rhs: str) -> CommandResult:
     # the anchor-prefixed original would look like a plain second mote
     # that happens to share half its name with the anchor.
     name = f"Rule: {equation}"
-    rule_id = motes_repo.create_mote(conn, {
+    rule_id = _create_mote(conn, {
         "name": name if len(name) <= 80 else name[:77] + "...",
         rules_repo.EQUATION_KEY: equation,
     })
-    rel_repo.create_relationship(conn, rule_id, anchor_id, rules_repo.APPLIES_TO)
+    _create_relationship(conn, rule_id, anchor_id, rules_repo.APPLIES_TO)
 
     # Stub every property the equation reads as "" wherever it isn't
     # already set -- purely visual, so `v` shows x and y right away
@@ -402,7 +487,7 @@ def _stub_properties(conn, mote_id: str, keys) -> None:
     mote = motes_repo.get_mote(conn, mote_id)
     missing = {key: "" for key in keys if key not in mote.properties}
     if missing:
-        motes_repo.update_mote(conn, mote_id, missing)
+        _update_mote(conn, mote_id, missing)
 
 
 def _run_relate(conn, from_token: str, rest: str) -> CommandResult:
@@ -418,7 +503,7 @@ def _run_relate(conn, from_token: str, rest: str) -> CommandResult:
 
     from_id, from_created = _find_or_create(conn, from_token)
     to_id, to_created = _find_or_create(conn, to_token)
-    rel_repo.create_relationship(conn, from_id, to_id, type_)
+    _create_relationship(conn, from_id, to_id, type_)
 
     created_tokens = [t for t, c in ((from_token, from_created), (to_token, to_created)) if c]
     note = f" ({', '.join(created_tokens)} created)" if created_tokens else ""
@@ -436,8 +521,8 @@ def _run_species(conn, mote_token: str, species_token: str) -> CommandResult:
     # the command bar's `:` is one slot, same as the inspector's species
     # control, so a second use replaces rather than accumulates.
     for rel in rel_repo.list_relationships(conn, from_id=mote_id, type_=species_repo.INSTANCE_OF):
-        rel_repo.delete_relationship(conn, rel.id)
-    species_repo.set_species(conn, mote_id, species_id)
+        _delete_relationship(conn, rel)
+    _create_relationship(conn, mote_id, species_id, species_repo.INSTANCE_OF)
 
     created_tokens = [t for t, c in ((mote_token, mote_created), (species_token, species_created)) if c]
     note = f" ({', '.join(created_tokens)} created)" if created_tokens else ""
@@ -451,7 +536,7 @@ def _run_delete(conn, target: str, confirm: bool) -> CommandResult:
     if "." in target:
         mote_token, key = target.rsplit(".", 1)
         mote_id = _resolve_one(conn, mote_token)
-        motes_repo.delete_property(conn, mote_id, key)
+        _delete_property(conn, mote_id, key)
         return CommandResult(ok=True, mote_id=mote_id, message=f"deleted {mote_token}.{key}")
 
     mote_id = _resolve_one(conn, target)
@@ -460,7 +545,7 @@ def _run_delete(conn, target: str, confirm: bool) -> CommandResult:
             ok=False, mote_id=mote_id, needs_confirm=True,
             message=f"press Enter again to delete {target} and its relationships",
         )
-    motes_repo.delete_mote(conn, mote_id)
+    _delete_mote(conn, mote_id)
     return CommandResult(ok=True, message=f"deleted {target}")
 
 
@@ -502,7 +587,7 @@ def _find_or_create(conn, token: str, create_if_missing: bool = True) -> tuple[s
         raise AmbiguousName(token, matches)
     if not create_if_missing:
         raise CommandError(f"no mote named '{token}'")
-    new_id = motes_repo.create_mote(conn, {"name": _unquote(token)})
+    new_id = _create_mote(conn, {"name": _unquote(token)})
     return new_id, True
 
 

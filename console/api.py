@@ -175,8 +175,13 @@ class Api:
         # `set` is read before @sel is expanded: its `@sel` is the whole
         # selection, where everywhere else it is the primary.
         literal = commands.parse(text)
-        if literal.kind == commands.VERB and literal.head == commands.SET_VERB:
-            return self._verb_set(literal.args, selection)
+        if literal.kind == commands.VERB and literal.head in commands.WRITE_VERBS:
+            return self._verb_write(literal.head, literal.args, selection)
+        if literal.kind == commands.VERB and literal.head in commands.ARG_VIEWS:
+            # The literal line is the pane's command: `open @sel` keeps
+            # following the selection rather than freezing on today's.
+            return {"effect": "open_view", "view": commands.ARG_VIEWS[literal.head],
+                    "command": literal.text}
         expanded = commands.expand_sel(text, selection)
         if expanded != text and motes_repo.get_mote(self._session.conn, selection[0]) is None:
             # command_bar reads an `#id` that matches nothing as a *name*
@@ -191,11 +196,11 @@ class Api:
         return self._run_statement(parsed.text, confirm)
 
     def _run_statement(self, text: str, confirm: bool) -> dict:
-        # Known gap: core/command_bar.py records no undo Command, so a
-        # statement typed here can't be undone yet (nor in the old
-        # windows' "/" bar). Undo covers edits that push onto the
-        # session's stack.
+        # Every statement form returns its writes as one undo step
+        # (core/command_bar.py's journal), so `undo` takes back a typed line.
         result = commands.run_statement(self._session.conn, text, confirm=confirm)
+        if result.command is not None:
+            self._session.undo.push(result.command)
         return {
             "effect": "statement",
             "ok": result.ok,
@@ -219,9 +224,6 @@ class Api:
             return self._verb_cd(parsed.args)
         if parsed.head == "layout":
             return self._verb_layout(parsed.args)
-        if parsed.head in commands.ARG_VIEWS:
-            return {"effect": "open_view", "view": commands.ARG_VIEWS[parsed.head],
-                    "command": parsed.text}
         if parsed.args:
             return _error(_no_arguments(parsed.head))
         if parsed.head in commands.VERB_VIEWS:
@@ -252,8 +254,8 @@ class Api:
         return {"effect": "legacy", "app": app.legacy,
                 "message": f"opened {app.name} (old window)"}
 
-    def _verb_set(self, args: tuple[str, ...], selection: list[str]) -> dict:
-        result = commands.run_set(self._session.conn, args, selection)
+    def _verb_write(self, verb: str, args: tuple[str, ...], selection: list[str]) -> dict:
+        result = commands.WRITE_VERBS[verb](self._session.conn, args, selection)
         if result.command is not None:
             self._session.undo.push(result.command)
         return {"effect": "statement", "ok": True, "message": result.message,

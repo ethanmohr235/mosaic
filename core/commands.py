@@ -28,7 +28,10 @@ from typing import Sequence
 from core import batch
 from core import command_bar
 from core import motes as motes_repo
+from core import relationships as rel_repo
+from core import species as species_repo
 from core import undo
+from core import units
 from core.command_bar import CommandError, CommandResult
 from core.reserved import RESERVED_VERBS, reserved_words
 
@@ -50,7 +53,7 @@ class ConsoleApp:
 
 CONSOLE_APPS: tuple[ConsoleApp, ...] = (
     ConsoleApp("nolith", "Monolith", default_view="monolith:table", default_command="find"),
-    ConsoleApp("te", "Inspector"),
+    ConsoleApp("te", "Inspector", default_view="mote:props", default_command="open @sel"),
     ConsoleApp("xie", "Moxie", legacy="moxie"),
     ConsoleApp("tion", "Motion", legacy="motion"),
     ConsoleApp("ra", "Mora", legacy="mora"),
@@ -63,7 +66,7 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
 VERB_VIEWS: dict[str, str] = {"log": "log"}
 # Verbs a view answers *with* their arguments: the whole line is the
 # pane's command (`find status:open --sort due`).
-ARG_VIEWS: dict[str, str] = {"find": "monolith:table"}
+ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
@@ -188,9 +191,14 @@ def _is_word_char(ch: str) -> bool:
 
 @dataclass(frozen=True)
 class SetResult:
+    """What a write verb did: a line for the log, how many motes it
+    touched, and its writes as one undo step for the caller to push."""
     message: str
     count: int
     command: "undo.Command | None" = None  # push it: the whole batch is one undo step
+
+
+WriteResult = SetResult
 
 
 def run_set(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
@@ -218,6 +226,128 @@ def run_set(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[s
         raise CommandError("nothing to set -- the target no longer exists")
     noun = "mote" if count == 1 else "motes"
     return SetResult(f"{verb} {key} on {count} {noun}", count, command)
+
+
+# ---- rename, unlink, template ------------------------------------------
+#
+# The props pane's edits as commands (docs/console.md -> Settled for U3):
+# each is a line, so it is in the history, the log and undo, and the CLI
+# or MCP could run the same one. `@sel` is the whole selection for all of
+# them, as for `set`.
+
+def run_rename(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
+    """`rename <target> <old> <new>`: the value moves to the new key, and
+    so does its entry in `units`. A mote that already has `<new>` is
+    refused rather than overwritten -- a rename that silently destroyed a
+    value would be an edit nobody asked for."""
+    if len(args) != 3:
+        raise CommandError(f"usage: {RESERVED_VERBS['rename']['usage']}")
+    target, old, new = args
+    if not new.strip() or new == old:
+        raise CommandError("rename needs a different new key")
+    ids = _set_targets(conn, target, selection)
+    steps: list[undo.Command] = []
+    for mote_id in ids:
+        props = motes_repo.get_mote(conn, mote_id).properties
+        if old not in props:
+            continue
+        if new in props:
+            _undo_all(steps)
+            raise CommandError(f"{_name_of(props, mote_id)} already has {new!r} -- clear it first")
+        updates = {new: props[old]}
+        before = {}
+        unit_map = units.parse_units_property(props.get(units.UNITS_KEY))
+        if old in unit_map:
+            before[units.UNITS_KEY] = props[units.UNITS_KEY]
+            unit_map[new] = unit_map.pop(old)
+            updates[units.UNITS_KEY] = unit_map
+        motes_repo.update_mote(conn, mote_id, updates)
+        motes_repo.delete_property(conn, mote_id, old)
+        steps.append(undo.combine(f"rename {old}", [
+            undo.for_update_mote(conn, mote_id, before, updates, label=f"rename {old}"),
+            undo.for_delete_property(conn, mote_id, old, props[old], label=f"rename {old}"),
+        ]))
+    if not steps:
+        raise CommandError(f"no {old!r} to rename")
+    return _written(f"renamed {old} to {new}", steps)
+
+
+def run_unlink(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
+    """`unlink <target> <type> <other>` removes every `<type>` relationship
+    between the two, in either direction; `unlink <target> #<rel id>`
+    removes that one, which is what the props pane runs for a row."""
+    usage = f"usage: {RESERVED_VERBS['unlink']['usage']}"
+    if len(args) not in (2, 3):
+        raise CommandError(usage)
+    ids = set(_set_targets(conn, args[0], selection))
+    rels = rel_repo.list_relationships(conn)
+    if len(args) == 2:
+        if not args[1].startswith("#"):
+            raise CommandError(usage)
+        wanted = [r for r in rels if r.id == args[1][1:] and ids & {r.from_id, r.to_id}]
+        if not wanted:
+            raise CommandError(f"no relationship {args[1]} on that mote")
+    else:
+        type_, other = args[1], args[2]
+        others = set(_set_targets(conn, other, selection))
+        wanted = [
+            r for r in rels if r.type == type_
+            and ((r.from_id in ids and r.to_id in others) or (r.to_id in ids and r.from_id in others))
+        ]
+        if not wanted:
+            raise CommandError(f"no {type_!r} relationship between them")
+    steps = []
+    for rel in wanted:
+        if rel_repo.delete_relationship(conn, rel.id):
+            steps.append(undo.for_delete_relationship(
+                conn, rel.id, rel.from_id, rel.to_id, rel.type, label=f"unlink {rel.type}"))
+    noun = "relationship" if len(steps) == 1 else "relationships"
+    return _written(f"removed {len(steps)} {noun}", steps)
+
+
+def run_template(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
+    """`template <mote> <species>`: that mote is now the one new instances
+    of the species start from. Replaces any earlier template rather than
+    adding one, since a species answers with only its first
+    (core/species.py::template_for) -- the same rule the old panel's
+    button follows."""
+    if len(args) != 2:
+        raise CommandError(f"usage: {RESERVED_VERBS['template']['usage']}")
+    (mote_id,) = _one_target(conn, args[0], selection)
+    (species_id,) = _one_target(conn, args[1], selection)
+    steps = []
+    for rel in rel_repo.list_relationships(conn, type_=species_repo.TEMPLATE_OF):
+        if rel.to_id == species_id and rel_repo.delete_relationship(conn, rel.id):
+            steps.append(undo.for_delete_relationship(
+                conn, rel.id, rel.from_id, rel.to_id, rel.type, label="template"))
+    rel_id = species_repo.set_template(conn, mote_id, species_id)
+    steps.append(undo.for_create_relationship(
+        conn, rel_id, mote_id, species_id, species_repo.TEMPLATE_OF, label="template"))
+    return _written(f"{args[0]} is now the template of {args[1]}", steps)
+
+
+WRITE_VERBS = {"set": run_set, "rename": run_rename, "unlink": run_unlink, "template": run_template}
+
+
+def _one_target(conn, target: str, selection: Sequence[str]) -> list[str]:
+    ids = _set_targets(conn, target, selection[:1])
+    if len(ids) != 1:
+        raise CommandError(f"{target} must name one mote")
+    return ids
+
+
+def _written(message: str, steps: list) -> SetResult:
+    return SetResult(message, len(steps), undo.combine(message, steps) if steps else None)
+
+
+def _undo_all(steps: list) -> None:
+    for step in reversed(steps):
+        step.undo()
+
+
+def _name_of(properties: dict, mote_id: str) -> str:
+    name = properties.get("name")
+    return name if isinstance(name, str) and name else f"#{mote_id[:8]}"
 
 
 def _set_targets(conn: sqlite3.Connection, target: str, selection: Sequence[str]) -> list[str]:
@@ -314,6 +444,8 @@ def complete(
         return _complete_from(RESERVED_VERBS[word]["usage"], _find_choices(conn, rest), rest, cursor)
     if word == SET_VERB:
         return _complete_from(RESERVED_VERBS[word]["usage"], _set_choices(conn, rest), rest, cursor)
+    if word in ("open", "rename", "unlink", "template"):
+        return _complete_from(RESERVED_VERBS[word]["usage"], _u3_choices(conn, word, rest), rest, cursor)
     if word in RESERVED_VERBS:
         choices = _verb_choices(word, rest, gardens, layouts, current_garden)
         return _complete_from(RESERVED_VERBS[word]["usage"], choices, rest, cursor)
@@ -402,6 +534,26 @@ def _set_choices(conn, rest: str) -> list[CompletionRow]:
         column = _schema(conn).column(query.Field(query.PROPERTY, done[1]))
         return [CompletionRow(value) for value in column.values] + [
             CompletionRow("--clear", "remove the property")]
+    return []
+
+
+def _u3_choices(conn, verb: str, rest: str) -> list[CompletionRow]:
+    """Targets first (`@sel` and names), then what each verb takes next:
+    a property key to rename, a relationship type then another mote to
+    unlink, a species to be the template of."""
+    done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
+    names = sorted({m.properties["name"] for m in motes_repo.list_motes(conn)
+                    if isinstance(m.properties.get("name"), str)})
+    targets = [CompletionRow(_SEL, "the selection")] + [CompletionRow(n) for n in names]
+    if not done:
+        return targets if verb != "template" else [CompletionRow(n) for n in names]
+    if verb == "rename" and len(done) == 1:
+        return _set_choices(conn, "x ")
+    if verb == "unlink" and len(done) == 1:
+        types = sorted({r.type for r in rel_repo.list_relationships(conn)})
+        return [CompletionRow(t) for t in types]
+    if (verb == "unlink" and len(done) == 2) or (verb == "template" and len(done) == 1):
+        return [CompletionRow(n) for n in names]
     return []
 
 

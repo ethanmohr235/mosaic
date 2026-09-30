@@ -46,7 +46,7 @@ from api_common import open_app as _open_app
 from api_common import open_gardens as _open_gardens
 from api_common import species_ids as _species_ids
 from api_common import synchronized as _synchronized
-from api_common import _visible_keys
+from core.inspect import visible_keys as _visible_keys
 from core import derivations as derivations_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo

@@ -53,7 +53,8 @@ def test_reserved_words_are_the_verbs_plus_the_app_suffixes():
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic",
     }
     assert list(RESERVED_VERBS) == [
-        "find", "set", "cd", "layout", "refresh", "undo", "redo", "log"]
+        "find", "set", "open", "rename", "unlink", "template",
+        "cd", "layout", "refresh", "undo", "redo", "log"]
 
 
 def test_resolve_view():
@@ -111,7 +112,7 @@ def _values(completion):
 def test_first_token_lists_matching_apps_then_verbs_then_dim_apps(conn):
     result = complete(conn, "r")
     rows = result.rows
-    assert [r.value for r in rows if not r.dim] == ["ra", "refresh", "redo"]
+    assert [r.value for r in rows if not r.dim] == ["ra", "rename", "refresh", "redo"]
     dim = [r.value for r in rows if r.dim]
     assert dim == ["nolith", "te", "xie", "tion", "nastery", "narch", "saic"]
     assert rows[0].description == "Mora — old window"
@@ -119,7 +120,12 @@ def test_first_token_lists_matching_apps_then_verbs_then_dim_apps(conn):
     assert (result.ghost, result.replace_from) == ("a", 0)
 
 
-def test_an_app_you_can_open_outranks_one_that_is_not_available(conn):
+def test_an_app_you_can_open_outranks_one_that_is_not_available(conn, monkeypatch):
+    from core import commands as commands_module
+    monkeypatch.setattr(commands_module, "CONSOLE_APPS", (
+        commands_module.ConsoleApp("te", "Inspector"),
+        commands_module.ConsoleApp("tion", "Motion", legacy="motion"),
+    ))
     result = complete(conn, "t")
     assert [r.value for r in result.rows if not r.dim][:2] == ["tion", "te"]
     assert result.ghost == "ion"
@@ -205,3 +211,21 @@ def test_find_and_set_resolve_and_complete(conn):
     assert values("set ") == ["@sel", "a", "b"]
     assert values("set @sel st") == ["status"]
     assert values("set @sel status d") == ["done"]
+
+
+def test_u3_verbs_complete_targets_then_their_arguments(conn):
+    from core import motes as motes_repo
+    from core.relationships import create_relationship
+    a = motes_repo.create_mote(conn, {"name": "a", "status": "open"})
+    b = motes_repo.create_mote(conn, {"name": "b"})
+    create_relationship(conn, a, b, "blocks")
+
+    def values(line):
+        return [row.value for row in commands.complete(conn, line).rows]
+
+    assert values("open ") == ["@sel", "a", "b"]
+    assert values("rename a st") == ["status"]
+    assert values("unlink a ") == ["blocks"]
+    assert values("unlink a blocks ") == ["a", "b"]
+    assert values("template ") == ["a", "b"]
+    assert commands.resolve_view("open @sel") == ("mote:props", "open @sel")
