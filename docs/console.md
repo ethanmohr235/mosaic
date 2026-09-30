@@ -353,3 +353,14 @@ Each step's done-check is the same:
   record no undo command, so `undo` can't reverse a typed edit yet
   (the old windows' `/` bar has the same gap). Close it in U3, where
   editing a mote becomes the same everywhere.
+- **Size tokens added in U1.** The shell took these from the design
+  canvas rather than the handoff README. Confirm or replace them:
+  `--popup-mo` 36px, `--popup-app` 90px, `--picker-key` 150px,
+  `--divider-hit` 3px (invisible grab margin), `--popup-rows` 12,
+  `--prompt-gap` 6px, `--bar-gap` 8px, `--border` 1px.
+- **Pane header style.** Every header uses 2a's filled 24px
+  `$ command` bar, not 2b's quieter 22px tiled header. Is that right?
+- **Result colours in `log`.** Successful results are `--fg`; only
+  warn and fault use their colours. Should success be `--ok`?
+- **Unsaved layout on switch.** `1`–`9` quietly drops unsaved drift
+  from the active layout. Should it ask first?
