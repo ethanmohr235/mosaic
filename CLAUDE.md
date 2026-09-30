@@ -9,6 +9,10 @@ Read before changing anything:
 The docs are the source of truth. Update them in the same change as the
 code.
 
+**`docs/manual.md` is the user's quick reference** for every console
+command, flag and key. Any change that adds, removes or changes one
+updates it in the same commit. Keep it compact: tables, no prose.
+
 ## How we work
 
 - **Plan each phase first.** Plan every non-trivial phase before

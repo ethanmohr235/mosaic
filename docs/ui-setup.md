@@ -28,7 +28,8 @@ once its app is ported. New UI is built only in the console.
 ```
 
 One window, one garden at a time, every pane the output of a command.
-Its design, grammar and view contract are in `docs/console.md`. This
+Its design, grammar and view contract are in `docs/console.md`; every
+command and key on one page is `docs/manual.md`. This
 section covers what it does today (steps U1–U4): the shell, the `log`
 view, the `find` table, the props pane and plots.
 
