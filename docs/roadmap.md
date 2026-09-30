@@ -144,7 +144,9 @@ Each one was a separate act of filing. That lesson became a rule in
 - **Cross-garden search:** read-only across every `.db`, and results open
   the project.
 - **Archive:** mark a finished tree read-only and out of the way. It stays
-  flat on disk and remains searchable.
+  flat on disk and remains searchable. **Decided:** read-only is refused
+  at the CLI and MCP write paths and flagged for the UI, not enforced in
+  the store. See `architecture.md` -> *Archive*.
 
 ## Phases
 

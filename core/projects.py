@@ -26,6 +26,12 @@ from dataclasses import dataclass
 from core import db, gardens as gardens_repo, motes as motes_repo, undo
 
 GARDEN_KEY = "garden"
+# `archived: true` on an owner archives the garden it owns and everything
+# beneath it; on a mote with no `garden` claim, it archives the garden the
+# mote lives in -- which is how a loose garden, with no owner to carry it,
+# is archived. Decided 2026-09-30 (`roadmap.md` -> *Structure*).
+ARCHIVED_KEY = "archived"
+ARCHIVE_MARKER_NAME = "Archived"
 
 # What check() found wrong. A garden may appear under more than one.
 DISPUTED = "disputed"
@@ -58,6 +64,12 @@ class Owner:
     @property
     def cover(self) -> "Cover":
         return cover_of(self.properties, self.mote_id)
+
+    @property
+    def archived(self) -> bool:
+        """Whether this owner itself says so -- not whether something
+        above it does, which is `archived_by()`'s question."""
+        return is_marked(self.properties)
 
 
 # The cover's fields. Ordinary, unreserved properties -- a homework mote
@@ -115,6 +127,9 @@ class Node:
     garden: str
     owner: Owner | None
     children: tuple["Node", ...] = ()
+    # Archived itself or beneath something archived. Home hides these by
+    # default; they stay searchable and still open, read-only.
+    archived: bool = False
 
     @property
     def loose(self) -> bool:
@@ -332,11 +347,14 @@ def tree(gardens: list[str] | None = None) -> list[Node]:
     owned = {garden for garden, found in claims.items() if found and garden in known}
     roots = [garden for garden in known if garden not in owned]
 
-    nodes = [_node(garden, None, children, known, frozenset()) for garden in sorted(roots)]
+    marked = _marked_gardens(known)
+    nodes = [_node(garden, None, children, known, frozenset(), marked, False)
+             for garden in sorted(roots)]
     drawn = {garden for node in nodes for garden in _reached(node)}
     # Whatever the walk never reached is in a loop (see check()).
     nodes += [
-        _node(garden, owner_of(garden, claims), children, known, frozenset())
+        _node(garden, owner_of(garden, claims), children, known, frozenset(), marked,
+              any(o.archived for o in claims.get(garden, [])))
         for garden in sorted(set(known) - drawn)
     ]
     return nodes
@@ -348,13 +366,16 @@ def _node(
     children: dict[str, list[Owner]],
     known: list[str],
     path: frozenset[str],
+    marked: set[str],
+    inherited: bool,
 ) -> Node:
+    archived = inherited or garden in marked or (owner is not None and owner.archived)
     beneath = [
-        _node(child.owns, child, children, known, path | {garden})
+        _node(child.owns, child, children, known, path | {garden}, marked, archived)
         for child in sorted(children.get(garden, ()), key=lambda o: o.name.casefold())
         if child.owns in known and child.owns not in path and child.owns != garden
     ]
-    return Node(garden=garden, owner=owner, children=tuple(beneath))
+    return Node(garden=garden, owner=owner, children=tuple(beneath), archived=archived)
 
 
 def _reached(node: Node) -> set[str]:
@@ -476,3 +497,161 @@ def stop_owning(conn: sqlite3.Connection, mote_id: str) -> tuple[str | None, und
     command.redo()
     return claimed, command
 
+
+
+# --- Archive ---------------------------------------------------------
+
+class ArchivedGarden(ValueError):
+    """A write was asked of a garden that is archived. Raised by the CLI
+    and MCP write paths through `ensure_writable`; the store itself never
+    raises it, so sync, undo and un-archiving keep working."""
+
+
+def is_marked(properties: dict) -> bool:
+    """`archived: true`, or the text "true" as a hand edit writes it --
+    the same reading `rules.is_check` gives its flag."""
+    value = properties.get(ARCHIVED_KEY)
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return value is True
+
+
+def _markers_in(conn: sqlite3.Connection) -> list[str]:
+    """Motes in this garden archiving the garden itself: marked, and
+    claiming no garden (a marked owner archives what it owns instead)."""
+    cur = conn.cursor()
+    cur.execute("SELECT mote_id FROM mote_properties WHERE key = ?", (ARCHIVED_KEY,))
+    ids = [row["mote_id"] for row in cur.fetchall()]
+    return [
+        mote.id for mote in motes_repo.get_motes(conn, ids)
+        if is_marked(mote.properties) and garden_named_by(mote.properties) is None
+    ]
+
+
+def _marked_gardens(gardens: list[str]) -> set[str]:
+    marked = set()
+    for garden in gardens:
+        if not gardens_repo.garden_exists(garden):
+            continue
+        conn = db.get_connection(garden)
+        try:
+            if _markers_in(conn):
+                marked.add(garden)
+        finally:
+            conn.close()
+    return marked
+
+
+def archived_by(garden: str, gardens: list[str] | None = None) -> str | None:
+    """Why this garden is archived, as a sentence, or None if it isn't.
+
+    Its own marker, an owner that says so, or anything above it: archiving
+    a hub archives the semester beneath it. Cycle-safe, like the tree."""
+    known = gardens if gardens is not None else gardens_repo.list_gardens()
+    claims = owners(known)
+    marked = _marked_gardens(known)
+    seen: set[str] = set()
+    at = garden
+    while at not in seen:
+        seen.add(at)
+        if at in marked:
+            where = "" if at == garden else f", which holds {garden!r}"
+            return f"the garden {at!r} is archived by a mote inside it{where}"
+        found = claims.get(at, [])
+        for owner in found:
+            if owner.archived:
+                where = "" if at == garden else f" (above {garden!r})"
+                return (f"{owner.name} (in {owner.garden}) archives the garden "
+                        f"{at!r}{where}")
+        if not found:
+            return None
+        at = found[0].garden
+    return None
+
+
+def is_archived(garden: str) -> bool:
+    return archived_by(garden) is not None
+
+
+def ensure_writable(garden: str) -> None:
+    """Refuse a write to an archived garden, saying what archived it and
+    how to undo that. For the CLI and MCP write paths; see ArchivedGarden."""
+    why = archived_by(garden)
+    if why is not None:
+        raise ArchivedGarden(
+            f"{garden!r} is archived and read-only: {why}. Un-archive it first "
+            f"(`monoss project unarchive {garden}`)."
+        )
+
+
+def set_archived(garden: str, archived: bool) -> str:
+    """Archive or un-archive one garden and everything beneath it. Returns
+    a sentence saying what was written.
+
+    Archiving writes `archived: true` onto the garden's sole owner, in the
+    owner's garden; a loose (or disputed) garden gets a marker mote inside
+    it instead. Un-archiving clears the flag from its owners and from every
+    marker inside it, and refuses if something *above* still archives it --
+    the answer then is to un-archive that, and the message names it.
+
+    Written directly, not through `ensure_writable`: un-archiving has to
+    write to a garden that is, by definition, archived."""
+    if not gardens_repo.garden_exists(garden):
+        raise LookupError(f"No such garden: {garden!r}")
+    claims = owners()
+    found = claims.get(garden, [])
+
+    if archived:
+        already = archived_by(garden)
+        if already is not None:
+            return f"{garden!r} is already archived: {already}"
+        if len(found) == 1:
+            _write(found[0].garden, found[0].mote_id, {ARCHIVED_KEY: True})
+            return f"archived {garden!r} on its owner, {found[0].name} (in {found[0].garden})"
+        conn = db.get_connection(garden)
+        try:
+            motes_repo.create_mote(conn, {"name": ARCHIVE_MARKER_NAME, ARCHIVED_KEY: True})
+        finally:
+            conn.close()
+        return f"archived {garden!r} with a marker mote inside it (it has no single owner)"
+
+    cleared = []
+    for owner in found:
+        if owner.archived:
+            _clear(owner.garden, owner.mote_id)
+            cleared.append(f"{owner.name} (in {owner.garden})")
+    conn = db.get_connection(garden)
+    try:
+        for marker in _markers_in(conn):
+            mote = motes_repo.get_mote(conn, marker)
+            if set(mote.properties) <= {"name", ARCHIVED_KEY} and \
+                    mote.properties.get("name") in (None, ARCHIVE_MARKER_NAME):
+                motes_repo.delete_mote(conn, marker)  # the marker we made, and nothing else
+            else:
+                motes_repo.delete_property(conn, marker, ARCHIVED_KEY)
+            cleared.append(f"a marker in {garden}")
+    finally:
+        conn.close()
+    still = archived_by(garden)
+    if still is not None:
+        raise ArchivedGarden(
+            f"{garden!r} is still archived from above: {still} -- un-archive that garden")
+    if not cleared:
+        return f"{garden!r} was not archived"
+    return f"un-archived {garden!r} (cleared {', '.join(cleared)})"
+
+
+def _write(garden: str, mote_id: str, properties: dict) -> None:
+    conn = db.get_connection(garden)
+    try:
+        motes_repo.update_mote(conn, mote_id, properties)
+    finally:
+        conn.close()
+
+
+def _clear(garden: str, mote_id: str) -> None:
+    conn = db.get_connection(garden)
+    try:
+        motes_repo.delete_property(conn, mote_id, ARCHIVED_KEY)
+    finally:
+        conn.close()

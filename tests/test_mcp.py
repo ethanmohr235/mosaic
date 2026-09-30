@@ -55,6 +55,8 @@ from mcp_server.server import (
     import_csv,
     propagate_uncertainty,
     write_worksheet as _ww,
+    search_gardens,
+    archive_garden,
 )
 
 # Every tool takes `garden` last and opens its own connection, so tests
@@ -780,3 +782,19 @@ def test_propagate_uncertainty_returns_each_result_with_its_budget(garden):
     assert c["label"] == "s.c" and c["sigma"] == pytest.approx((0.3**2 + 0.8**2) ** 0.5)
     assert [p["label"] for p in c["contributions"]] == ["s.b", "s.a"]
     assert {i["label"] for i in report["inputs"]} == {"s.a", "s.b"}
+
+
+def test_search_gardens_and_archive_garden(garden):
+    create_mote({"name": "beam"}, GARDEN)
+    (hit,) = search_gardens("beam")["hits"]
+    assert hit["garden"] == GARDEN and hit["project"] == GARDEN and not hit["archived"]
+
+    result = archive_garden(GARDEN)
+    assert result["archived"] and "marker" in result["message"]
+    assert search_gardens("beam")["hits"][0]["archived"]
+    with pytest.raises(Exception, match="archived and read-only"):
+        create_mote({"name": "x"}, GARDEN)
+    # Reads still work.
+    assert search_motes("beam", garden=GARDEN)
+    assert not archive_garden(GARDEN, archived=False)["archived"]
+    create_mote({"name": "x"}, GARDEN)

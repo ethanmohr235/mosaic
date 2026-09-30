@@ -983,3 +983,28 @@ def test_uncertainty_prints_each_result_and_its_budget(conn, capsys):
     out = capsys.readouterr().out
     assert "s.c = 11.00 ± 0.85" in out
     assert "87.7%  s.b" in out
+
+
+def test_archive_refuses_cli_writes_and_search_spans_gardens(capsys, monkeypatch, conn):
+    import sys
+    from cli.main import main
+    from core import motes as motes_repo
+
+    motes_repo.create_mote(conn, {"name": "beam"})
+
+    def run(*argv):
+        monkeypatch.setattr(sys, "argv", ["monoss", "--garden", "test", *argv])
+        main()
+
+    run("project", "archive", "test")
+    run("mote", "create", "--properties", '{"name": "x"}')
+    run("search", "beam")
+    run("project", "tree")
+    run("project", "unarchive", "test")
+    out = capsys.readouterr().out
+    assert "archived 'test' with a marker mote" in out
+    assert "Error: 'test' is archived and read-only" in out
+    assert "test  [test]  (archived)" in out
+    assert "beam" in out
+    assert "un-archived 'test'" in out
+    assert [m.properties.get("name") for m in motes_repo.list_motes(conn)] == ["beam"]

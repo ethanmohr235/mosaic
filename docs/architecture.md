@@ -53,7 +53,38 @@ property owns that garden and is its cover.
   already carries `due` and `status`. A number is read as its text, so a
   hand-typed `revision: 3` is `"3"`.
 
-`monoss project start|stop|tree|check`; MCP `project_tree`, `start_project`.
+### Archive
+
+`archived: true` on an owner archives the garden it owns *and everything
+beneath it*; on a mote claiming no garden, it archives the garden the mote
+lives in, which is how a loose garden is archived (decided). Disk stays
+flat and nothing is renamed.
+
+- `archived_by(garden)` says why a garden is archived (its own marker, an
+  owner, or an ancestor), or None. `Node.archived` carries the same
+  inherited flag, so Home can hide archived trees.
+- **Read-only is enforced at the CLI and MCP write paths**, not in the
+  store (decided): `ensure_writable(garden)` raises `ArchivedGarden`, and
+  every MCP write tool and CLI write command calls it first. Sync, undo
+  and the store are untouched, so un-archiving always works.
+- `set_archived(garden, bool)` writes the flag on the sole owner, or a
+  marker mote named `Archived` inside a loose or disputed garden.
+  Un-archiving clears owners and markers (deleting a marker it made,
+  keeping any other mote), and refuses if an ancestor still archives the
+  garden, naming it.
+
+### Search across gardens
+
+`core/search.py::search_all(query)` opens every garden read-only and runs
+the same `motes.search_motes` a single garden uses, so query forms mean
+the same everywhere. Each `Hit` carries its garden and that garden's
+cover (`owner`, `project`), since a result opens as its project. Archived
+gardens are searched after live ones and flagged; `truncated` names the
+gardens that had more hits than `per_garden`. A blank query returns
+nothing.
+
+`monoss project start|stop|tree|check|archive|unarchive`, `monoss search`;
+MCP `project_tree`, `start_project`, `archive_garden`, `search_gardens`.
 
 # Species
 
@@ -94,7 +125,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance` and `uncertainty` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance`, `uncertainty` and `archived` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 

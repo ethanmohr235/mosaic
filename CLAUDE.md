@@ -70,6 +70,10 @@ code.
   reserved `uncertainty` map, propagation on read, ± in `\val`/`\given`/
   `\answers` and the worksheet (`bd.x = 80 ± 0.5 in`); `monoss
   uncertainty`; MCP `propagate_uncertainty`.
+- Roadmap **phase 9's backend is partly done**: archive (reserved
+  `archived`, `projects.set_archived`/`ensure_writable`, CLI/MCP writes
+  refuse an archived garden) and cross-garden search (`core/search.py`,
+  `monoss search`, MCP `search_gardens`). The materials provider is next.
 - The next UI step is U2's frontend.
 
 ## Split of work: cloud backend, local frontend

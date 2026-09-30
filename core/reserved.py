@@ -21,7 +21,7 @@ removed that reason, and with it the third place the same facts were
 written down."""
 from core.calc import SOURCE_KEY
 from core.links import URL_PROPERTY
-from core.projects import GARDEN_KEY
+from core.projects import ARCHIVED_KEY, GARDEN_KEY
 from core.uncertainty import UNCERTAINTY_KEY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
@@ -38,7 +38,7 @@ RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
     ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY, GARDEN_KEY,
-    CHECK_KEY, TOLERANCE_KEY, UNCERTAINTY_KEY,
+    CHECK_KEY, TOLERANCE_KEY, UNCERTAINTY_KEY, ARCHIVED_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -115,6 +115,12 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "a claim on a garden that doesn't exist, or a loop are flagged by "
         "`project_tree`'s problems, never enforced. Written by `start_project`, "
         "which creates the garden in the same step.",
+    ARCHIVED_KEY: "`true` archives a project tree: on a mote that owns a "
+        "garden (`garden`), it archives that garden and everything beneath it; "
+        "on a mote claiming no garden, it archives the garden the mote lives "
+        "in (how a loose garden is archived). An archived garden stays "
+        "searchable and readable; every write tool refuses it. Set or clear it "
+        "with `archive_garden` rather than by hand.",
     UNCERTAINTY_KEY: "A given's ±, as a per-property map in exactly the "
         "shape `units` has: {'x': 0.5} is ± 0.5 in x's own unit, {'x': '2%'} "
         "is ± 2% of its value. The value stays a plain number. A result's ± is "

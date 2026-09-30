@@ -46,8 +46,8 @@ absolute path.
 
 ## Tools
 
-53 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), projects (`project_tree`, `start_project`), `import_csv`, `propagate_uncertainty`, motes (`list_motes`, `search_motes`, `get_mote`,
+55 tools, grouped: gardens (`list_gardens`, `create_garden`,
+`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `propagate_uncertainty`, motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
@@ -187,6 +187,12 @@ external value. A rule marked `check: true` (with an optional relative
 budget. Derived on read, never stored; first order, root-sum-square. Row
 shapes from `calc_sections` carry `sigma` too. See `docs/simulation.md` ->
 *Uncertainty*.
+
+`search_gardens` searches every garden at once, read-only, with the same
+query forms as `search_motes`; each hit names its garden and project.
+`archive_garden` archives a garden and its subtree (`archived: true` on
+its owner, or a marker inside a loose garden); **every write tool then
+refuses that garden** until `archive_garden(..., archived=false)`.
 
 `import_csv` takes the file's text and its name, and makes one mote per
 row; `load [kN]` in the header gives a column its unit, and each value is

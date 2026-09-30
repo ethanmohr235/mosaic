@@ -10,6 +10,7 @@ from core import csv_import
 from core import uncertainty
 from core import health
 from core import projects
+from core import search
 from core import modoc
 from core import worksheet
 from core.modoc_bind import assemble as assemble_modoc
@@ -304,6 +305,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     unc_parser.add_argument("--solver", default="linear", help="Solver backend (default linear)")
 
+    ### Search
+    search_all = subparsers.add_parser(
+        "search", help="Search every garden at once (read-only)"
+    )
+    search_all.add_argument("query", help="Text, or `key = value`")
+    search_all.add_argument("--per-garden", type=int, default=20)
+    search_all.add_argument("--no-archived", action="store_true",
+                            help="Leave archived gardens out")
+
     ### Import
     import_parser = subparsers.add_parser(
         "import", help="Bring measured data in as motes"
@@ -337,6 +347,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     project_stop.add_argument("mote_id")
     project_sub.add_parser("tree", help="Every garden, nested under the mote that owns it")
+    for verb, text in (("archive", "Make a garden and everything beneath it read-only"),
+                       ("unarchive", "Make an archived garden writable again")):
+        verb_parser = project_sub.add_parser(verb, help=text)
+        verb_parser.add_argument("name", help="The garden")
     project_sub.add_parser(
         "check", help="Gardens with two owners, claims on missing gardens, and loops"
     )
@@ -846,6 +860,9 @@ def _handle_project(args) -> None:
         for root in roots:
             _print_project_node(root, 0)
         return
+    if args.action in ("archive", "unarchive"):
+        print(projects.set_archived(args.name, args.action == "archive"))
+        return
     if args.action == "check":
         problems = projects.check()
         if not problems:
@@ -871,6 +888,39 @@ def _handle_project(args) -> None:
         conn.close()
 
 
+def _handle_search(args) -> None:
+    results = search.search_all(args.query, args.per_garden, not args.no_archived)
+    if not results.hits:
+        print("No matches in any garden.")
+    garden = None
+    for hit in results.hits:
+        if hit.garden != garden:
+            garden = hit.garden
+            tag = "  (archived)" if hit.archived else ""
+            print(f"{hit.project}  [{garden}]{tag}")
+        print(f"  {hit.mote_id}  {hit.name}")
+    for garden in results.truncated:
+        print(f"  ... more in {garden}; raise --per-garden to see them")
+
+
+# (command, action) pairs that write to the garden --garden names. An
+# archived garden refuses them (core/projects.py::ensure_writable).
+_WRITES = {
+    ("mote", "create"), ("mote", "update"), ("mote", "delete"),
+    ("rel", "create"), ("rel", "update"), ("rel", "delete"),
+    ("species", "set"), ("species", "template"), ("species", "new"),
+    ("modoc", "import"), ("worksheet", "apply"), ("import", "csv"),
+    ("project", "start"), ("project", "stop"),
+}
+
+
+def _writes(args) -> bool:
+    action = getattr(args, "action", None)
+    if args.command == "simulate":
+        return action in (None, "run") and not getattr(args, "scenario", None)
+    return (args.command, action) in _WRITES
+
+
 def _print_project_node(node, depth: int) -> None:
     if node.loose:
         label = node.garden
@@ -878,6 +928,8 @@ def _print_project_node(node, depth: int) -> None:
         cover = node.owner.cover
         extra = [f"{key} {getattr(cover, key)}" for key in ("status", "due") if getattr(cover, key)]
         label = f"{node.name}  [{node.garden}]" + (f"  ({', '.join(extra)})" if extra else "")
+    if node.archived:
+        label += "  (archived)"
     print("  " * depth + label)
     for child in node.children:
         _print_project_node(child, depth + 1)
@@ -919,6 +971,13 @@ def main() -> None:
         if args.command == "garden":
             _handle_garden(args)
             return
+
+        if args.command == "search":
+            _handle_search(args)
+            return
+
+        if _writes(args):
+            projects.ensure_writable(resolve_garden(args.garden))
 
         if args.command == "project":
             _handle_project(args)

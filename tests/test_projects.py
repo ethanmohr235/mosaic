@@ -246,3 +246,93 @@ def test_a_bare_cover_is_just_a_name():
     (mid,) = _garden("a", {"garden": "b", "status": "  ", "due": True, "author": ["x"]})
     (owner,) = projects.owners()["b"]
     assert owner.cover == projects.Cover(name=mid[:8])
+
+
+# --- archive ----------------------------------------------------------
+
+def _tree_flags(nodes, out=None):
+    out = {} if out is None else out
+    for node in nodes:
+        out[node.garden] = node.archived
+        _tree_flags(node.children, out)
+    return out
+
+
+@pytest.fixture
+def semester():
+    _garden("college", {"name": "HW 4", "garden": "hw4"}, {"name": "Lab", "garden": "lab"})
+    _garden("hw4", {"name": "Part B", "garden": "hw4-b"})
+    _garden("hw4-b")
+    _garden("lab")
+    _garden("scratch")
+
+
+def test_archiving_an_owned_garden_marks_its_owner_and_its_subtree(semester):
+    message = projects.set_archived("hw4", True)
+    assert "on its owner, HW 4 (in college)" in message
+    (owner,) = projects.owners()["hw4"]
+    assert owner.archived and owner.properties["archived"] is True
+    assert _tree_flags(projects.tree()) == {
+        "college": False, "hw4": True, "hw4-b": True, "lab": False, "scratch": False}
+    assert projects.is_archived("hw4-b")
+    assert "above 'hw4-b'" in projects.archived_by("hw4-b")
+
+
+def test_a_loose_garden_is_archived_by_a_marker_inside_it(semester):
+    assert "marker mote" in projects.set_archived("scratch", True)
+    assert projects.is_archived("scratch")
+    assert projects.set_archived("scratch", False).startswith("un-archived")
+    assert not projects.is_archived("scratch")
+    conn = db.get_connection("scratch")
+    try:
+        assert motes_repo.list_motes(conn) == []  # the marker we made is gone
+    finally:
+        conn.close()
+
+
+def test_a_hub_marker_archives_every_project_beneath_it(semester):
+    projects.set_archived("college", True)
+    assert all(_tree_flags(projects.tree())[g] for g in ("college", "hw4", "hw4-b", "lab"))
+    assert not projects.is_archived("scratch")
+
+
+def test_ensure_writable_refuses_an_archived_garden_and_names_why(semester):
+    projects.ensure_writable("hw4")
+    projects.set_archived("hw4", True)
+    with pytest.raises(projects.ArchivedGarden, match="HW 4 \\(in college\\) archives"):
+        projects.ensure_writable("hw4-b")
+
+
+def test_unarchiving_beneath_an_archived_ancestor_is_refused(semester):
+    projects.set_archived("hw4", True)
+    with pytest.raises(projects.ArchivedGarden, match="still archived from above"):
+        projects.set_archived("hw4-b", False)
+    projects.set_archived("hw4", False)
+    assert not projects.is_archived("hw4-b")
+    assert "archived" not in projects.owners()["hw4"][0].properties
+
+
+def test_archiving_twice_and_unarchiving_what_is_not_archived_say_so(semester):
+    projects.set_archived("lab", True)
+    assert "already archived" in projects.set_archived("lab", True)
+    assert "was not archived" in projects.set_archived("scratch", False)
+    with pytest.raises(LookupError):
+        projects.set_archived("nope", True)
+
+
+def test_a_marked_owner_does_not_archive_its_own_garden(semester):
+    # The owner lives in `college`; its flag archives `hw4`, not `college`.
+    projects.set_archived("hw4", True)
+    assert not projects.is_archived("college")
+
+
+def test_a_hand_written_marker_keeps_its_mote_on_unarchive():
+    (mid,) = _garden("notes", {"name": "Read me", "archived": "true", "body": "keep"})
+    assert projects.is_archived("notes")
+    projects.set_archived("notes", False)
+    conn = db.get_connection("notes")
+    try:
+        props = motes_repo.get_mote(conn, mid).properties
+    finally:
+        conn.close()
+    assert props == {"name": "Read me", "body": "keep"}

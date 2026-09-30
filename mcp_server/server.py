@@ -30,6 +30,7 @@ from core import health as health_repo
 from core import csv_import as csv_import_repo
 from core import uncertainty as uncertainty_repo
 from core import projects as projects_repo
+from core import search as search_repo
 from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo
@@ -68,10 +69,15 @@ _INSTRUCTIONS = (
 
 
 @contextmanager
-def _connect(garden: str | None) -> Iterator[sqlite3.Connection]:
+def _connect(garden: str | None, write: bool = False) -> Iterator[sqlite3.Connection]:
     """One short-lived connection per tool call. garden=None resolves to
-    'default', creating it if absent -- same as the CLI."""
-    conn = get_connection(gardens_repo.resolve_garden(garden))
+    'default', creating it if absent -- same as the CLI. `write=True`
+    refuses an archived garden (core/projects.py::ensure_writable) before
+    anything is opened."""
+    name = gardens_repo.resolve_garden(garden)
+    if write:
+        projects_repo.ensure_writable(name)
+    conn = get_connection(name)
     try:
         conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
         initialize_database(conn)
@@ -192,7 +198,7 @@ def create_mote(properties: dict[str, Any], garden: str | None = None) -> dict[s
     stored as a number, "21" as a string. `name` is conventional but not
     required. Some keys are reserved and carry behavior -- see
     reserved_names()."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         mote_id = motes_repo.create_mote(conn, properties)
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
 
@@ -203,7 +209,7 @@ def update_mote(
     """Set or overwrite the given properties on a mote and return the
     whole updated mote. Keys not mentioned are left alone -- use
     delete_property() to remove one."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         motes_repo.update_mote(conn, mote_id, properties)
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
 
@@ -211,14 +217,14 @@ def update_mote(
 def delete_property(mote_id: str, key: str, garden: str | None = None) -> bool:
     """Remove a single property from a mote. Returns false if the mote
     had no such key."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         return motes_repo.delete_property(conn, mote_id, key)
 
 
 def delete_mote(mote_id: str, garden: str | None = None) -> bool:
     """Delete a mote and every relationship touching it. Returns false if
     no mote had that id. This is not undoable."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         return motes_repo.delete_mote(conn, mote_id)
 
 
@@ -253,7 +259,7 @@ def create_relationship(
     free-form (e.g. 'wrote', 'lives_in'), except for the reserved ones
     the engine interprets -- see reserved_names(), and prefer
     set_species()/set_template() over creating those by hand."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         rel_id = rel_repo.create_relationship(conn, from_id, to_id, type)
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
 
@@ -267,7 +273,7 @@ def update_relationship(
 ) -> dict[str, Any] | None:
     """Repoint or retype an existing relationship. Supply at least one of
     from_id, to_id, type; omitted fields are left alone."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         rel_repo.update_relationship(conn, rel_id, from_id, to_id, type)
         rel = rel_repo.get_relationship(conn, rel_id)
         return dataclasses.asdict(rel) if rel is not None else None
@@ -276,7 +282,7 @@ def update_relationship(
 def delete_relationship(rel_id: str, garden: str | None = None) -> bool:
     """Delete one relationship, leaving both motes in place. Returns
     false if no relationship had that id."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         return rel_repo.delete_relationship(conn, rel_id)
 
 
@@ -309,7 +315,7 @@ def instances_of(species_id: str, garden: str | None = None) -> list[dict[str, A
 def set_species(mote_id: str, species_id: str, garden: str | None = None) -> dict[str, Any]:
     """Declare an existing mote an instance of a species. Additive -- it
     does not replace species the mote already belongs to."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         rel_id = species_repo.set_species(conn, mote_id, species_id)
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
 
@@ -318,7 +324,7 @@ def set_template(mote_id: str, species_id: str, garden: str | None = None) -> di
     """Make a mote the template for a species -- the mote whose
     properties new instances start from. A template is not itself an
     instance and never appears among a species' instances."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         rel_id = species_repo.set_template(conn, mote_id, species_id)
         return dataclasses.asdict(rel_repo.get_relationship(conn, rel_id))
 
@@ -337,7 +343,7 @@ def create_instance(
     species' template if it has one, with `overrides` applied on top.
     Without a template this is just a bare mote plus an instance_of
     relationship."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         mote_id = species_repo.create_instance(conn, species_id, overrides or {})
         return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
 
@@ -697,6 +703,7 @@ def _owner_json(owner: "projects_repo.Owner | None") -> dict[str, Any] | None:
 
 def _node_json(node: "projects_repo.Node") -> dict[str, Any]:
     return {"garden": node.garden, "name": node.name, "loose": node.loose,
+            "archived": node.archived,
             "owner": _owner_json(node.owner),
             "children": [_node_json(child) for child in node.children]}
 
@@ -719,6 +726,40 @@ def project_tree() -> dict[str, Any]:
     }
 
 
+def search_gardens(
+    query: str, per_garden: int = 20, include_archived: bool = True
+) -> dict[str, Any]:
+    """Search every garden at once, read-only -- the same query forms as
+    `search_motes` (substring, or `key = value`). Each hit names its
+    `garden` and the `project` it belongs to (the garden's cover, where
+    one mote owns it; open that project to see the hit in context).
+    Archived gardens are searched too, after live ones, flagged
+    `archived`. `truncated` lists gardens with more hits than
+    `per_garden`."""
+    results = search_repo.search_all(query, per_garden, include_archived)
+    return {
+        "hits": [
+            {"garden": h.garden, "moteId": h.mote_id, "name": h.name,
+             "properties": h.properties, "project": h.project,
+             "owner": _owner_json(h.owner), "archived": h.archived}
+            for h in results.hits
+        ],
+        "truncated": list(results.truncated),
+    }
+
+
+def archive_garden(garden: str, archived: bool = True) -> dict[str, Any]:
+    """Archive a garden and everything beneath it (read-only, out of the way,
+    still searchable), or un-archive it with `archived=false`. Archiving
+    writes `archived: true` on the garden's owner, or a marker mote inside a
+    loose garden. While archived, every write tool refuses the garden.
+    Un-archiving is refused if a garden above it is still archived, and the
+    message names which."""
+    message = projects_repo.set_archived(garden, archived)
+    return {"garden": garden, "archived": projects_repo.is_archived(garden),
+            "message": message}
+
+
 def start_project(mote_id: str, name: str | None = None, garden: str | None = None) -> dict[str, Any]:
     """Give a mote (in `garden`) a garden of its own: creates the garden and
     writes `garden: <name>` onto the mote in one step, making the mote the
@@ -726,7 +767,7 @@ def start_project(mote_id: str, name: str | None = None, garden: str | None = No
     and never collides with an existing garden; a `name` given explicitly
     adopts a loose garden of that name. Refused if the mote already owns a
     garden or the named garden already has an owner."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         created, _ = projects_repo.start_project(conn, mote_id, name)
         return {"garden": created, "owner": mote_id}
 
@@ -780,7 +821,7 @@ def import_csv(
     }
     if parsed.problems or dry_run:
         return result
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         imported, _ = csv_import_repo.apply(conn, parsed, name)
     return {**result, "imported": True, "importId": imported.import_id,
             "rowIds": list(imported.row_ids)}
@@ -811,7 +852,7 @@ def write_worksheet(text: str, garden: str | None = None) -> dict[str, Any]:
     a garden you have not read. Rules about a species are never touched
     (`untouched` counts them). A line that does not parse is reported in
     `problems` and nothing is deleted while any line is broken."""
-    with _connect(garden) as conn:
+    with _connect(garden, write=True) as conn:
         applied = worksheet_repo.apply(conn, text)
         return {
             "motesCreated": list(applied.motes_created),
@@ -956,6 +997,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
     project_tree, start_project, import_csv, propagate_uncertainty,
+    search_gardens, archive_garden,
     calc_sections, shown_work,
     resolve_modoc,
     reserved_names,
