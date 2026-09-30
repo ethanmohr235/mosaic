@@ -299,6 +299,46 @@ phase that builds them.
   it, and a pane cancels its own stale runs; `plot save ‹name›` enters
   the history once; PNG export embeds Geist.
 
+### Settled for U5, Motion (2026-09-30)
+
+- **No board.** The node-card board is not ported; a graph of the model
+  comes back with Monarch's canvas graph in U8. Linking stays a command.
+- **Grammar:**
+  ```
+  sim [--ticks N] [--scenario s] [--vs s2] [--solver newton] [‹find conditions›]   motion:state
+  rule ‹rule›|@sel                                                                 motion:rule
+  scenarios                                                                        motion:scenarios
+  solve [--live on|off]      one static solve, written, undoable
+  why ‹m.k›                  explain a solved value
+  step +N|-N|‹tick›, play, pause
+  mo tion                    opens scenarios | sim | rule @sel
+  ```
+- **The run table is its own pane, a watch list for a run**, not a
+  second mote table: one row per value (`C1.current`) with its state
+  (given, solved, varied, pinned), its value at the tick, Δ/tick, a
+  range bar over the run, and with `--vs` the other run's value and Δ.
+  Same table component and find conditions as Monolith; nothing is
+  edited in it. The Monolith table never knows about runs. Default
+  rows: the values the run moves, the solver's freedoms and the givens
+  the scenario varies; with find conditions, every numeric value of the
+  matched motes.
+- **Fast mode is a workspace `live` toggle**: `solve --live on|off`, per
+  garden in the console sidecar, off by default. When on, every write
+  made from the window is followed by a solve that writes, one undo step
+  with the edit; the top bar says `live`.
+- **One shared playhead** in the store, like the selection. Every Motion
+  pane follows it; the top bar shows `tick 12/200 ▶`. Not saved in
+  commands.
+- **Comparing:** two sim panes under different `--scenario`s, synced by
+  the playhead; `--vs` adds a Δ column, `d` toggles it against the
+  garden as it stands.
+- **Timeline markers:** constraint breaks and a failed tick in `--fault`,
+  and the selected row's min/max over the run in `--dim`.
+- **Ported extras:** scenario editing (`set --scenario hot C1.voltage 30`
+  writes that scenario's override) and equation name hints in the rule
+  pane. **Not ported:** value traces (lanes), the pre-flight role check
+  and the impact view (both stay in the CLI/MCP).
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
