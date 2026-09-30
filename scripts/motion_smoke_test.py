@@ -591,7 +591,7 @@ def run_checks(window):
         try:
             assert count(window, ".stage-empty") == 1, "empty state did not draw"
             covered = json.loads(js(window, """
-                JSON.stringify(['tool-mote', 'tool-rule', 'tool-link', 'tool-layout']
+                JSON.stringify(['tool-mote', 'tool-rule', 'tool-link', 'tool-snap']
                   .filter(id => {
                     const r = document.getElementById(id).getBoundingClientRect();
                     const hit = document.elementFromPoint(r.left + r.width / 2,

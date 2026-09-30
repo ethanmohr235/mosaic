@@ -108,7 +108,7 @@ alongside all of them.
 
 | # | Phase | Proves |
 |---|---|---|
-| 1 | Cleanup: remove Momentum; freeze Monarch; cut commit-tick and run history | Fewer surfaces, less code |
+| 1 | **Done.** Cleanup: remove Momentum; freeze Monarch; cut commit-tick and run history | Fewer surfaces, less code |
 | 2 | Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
 | 3 | Mora calc macros and LaTeX basics | A gradeable homework document |
 | 4 | Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
