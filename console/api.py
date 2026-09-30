@@ -26,6 +26,7 @@ from typing import Any
 import api_common
 from console import state as state_repo
 from console.monolith import MonolithApi
+from console.motion import MotionApi
 from console.mote import MoteApi
 from console.moxie import MoxieApi
 from console.session import Session, locked
@@ -33,6 +34,7 @@ from core import commands
 from core import gardens as gardens_repo
 from core import motes as motes_repo
 from core import fit as fit_repo
+from core import motion as motion_repo
 from core import plotcmd
 from core.command_bar import CommandError
 from core.reserved import RESERVED_VERBS
@@ -57,6 +59,7 @@ class Api:
         self.monolith = MonolithApi(self._session)
         self.mote = MoteApi(self._session)
         self.moxie = MoxieApi(self._session, lambda: self._window)
+        self.motion = MotionApi(self._session)
 
     # ---- boot and gardens ----
 
@@ -210,12 +213,11 @@ class Api:
         # Every statement form returns its writes as one undo step
         # (core/command_bar.py's journal), so `undo` takes back a typed line.
         result = commands.run_statement(self._session.conn, text, confirm=confirm)
-        if result.command is not None:
-            self._session.undo.push(result.command)
+        live = self._push(result.command)
         return {
             "effect": "statement",
             "ok": result.ok,
-            "message": result.message,
+            "message": result.message + live,
             "moteId": result.mote_id,
             "moteName": self._mote_name(result.mote_id),
             "created": result.created,
@@ -235,6 +237,10 @@ class Api:
             return self._verb_cd(parsed.args)
         if parsed.head == "layout":
             return self._verb_layout(parsed.args)
+        if parsed.head == motion_repo.SOLVE_VERB:
+            return self._verb_solve(parsed.args)
+        if parsed.head in (motion_repo.STEP_VERB, motion_repo.PLAY_VERB, motion_repo.PAUSE_VERB):
+            return self._verb_playhead(parsed.head, parsed.args)
         if parsed.args:
             return _error(_no_arguments(parsed.head))
         if parsed.head in commands.VERB_VIEWS:
@@ -257,6 +263,8 @@ class Api:
             return _error(f"no app mo {parsed.head} -- try {suffixes}")
         if parsed.args:
             return _error(f"mo {parsed.head} takes nothing after the app")
+        if app.layout:
+            return {"effect": "open_layout", "app": app.suffix, "tree": app.layout}
         if app.default_view:
             return {"effect": "open_view", "view": app.default_view,
                     "command": app.default_command or app.suffix}
@@ -272,9 +280,8 @@ class Api:
 
     def _verb_write(self, verb: str, args: tuple[str, ...], selection: list[str]) -> dict:
         result = commands.WRITE_VERBS[verb](self._session.conn, args, selection)
-        if result.command is not None:
-            self._session.undo.push(result.command)
-        return {"effect": "statement", "ok": True, "message": result.message,
+        live = self._push(result.command)
+        return {"effect": "statement", "ok": True, "message": result.message + live,
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": result.count > 0}
 
@@ -307,10 +314,46 @@ class Api:
                     "command": parsed.text}
         result = fit_repo.run(self._session.conn, line)
         message, undo_command = fit_repo.apply(self._session.conn, result)
-        self._session.undo.push(undo_command)
-        return {"effect": "statement", "ok": True, "message": message,
+        live = self._push(undo_command)
+        return {"effect": "statement", "ok": True, "message": message + live,
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": True}
+
+    def _verb_solve(self, args: tuple[str, ...]) -> dict:
+        """`solve` writes one static solve, one undo step; `solve --live
+        on|off` is the workspace toggle, kept in the console sidecar."""
+        live = motion_repo.parse_live(args)
+        if live is not None:
+            self._state.live = live
+            self._save_state()
+            return {"effect": "live", "live": live,
+                    "message": "live: every edit made here is solved" if live else "live off"}
+        solved = motion_repo.solve(self._session.conn)
+        self._session.undo.push(solved.command)
+        return {"effect": "statement", "ok": True, "message": solved.message,
+                "moteId": None, "moteName": None, "created": False,
+                "needsConfirm": False, "choices": [], "wrote": True}
+
+    def _verb_playhead(self, verb: str, args: tuple[str, ...]) -> dict:
+        """The playhead is the shell's (the store's), so these come back
+        as an effect for it; nothing here knows where it stands."""
+        if verb == motion_repo.STEP_VERB:
+            mode, n = motion_repo.parse_step(args)
+            return {"effect": "playhead", "op": "step", "mode": mode, "n": n}
+        if args:
+            return _error(_no_arguments(verb))
+        return {"effect": "playhead", "op": verb}
+
+    def _push(self, command) -> str:
+        """Push a write's undo step -- after a live solve folded into it,
+        when `live` is on. Returns what the live solve adds to the message."""
+        if command is None:
+            return ""
+        suffix = ""
+        if self._state.live:
+            suffix, command = motion_repo.live_solve(self._session.conn, command)
+        self._session.undo.push(command)
+        return suffix
 
     def _verb_cd(self, args: tuple[str, ...]) -> dict:
         if len(args) != 1:
@@ -366,7 +409,8 @@ class Api:
             "gardens": gardens_repo.list_gardens(),
             "apps": [
                 {"suffix": app.suffix, "name": app.name,
-                 "defaultView": app.default_view, "legacy": app.legacy}
+                 "defaultView": app.default_view, "legacy": app.legacy,
+                 "layout": app.layout}
                 for app in commands.CONSOLE_APPS
             ],
             "verbs": [{"verb": verb, **meta} for verb, meta in RESERVED_VERBS.items()],
@@ -374,6 +418,7 @@ class Api:
             "active": self._state.active,
             "working": self._state.working,
             "history": list(self._state.history),
+            "live": self._state.live,
         }
 
 

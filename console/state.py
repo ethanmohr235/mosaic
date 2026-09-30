@@ -36,6 +36,9 @@ class ConsoleState:
     active: str | None = None
     working: Any = None
     history: list[dict] = field(default_factory=list)  # [{"time", "command"}], oldest first
+    # `solve --live on`: every write made from the window is followed by
+    # a solve (docs/console.md -> Settled for U5). Off by default.
+    live: bool = False
 
     def layout_names(self) -> list[str]:
         return [layout["name"] for layout in self.layouts]
@@ -86,6 +89,7 @@ class ConsoleState:
             "active": self.active,
             "working": self.working,
             "history": self.history,
+            "live": self.live,
         }
 
 
@@ -149,6 +153,7 @@ def from_json(data: Any) -> ConsoleState:
         active=active if active in names else None,
         working=working,
         history=history[-HISTORY_LIMIT:],
+        live=data.get("live") is True,
     )
 
 

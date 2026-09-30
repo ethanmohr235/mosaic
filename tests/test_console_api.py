@@ -24,6 +24,7 @@ BRIDGE = {
 # api.monolith (U2). The walk collects bare method names.
 MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
 MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "fit"}  # U4
+MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
 
 
 @pytest.fixture
@@ -48,21 +49,22 @@ def launched(monkeypatch):
 def test_boot_shape(api):
     boot = api.boot()
     assert set(boot) == {"garden", "gardens", "apps", "verbs", "layouts",
-                         "active", "working", "history"}
+                         "active", "working", "history", "live"}
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
     assert boot["apps"][2] == {"suffix": "xie", "name": "Moxie",
-                               "defaultView": "moxie:plot", "legacy": None}
-    assert boot["apps"][3] == {"suffix": "tion", "name": "Motion",
-                               "defaultView": None, "legacy": "motion"}
+                               "defaultView": "moxie:plot", "legacy": None, "layout": None}
+    tion = boot["apps"][3]
+    assert (tion["defaultView"], tion["legacy"]) == ("motion:state", None)
+    assert [c["command"] for c in tion["layout"]["children"]] == ["scenarios", "sim", "rule @sel"]
     assert [a["suffix"] for a in boot["apps"]] == [
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
-                               "defaultView": "monolith:table", "legacy": None}
-    assert boot["verbs"][9] == {"verb": "cd", "usage": "cd ‹garden›",
+                               "defaultView": "monolith:table", "legacy": None, "layout": None}
+    assert boot["verbs"][17] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
-    assert (boot["layouts"], boot["active"], boot["working"], boot["history"]) == (
-        [], None, None, [])
+    assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
+        [], None, None, [], False)
 
 
 # ---- the pywebview walk ------------------------------------------------------
@@ -88,10 +90,10 @@ def _reachable(obj, seen=None):
 
 def test_pywebview_walk_reaches_no_connection(api):
     seen = _reachable(api)
-    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE
+    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api, api.monolith, api.mote, api.moxie]
+    assert seen["objects"] == [api, api.monolith, api.mote, api.motion, api.moxie]
 
 
 # ---- statements --------------------------------------------------------------
@@ -147,11 +149,11 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
 
 
 def test_an_unported_app_opens_its_old_window(api, launched):
-    effect = api.run("mo tion")
-    assert effect == {"effect": "legacy", "app": "motion",
-                      "message": "opened Motion (old window)"}
+    effect = api.run("mo ra")
+    assert effect == {"effect": "legacy", "app": "mora",
+                      "message": "opened Mora (old window)"}
     assert launched[-1][0] == sys.executable
-    assert launched[-1][1].endswith("run_motion.py")
+    assert launched[-1][1].endswith("run_mora.py")
     assert launched[-1][2:] == ["--garden", "test"]
 
 
@@ -650,3 +652,83 @@ def test_the_fit_payload(api, divider):
     assert api.moxie.fit("fit")["empty"]
     assert "error" in api.moxie.fit(FIT + " --apply")
     assert motes_repo.get_mote(api._session.conn, divider).properties["r_a"] == 100
+
+
+# ---- Motion (U5) -------------------------------------------------------------
+
+def _divider(api):
+    from core.relationships import create_relationship
+    from core.species import set_species
+    conn = api._session.conn
+    species = motes_repo.create_mote(conn, {"name": "Divider", "freedoms": "current"})
+    rule = motes_repo.create_mote(conn, {"name": "series",
+                                         "equation": "current * (r_a + r_b) == voltage"})
+    create_relationship(conn, rule, species, "applies_to")
+    c1 = motes_repo.create_mote(conn, {"name": "C1", "voltage": 10, "r_a": 50, "r_b": 200})
+    set_species(conn, c1, species)
+
+
+def _current(api):
+    conn = api._session.conn
+    (c1,) = [m for m in motes_repo.list_motes(conn) if m.properties.get("name") == "C1"]
+    return c1.properties.get("current")
+
+
+def test_mo_tion_opens_its_three_panes(api):
+    effect = api.run("mo tion")
+    assert effect["effect"] == "open_layout" and effect["app"] == "tion"
+    assert effect["tree"]["split"] == "row"
+
+
+def test_sim_rule_why_and_scenarios_open_panes(api):
+    assert api.run("sim --ticks 5") == {"effect": "open_view", "view": "motion:state",
+                                        "command": "sim --ticks 5"}
+    assert api.run("rule @sel")["view"] == "motion:rule"
+    assert api.run("why C1.current")["view"] == "motion:rule"
+    assert api.run("scenarios")["view"] == "motion:scenarios"
+
+
+def test_solve_writes_one_undo_step(api):
+    _divider(api)
+    effect = api.run("solve")
+    assert effect["effect"] == "statement" and effect["wrote"]
+    assert _current(api) == pytest.approx(0.04)
+    api.run("undo")
+    assert _current(api) is None
+
+
+def test_live_solves_after_each_write_as_one_step(api):
+    _divider(api)
+    assert api.run("solve --live on")["live"] is True
+    assert api.boot()["live"] is True
+    effect = api.run("set C1.voltage 20")
+    assert "live: solved" in effect["message"]
+    assert _current(api) == pytest.approx(0.08)
+    api.run("undo")
+    assert _current(api) is None
+    api.run("solve --live off")
+    api.run("set C1.voltage 30")
+    assert _current(api) is None
+
+
+def test_playhead_verbs_are_effects_for_the_shell(api):
+    assert api.run("step -3") == {"effect": "playhead", "op": "step", "mode": "by", "n": -3}
+    assert api.run("step 12")["mode"] == "to"
+    assert api.run("play") == {"effect": "playhead", "op": "play"}
+    assert api.run("pause x")["effect"] == "error"
+
+
+def test_the_motion_panes_answer(api):
+    _divider(api)
+    run = api.motion.sim("sim --ticks 3")
+    assert [r["ref"] for r in run["rows"]] == ["C1.current"]
+    assert api.motion.rewrite("sim", {"vs": "garden"}) == {"command": "sim --vs garden"}
+    rule = api.motion.rule("rule series", [], {"ticks": 3})
+    assert rule["cards"][0]["name"] == "series"
+    assert any(b["series"] for b in rule["cards"][0]["bindings"])
+    assert api.motion.rule("rule @sel", [])["empty"]
+    api.run("solve")
+    assert api.motion.rule("why C1.current")["explanation"]["value"] == pytest.approx(0.04)
+    api.run("set --scenario hot C1.voltage 30")
+    assert api.motion.scenarios()["scenarios"][0]["name"] == "hot"
+    assert api.motion.sim("sim --scenario nope")["error"].startswith("no scenario")

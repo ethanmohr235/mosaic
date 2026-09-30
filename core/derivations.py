@@ -107,6 +107,26 @@ def replace_journal(cursor: sqlite3.Cursor, journal: Journal) -> None:
         _log_derivation(cursor, derivation)
 
 
+def snapshot(conn: sqlite3.Connection) -> dict[str, list[tuple]]:
+    """Every provenance row as it stands, so a solve that replaced them
+    can be undone (core/motion.py::solve): `why` after an undo explains
+    the values the undo put back, not the ones it took away."""
+    return {table: [tuple(row) for row in conn.execute(f"SELECT * FROM {table}")]
+            for table in _TABLES}
+
+
+def restore(conn: sqlite3.Connection, saved: dict[str, list[tuple]]) -> None:
+    """Put back a snapshot() -- the whole provenance, replacing what is there."""
+    cursor = conn.cursor()
+    for table in _TABLES:
+        cursor.execute(f"DELETE FROM {table}")
+        rows = saved.get(table, [])
+        if rows:
+            marks = ", ".join("?" * len(rows[0]))
+            cursor.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
+    conn.commit()
+
+
 def _log_derivation(cursor: sqlite3.Cursor, derivation: Derivation) -> None:
     cursor.executemany(
         "INSERT INTO simulation_derivations "

@@ -57,7 +57,8 @@ def test_reserved_words_are_the_verbs_and_mo():
     assert reserved_words() == set(RESERVED_VERBS)
     assert list(RESERVED_VERBS) == [
         "mo", "find", "set", "open", "rename", "unlink", "template",
-        "plot", "fit", "cd", "layout", "refresh", "undo", "redo", "log"]
+        "plot", "fit", "sim", "rule", "scenarios", "solve", "why", "step", "play", "pause",
+        "cd", "layout", "refresh", "undo", "redo", "log"]
 
 
 def test_resolve_view():
@@ -115,7 +116,7 @@ def _values(completion):
 
 def test_first_token_lists_verbs(conn):
     result = complete(conn, "r")
-    assert [r.value for r in result.rows] == ["rename", "refresh", "redo"]
+    assert [r.value for r in result.rows] == ["rename", "rule", "refresh", "redo"]
     assert (result.ghost, result.replace_from) == ("ename", 0)
 
 

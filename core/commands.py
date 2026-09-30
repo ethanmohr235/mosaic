@@ -51,13 +51,19 @@ class ConsoleApp:
     default_view: str | None = None
     legacy: str | None = None
     default_command: str | None = None  # canonical command for default_view
+    # An app that opens several panes at once (`mo tion`): a layout tree
+    # in the shell's JSON shape (console/frontend/js/tree.js) that takes
+    # the focused pane's place. None opens `default_command` alone.
+    layout: dict | None = None
 
 
 CONSOLE_APPS: tuple[ConsoleApp, ...] = (
     ConsoleApp("nolith", "Monolith", default_view="monolith:table", default_command="find"),
     ConsoleApp("te", "Inspector", default_view="mote:props", default_command="open @sel"),
     ConsoleApp("xie", "Moxie", default_view="moxie:plot", default_command="plot"),
-    ConsoleApp("tion", "Motion", legacy="motion"),
+    ConsoleApp("tion", "Motion", default_view="motion:state", default_command="sim",
+               layout={"split": "row", "sizes": [0.24, 0.46, 0.3], "children": [
+                   {"command": "scenarios"}, {"command": "sim"}, {"command": "rule @sel"}]}),
     ConsoleApp("ra", "Mora", legacy="mora"),
     ConsoleApp("nastery", "Monastery", legacy="monastery"),
     ConsoleApp("narch", "Monarch", legacy="monarch"),
@@ -65,14 +71,16 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
 )
 
 # Verbs a view answers directly, rather than the root API acting on them.
-VERB_VIEWS: dict[str, str] = {"log": "log"}
+VERB_VIEWS: dict[str, str] = {"log": "log", "scenarios": "motion:scenarios"}
 # Verbs a view answers *with* their arguments: the whole line is the
 # pane's command (`find status:open --sort due`).
 ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "plot": "moxie:plot",
-                             "fit": "moxie:fit"}
+                             "fit": "moxie:fit", "sim": "motion:state", "rule": "motion:rule",
+                             "why": "motion:rule"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
+SCENARIO_FLAG = "--scenario"
 
 LAYOUT_OPS: dict[str, str] = {
     "save": "save the current panes as ‹name›",
@@ -217,10 +225,14 @@ def run_set(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[s
     `R1.x = 5 ohm` is (core/batch.py), so a unit lands in `units`.
     Raises CommandError for a line that says nothing it can do."""
     usage = f"usage: {RESERVED_VERBS[SET_VERB]['usage']}"
+    args, scenario = _scenario_flag(args, usage)
+    args = _dotted(conn, args)
     if len(args) < 3:
         raise CommandError(usage)
     target, key, rest = args[0], args[1], list(args[2:])
     ids = _set_targets(conn, target, selection)
+    if scenario is not None:
+        return _set_in_scenario(conn, scenario, ids, key, rest, usage)
     if rest == [CLEAR_FLAG]:
         count, command = batch.clear_property(conn, ids, key)
         verb = "cleared"
@@ -233,6 +245,84 @@ def run_set(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[s
         raise CommandError("nothing to set -- the target no longer exists")
     noun = "mote" if count == 1 else "motes"
     return SetResult(f"{verb} {key} on {count} {noun}", count, command)
+
+
+def _scenario_flag(args: Sequence[str], usage: str) -> tuple[tuple[str, ...], str | None]:
+    """`--scenario ‹s›` anywhere in a set line: pulled out, its value kept."""
+    args = list(args)
+    if SCENARIO_FLAG not in args:
+        return tuple(args), None
+    i = args.index(SCENARIO_FLAG)
+    if i + 1 >= len(args):
+        raise CommandError(f"{SCENARIO_FLAG} needs a scenario -- {usage}")
+    scenario = args[i + 1]
+    del args[i:i + 2]
+    return tuple(args), scenario
+
+
+def _dotted(conn: sqlite3.Connection, args: tuple[str, ...]) -> tuple[str, ...]:
+    """`set C1.voltage 30` is `set C1 voltage 30` -- the worksheet's way
+    of naming a value. Only when the first word is not itself a mote's
+    whole name, so a mote called `v1.2` is still reached as it always was."""
+    if len(args) < 2 or "." not in args[0]:
+        return args
+    target, _dot, key = args[0].rpartition(".")
+    if not target or not key:
+        return args
+    if not args[0].startswith(("#", _SEL)) and any(
+            m.properties.get("name") == args[0] for m in motes_repo.list_motes(conn)):
+        return args
+    return (target, key, *args[1:])
+
+
+def _set_in_scenario(conn, scenario: str, ids: list[str], key: str, rest: list[str],
+                     usage: str) -> SetResult:
+    """`set --scenario hot C1.voltage 30`: the value goes on that
+    scenario's override of C1 (created, with the scenario itself, if
+    need be), never on C1. `--clear` takes the override's value away, so
+    the scenario reads the garden's again."""
+    from core import motion
+    if CLEAR_FLAG in rest and rest != [CLEAR_FLAG]:
+        raise CommandError(f"{CLEAR_FLAG} takes no value -- {usage}")
+    scenario_id, steps = motion.scenario_for_write(conn, scenario)
+    overrides = []
+    for mote_id in ids:
+        override_id, created = motion.override_for_write(conn, scenario_id, mote_id)
+        steps += created
+        overrides.append((mote_id, override_id))
+    override_ids = [o for _m, o in overrides]
+    if rest == [CLEAR_FLAG]:
+        count, command = batch.clear_property(conn, override_ids, key)
+        verb = "cleared"
+    else:
+        count, command = batch.set_property(conn, override_ids, key, " ".join(rest))
+        verb = "set"
+    if command is not None:
+        steps.append(command)
+    if verb == "set":
+        for mote_id, override_id in overrides:
+            steps += _keep_units(conn, mote_id, override_id)
+    noun = "mote" if count == 1 else "motes"
+    message = f"{verb} {key} on {count} {noun} under {scenario}"
+    return SetResult(message, count, undo.combine(message, steps) if steps else None)
+
+
+def _keep_units(conn, mote_id: str, override_id: str) -> list:
+    """An override replaces whole properties (core/scenarios.py::apply),
+    so a unit written on it would replace the target's whole `units` map.
+    Its map is filled out from the target's, so only the one entry differs."""
+    override = motes_repo.get_mote(conn, override_id).properties
+    if units.UNITS_KEY not in override:
+        return []
+    target = motes_repo.get_mote(conn, mote_id).properties
+    merged = {**units.parse_units_property(target.get(units.UNITS_KEY)),
+              **units.parse_units_property(override[units.UNITS_KEY])}
+    if merged == override[units.UNITS_KEY]:
+        return []
+    before = {units.UNITS_KEY: override[units.UNITS_KEY]}
+    motes_repo.update_mote(conn, override_id, {units.UNITS_KEY: merged})
+    return [undo.for_update_mote(conn, override_id, before, {units.UNITS_KEY: merged},
+                                 label="scenario units")]
 
 
 # ---- rename, unlink, template ------------------------------------------
@@ -464,6 +554,10 @@ def complete(
     if word == "fit":
         from core import fit
         rows = [CompletionRow(c.value, c.description) for c in fit.choices(conn, rest)]
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word in ("sim", "rule", "why", "solve", "step"):
+        from core import motion
+        rows = [CompletionRow(v, d) for v, d in motion.choices(conn, word, rest)]
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
     if word in ("open", "rename", "unlink", "template"):
         return _complete_from(RESERVED_VERBS[word]["usage"], _u3_choices(conn, word, rest), rest, cursor)
