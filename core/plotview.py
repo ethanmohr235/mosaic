@@ -139,6 +139,7 @@ class Figure:
     dots: list[dict] = field(default_factory=list)
     solves: int = 0
     error: str | None = None
+    cancelled: bool = False
 
 
 # --- finding the view ------------------------------------------------
@@ -222,31 +223,44 @@ def figure(
                             motes=motes, max_points=max_points)
 
 
+def read_for(conn: sqlite3.Connection, spec: dict) -> tuple[Ground, list[Mote]]:
+    """Everything drawing `spec` reads from the garden, in one go -- so a
+    caller can read under its connection's lock and solve outside it
+    (figure_from_spec's `ground` and `motes`)."""
+    return read_garden(conn, _scenario_ids(spec)), list_motes(conn)
+
+
 def figure_from_spec(
-    conn: sqlite3.Connection,
+    conn: sqlite3.Connection | None,
     spec: dict,
     *,
     name: str = "",
     view_id: str | None = None,
     motes: list[Mote] | None = None,
+    ground: Ground | None = None,
     max_points: int = NOTE_POINTS,
+    should_cancel=None,
 ) -> Figure:
     """A plot specification -- the same shape a saved view holds -- drawn
     against the garden as it stands. What figure() does once it has found
     the view, and what the console's `plot …` pane asks for directly
-    (core/plotcmd.py builds the spec from the line). Writes nothing."""
+    (core/plotcmd.py builds the spec from the line). Writes nothing.
+
+    Pass `ground` and `motes` (read_for) to solve without touching `conn`;
+    `should_cancel` is polled between points, and a cancelled figure comes
+    back with `cancelled` set."""
     motes = list_motes(conn) if motes is None else motes
     directory = _Directory(motes)
     mode = spec.get("mode") or "sweep"
     if mode not in _MODES:
         return Figure(name=name, view_id=view_id, error=f"unknown plot mode {mode!r}")
     try:
-        ground = read_garden(conn, _scenario_ids(spec))
+        ground = read_garden(conn, _scenario_ids(spec)) if ground is None else ground
         if mode == "surface":
-            return _surface(spec, name, view_id, directory, ground, max_points)
+            return _surface(spec, name, view_id, directory, ground, max_points, should_cancel)
         if mode == "correlate":
             return _correlate(spec, name, view_id, directory, ground)
-        return _sweep(spec, name, view_id, directory, ground, max_points)
+        return _sweep(spec, name, view_id, directory, ground, max_points, should_cancel)
     except Exception as e:                      # noqa: BLE001 -- see the module docstring
         logger.warning("plot %r failed to draw: %s", name or spec, e)
         return Figure(mode=mode, name=name, view_id=view_id, error=str(e))
@@ -299,7 +313,7 @@ class _Directory:
 
 def _sweep(
     spec: dict, name: str, view_id: str | None, directory: _Directory, ground: Ground,
-    max_points: int,
+    max_points: int, should_cancel=None,
 ) -> Figure:
     axis = _axis(spec.get("x"), max_points)
     series_specs = [s for s in spec.get("series") or [] if _names_a_property(s)]
@@ -312,7 +326,10 @@ def _sweep(
     result = run_sweep(
         ground, axis, cases, outputs,
         spec.get("solver", "linear"), spec.get("solverConfiguration"),
+        should_cancel=should_cancel,
     )
+    if result.cancelled:
+        return Figure(mode="sweep", name=name, view_id=view_id, cancelled=True)
 
     ghosting = bool(spec.get("ghost")) and bool(spec.get("baseline"))
     rows = []
@@ -366,7 +383,7 @@ def _sweep(
 
 def _surface(
     spec: dict, name: str, view_id: str | None, directory: _Directory, ground: Ground,
-    max_points: int,
+    max_points: int, should_cancel=None,
 ) -> Figure:
     x_axis = _axis(spec.get("x"), max(2, max_points))
     y_axis = _axis(spec.get("y"), max(2, max_points))
@@ -378,8 +395,10 @@ def _surface(
     result = run_surface(
         ground, x_axis, y_axis, (output["mote"], output["key"]),
         _cases(spec, [])[0], spec.get("solver", "linear"),
-        spec.get("solverConfiguration"),
+        spec.get("solverConfiguration"), should_cancel=should_cancel,
     )
+    if result.cancelled:
+        return Figure(mode="surface", name=name, view_id=view_id, cancelled=True)
     span = result.span
     # The sweep's own row/col indices are the axis's (a coarse pass skips
     # some); a figure is drawn once, so the grid is dense and
@@ -522,11 +541,15 @@ def _bands(rows: list[dict], log: bool) -> list[Band]:
     Answered from the points, since a figure carries nothing else."""
     groups: list[dict] = []
     for row in rows:
-        found = next((g for g in groups if g["dimension"] == row["dimension"]), None)
+        size = _magnitude(row["points"])
+        found = next((g for g in groups if g["dimension"] == row["dimension"]
+                      and (row["dimension"] is not None or _comparable(g["size"], size))), None)
         if found is None:
-            found = {"dimension": row["dimension"], "unit": row["unit"],
+            found = {"dimension": row["dimension"], "unit": row["unit"], "size": size,
                      "keys": [], "series": [], "lo": None, "hi": None}
             groups.append(found)
+        elif found["size"] is None or (size is not None and size > found["size"]):
+            found["size"] = size
         found["series"].append(row["id"])
         label = row["label"].rsplit(".", 1)[-1]
         if label not in found["keys"]:
@@ -553,6 +576,23 @@ def _bands(rows: list[dict], log: bool) -> list[Band]:
             lo=lo, hi=hi, series=group["series"],
         ))
     return bands
+
+
+# Two unitless series whose sizes differ by more than this share no axis:
+# without a unit there is nothing to say they measure the same thing, and
+# a value of 0.03 drawn on 0..100 is a flat line at zero.
+MAGNITUDE_SPLIT = 100.0
+
+
+def _magnitude(points) -> float | None:
+    values = [abs(p[1]) for p in points if p is not None]
+    return max(values) if values else None
+
+
+def _comparable(a: float | None, b: float | None) -> bool:
+    if a is None or b is None or a == 0 or b == 0:
+        return True
+    return max(a, b) / min(a, b) <= MAGNITUDE_SPLIT
 
 
 def _padded(lo, hi, log: bool) -> tuple[float, float]:

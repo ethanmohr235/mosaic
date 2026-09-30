@@ -112,13 +112,13 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
   };
 
   /** Run one command line. Resolves to the command line's outcome. */
-  async function run(line, { newPane = false, confirm = false } = {}) {
+  async function run(line, { newPane = false, confirm = false, replaceHistory = false } = {}) {
     await autosave.flush();
-    if (!confirm) store.addHistory(line);
+    if (!confirm) store.addHistory(line, { replace: replaceHistory });
     store.log("command", line);
     let effect;
     try {
-      effect = await api.run(line, store.state.selection, confirm);
+      effect = await api.run(line, store.state.selection, confirm, replaceHistory);
     } catch (err) {
       effect = { effect: "error", message: message(err) };
     }

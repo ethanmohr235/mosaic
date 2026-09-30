@@ -25,6 +25,9 @@ import { render as draw, fmt, seriesStyle } from "../plot.js";
 const HINTS = [["h l", "cursor"], ["[ ]", "series"], ["t", "show/hide"], ["z", "zoom"], ["Z", "zoom out"],
   ["y", "log y"]];
 const KNOB_HINTS = [["j k", "knob"], ["- +", "move knob"]];
+// Below this pane width the side column hides (its knobs and sensitivity
+// move to the status line) so the plot keeps the room; `r` overrides.
+const NARROW = 640;
 const NUDGE = 1 / 20; // one `-`/`+` press moves a knob this share of its range
 
 function message(err) {
@@ -35,11 +38,30 @@ function points(raw) {
   return (raw || []).map((p) => (p ? { x: p[0], y: p[1] } : null));
 }
 
+let fontCache = null;
+
+/** vendor/fonts/GeistMono-Regular.woff2 as a data: URL, fetched once. */
+function embeddedFont() {
+  if (!fontCache) {
+    fontCache = fetch("vendor/fonts/GeistMono-Regular.woff2")
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => blob && new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      }))
+      .catch(() => null);
+  }
+  return fontCache;
+}
+
 function create(ctx) {
   const { api, store, components } = ctx;
   const { h } = components;
-  const st = { command: "", seq: 0, payload: null, error: null, cursor: null, mark: null,
-    series: 0, knob: 0, draft: null, dragging: null, sensitivity: null, sensSeq: 0, geometry: null };
+  const channel = `plot-${Math.random().toString(36).slice(2)}`;
+  const st = { command: "", seq: 0, gen: 0, payload: null, error: null, cursor: null, mark: null,
+    series: 0, knob: 0, rail: null, draft: null, dragging: null, sensitivity: null, sensSeq: 0, geometry: null };
   let root = null, plotEl = null, statusEl = null, railEl = null;
   let resize = null;
   let sensTimer = 0;
@@ -118,8 +140,14 @@ function create(ctx) {
     drawRail();
   }
 
+  function railShown() {
+    if (st.rail !== null) return st.rail;
+    return !root || root.clientWidth >= NARROW;
+  }
+
   function drawPlot() {
     if (!plotEl || !st.payload || st.payload.empty) return;
+    railEl.hidden = !railShown();
     const f = st.payload.figure;
     if (f.error && !(f.series || []).some((s) => s.points.some(Boolean)) && !(f.cells || []).length && !(f.dots || []).length) {
       plotEl.replaceChildren(h("div", "pane-error lvl-fault", f.error));
@@ -148,6 +176,12 @@ function create(ctx) {
     if (p.xPinned) parts.push(h("span", "lvl-warn", "x pinned"));
     if ((f.broken || []).length) parts.push(h("span", "lvl-fault", `breaks ${f.broken.join(", ")}`));
     if (f.failed && f.failed.length) parts.push(h("span", "lvl-fault", `${f.failed.length} span${f.failed.length === 1 ? "" : "s"} unsolved`));
+    if (!railShown()) {
+      const knobs = (p.knobs || []).map((k, i) => `${k.ref}=${fmt(knobValue(i))}`);
+      if (knobs.length) parts.push(h("span", null, knobs.join(" ")));
+      const top = (st.sensitivity || [])[0];
+      if (top && st.cursor !== null) parts.push(h("span", null, `most: ${top.ref} ${top.value >= 0 ? "+" : ""}${top.value.toFixed(2)}`));
+    }
     parts.push(h("span", "plot-status-fill"));
     const rows = readout();
     if (rows.length) {
@@ -236,7 +270,10 @@ function create(ctx) {
   async function ask(command, coarse) {
     const ns = api.moxie;
     try {
-      return ns && typeof ns.plot === "function" ? await ns.plot(command, coarse) : { error: "this window has no moxie api" };
+      // Every ask supersedes this pane's older one, which Python then
+      // cancels between points rather than finishing.
+      return ns && typeof ns.plot === "function" ? await ns.plot(command, coarse, channel, ++st.gen)
+        : { error: "this window has no moxie api" };
     } catch (err) {
       return { error: message(err) };
     }
@@ -264,7 +301,7 @@ function create(ctx) {
     st.command = command;
     const seq = ++st.seq;
     const coarse = await ask(command, true);
-    if (seq !== st.seq || !root) return { summary: "", level: "idle" };
+    if (seq !== st.seq || !root || (coarse && coarse.cancelled)) return { summary: "", level: "idle" };
     if (!coarse || coarse.error) {
       Object.assign(st, { payload: null, error: (coarse && coarse.error) || "no answer" });
       render();
@@ -275,7 +312,7 @@ function create(ctx) {
     if (coarse.empty) return { summary: "", level: "idle" };
     const full = await ask(command, false);
     if (seq !== st.seq || !root) return { summary: "", level: "idle" };
-    if (full && !full.error) {
+    if (full && !full.error && !full.cancelled) {
       adopt(full);
       render();
       scheduleSensitivity();
@@ -429,7 +466,7 @@ function create(ctx) {
         draft = null;
       }
       const p = draft && !draft.error ? await ask(draft.command, true) : null;
-      if (st.dragging === drag && p && !p.error && !p.empty) {
+      if (st.dragging === drag && p && !p.error && !p.empty && !p.cancelled) {
         adopt(p);
         drawPlot();
       }
@@ -473,6 +510,7 @@ function create(ctx) {
       if (seq !== st.sensSeq || !root) return;
       st.sensitivity = result && result.rows ? result.rows : null;
       drawRail();
+      drawStatus();
     }, 120);
   }
 
@@ -490,6 +528,7 @@ function create(ctx) {
     z: zoomKey,
     Z: zoomOut,
     y: () => st.payload.figure && rewrite({ log: st.payload.figure.yScale !== "log" }),
+    r: () => { st.rail = !railShown(); drawPlot(); },
   };
 
   function onKey(event) {
@@ -511,10 +550,17 @@ function create(ctx) {
 
   /** The plot as a standalone SVG: every var(--x) resolved (an image has
    * no stylesheet) and the HTML labels written in as <text>. */
-  function svgDataUrl() {
+  async function svgDataUrl() {
     const svg = plotEl && plotEl.querySelector("svg");
     if (!svg) return null;
     const clone = svg.cloneNode(true);
+    // An image can't reach the page's fonts, so Geist rides inside it.
+    const font = await embeddedFont();
+    if (font) {
+      const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+      style.textContent = `@font-face { font-family: "Geist Mono"; src: url(${font}) format("woff2"); }`;
+      clone.insertBefore(style, clone.firstChild);
+    }
     const style = getComputedStyle(document.documentElement);
     const resolve = (value) => value.replace(/var\((--[\w-]+)\)/g, (_m, name) => style.getPropertyValue(name).trim());
     clone.querySelectorAll("*").forEach((node) => {
@@ -543,8 +589,8 @@ function create(ctx) {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`;
   }
 
-  function rasterize() {
-    const url = svgDataUrl();
+  async function rasterize() {
+    const url = await svgDataUrl();
     if (!url) return Promise.resolve(null);
     const rect = plotEl.getBoundingClientRect();
     if (!rect.width || !rect.height) return Promise.resolve(null);
@@ -570,7 +616,9 @@ function create(ctx) {
       const body = st.command.replace(/^plot\s*/, "");
       if (!body) return { message: "nothing to save -- this pane shows no plot yet", level: "fault" };
       const name = /^[\w.-]+$/.test(e.name) ? e.name : JSON.stringify(e.name);
-      const outcome = await ctx.runCommand(`plot save ${name} ${body}`);
+      // The typed `plot save ‹name›` is replaced in the history by the
+      // full line, which is what actually wrote.
+      const outcome = await ctx.runCommand(`plot save ${name} ${body}`, { replaceHistory: true });
       return { ...outcome, logged: true };
     }
     if (e.action === "export") {
@@ -616,8 +664,9 @@ function create(ctx) {
     hints: () => {
       if (!st.payload || st.payload.empty || !st.payload.figure) return [];
       const knobs = (st.payload.knobs || []).length ? KNOB_HINTS : [];
-      if (st.payload.figure.mode === "sweep") return [...HINTS, ...knobs];
-      return st.payload.figure.mode === "correlate" ? [["y", "log y"], ...knobs] : knobs;
+      const rail = [["r", "side column"]];
+      if (st.payload.figure.mode === "sweep") return [...HINTS, ...knobs, ...rail];
+      return st.payload.figure.mode === "correlate" ? [["y", "log y"], ...knobs, ...rail] : [...knobs, ...rail];
     },
     onKey,
     action,

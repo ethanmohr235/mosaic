@@ -791,9 +791,9 @@ running anything.
 go, and every `run_*` above accepts that `Ground` in place of a
 connection. A caller can therefore read under whatever lock guards its
 connection and solve outside it, so a sweep need not hold the connection
-against the keystroke meant to cancel it. (The console's plot pane does
-not do this yet: `console/moxie.py` solves under the session lock, draws
-a coarse pass first, and drops any reply a newer request overtook.) `indices`
+against the keystroke meant to cancel it. The console's plot pane does exactly this (`plotview.read_for` under
+the session lock, then `figure_from_spec(ground=…, should_cancel=…)`
+outside it), and a newer request from the same pane cancels the older. `indices`
 (and `run_surface`'s `stride`) compute a subset of the points, so a
 coarse pass can be drawn before a fine one refines it, and
 `should_cancel` is polled between points.

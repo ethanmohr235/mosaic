@@ -78,7 +78,8 @@ class Api:
     # ---- the command line ----
 
     @locked
-    def run(self, line: str, selection: list[str] | None = None, confirm: bool = False) -> dict:
+    def run(self, line: str, selection: list[str] | None = None, confirm: bool = False,
+            replace_history: bool = False) -> dict:
         """Run one command-line line and return exactly one effect:
         statement, open_view, legacy, layout, garden, undo/redo, refresh
         or error. The raw line enters this garden's history first, so
@@ -89,7 +90,7 @@ class Api:
         if not text:
             return _error("")
         if not confirm:
-            self._state.add_history(text)
+            self._state.add_history(text, replace=replace_history)
             self._save_state()
         try:
             return self._dispatch(text, selection or [], confirm)

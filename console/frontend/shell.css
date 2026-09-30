@@ -695,8 +695,9 @@ body.dragging-col { cursor: row-resize; }
   overflow: auto; min-height: 0;
 }
 .plot-rail-section { padding: var(--table-head-pad) var(--pad-x); border-bottom: var(--border) solid var(--line); }
-.plot-rail-head { display: flex; justify-content: space-between; font-weight: var(--w-bold); }
-.plot-rail-meta { color: var(--dim); font-weight: var(--w-regular); }
+.plot-rail-head { display: flex; gap: var(--header-gap); font-weight: var(--w-bold); white-space: nowrap; }
+.plot-rail-head > span { overflow: hidden; text-overflow: ellipsis; }
+.plot-rail-meta { flex: 1; min-width: 0; text-align: right; color: var(--dim); font-weight: var(--w-regular); }
 .plot-rail-row { display: flex; align-items: center; gap: var(--header-gap); height: var(--row-h); cursor: default; }
 .plot-rail-row.hidden { color: var(--dim); }
 .plot-rail-section > .plot-rail-row.cursor,

@@ -143,8 +143,10 @@ function sessionOps(state, emit) {
     },
 
     /** Mirror a line Python just appended to the garden's history. */
-    addHistory(command) {
-      state.history.push({ time: localIso(new Date()), command });
+    addHistory(command, { replace = false } = {}) {
+      const entry = { time: localIso(new Date()), command };
+      if (replace && state.history.length) state.history[state.history.length - 1] = entry;
+      else state.history.push(entry);
     },
 
     /** Add a session-log entry. level: "ok" | "warn" | "fault" | "idle". */

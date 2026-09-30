@@ -68,8 +68,14 @@ class ConsoleState:
             raise ValueError(f"no layout named {name!r}")
         self.active = name
 
-    def add_history(self, command: str, when: datetime | None = None) -> None:
+    def add_history(self, command: str, when: datetime | None = None, replace: bool = False) -> None:
+        """`replace` swaps the newest entry for `command` instead: a pane
+        that completes a short line into its full form (`plot save Load`
+        -> `plot save Load ‹its line›`) keeps one entry, the full one."""
         stamp = (when or datetime.now()).isoformat(timespec="seconds")
+        if replace and self.history:
+            self.history[-1] = {"time": stamp, "command": command}
+            return
         self.history.append({"time": stamp, "command": command})
         del self.history[:-HISTORY_LIMIT]
 

@@ -41,7 +41,7 @@ function wire(api) {
     },
     onPlace: (id, view) => shell.actions.place(id, view),
     onCancel: (id) => shell.actions.close(id),
-    onRun: (line) => shell.runLine(line),
+    onRun: (line, options) => shell.runLine(line, options),
     isCommandLineActive: () => !!shell.commandLine && shell.commandLine.isActive(),
   });
   shell.actions = createActions({ store, panes: shell.panes, api });
@@ -57,8 +57,8 @@ function wire(api) {
   // ctx.runCommand: a view's own line (an inline edit's `set …`) runs
   // exactly as if typed (history, log, effects) and reports on the
   // command line's status, the way ^z does.
-  shell.runLine = async (line) => {
-    const outcome = await runner.run(line);
+  shell.runLine = async (line, options = {}) => {
+    const outcome = await runner.run(line, options);
     shell.commandLine.setStatus(outcome.message || "", outcome.level === "fault" ? "fault" : "idle");
     return outcome;
   };

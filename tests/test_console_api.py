@@ -600,3 +600,18 @@ def test_sensitivity_from_the_bridge(api, divider):
 def test_plot_completion(api, divider):
     rows = [r["value"] for r in api.complete("plot C1.cu")["rows"]]
     assert rows == ["C1.current"]
+
+
+def test_a_newer_plot_request_cancels_the_older_one(api, divider):
+    """A pane's requests share a channel: once generation 2 is claimed,
+    generation 1 stops between points and says so."""
+    api.moxie._claim("pane", 2)
+    assert api.moxie.plot(LINE, False, "pane", 1) == {"cancelled": True}
+    assert "figure" in api.moxie.plot(LINE, False, "pane", 3)
+    assert "figure" in api.moxie.plot(LINE, False, "other", 1)
+
+
+def test_plot_save_replaces_its_short_line_in_history(api, divider):
+    api.run("plot save Load")
+    api.run("plot save Load " + LINE[len("plot "):], replace_history=True)
+    assert [h["command"] for h in api.history()] == ["plot save Load " + LINE[len("plot "):]]

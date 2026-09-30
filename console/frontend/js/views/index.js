@@ -29,7 +29,7 @@
  *               the layout is marked dirty and autosaved, and run() is
  *               called with the new command. Resolves once it has run.
  *               The command must still be one this view answers.
- *   runCommand(line)  run `line` as if typed at the command line (with
+ *   runCommand(line, {replaceHistory}?)  run `line` as if typed at the command line (with
  *               the current selection for @sel): it enters history and
  *               the log, its effect is applied (a write re-runs every
  *               pane), and its message shows in the command line's

@@ -106,6 +106,7 @@ Click selects, shift-click a range, ctrl-click toggles.
 | `y` | Log y |
 | `[` `]`, `t` / legend click | Pick series, show/hide it |
 | `j` `k`, `-` `+` / drag knob bar | Pick knob, move it 1/20 of its range |
+| `r` | Show/hide the side column (hidden automatically in a narrow pane; knobs then show in the status line) |
 | `esc` | Clear cursor |
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.

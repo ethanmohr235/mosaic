@@ -287,3 +287,19 @@ def test_completion_offers_refs_then_vs(conn, divider):
     after = [c.value for c in plotcmd.choices(conn, "C1.current ")]
     assert after[0] == "vs"
     assert [c.value for c in plotcmd.choices(conn, "export ")] == ["csv", "png"]
+
+
+def test_unitless_series_of_very_different_sizes_get_two_axes(conn, divider):
+    """g = 0.002 beside r_a = 100, neither with a unit: one shared axis
+    draws g as a flat line at zero, so the band splits by magnitude."""
+    from core.motes import update_mote
+    update_mote(conn, divider, {"g": 0.002})
+    figure = draw(conn, "plot C1.g C1.r_a vs C1.voltage 0:10 --steps 4")
+    assert [b.dimension for b in figure.bands] == [None, None]
+    assert len(figure.bands) == 2
+    assert [s.band for s in figure.series] == [0, 1]
+
+
+def test_unitless_series_of_similar_size_share_an_axis(conn, divider):
+    figure = draw(conn, "plot C1.r_a C1.r_b vs C1.voltage 0:10 --steps 4")
+    assert len(figure.bands) == 1

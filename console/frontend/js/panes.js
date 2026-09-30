@@ -37,7 +37,7 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
       components,
       navigate: (id, label = null) => store.setSelection([id], label ? { [id]: label } : {}),
       setCommand: (command) => setPaneCommand(pane, command),
-      runCommand: (line) => onRun(line),
+      runCommand: (line, options) => onRun(line, options),
     };
   }
 

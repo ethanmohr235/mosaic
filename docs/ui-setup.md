@@ -168,7 +168,10 @@ says **x pinned**, because the answer is then "what if this were so".
 
 The line is the pane's command, so every gesture rewrites it (a drag,
 a zoom, a knob move), and a layout restores exactly the plot you left.
-A pane draws a coarse pass first and then the full one.
+A pane draws a coarse pass first and then the full one. It reads the
+garden under the session lock and solves outside it, so a long sweep
+never holds up another pane, and a newer request from the same pane
+cancels the older one between points.
 
 | Key | Does |
 |---|---|
@@ -178,6 +181,7 @@ A pane draws a coarse pass first and then the full one.
 | `y` | Log y |
 | `[` `]`, `t` / a legend click | Pick a series; show or hide it |
 | `j` `k`, `-` `+` / drag a knob's bar | Pick a knob; move it a twentieth of its range |
+| `r` | Show or hide the side column. It hides by itself when the pane is narrower than 640px, and the knobs and the strongest sensitivity move to the status line |
 | `esc` | Clear the cursor |
 
 With knobs set, the rail ranks them by **sensitivity** at the cursor:
@@ -189,7 +193,7 @@ leaves a **gap** (hatched, with the solver's message on hover), never a
 line across it, and where the answer breaks one of the garden's own
 constraints the span is shaded and edged in `--fault` dashes. Series
 that measure the same dimension share a y axis, a second dimension takes
-the right one (`core/units.py` decides commensurability). Series colours
+the right one (so do unitless series more than 100× apart in size) (`core/units.py` decides commensurability). Series colours
 are `--s1`…`--s6`, by the series' place in the command so hiding one
 never repaints the others; a seventh repeats the first, dashed.
 

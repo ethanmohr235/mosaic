@@ -43,11 +43,16 @@ class MoxieApi:
     def __init__(self, session: Session, window: Callable[[], Any] = lambda: None):
         self._session = session
         self._window = window
+        self._generations: dict[str, int] = {}
 
-    @locked
-    def plot(self, command: str, coarse: bool = False) -> dict[str, Any]:
+    def plot(self, command: str, coarse: bool = False, channel: str = "default",
+             generation: int | None = None) -> dict[str, Any]:
+        """Not @locked: the garden is read under the session lock and solved
+        outside it, so a long sweep never holds up another pane. A newer
+        request on the same `channel` (one pane) cancels this one between
+        points; it then answers `{"cancelled": true}`."""
         try:
-            return self._plot(command, coarse)
+            return self._plot(command, coarse, self._claim(channel, generation))
         except (CommandError, ValueError, LookupError) as e:
             return {"error": str(e)}
         except Exception as e:  # never a traceback across the bridge
@@ -119,13 +124,24 @@ class MoxieApi:
             raise CommandError(f"{command!r} is an action, not a plot")
         return parsed.line
 
-    def _plot(self, command: str, coarse: bool) -> dict[str, Any]:
-        line = self._line(command)
-        if line.empty:
-            return {"empty": True, "usage": plotcmd.usage()}
-        resolved = plotcmd.resolve(self._session.conn, line)
+    def _claim(self, channel: str, generation: int | None) -> Callable[[], bool]:
+        if generation is None:
+            return lambda: False
+        with self._session.lock:
+            self._generations[channel] = max(self._generations.get(channel, 0), generation)
+        return lambda: self._generations.get(channel, 0) > generation
+
+    def _plot(self, command: str, coarse: bool, should_cancel) -> dict[str, Any]:
+        with self._session.lock:
+            line = self._line(command)
+            if line.empty:
+                return {"empty": True, "usage": plotcmd.usage()}
+            resolved = plotcmd.resolve(self._session.conn, line)
+            ground, motes = plotview.read_for(self._session.conn, resolved.spec)
         started = time.perf_counter()
-        figure = self._figure(resolved, coarse)
+        figure = self._figure(resolved, coarse, ground=ground, motes=motes, should_cancel=should_cancel)
+        if figure.cancelled:
+            return {"cancelled": True}
         return {
             "mode": figure.mode,
             "figure": plotview.figure_json(figure),
@@ -139,13 +155,14 @@ class MoxieApi:
             "seconds": round(time.perf_counter() - started, 3),
         }
 
-    def _figure(self, resolved: plotcmd.Resolved, coarse: bool) -> plotview.Figure:
+    def _figure(self, resolved: plotcmd.Resolved, coarse: bool, **snapshot) -> plotview.Figure:
         spec = resolved.spec
         steps = max(int((spec.get("x") or {}).get("steps") or plotcmd.DEFAULT_STEPS),
                     int((spec.get("y") or {}).get("steps") or 0))
         points = min(steps + 1, COARSE_POINTS) if coarse else steps + 1
-        return plotview.figure_from_spec(self._session.conn, spec, name=resolved.name,
-                                         view_id=resolved.view_id, max_points=points)
+        return plotview.figure_from_spec(None if snapshot else self._session.conn, spec,
+                                         name=resolved.name, view_id=resolved.view_id,
+                                         max_points=points, **snapshot)
 
     def _target(self, path: str | None, filename: str) -> Path | None:
         if path:

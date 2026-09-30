@@ -294,7 +294,12 @@ function renderDots(host, svg, g, model) {
   const xt = ticks(model.xLo, model.xHi, 4);
   drawFrame(svg, g, X, xt, band);
   const layer = div("plot-labels");
-  const placed = [];
+  // Every dot is an obstacle before any label is placed, so a label never
+  // covers another mote's dot; a label with nowhere to go is left off
+  // (its dot keeps its tooltip).
+  const placed = model.dots.map((dot) => ({ top: band.Y(dot.y) - 8, left: X(dot.x) - 6, width: 12 }));
+  const clash = (top, left, width) => placed.some((p) => Math.abs(p.top - top) < 16
+    && left < p.left + p.width + 4 && p.left < left + width + 4);
   for (const dot of model.dots) {
     const cx = X(dot.x), cy = band.Y(dot.y);
     const circle = el("circle", { cx, cy, r: 4, fill: dot.color, stroke: "var(--bg)", "stroke-width": 2, class: "plot-dot" });
@@ -307,10 +312,10 @@ function renderDots(host, svg, g, model) {
     const width = dot.label.length * 7.4 + 4;
     const flip = cx + 10 + width > g.right;
     const left = flip ? cx - 10 - width : cx + 8;
-    let top = cy - 9;
-    for (let guard = 0; guard < 16 && placed.some((p) => Math.abs(p.top - top) < 16
-      && left < p.left + p.width + 6 && p.left < left + width + 6); guard++) top += 16;
-    top = Math.min(g.bottom - 16, Math.max(g.top, top));
+    const tries = [cy - 9, cy - 25, cy + 7, cy - 41, cy + 23];
+    const top = tries.map((t) => Math.min(g.bottom - 16, Math.max(g.top, t)))
+      .find((t) => !clash(t, left, width));
+    if (top === undefined) continue;
     placed.push({ top, left, width });
     label(layer, dot.label, { left: `${left}px`, top: `${top}px`, width: `${width}px`, textAlign: flip ? "right" : "left" }, "plot-dot-label");
   }
