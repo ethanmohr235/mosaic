@@ -52,6 +52,7 @@ from mcp_server.server import (
     write_worksheet,
     project_tree,
     start_project,
+    import_csv,
 )
 
 # Every tool takes `garden` last and opens its own connection, so tests
@@ -745,3 +746,18 @@ def test_project_tree_reports_two_owners(garden):
     create_mote({"name": "Two", "garden": "p"}, GARDEN)
     kinds = {p["kind"] for p in project_tree()["problems"]}
     assert "disputed" in kinds
+
+
+def test_import_csv_dry_run_writes_nothing_then_imports(garden):
+    text = "name,load [kN]\nA,1.5\nB,2\n"
+    preview = import_csv(text, "loads.csv", dry_run=True, garden=GARDEN)
+    assert preview["rows"] == 2 and not preview["imported"]
+    assert preview["columns"][1] == {"key": "load", "unit": "kN"}
+    assert list_motes(GARDEN) == []
+    done = import_csv(text, "loads.csv", garden=GARDEN)
+    assert done["imported"] and len(done["rowIds"]) == 2
+
+
+def test_import_csv_refuses_a_bad_file(garden):
+    result = import_csv("x [nope]\n1\n", "bad.csv", garden=GARDEN)
+    assert not result["imported"] and result["problems"]

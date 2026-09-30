@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from core import calc
+from core import csv_import
 from core import health
 from core import projects
 from core import modoc
@@ -295,6 +296,21 @@ def build_parser() -> argparse.ArgumentParser:
         "health", help="Whether the model is solvable, and which values are not"
     )
     health_parser.add_argument("--scenario", help="Ask the same question of a scenario")
+
+    ### Import
+    import_parser = subparsers.add_parser(
+        "import", help="Bring measured data in as motes"
+    )
+    import_sub = import_parser.add_subparsers(dest="action")
+    import_csv = import_sub.add_parser(
+        "csv", help="One mote per row; `load [kN]` in the header gives a unit"
+    )
+    import_csv.add_argument("file", help="The CSV file")
+    import_csv.add_argument("--name", help="What to call the import (defaults to the file name)")
+    import_csv.add_argument("--delimiter", default=",", help="Cell separator (default ',')")
+    import_csv.add_argument(
+        "--dry-run", action="store_true", help="Show what would be imported, and write nothing"
+    )
 
     ### Project
     project_parser = subparsers.add_parser(
@@ -771,6 +787,26 @@ def _handle_health(conn, args) -> None:
             print(f"  {inert.label} on {inert.anchor}")
 
 
+def _handle_import(conn, args) -> None:
+    path = Path(args.file)
+    parsed = csv_import.parse(
+        path.read_text(encoding="utf-8-sig"), path.name, delimiter=args.delimiter
+    )
+    columns = ", ".join(
+        f"{c.key} [{c.unit}]" if c.unit else c.key for c in parsed.columns
+    )
+    print(f"{path.name}: {len(parsed.rows)} row(s); columns {columns or '(none)'}")
+    for problem in parsed.problems:
+        print(f"  problem: {problem}")
+    if parsed.problems:
+        print("Nothing was imported.")
+        return
+    if args.dry_run:
+        return
+    imported, _ = csv_import.apply(conn, parsed, args.name)
+    print(f"Imported {len(imported.row_ids)} row(s) under {imported.import_id}.")
+
+
 def _handle_project(args) -> None:
     """tree and check read every garden, so they take no --garden; start
     and stop write one mote, in the garden --garden names."""
@@ -897,6 +933,8 @@ def main() -> None:
                 _handle_health(conn, args)
             elif args.command == "calc":
                 _handle_calc(conn, args)
+            elif args.command == "import":
+                _handle_import(conn, args)
             elif args.command == "why":
                 _handle_why(conn, args)
             elif args.command in ("impact", "requires", "producers", "consumers"):

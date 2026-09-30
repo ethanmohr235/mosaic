@@ -27,6 +27,7 @@ from core import calc as calc_repo
 from core import derivations as derivations_repo
 from core import garden_io
 from core import health as health_repo
+from core import csv_import as csv_import_repo
 from core import projects as projects_repo
 from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
@@ -729,6 +730,36 @@ def start_project(mote_id: str, name: str | None = None, garden: str | None = No
         return {"garden": created, "owner": mote_id}
 
 
+def import_csv(
+    text: str,
+    file: str,
+    name: str | None = None,
+    delimiter: str = ",",
+    dry_run: bool = False,
+    garden: str | None = None,
+) -> dict[str, Any]:
+    """Import measured data from CSV `text`: one mote per row, the header
+    naming properties with an optional unit in brackets (`load [kN]`),
+    every value marked `source: measured` with `file` as its note, and each
+    row linked `imported_from` one import mote recording the file. A `name`
+    column names the rows; otherwise they are `<name> 1`, `<name> 2`...
+    Any problem refuses the whole file and writes nothing; `dry_run`
+    reports what would be written."""
+    parsed = csv_import_repo.parse(text, file, delimiter=delimiter)
+    result: dict[str, Any] = {
+        "columns": [{"key": c.key, "unit": c.unit} for c in parsed.columns],
+        "rows": len(parsed.rows),
+        "problems": list(parsed.problems),
+        "imported": False,
+    }
+    if parsed.problems or dry_run:
+        return result
+    with _connect(garden) as conn:
+        imported, _ = csv_import_repo.apply(conn, parsed, name)
+    return {**result, "imported": True, "importId": imported.import_id,
+            "rowIds": list(imported.row_ids)}
+
+
 def read_worksheet(garden: str | None = None) -> str:
     """This garden's calculation as lines of text -- its givens, then its
     equations -- the form `write_worksheet` takes back.
@@ -889,7 +920,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
-    project_tree, start_project,
+    project_tree, start_project, import_csv,
     calc_sections, shown_work,
     resolve_modoc,
     reserved_names,

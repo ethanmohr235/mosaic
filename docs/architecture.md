@@ -627,6 +627,30 @@ A capability missing from a surface its charter covers is a gap to
 close, not a decision. A capability missing from a surface its charter
 excludes should say so, here, in one line.
 
+# Importing measured data
+
+`core/csv_import.py` brings a CSV file in as **one mote per row**. The
+header names the properties, a unit rides in brackets (`load [kN]`), and
+a header is made a key by turning its spaces into `_` (`mesh size [mm]`
+is `mesh_size`, in millimetres) so an equation can name it. A `name`
+column names the rows; otherwise they are `<import> 1`, `<import> 2`...
+
+Every value is marked `source: {kind: measured, note: <file>}`, and every
+row is linked `imported_from` one import mote carrying `file`, `rows` and
+`columns`, so the rows can be found, and undone, as the one thing they
+were. `imported_from` is an ordinary relationship type: nothing solves
+or renders differently because of it.
+
+An empty cell is no value, not a zero. `nan` and `inf` stay text, since
+no measurement is either and neither survives JSON.
+
+`parse(text, file)` is pure and never raises; each problem is a line
+(an unknown unit, a repeated or reserved column, a row wider than the
+header). `apply(conn, parsed)` refuses a file with *any* problem, because
+half an import looks complete. It returns one undo Command for the lot.
+
+`monoss import csv <file> [--dry-run]`; MCP `import_csv`.
+
 # Links and external export
 
 `url` (`core/links.py`) makes a mote openable -- a web address or a local

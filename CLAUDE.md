@@ -59,7 +59,9 @@ code.
   tree and the cover (`name`, `due`, `status`, `author`, `revision`);
   `monoss project start|stop|tree|check`; MCP `project_tree`,
   `start_project`.
-- The next UI step is U2's frontend. The next roadmap step is phase 7's core.
+- Roadmap **phase 7's core is in progress**: CSV import is done
+  (`core/csv_import.py`, `monoss import csv`, MCP `import_csv`).
+- The next UI step is U2's frontend.
 
 ## Split of work: cloud backend, local frontend
 

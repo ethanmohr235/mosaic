@@ -944,3 +944,19 @@ def test_project_start_tree_and_check(capsys, monkeypatch):
     assert "Started project hw-4" in out
     assert "college\n  HW 4  [hw-4]" in out
     assert "Every garden has at most one owner." in out
+
+
+def test_import_csv_dry_run_then_import(capsys, monkeypatch, tmp_path, conn):
+    import sys
+    from cli.main import main
+    from core import motes as motes_repo
+
+    path = tmp_path / "loads.csv"
+    path.write_text("name,load [kN]\nA,1.5\n")
+    for extra in (["--dry-run"], []):
+        monkeypatch.setattr(sys, "argv", ["monoss", "--garden", "test", "import", "csv", str(path), *extra])
+        main()
+    out = capsys.readouterr().out
+    assert "loads.csv: 1 row(s); columns name, load [kN]" in out
+    assert "Imported 1 row(s)" in out
+    assert len(motes_repo.list_motes(conn)) == 2
