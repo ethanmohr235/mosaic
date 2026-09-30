@@ -916,13 +916,29 @@ calendar stranded at the coordinates the field used to be at.
 
 # The table
 
-Monolith (`monolith/`) is a fifth window: the garden as rows and
-columns. It is where large edits happen -- forty motes given an owner in
-one gesture -- and where structured questions get asked across
-everything at once, rather than one mote at a time.
+The garden as rows and columns: where large edits happen -- forty motes
+given an owner in one gesture -- and where structured questions get asked
+across everything at once, rather than one mote at a time. It was a
+window of its own (`monolith/`) and is becoming the console's `find` view
+(`docs/console.md`, step U2); **all of it lives in `core/` now**, in four
+modules, because the console, the CLI and an MCP tool all have to agree
+about what columns a garden has and what "set `status` on these forty"
+does:
+
+| module | subject |
+| --- | --- |
+| `core/query.py` | the query language: fields, operators, joins, order, grouping |
+| `core/table.py` | the discovered schema, and one query's rows |
+| `core/findtext.py` | that query as one typed line, both ways |
+| `core/batch.py` | one edit applied to many motes, as one undo step |
+| `core/views.py` | a query kept under a name |
+
+`monolith/payload.py` is what is left of the window's own shaping -- the
+relationship matrix and the row detail panel -- and re-exports the rest
+from `core/table.py` so the window keeps working until U2 deletes it.
 
 **Columns are discovered, never declared.** A garden has no schema, so
-there is nothing to read a column list off. `monolith/payload.py::Schema`
+there is nothing to read a column list off. `core/table.py::Schema`
 builds one per request from what is actually there: every property key
 anyone has used (with how many motes carry it, and whether it is a
 reserved name), every relationship type anyone has drawn -- in both
@@ -935,7 +951,7 @@ where every value differs.
 
 **A query is a first-class thing, and it lives in `core/`.**
 `core/query.py` holds the language -- fields, operators, joins, sorting,
-grouping -- and Monolith is only an editor for it, the same split
+grouping -- and a table is only an editor for it, the same split
 `core/modoc.py` and Mora draw. A **field** names one of four sources:
 
     property   a JSON property key
@@ -950,14 +966,6 @@ express. `rel` and `graph` fields are list-valued and therefore share one
 set of operators, and a `rel` column is editable: setting a cell writes
 relationships, which is the join a spreadsheet cannot do.
 
-**A saved view is an ordinary mote** carrying a `query` property -- the
-one reserved name this window adds. Like `modoc`, carrying one is data
-rather than a job in the graph's machinery, so it is deliberately not a
-`core/kinds.py` kind: a view mote that read as a kind would displace its
-real species in every other window's type label. Being ordinary is what
-makes a view sync between devices, appear in Monarch, and be linkable
-from a note.
-
 **Two gestures write relationships in bulk.** The relationship matrix
 puts the visible rows on both axes and writes or erases one edge per
 click, painting the type selected above it; and the bulk bar chains a
@@ -965,20 +973,98 @@ selection in row order or fans it into its first row. Thirty imported
 motes into a dependency chain is one gesture here and twenty-nine in the
 graph window.
 
-Everything else the window does is ordinary writes through
-`core/motes.py` and `core/relationships.py`, one primitive at a time, so
-a two-hundred-mote edit is two hundred oplog rows that `core/sync.py`
-replicates like any other. The one destructive action is guarded rather
-than fast: `monolith/api.py::delete_motes` refuses without an explicit
-confirmation, the same preview/commit split Mora keeps between saving a
-note and applying a simulation step.
+**A bulk edit is ordinary writes, and one undo step.** `core/batch.py`
+holds all three (`set_property`, `clear_property`, `delete_motes`), and
+three rules hold for each:
 
-Monolith is a fifth process on the same terms as the other three:
-`monolith/app.py::choose_port` asks for 42005 and falls back to an
-ephemeral port, `.webview_data_monolith/` is its own WebKit storage, and
-the draft query -- the one being edited before it is saved as a view --
-is the window's own state in `localStorage`, not the garden's. See
-`docs/ui-setup.md`.
+- **One primitive write per mote**, through `core/motes.py`, so a
+  two-hundred-mote edit is two hundred oplog rows that `core/sync.py`
+  replicates like any other. There is no bulk path in the store for a
+  surface to have invented.
+- **One undo step.** Each returns a single `undo.combine`d Command, since
+  somebody who bulk-deleted a selection expects one Ctrl+Z rather than two
+  hundred presses. The Command is *returned* rather than pushed: the undo
+  stack belongs to whichever surface is open, and core has no business
+  knowing which. That is also what makes deleting safe to leave
+  unguarded -- a dialog is the wrong shape for a selection that might be
+  one row or two hundred, and one Ctrl+Z is a better answer than one
+  refusal.
+- **A missing id is skipped, not fatal.** A selection outlives the rows it
+  was made on, so writing the other 199 is right and raising is not.
+
+`set_property` reads its value through `core/command_bar.py::parse_value`
+-- the same reading `R1.x = 500 ohm` gets -- so typing `90` into a
+duration column stores a number rather than a string `core/calendar.py`
+would ignore, and typing a unit annotates the mote's `units` map instead
+of storing the word. A second, unit-blind reading of the same keystrokes
+is how one surface comes to disagree with another about what was typed.
+
+**A query is also one line of text.** `core/findtext.py` reads
+`status:todo due:<7d --sort -updated` into a `Query` and writes one back
+out, and `format_find(parse_find(text)) == text` for canonical text. The
+round trip is the reason it is a module rather than a regex in a bridge: a
+console echoes the line you typed, a saved view shows the line that
+reproduces it, and a completion extends the line you are halfway through
+-- three things that only agree if one function answers what a query
+*reads* as.
+
+    key:value      is            (includes, on a list-valued column)
+    key~value      contains
+    key:>value     greater       (after, on a date column)
+    key:<value     less          (before, on a date column)
+    key!:value     is not        (excludes)
+    key:?          is empty
+    key!:?         is not empty
+
+    or             join with OR rather than AND
+    --sort key     ascending; --sort -key descending
+    --group key
+    --cols a,b,c
+    --view name    start from a saved view; conditions here add to it
+
+`type:`/`species:` ask what `instance_of` answers; `kind:` and `related:`
+are the other graph fields; `name:`, `id:`, `degree:` and `updated:` are
+the builtins; `->type:` and `<-type:` are a relationship in one
+direction; anything else is a property key. Quoted values may contain
+spaces.
+
+**What a condition *means* is decided when it runs, not when it is
+written.** A garden has no schema, so `estimate:>3` cannot know whether it
+is a numeric `>` or a lexical `after` until somebody looks at what
+`estimate` holds. So the parser records an **intent**
+(`core/query.py`'s `IS`/`NOT`/`CONTAINS`/`GREATER`/`LESS`/`EMPTY`), and
+`core/table.py::resolve_query` turns it into the operator the discovered
+kind accepts at evaluate time -- along with resolving a relative date
+(`today`, `7d`, `-3d`, `2w`, `1m`), which is stored verbatim for the same
+reason. That is what keeps a saved view meaning what it said: `due:7d` is
+the next week whenever it is opened, and `estimate:>3` becomes a numeric
+comparison the day estimate stops being prose. An intent a column cannot
+answer (`kind:>x` asks a list of kinds to be greater than something)
+drops the condition and says so in the answer's `problems`, rather than
+quietly meaning something else.
+
+A date named without a time is a question about the day, so `is`, `before`
+and `after` compare on the date prefix (`core/query.py`'s
+`_same_precision`): `due:2026-10-01` matches a mote due
+`2026-10-01T09:00`, and that mote is not *after* the 1st.
+
+**A saved view is an ordinary mote** carrying a `query` property
+(`core/views.py`) -- the one reserved name this subject adds. Like
+`modoc`, carrying one is data rather than a job in the graph's machinery,
+so it is deliberately not a `core/kinds.py` kind: a view mote that read as
+a kind would displace its real species in every other surface's type
+label. Being ordinary is what makes a view sync between devices, appear in
+the graph, and be linkable from a note. Every saved view *is* declared an
+instance of a `Saved View` species -- an ordinary mote, found or created by
+name rather than reserved, so a garden that has never saved a view never
+grows one.
+
+While it still exists, Monolith is a fifth process on the same terms as
+the other three: `monolith/app.py::choose_port` asks for 42005 and falls
+back to an ephemeral port, `.webview_data_monolith/` is its own WebKit
+storage, and the draft query -- the one being edited before it is saved as
+a view -- is the window's own state in `localStorage`, not the garden's.
+See `docs/ui-setup.md`.
 
 # Simulation
 

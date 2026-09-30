@@ -74,9 +74,11 @@ IN = "in"
 # ---- value kinds and the operators each accepts ----
 #
 # The kind is the *column's*, guessed from the values in it
-# (monolith/payload.py::guess_kind) -- this module never guesses, it only
-# says which operators go with which answer. Shared with the frontend so
-# the operator picker offers exactly what evaluate() can honour.
+# (core/table.py::guess_kind) -- this module never guesses, it only says
+# which operators go with which answer. Shared with every surface so an
+# operator picker offers exactly what evaluate() can honour, and read by
+# core/table.py::resolve_query to decide which operator a written
+# condition means on the column it lands on.
 
 TEXT = "text"
 NUMBER = "number"
@@ -85,10 +87,15 @@ BOOL = "bool"
 LIST = "list"
 
 EMPTY_OPS = ("is empty", "is not empty")
+# Every scalar kind takes `is not` and `contains`, and text and dates take
+# before/after, because `_test_scalar` below answers all of them from one
+# string comparison -- there was never an evaluator reason for a number
+# column to lack `is not`, only that nothing had asked for one. The text
+# grammar (core/findtext.py) asks: `estimate!:3` has to mean something.
 OPS: dict[str, tuple[str, ...]] = {
-    TEXT: ("contains", "is", "is not", *EMPTY_OPS),
-    NUMBER: ("=", ">", "<", *EMPTY_OPS),
-    DATE: ("is", "before", "after", *EMPTY_OPS),
+    TEXT: ("contains", "is", "is not", "before", "after", *EMPTY_OPS),
+    NUMBER: ("=", ">", "<", "is not", "contains", *EMPTY_OPS),
+    DATE: ("is", "before", "after", "is not", "contains", *EMPTY_OPS),
     BOOL: ("is", "is not", *EMPTY_OPS),
     LIST: ("includes", "excludes", *EMPTY_OPS),
 }
@@ -98,6 +105,59 @@ OR = "or"
 
 ASC = "asc"
 DESC = "desc"
+
+# ---- what an operator *meant*, independent of the column it lands on ----
+#
+# A garden has no schema, so `estimate:>3` cannot know whether it is a
+# numeric `>` or a lexical `after` until somebody looks at what `estimate`
+# holds. The intent is what survives that ignorance: a written condition
+# records one, and core/table.py::resolve_query turns it into the operator
+# the discovered kind accepts, at evaluate time. That is what keeps a
+# saved view meaning what it said the day the column's kind changes.
+
+IS = "is"
+NOT = "not"
+CONTAINS = "contains"
+GREATER = "greater"
+LESS = "less"
+EMPTY = "empty"
+NOT_EMPTY = "not empty"
+INTENTS = (IS, NOT, CONTAINS, GREATER, LESS, EMPTY, NOT_EMPTY)
+
+_OP_BY_KIND: dict[str, dict[str, str]] = {
+    TEXT: {IS: "is", NOT: "is not", CONTAINS: "contains",
+           GREATER: "after", LESS: "before"},
+    NUMBER: {IS: "=", NOT: "is not", CONTAINS: "contains",
+             GREATER: ">", LESS: "<"},
+    DATE: {IS: "is", NOT: "is not", CONTAINS: "contains",
+           GREATER: "after", LESS: "before"},
+    BOOL: {IS: "is", NOT: "is not"},
+    LIST: {IS: "includes", NOT: "excludes"},
+}
+_OP_BY_EMPTY_INTENT = {EMPTY: EMPTY_OPS[0], NOT_EMPTY: EMPTY_OPS[1]}
+_INTENT_OF_OP = {
+    "is": IS, "=": IS, "includes": IS,
+    "is not": NOT, "excludes": NOT,
+    "contains": CONTAINS,
+    ">": GREATER, "after": GREATER,
+    "<": LESS, "before": LESS,
+    EMPTY_OPS[0]: EMPTY, EMPTY_OPS[1]: NOT_EMPTY,
+}
+
+
+def intent_of(op: str) -> str:
+    """What a concrete operator meant. An unknown operator reads as `is`,
+    matching this module's forgiving reading of a hand-edited view."""
+    return _INTENT_OF_OP.get(op, IS)
+
+
+def op_for(intent: str, kind: str) -> str | None:
+    """The operator `intent` becomes on a column of `kind`, or None where
+    the pair means nothing: `kind:>x` asks a list of kinds to be greater
+    than something, and there is no honest answer to give it."""
+    if intent in _OP_BY_EMPTY_INTENT:
+        return _OP_BY_EMPTY_INTENT[intent]
+    return _OP_BY_KIND.get(kind, {}).get(intent)
 
 
 @dataclass(frozen=True)
@@ -118,7 +178,12 @@ class Field:
         if self.source in (REL, GRAPH):
             return LIST
         if self.source == BUILTIN:
-            return NUMBER if self.key == BUILTIN_DEGREE else TEXT
+            if self.key == BUILTIN_DEGREE:
+                return NUMBER
+            # `updated` is a timestamp core/motes.py writes, so it earns
+            # before/after and a relative date (`updated:-7d`) rather
+            # than being compared as prose.
+            return DATE if self.key == BUILTIN_UPDATED else TEXT
         return ""
 
     def to_json(self) -> dict:
@@ -392,6 +457,7 @@ def _test_scalar(value, condition: Condition) -> bool:
     left, right = text_of_scalar(value).casefold(), wanted.casefold()
     if op == "contains":
         return right in left
+    left = _same_precision(left, right)
     if op == "is":
         return left == right
     if op == "is not":
@@ -401,6 +467,24 @@ def _test_scalar(value, condition: Condition) -> bool:
     if op == "after":
         return left > right
     return True
+
+
+_DATE_ONLY = 10
+
+
+def _same_precision(left: str, right: str) -> str:
+    """`left` truncated to `right`'s precision when `right` is a bare
+    `yyyy-mm-dd` and `left` is a longer timestamp.
+
+    Which is what makes `due:2026-10-01` match a mote due
+    `2026-10-01T09:00`. Comparing the full strings would answer "is it
+    exactly midnight" to a question that was about the day, and would
+    likewise put every timed event on the 1st *after* the 1st. A whole
+    day is the unit someone naming a date without a time meant."""
+    if len(right) != _DATE_ONLY or len(left) <= _DATE_ONLY:
+        return left
+    head = left[:_DATE_ONLY]
+    return head if head[4:5] == "-" and head[7:8] == "-" else left
 
 
 def text_of_scalar(value) -> str:

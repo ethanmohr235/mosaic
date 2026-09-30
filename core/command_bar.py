@@ -224,7 +224,7 @@ def _dispatch(conn: sqlite3.Connection, text: str, confirm: bool) -> CommandResu
 
 def _run_property(conn, mote_token: str, key: str, value_text: str) -> CommandResult:
     mote_id, created = _find_or_create(conn, mote_token)
-    value, unit_name = _parse_value(value_text)
+    value, unit_name = parse_value(value_text)
     new_props = {key: value}
     if unit_name:
         mote = motes_repo.get_mote(conn, mote_id)
@@ -528,11 +528,20 @@ def _choice(conn, mote: Mote) -> dict:
 
 # ---- value + unit parsing ----------------------------------------------
 
-def _parse_value(text: str):
+def parse_value(text: str):
     """`"500 ohms"` -> (500, "ohm"); `"500"` -> (500, None); anything else
     tries JSON (`"true"` -> True, `"[1, 2]"` -> [1, 2]) and falls back to
     the literal string, same tolerance api_common.coerce() gives typed
-    property boxes elsewhere."""
+    property boxes elsewhere.
+
+    Public because it is the one answer to "what did that typed value
+    mean": core/batch.py's bulk write reads a value exactly as `R1.x = 5
+    ohm` does here, rather than growing a second, unit-blind reading of
+    the same keystrokes."""
+    if not isinstance(text, str):
+        # Already a value rather than something typed -- a bridge handing
+        # over a number or a bool has nothing to parse.
+        return text, None
     text = text.strip()
     head, _, tail = text.rpartition(" ")
     if not head and text.endswith("%"):
