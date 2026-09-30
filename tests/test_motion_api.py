@@ -315,16 +315,27 @@ def test_solvers_come_from_the_registry_not_a_fixed_menu(api):
 
 # ---- check_equation_names ----
 
-def test_check_equation_names_offers_an_unconnected_mote(api):
+def test_check_equation_names_ignores_a_unique_unconnected_name(api):
+    # Garden-scope names resolve it without a relationship, so there is
+    # nothing for the editor to offer.
     a = api.create_mote({"name": "A"})
-    b = api.create_mote({"name": "B", "x": 5})
+    api.create_mote({"name": "B", "x": 5})
+    assert api.check_equation_names(a["id"], "y == B.x") == []
+
+
+def test_check_equation_names_offers_the_colliding_candidates(api):
+    a = api.create_mote({"name": "A"})
+    b1 = api.create_mote({"name": "B", "x": 5})
+    b2 = api.create_mote({"name": "B", "x": 6})
     result = api.check_equation_names(a["id"], "y == B.x")
-    assert result == [{"name": "B", "candidates": [{"id": b["id"], "label": "B"}]}]
+    assert result[0]["name"] == "B"
+    assert {c["id"] for c in result[0]["candidates"]} == {b1["id"], b2["id"]}
 
 
 def test_check_equation_names_empty_once_connected(api):
     a = api.create_mote({"name": "A"})
     b = api.create_mote({"name": "B", "x": 5})
+    api.create_mote({"name": "B", "x": 6})
     api.create_relationship(a["id"], b["id"], "relates_to")
     assert api.check_equation_names(a["id"], "y == B.x") == []
 

@@ -268,6 +268,35 @@ anything but `targets()`/`sources()` was already an error.
 through the shared rules in `core/roles.py` -- the two walks must agree
 about roles exactly as they already agree about the call whitelist.
 
+# Names in an equation
+
+An attribute base that isn't a role is a mote's `name`, searched in two
+scopes in order: the anchor's immediate neighbours, then the whole garden
+(`core/formula.py`'s `_connected_by_name` and `_named_in_garden`, both
+deciding "exactly one or refuse" through the shared `name_match()`, which
+`core/dimensions.py` calls too -- the two walks must agree about a name
+exactly as they agree about roles).
+
+**The garden scope is what made relationships mean something again.**
+Only the neighbour scope existed, so `bd.l` needed `bd` wired to the
+rule's anchor, and `FEA-Homework-4` carried six `related_to` edges whose
+entire job was making a reference legal. The command bar drew them
+automatically, which is the tell: an edge no human would think to add,
+added to satisfy the resolver rather than to say anything. A name is
+already unique enough to identify a mote to the person writing the
+equation. `core/simulation.py`'s `_GardenView.by_name` is the index,
+built from the same properties dict the run reads -- so an override mote,
+whose properties are stripped from every run, lends no name to resolve
+against.
+
+The neighbour scope stays, and stays *first*, because it is now the
+answer to a collision rather than the only way to resolve at all: a
+garden with two motes called `bd` draws one edge to say which one this
+rule means. `unresolved_equation_names()` reports exactly those
+collisions for an editor to offer that edge on; it used to report every
+unwired name, which with the garden scope in place would be offering a
+fix to something that isn't broken.
+
 What `applies_to` points at decides a rule's reach, inferred rather than
 declared: a species means once per instance, any other mote means once
 about that mote. `Rule.scope` carries the resolved answer and

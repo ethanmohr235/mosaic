@@ -8,13 +8,18 @@ from core.dimensions import DimensionContext, check_equation
 
 
 def context(mote_id="r1", units=None, targets=None, capability_units=None,
-            neighbors=None, names=None):
+            neighbors=None, names=None, garden_names=None):
     """A checker context over plain dicts -- the same testing shape
-    core/formula.py's Context is built for."""
+    core/formula.py's Context is built for.
+
+    `garden_names` is the garden-scope index (name -> mote ids), kept
+    separate from `names` so the connected-name tests still exercise that
+    scope on its own."""
     units = units or {}
     targets = targets or {}
     neighbors = neighbors or {}
     names = names or {}
+    garden_names = garden_names or {}
     return DimensionContext(
         mote_id=mote_id,
         units=lambda mid: units.get(mid, {}),
@@ -23,6 +28,7 @@ def context(mote_id="r1", units=None, targets=None, capability_units=None,
         capability_units=capability_units or (lambda *a: None),
         neighbors=lambda mid: neighbors.get(mid, []),
         mote_name=lambda mid: names.get(mid),
+        named=lambda name: garden_names.get(name, []),
     )
 
 
@@ -363,5 +369,28 @@ def test_ambiguous_connected_name_reports_nothing_here():
     problems = check_equation(
         "y == n1.voltage",
         context(neighbors={"r1": ["n1", "n1b"]}, names={"n1": "n1", "n1b": "n1"}),
+    )
+    assert problems == []
+
+
+# ---- garden-scope names ----
+
+def test_garden_scope_name_dimension_is_checked_the_same_way():
+    # The two walks must agree about what a name means: a reference the
+    # evaluator now resolves garden-wide has to be checkable too, or every
+    # equation using one would go unverified.
+    units = {"r1": {"x": "V"}, "bd": {"l": "m"}}
+    problems = check_equation(
+        "x == bd.l",
+        context(units=units, garden_names={"bd": ["bd"]}),
+    )
+    assert len(problems) == 1
+    assert "different dimensions" in problems[0]
+
+
+def test_an_ambiguous_garden_scope_name_reports_nothing_here():
+    problems = check_equation(
+        "y == bd.l",
+        context(garden_names={"bd": ["bd1", "bd2"]}),
     )
     assert problems == []

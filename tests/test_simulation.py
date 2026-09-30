@@ -1,7 +1,8 @@
 import pytest
 
+from core import scenarios as scenarios_repo
 from core.motes import create_mote, get_mote, update_mote
-from core.relationships import create_relationship
+from core.relationships import create_relationship, list_relationships
 from core.rules import APPLIES_TO
 from core.simulation import (
     SimulationError,
@@ -114,13 +115,55 @@ def test_connected_name_reference_solves_through_the_full_stack(conn):
     assert prop(conn, a, "y") == pytest.approx(10.0)
 
 
+def test_garden_scope_name_solves_with_no_relationship_at_all(conn):
+    # The phase-2 point: `FEA-Homework-4` had six `related_to` edges whose
+    # only job was making a reference legal. None is needed now.
+    a = create_mote(conn, {"name": "A", "freedoms": "y"})
+    create_mote(conn, {"name": "B", "x": 5})
+    add_rule(conn, a, "Sum", "y == B.x * 2")
+
+    run_simulation(conn)
+
+    assert prop(conn, a, "y") == pytest.approx(10.0)
+    assert list_relationships(conn, from_id=a) == []
+
+
+def test_a_garden_scope_name_collision_fails_the_solve(conn):
+    a = create_mote(conn, {"name": "A", "freedoms": "y"})
+    b1 = create_mote(conn, {"name": "B", "x": 1})
+    b2 = create_mote(conn, {"name": "B", "x": 2})
+    add_rule(conn, a, "Sum", "y == B.x")
+
+    with pytest.raises(SimulationError) as excinfo:
+        run_simulation(conn)
+    message = str(excinfo.value)
+    assert "matches 2 motes in the garden" in message
+    assert b1[:8] in message and b2[:8] in message
+
+
+def test_an_override_lends_no_name_to_the_garden_scope(conn):
+    # Override motes are stripped from every run's view, so the name they
+    # carry cannot be what a reference resolves to.
+    a = create_mote(conn, {"name": "A", "freedoms": "y"})
+    real = create_mote(conn, {"name": "B", "x": 5})
+    override = create_mote(conn, {"name": "B", "x": 99})
+    create_relationship(conn, override, real, scenarios_repo.OVERRIDES)
+    add_rule(conn, a, "Sum", "y == B.x")
+
+    run_simulation(conn)
+
+    assert prop(conn, a, "y") == pytest.approx(5.0)
+
+
 # ---- unresolved_equation_names ----
 
-def test_unresolved_equation_names_offers_an_unconnected_mote(conn):
+def test_unresolved_equation_names_ignores_an_unconnected_unique_name(conn):
+    # Nothing to offer: garden-scope names resolve `B.x` with no
+    # relationship drawn, so reporting it would offer a fix to something
+    # that isn't broken.
     a = create_mote(conn, {"name": "A"})
-    b = create_mote(conn, {"name": "B", "x": 5})
-    result = unresolved_equation_names(conn, a, "y == B.x")
-    assert result == [{"name": "B", "candidates": [b]}]
+    create_mote(conn, {"name": "B", "x": 5})
+    assert unresolved_equation_names(conn, a, "y == B.x") == []
 
 
 def test_unresolved_equation_names_ignores_already_connected_names(conn):
@@ -142,6 +185,17 @@ def test_unresolved_equation_names_lists_every_candidate_for_a_shared_name(conn)
     result = unresolved_equation_names(conn, a, "y == B.x")
     assert result[0]["name"] == "B"
     assert set(result[0]["candidates"]) == {b1, b2}
+
+
+def test_unresolved_equation_names_clears_once_one_candidate_is_connected(conn):
+    # Wiring the anchor to one of two same-named motes is exactly how the
+    # ambiguity is settled: the connected scope is searched first, so that
+    # edge decides which `B` the equation means.
+    a = create_mote(conn, {"name": "A"})
+    b1 = create_mote(conn, {"name": "B", "x": 1})
+    create_mote(conn, {"name": "B", "x": 2})
+    create_relationship(conn, a, b1, "relates_to")
+    assert unresolved_equation_names(conn, a, "y == B.x") == []
 
 
 def test_editing_an_input_changes_the_solution(conn, divider):

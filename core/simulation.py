@@ -189,6 +189,11 @@ class _GardenView:
     # than out_edges/in_edges on purpose: a name reference doesn't care
     # which relationship carried it, only that one did.
     neighbors: dict[str, list[str]] = field(default_factory=dict)
+    # Every mote id under each `name`, for garden-scope names
+    # (core/formula.py's Context.named). Built from the same properties
+    # dict the run reads, so an override mote -- whose properties are
+    # stripped above -- contributes no name to resolve against.
+    by_name: dict[str, list[str]] = field(default_factory=dict)
 
 
 def step_payloads(steps: list[StepResult]) -> list[dict]:
@@ -575,7 +580,21 @@ def _build_view(
         _units_for(properties),
         _roles_for(properties, relationships, acting_as_species),
         {mote_id: list(ids) for mote_id, ids in neighbor_sets.items()},
+        _by_name(properties),
     )
+
+
+def _by_name(properties: dict[str, dict]) -> dict[str, list[str]]:
+    """Every mote id indexed under its `name`, for garden-scope names.
+
+    Unnamed motes and non-string names are simply absent: a name that
+    can't be written in an equation can't be resolved from one either."""
+    index: dict[str, list[str]] = {}
+    for mote_id, props in properties.items():
+        name = props.get("name")
+        if isinstance(name, str) and name:
+            index.setdefault(name, []).append(mote_id)
+    return index
 
 
 def _acting_as_species(relationships: list[Relationship]) -> set[str]:
@@ -896,6 +915,7 @@ def _context(
         targets=lambda mid, type_: view.out_edges.get((mid, type_), []),
         sources=lambda mid, type_: view.in_edges.get((mid, type_), []),
         neighbors=lambda mid: view.neighbors.get(mid, []),
+        named=lambda name: view.by_name.get(name, []),
         solved=solved if reads is None else reads.solved(mote_id, solved),
         tick=tick,
         previous=previous_properties,
@@ -1023,45 +1043,40 @@ def unresolved_equation_names(
     equation: str,
     scenario: str | None = None,
 ) -> list[dict]:
-    """Names `equation` references that aren't reachable from `mote_id`
-    -- neither a declared role nor a mote already connected to it (see
-    core/formula.py's connected-name resolution) -- but that do match
-    some *other* mote's name somewhere in the garden. Each entry names
-    the candidate mote id(s) an editor could offer to wire up a
-    relationship to, turning an opaque "no property" failure into a
-    one-click fix (docs/simulation.md's "Connected-name references").
+    """Names `equation` references that the garden cannot resolve to one
+    mote from `mote_id` -- neither a declared role, nor a mote connected
+    to it, nor a unique garden-scope name (see core/formula.py's
+    `_role_or_value`). Each entry names the colliding mote ids, so an
+    editor can offer to wire a relationship to whichever one was meant:
+    a connected name is tried before the garden-wide scope, so drawing
+    that one edge is what settles the ambiguity.
+
+    Garden-scope names are why this is now the *collision* report rather
+    than the unwired-reference report it was. A name matching exactly one
+    mote anywhere in the garden resolves on its own, with no relationship
+    to draw, so listing it would be offering a fix to something that
+    isn't broken.
 
     Read-only and does not evaluate the equation itself: a name that
-    doesn't parse, isn't any mote's name, or is already reachable, is
-    simply absent from the result rather than reported as a problem.
-    Several candidates for one name means the garden has more than one
-    mote by that name -- surfaced as-is, so a caller can list them rather
-    than silently connecting to a guess."""
+    doesn't parse, isn't any mote's name, or resolves fine, is simply
+    absent from the result rather than reported as a problem."""
     properties = {m.id: m.properties for m in list_motes(conn)}
     relationships = list_relationships(conn)
     case = _resolve_scenario(conn, scenario)
     view = _build_view(scenarios_repo.apply(properties, case), relationships)
 
     role_names = set(view.roles.get(mote_id, {}))
-    connected_names = {
+    connected_names = [
         view.properties.get(mid, {}).get("name")
         for mid in view.neighbors.get(mote_id, [])
-    }
-
-    by_name: dict[str, list[str]] = {}
-    for other_id, props in view.properties.items():
-        if other_id == mote_id:
-            continue
-        name = props.get("name")
-        if isinstance(name, str) and name:
-            by_name.setdefault(name, []).append(other_id)
+    ]
 
     results = []
     for name in attribute_bases(equation):
-        if name in role_names or name in connected_names:
+        if name in role_names or connected_names.count(name) == 1:
             continue
-        candidates = by_name.get(name)
-        if candidates:
+        candidates = view.by_name.get(name, [])
+        if len(candidates) > 1:
             results.append({"name": name, "candidates": candidates})
     return results
 
@@ -1100,6 +1115,7 @@ def _dimension_context(
         roles=lambda mid: view.roles.get(mid, {}),
         neighbors=lambda mid: view.neighbors.get(mid, []),
         mote_name=lambda mid: view.properties.get(mid, {}).get("name"),
+        named=lambda name: view.by_name.get(name, []),
     )
 
 

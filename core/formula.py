@@ -524,13 +524,19 @@ class Context:
     references (`R1.current` reaching a wired-up mote literally named
     "R1", without a declared role). Defaults to nobody connected, which
     makes the feature simply absent for a caller that doesn't wire it up
-    (core/modoc.py's `expression_context`, existing tests)."""
+    (core/modoc.py's `expression_context`, existing tests).
+
+    `named` is the same question asked of the whole garden rather than of
+    one mote's neighbors -- the last fallback, after roles and connected
+    names (see _named_in_garden). Defaults to nothing, on the same terms
+    as `neighbors`."""
     mote_id: str
     properties: Callable[[str], dict]
     unknown_keys: Callable[[str], set[str]]
     targets: Callable[[str, str], list[str]]
     sources: Callable[[str, str], list[str]]
     neighbors: Callable[[str], list[str]] = lambda mote_id: []
+    named: Callable[[str], list[str]] = lambda name: []
     solved: dict[Unknown, float] = field(default_factory=dict)
     tick: float = 0.0
     previous: Callable[[str], dict] = lambda mote_id: {}
@@ -582,9 +588,10 @@ def attribute_bases(text: str) -> list[str]:
     An editor that wants to know what an equation *references* before
     running it reads this rather than parsing formulas itself --
     core/simulation.py's `unresolved_equation_names()` is what an
-    unconnected name here turns into: an offer to wire up the missing
-    relationship (docs/simulation.md's "Connected-name references"). A
-    formula that fails to parse simply yields nothing here -- this never
+    ambiguous name here turns into: an offer to draw the one relationship
+    that picks which mote was meant (docs/simulation.md's "Name
+    references"). A formula that fails to parse simply yields nothing
+    here -- this never
     raises the parse errors evaluate_equation() would; a checker's job is
     to inform an editor, not to be a second place a bad formula fails."""
     try:
@@ -764,12 +771,13 @@ def _attribute(node: ast.Attribute, ctx: Context):
 
 def _role_or_value(node: ast.Attribute, ctx: Context):
     """Resolve the left-hand side of an attribute access: a declared
-    role first, then a mote connected to the anchor by name, then
-    whatever a plain property lookup makes of it (which -- unless it
-    happens to be a MoteSet already -- _attribute() will reject). Returns
-    the Role it matched (or None) alongside the value, because arity
-    decides whether one mote collapses to a scalar; a name match always
-    reaches at most one mote (see _connected_by_name)."""
+    role first, then a mote connected to the anchor by name, then a mote
+    of that name anywhere in the garden, then whatever a plain property
+    lookup makes of it (which -- unless it happens to be a MoteSet
+    already -- _attribute() will reject). Returns the Role it matched (or
+    None) alongside the value, because arity decides whether one mote
+    collapses to a scalar; a name match always reaches at most one mote
+    (see name_match)."""
     if not isinstance(node.value, ast.Name):
         return None, _evaluate(node.value, ctx)
     identifier = node.value.id
@@ -781,38 +789,71 @@ def _role_or_value(node: ast.Attribute, ctx: Context):
             raise FormulaError(f"mote {ctx.mote_id[:8]}: {problem}")
         return role, MoteSet(mote_ids, role.name)
 
-    matches = _connected_by_name(ctx, identifier)
-    if matches is not None:
-        return None, MoteSet(matches, identifier)
+    # Each scope is only asked once the one before it came up empty -- a
+    # garden-wide collision must not be raised for a name a relationship
+    # has already settled.
+    for scope in (_connected_by_name, _named_in_garden):
+        matches = scope(ctx, identifier)
+        if matches is not None:
+            return None, MoteSet(matches, identifier)
 
     return None, _evaluate(node.value, ctx)
 
 
-def _connected_by_name(ctx: Context, name: str) -> list[str] | None:
-    """A mote immediately wired to the anchor -- any relationship type,
-    either direction -- whose `name` property equals `name`. None means
-    "no such neighbor", which sends the caller on to the ordinary
-    property-lookup path (and that path's existing error, if `name`
-    isn't a property of the anchor either).
+def name_match(matches: list[str], name: str, where: str) -> list[str] | None:
+    """The one mote a name reaches, or None for none at all.
 
-    Deliberately narrower than a role: this exists so a garden wired by
-    hand doesn't need a role declared for a one-off reference, not to
-    replace targets()/sources() for real navigation -- which is why two
-    connected motes sharing a name is an error rather than a silently
-    collapsed set. A name is meant to pick one specific thing."""
-    matches = [
-        mid for mid in ctx.neighbors(ctx.mote_id)
-        if ctx.properties(mid).get("name") == name
-    ]
+    The single place the rule "a name picks exactly one thing" lives, for
+    both scopes a name is searched in (a mote's neighbors, then the whole
+    garden) and both walks that search them (this module and
+    core/dimensions.py). None sends a caller on to the next scope, and
+    finally to the ordinary property-lookup path -- and that path's
+    existing error, if `name` isn't a property of the anchor either.
+
+    Several matches is a hard error naming every one of them, never a
+    silently collapsed set the way a `many` role or `sum()` would be: a
+    name is meant to pick one specific thing, and a garden with two motes
+    called `bd` has a modelling problem no solve should paper over."""
     if not matches:
         return None
     if len(matches) > 1:
+        listed = ", ".join(sorted(mid[:8] for mid in matches))
         raise FormulaError(
-            f"'{name}' matches {len(matches)} motes connected to mote "
-            f"{ctx.mote_id[:8]} -- rename one of them, or reach it with "
-            f"targets('relationship-type')"
+            f"'{name}' matches {len(matches)} motes {where} ({listed}) -- rename all "
+            f"but one, or reach it with targets('relationship-type')"
         )
     return matches
+
+
+def _connected_by_name(ctx: Context, name: str) -> list[str] | None:
+    """A mote immediately wired to the anchor -- any relationship type,
+    either direction -- whose `name` property equals `name`.
+
+    Tried before the garden-wide scope below, so a deliberately drawn
+    relationship still decides which `bd` a rule means in a garden that
+    holds two of them."""
+    return name_match(
+        [mid for mid in ctx.neighbors(ctx.mote_id) if ctx.properties(mid).get("name") == name],
+        name,
+        f"connected to mote {ctx.mote_id[:8]}",
+    )
+
+
+def _named_in_garden(ctx: Context, name: str) -> list[str] | None:
+    """A mote of that name anywhere in the garden -- the last scope a name
+    is searched in, after roles and connected names.
+
+    This is what deletes the `related_to`-for-resolution edge: a garden
+    had to wire `bd` to a rule's anchor for `bd.l` to resolve, so six of
+    ten relationships in a real model existed only to make a reference
+    legal. A name is already unique enough to identify a mote *to the
+    person writing the equation*, and where it isn't, name_match refuses
+    rather than guessing.
+
+    The anchor itself is included: a rule about `bd` can write `bd.x` for
+    its own property, which is what someone copying a line out of a
+    worksheet means."""
+    return name_match(list(ctx.named(name)), name, "in the garden")
 
 
 def _call(node: ast.Call, ctx: Context):

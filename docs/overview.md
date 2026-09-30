@@ -37,7 +37,8 @@ Specialized behavior comes from data, not from new object models:
 - A mote is a **species** when others point at it with `instance_of`. A
   species may have a **template** via `template_of`.
 - A mote with an `equation` is a **rule**. Rules solve for **freedoms**
-  and reach other motes through `applies_to`, roles, and connected names.
+  and reach other motes through `applies_to`, roles, and names -- a name
+  unique in the garden needs no relationship drawn for it.
 - **Units**, **property models** (CoolProp, ideal gas), **scenarios**,
   **sweeps**, and **comparison constraints** are all properties and
   relationships the engine recognizes by reserved names (`core/reserved.py`).

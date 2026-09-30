@@ -645,7 +645,17 @@ def test_property_rejects_a_non_numeric_result():
 # by that mote's `name` property, without targets()/sources() and
 # without a role declaration. See core/formula.py's _connected_by_name.
 
-def _named_context(mote_id, properties, neighbor_map, roles=None):
+def _named_context(mote_id, properties, neighbor_map, roles=None, garden=False):
+    """`garden=True` turns on the garden-scope fallback, indexing every
+    mote in `properties` by its `name` the way core/simulation.py's
+    _build_view does. Off by default so the connected-name tests below
+    still exercise that scope alone."""
+    by_name = {}
+    if garden:
+        for mid, props in properties.items():
+            name = props.get("name")
+            if isinstance(name, str) and name:
+                by_name.setdefault(name, []).append(mid)
     return Context(
         mote_id=mote_id,
         properties=lambda mid: properties.get(mid, {}),
@@ -653,6 +663,7 @@ def _named_context(mote_id, properties, neighbor_map, roles=None):
         targets=lambda mid, t: [],
         sources=lambda mid, t: [],
         neighbors=lambda mid: neighbor_map.get(mid, []),
+        named=lambda name: by_name.get(name, []),
         roles=lambda mid: (roles or {}).get(mid, {}),
     )
 
@@ -681,6 +692,76 @@ def test_ambiguous_connected_name_is_rejected():
     }
     ctx = _named_context("R1", properties, {"R1": ["N1", "N1b"]})
     with pytest.raises(FormulaError, match="matches 2 motes"):
+        evaluate_expression("N1.voltage", ctx)
+
+
+# ---- garden-scope names ----
+#
+# The scope after roles and connected names: a name unique in the whole
+# garden resolves with no relationship drawn at all, which is what
+# deletes the `related_to`-for-resolution edge (roadmap phase 2). See
+# core/formula.py's _named_in_garden.
+
+def test_garden_scope_name_resolves_without_any_relationship():
+    properties = {"bd": {"name": "bd", "l": 100}, "rule_anchor": {}}
+    ctx = _named_context("rule_anchor", properties, {}, garden=True)
+    assert evaluate_expression("bd.l", ctx).constant == 100.0
+
+
+def test_garden_scope_name_reaches_the_anchor_itself():
+    # A rule about `bd` may write `bd.x` for `bd`'s own property, which is
+    # what copying a line out of a worksheet means. The anchor is not its
+    # own neighbor, so only the garden scope can answer this.
+    properties = {"bd": {"name": "bd", "x": 80}}
+    ctx = _named_context("bd", properties, {}, garden=True)
+    assert evaluate_expression("bd.x", ctx).constant == 80.0
+
+
+def test_garden_scope_name_collision_names_every_mote():
+    properties = {
+        "a1b2c3d4-x": {"name": "bd", "l": 1},
+        "e5f6g7h8-y": {"name": "bd", "l": 2},
+    }
+    ctx = _named_context("anchor", properties, {}, garden=True)
+    with pytest.raises(FormulaError) as excinfo:
+        evaluate_expression("bd.l", ctx)
+    message = str(excinfo.value)
+    assert "matches 2 motes in the garden" in message
+    assert "a1b2c3d4" in message and "e5f6g7h8" in message
+
+
+def test_a_connected_name_beats_the_garden_scope():
+    # Drawing one edge is how a garden holding two `bd`s says which one a
+    # rule means -- the connected scope is searched first.
+    properties = {
+        "anchor": {},
+        "bd1": {"name": "bd", "l": 1},
+        "bd2": {"name": "bd", "l": 2},
+    }
+    ctx = _named_context("anchor", properties, {"anchor": ["bd2"]}, garden=True)
+    assert evaluate_expression("bd.l", ctx).constant == 2.0
+
+
+def test_a_role_beats_the_garden_scope():
+    from core.roles import Role
+
+    properties = {"anchor": {}, "part": {"name": "other", "l": 7}, "bd": {"name": "bd", "l": 1}}
+    ctx = Context(
+        mote_id="anchor",
+        properties=lambda mid: properties.get(mid, {}),
+        unknown_keys=lambda mid: set(),
+        targets=lambda mid, t: ["part"] if t == "bd" else [],
+        sources=lambda mid, t: [],
+        named=lambda name: ["bd"] if name == "bd" else [],
+        roles=lambda mid: {"bd": Role("bd")},
+    )
+    assert evaluate_expression("bd.l", ctx).constant == 7.0
+
+
+def test_a_name_nobody_has_still_falls_through_to_a_property():
+    properties = {"R1": {}}
+    ctx = _named_context("R1", properties, {}, garden=True)
+    with pytest.raises(FormulaError, match="no property"):
         evaluate_expression("N1.voltage", ctx)
 
 

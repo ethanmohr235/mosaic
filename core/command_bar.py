@@ -17,10 +17,8 @@ Seven forms, tried in this order (first match wins):
                               trailing token resolved against core/units.py
     R1.voltage == ...         rule: find-or-create R1, create a rule mote
     beam.I / beam.I0 == 0.1   with that equation, applies_to R1. Any other
-                              Name.prop reference that resolves to exactly
-                              one existing mote is auto-wired to R1 with a
-                              default-type relationship, so the equation
-                              is reachable right away.
+                              Name.prop reference resolves by garden-scope
+                              name, so nothing is wired up for it.
 
                               Either side may be any expression the rule
                               language accepts -- an equation does not
@@ -310,31 +308,30 @@ def _run_rule(conn, lhs: str, rhs: str) -> CommandResult:
     # Stub every property the equation reads as "" wherever it isn't
     # already set -- purely visual, so `v` shows x and y right away
     # instead of looking untouched until the solver eventually runs.
-    # Any other Name.prop reference that resolves to exactly one existing
-    # mote is also auto-wired to the anchor (default relationship type,
-    # same as the bare `->` form) so the equation is reachable the moment
-    # the rule is saved -- mirroring the graph panel's one-click "connect"
-    # suggestion, just without the click. A name matching zero or several
-    # motes is left alone; nothing is created for it, same caution
-    # unresolved_equation_names already takes.
+    #
+    # This used to also draw a default-type relationship from the anchor
+    # to every other mote the equation named, because a reference only
+    # resolved if the two were wired. Garden-scope names removed that
+    # reason, and with it the edges: a reference is legal because the name
+    # is unique, so the only relationships left in a garden are the ones
+    # that mean something.
     own_props, other_props = _equation_property_refs(equation)
     _stub_properties(conn, anchor_id, own_props)
     for name_token, keys in other_props.items():
         matches = _lookup(conn, name_token)
         if len(matches) == 1:
-            other_id = matches[0].id
-            _stub_properties(conn, other_id, keys)
-            if not _connected(conn, anchor_id, other_id):
-                rel_repo.create_relationship(conn, anchor_id, other_id, _DEFAULT_REL_TYPE)
+            _stub_properties(conn, matches[0].id, keys)
 
     label = _label_for(anchor_token, created)
     message = f"{label}rule saved: {equation}"
-    missing = unresolved_equation_names(conn, anchor_id, equation)
-    if missing:
+    colliding = unresolved_equation_names(conn, anchor_id, equation)
+    if colliding:
         hints = ", ".join(
-            f"{m['name']} (try `{anchor_token} -> {m['name']}`)" for m in missing
+            f"{m['name']} ({len(m['candidates'])} motes -- try "
+            f"`{anchor_token} -> {m['name']}` to pick one)"
+            for m in colliding
         )
-        message += f" -- not yet reachable from {anchor_token}: {hints}"
+        message += f" -- ambiguous from {anchor_token}: {hints}"
     return CommandResult(ok=True, mote_id=rule_id, created=True, message=message)
 
 
@@ -490,17 +487,6 @@ def _lookup(conn: sqlite3.Connection, token: str) -> list[Mote]:
         m for m in motes_repo.list_motes(conn)
         if str(m.properties.get("name", "")).strip().lower() == needle
     ]
-
-
-def _connected(conn: sqlite3.Connection, a_id: str, b_id: str) -> bool:
-    """Whether `a_id` and `b_id` already share a relationship, either
-    direction -- the same "already reachable" test core/formula.py's
-    connected-name resolution applies at evaluation time, checked here so
-    a rule's auto-link step doesn't lay down a duplicate edge."""
-    return (
-        any(r.to_id == b_id for r in rel_repo.list_relationships(conn, from_id=a_id))
-        or any(r.to_id == a_id for r in rel_repo.list_relationships(conn, from_id=b_id))
-    )
 
 
 def _resolve_one(conn, token: str, create_if_missing: bool = False) -> str:
