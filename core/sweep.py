@@ -305,7 +305,7 @@ def _scenario_of(ground: Ground, scenario_id: str | None):
 
 
 def _perturbed(
-    ground: _Ground,
+    ground: Ground,
     scenario: scenarios_repo.Scenario | None,
     *overrides: dict[str, dict[str, float]],
 ) -> dict[str, dict]:
