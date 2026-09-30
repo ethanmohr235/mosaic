@@ -122,6 +122,23 @@ export function setCommand(tree, id, command) {
 }
 
 /**
+ * Put the subtree `json` (bridge JSON, e.g. `mo tion`'s three panes) where
+ * leaf `id` was, taking its share. Returns {tree, focusId}: the first new
+ * leaf whose command is `focusCommand`, else the first new leaf.
+ */
+export function replaceLeaf(tree, id, json, focusCommand = null) {
+  const path = pathTo(tree, id);
+  if (!path) return { tree, focusId: id };
+  const sub = fromJSON(json);
+  const fresh = leaves(sub);
+  const focus = fresh.find((l) => l.command === focusCommand) || fresh[0];
+  if (path.length === 0) return { tree: sub, focusId: focus.id };
+  const next = clone(tree);
+  nodeAt(next, path.slice(0, -1)).children[path[path.length - 1]] = sub;
+  return { tree: next, focusId: focus.id };
+}
+
+/**
  * Split leaf `id` into two along `dir` ("row" | "col"); the new pane
  * (with `command`) goes after it. When the leaf's parent already splits
  * that way the new pane joins it as a sibling, as vim does, taking half

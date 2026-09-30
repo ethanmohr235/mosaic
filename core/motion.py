@@ -145,10 +145,12 @@ def parse_text(command: str) -> SimLine:
 
 
 def rewrite(line: SimLine, change: dict) -> SimLine:
-    """A pane gesture as a line: `d` toggles `--vs garden`."""
-    if "vs" in change:
-        return replace(line, vs=change["vs"] or None)
-    raise CommandError(f"no such change: {sorted(change)}")
+    """A pane gesture as a line: `d` toggles `--vs garden`; the
+    scenarios pane's ⏎ and `v` set `--scenario` and `--vs`."""
+    known = {"vs", "scenario"}
+    if not change or set(change) - known:
+        raise CommandError(f"no such change: {sorted(set(change) - known) or 'nothing'}")
+    return replace(line, **{k: (v or None) for k, v in change.items()})
 
 
 def _ticks(value: str) -> int:
@@ -356,6 +358,7 @@ def _unit(properties: dict, key: str) -> str | None:
 def run_json(result: SimRun) -> dict:
     return {
         "command": result.line.text(),
+        "solver": result.line.solver,
         "ticks": result.ticks,
         "count": result.count,
         "scenario": result.scenario,
@@ -581,7 +584,7 @@ def solve(conn: sqlite3.Connection, solver: str | None = None) -> Solve:
         redo=lambda: derivations_repo.restore(conn, replaced),
     ))
     moved = len(steps) - 1
-    message = f"solved: {moved} mote{'' if moved == 1 else 's'} changed"
+    message = f"solved · {moved} mote{'' if moved == 1 else 's'} changed"
     if result.unsolved:
         message += f" · {len(result.unsolved)} freedom(s) had no equation"
     if result.constraint_violations:

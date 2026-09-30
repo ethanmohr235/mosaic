@@ -1,7 +1,8 @@
 /* The top bar. Left: the `[mo]` box flush to the edge, the focused
  * pane's app suffix (`saic` for shell views), and `/ garden` in --dim.
  * Right: the saved layouts as `1:name` tabs (the active one inverted,
- * with `*` when the tree has drifted from it), then `unsaved layout` in
+ * with `*` when the tree has drifted from it), the playhead (`tick 12/49
+ * ▶`) and `live` when Motion has them, then `unsaved layout` in
  * --warn, and `sel X +N · linked in N panes` or the pane count. A tab
  * click switches layout, like its number key. */
 
@@ -38,6 +39,16 @@ export function createTopbar({ root, store, panes, actions, components }) {
     return parts;
   }
 
+  /** `tick 12/49 ▶` while a sim pane owns the playhead, and `live` when
+   * every edit is solved (docs/console.md → Settled for U5). */
+  function motion() {
+    const parts = [];
+    const p = store.state.playhead;
+    if (p.count) parts.push(h("span", "playhead", `tick ${p.tick}/${p.count - 1} ${p.playing ? "▶" : "‖"}`));
+    if (store.state.live) parts.push(h("span", "live lvl-ok", "live"));
+    return parts;
+  }
+
   function render() {
     const dirty = store.dirty();
     root.replaceChildren(
@@ -46,11 +57,12 @@ export function createTopbar({ root, store, panes, actions, components }) {
       h("span", "breadcrumb", `/ ${store.state.garden}`),
       h("span", "grow"),
       h("span", "tabs", tabs(dirty)),
+      ...motion(),
       ...summary(dirty),
     );
   }
 
-  ["layout", "garden", "selection", "panes"].forEach((event) => store.subscribe(event, render));
+  ["layout", "garden", "selection", "panes", "playhead", "live"].forEach((event) => store.subscribe(event, render));
   render();
   return { render };
 }

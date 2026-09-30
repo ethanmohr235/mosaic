@@ -18,6 +18,7 @@ import { createKeys } from "./keys.js";
 import { createTopbar } from "./topbar.js";
 import { createHintbar } from "./hintbar.js";
 import { createFloat } from "./float.js";
+import { createPlayer } from "./playhead.js";
 
 const FIRST_PANE = "log";
 
@@ -42,6 +43,7 @@ function wire(api) {
     onPlace: (id, view) => shell.actions.place(id, view),
     onCancel: (id) => shell.actions.close(id),
     onRun: (line, options) => shell.runLine(line, options),
+    onPrefill: (line) => shell.commandLine.load(line),
     isCommandLineActive: () => !!shell.commandLine && shell.commandLine.isActive(),
   });
   shell.actions = createActions({ store, panes: shell.panes, api });
@@ -73,6 +75,7 @@ function wire(api) {
   shell.keys = createKeys({ store, panes: shell.panes, actions: shell.actions,
     commandLine: shell.commandLine, runner, float: shell.float });
   createTopbar({ root: $("topbar"), store, panes: shell.panes, actions: shell.actions, components });
+  createPlayer({ store });
   createHintbar({ root: $("hintbar"), store, keys: shell.keys, components });
 
   // Writes from outside the window (MCP, CLI, sync) show up when it

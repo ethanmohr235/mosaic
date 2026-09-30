@@ -22,7 +22,7 @@ import { createPicker } from "./picker.js";
 const GUIDE_LINGER_MS = 1000;
 
 export function createPanes({ root, store, api, components, onEdit, onPlace, onCancel, onRun,
-  isCommandLineActive }) {
+  onPrefill, isCommandLineActive }) {
   const { h } = components;
   const panes = new Map();
   const splitEls = new Map();
@@ -38,6 +38,12 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
       navigate: (id, label = null) => store.setSelection([id], label ? { [id]: label } : {}),
       setCommand: (command) => setPaneCommand(pane, command),
       runCommand: (line, options) => onRun(line, options),
+      prefill: (line) => onPrefill(line),
+      isFocused: () => store.state.focusedId === pane.id,
+      paneAction: (viewId, action) => {
+        const instance = instanceFor(viewId);
+        return instance && typeof instance.action === "function" ? instance.action(action) : null;
+      },
     };
   }
 
@@ -281,6 +287,16 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
     if (active && active !== document.body && root.contains(active)) active.blur();
   }
 
+  /** Where a `pane_action` effect goes (`plot save ‹name›`, `plot
+   * export …`) and ctx.paneAction: the focused pane when it shows
+   * `viewId`, else the first pane that does. Null when none does. */
+  function instanceFor(viewId) {
+    const focused = panes.get(store.state.focusedId);
+    if (focused && focused.view && focused.view.id === viewId) return focused.instance;
+    for (const pane of panes.values()) if (pane.view && pane.view.id === viewId) return pane.instance;
+    return null;
+  }
+
   /* ---------- re-running ---------- */
 
   const isLinked = (pane) => !!pane.view
@@ -317,12 +333,7 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
     /** Where a `pane_action` effect goes (`plot save ‹name›`, `plot
      * export …`): the focused pane when it shows `viewId`, else the first
      * pane that does. Null when none does. */
-    instanceFor(viewId) {
-      const focused = panes.get(store.state.focusedId);
-      if (focused && focused.view && focused.view.id === viewId) return focused.instance;
-      const id = this.findView(viewId);
-      return id ? panes.get(id).instance : null;
-    },
+    instanceFor,
     linkedCount: () => [...panes.values()].filter(isLinked).length,
     count: () => panes.size,
     /** Pane id → its on-screen rect, for ^w h/j/k/l. */

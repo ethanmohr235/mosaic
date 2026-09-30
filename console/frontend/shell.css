@@ -88,6 +88,8 @@ body {
   cursor: pointer;
 }
 
+.topbar .playhead { color: var(--fg); }
+
 .tab.active {
   padding: 0 var(--tab-pad-x);
   background: var(--fg);
@@ -716,3 +718,34 @@ body.dragging-col { cursor: row-resize; }
 .plot-usage { color: var(--fg); }
 .plot-apply { color: var(--bright); cursor: pointer; height: auto; min-height: var(--row-h); }
 .plot-apply:hover { background: var(--bg-raised); }
+
+/* ---------- motion (U5) ---------- */
+
+.view-motion { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.motion-timeline {
+  position: relative; flex: 0 0 var(--timeline-h); overflow: hidden; cursor: ew-resize;
+  border-top: var(--border) solid var(--line);
+}
+.motion-svg { position: absolute; inset: 0; display: block; }
+.tl-axis { stroke: var(--line); }
+.tl-label { fill: var(--dim); font: var(--fs-body) var(--font); }
+.tl-series { fill: none; stroke: var(--s1); }
+.tl-vs { fill: none; stroke: var(--dim); stroke-dasharray: 3 3; }
+.tl-extreme { stroke: var(--dim); stroke-dasharray: 1 3; }
+.tl-break { fill: var(--fault); }
+.tl-failed { stroke: var(--fault); }
+.tl-lost { fill: var(--bg-raised); }
+.tl-playhead { stroke: var(--bright); }
+.range-bar { position: relative; display: inline-block; width: 100%; height: var(--border); background: var(--line);
+  vertical-align: middle; }
+.range-mark { position: absolute; top: calc(-1 * var(--table-head-pad)); width: var(--border);
+  height: calc(2 * var(--table-head-pad) + var(--border)); background: var(--fg); }
+.c-table-row.selected .range-bar { background: var(--bg); }
+.motion-rule-head { display: flex; gap: var(--header-gap); margin-top: var(--table-head-pad); }
+.motion-rule-name { color: var(--bright); font-weight: var(--w-bold); }
+.motion-equation { color: var(--bright); padding: var(--table-head-pad) 0; white-space: pre-wrap; }
+.motion-hint { padding: 0 0 var(--table-head-pad); }
+.motion-why { white-space: pre-wrap; }
+.view-props .motion-why { padding-left: 0; }
+.motion-scenario { font-weight: var(--w-bold); }
+.motion-scenario.running { color: var(--bright); }

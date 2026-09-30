@@ -13,6 +13,9 @@
  *   layout     the tree, the focused pane, the layouts or the dirty flag changed
  *   garden     the workspace switched garden (the whole state was replaced)
  *   log        a session-log entry was added
+ *   playhead   the shared playhead moved, started/stopped, or a sim pane
+ *              claimed it with its run ({tick, count, playing, run} changed)
+ *   live       `solve --live on|off` flipped the workspace's live toggle
  *
  * The tree held here is the *internal* tree (tree.js): leaves carry a
  * stable `id` the panes are keyed by. `tree.toJSON` strips those ids
@@ -37,6 +40,11 @@ export function createStore() {
     active: null,
     history: [],
     log: [],
+    live: false,
+    // One shared playhead (docs/console.md → Settled for U5): every Motion
+    // pane reads `tick`; the sim pane that last ran or was focused owns it
+    // and publishes its tick `count` and `run` ({ticks, scenario, solver}).
+    playhead: { tick: 0, count: 0, playing: false, run: null, owner: null },
   };
   state.focusedId = T.firstLeaf(state.tree).id;
 
@@ -60,6 +68,7 @@ export function createStore() {
   Object.assign(store, selectionOps(state, emit));
   Object.assign(store, treeOps(state, emit));
   Object.assign(store, sessionOps(state, emit));
+  Object.assign(store, playheadOps(state, emit));
   return store;
 }
 
@@ -139,6 +148,8 @@ function sessionOps(state, emit) {
       state.history = boot.history || [];
       state.selection = [];
       state.labels = new Map();
+      state.live = !!boot.live;
+      state.playhead = { tick: 0, count: 0, playing: false, run: null, owner: null };
       emit("garden", boot);
     },
 
@@ -156,6 +167,53 @@ function sessionOps(state, emit) {
       if (state.log.length > LOG_CAP) state.log.splice(0, state.log.length - LOG_CAP);
       emit("log", entry);
       return entry;
+    },
+  };
+}
+
+function playheadOps(state, emit) {
+  const clamp = (tick, count) => Math.max(0, Math.min(Math.max(count - 1, 0), Math.round(tick)));
+  return {
+    /** Move the playhead to `tick` (clamped to the owner's run). */
+    seek(tick) {
+      const p = state.playhead;
+      const next = clamp(tick, p.count);
+      if (next === p.tick) return;
+      p.tick = next;
+      emit("playhead", { tick: true });
+    },
+    /** `step +N` / `step N`. */
+    step(n, mode = "by") {
+      this.seek(mode === "to" ? n : state.playhead.tick + n);
+    },
+    setPlaying(playing) {
+      const p = state.playhead;
+      if (playing && p.count < 2) return;
+      if (!!playing === p.playing) return;
+      p.playing = !!playing;
+      emit("playhead", { playing: true });
+    },
+    /** A sim pane publishing its run. `owner` is the pane's own token;
+     * `force` takes the playhead from another pane (it was focused). */
+    claimPlayhead(owner, { count, run }, { force = false } = {}) {
+      const p = state.playhead;
+      if (p.owner && p.owner !== owner && !force) return false;
+      const changed = p.owner !== owner || p.count !== count || JSON.stringify(p.run) !== JSON.stringify(run);
+      Object.assign(p, { owner, count, run });
+      p.tick = clamp(p.tick, count);
+      if (count < 2) p.playing = false;
+      if (changed) emit("playhead", { run: true });
+      return true;
+    },
+    releasePlayhead(owner) {
+      const p = state.playhead;
+      if (p.owner !== owner) return;
+      Object.assign(p, { owner: null, count: 0, run: null, playing: false });
+      emit("playhead", { run: true });
+    },
+    setLive(live) {
+      state.live = !!live;
+      emit("live", state.live);
     },
   };
 }

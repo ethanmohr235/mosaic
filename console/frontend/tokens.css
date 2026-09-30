@@ -107,6 +107,7 @@
   --kv-key: 84px;
   --kv-key-wide: 104px;
   --plot-rail: 240px;        /* moxie:plot's legend / knobs / readout column (U4) */
+  --timeline-h: 72px;        /* motion:state's timeline under the run table (U5) */
   --gap: 1px;                /* tiled panes: 1px gaps over --line */
   --divider-hit: 3px;        /* invisible grab margin either side of a divider */
   --picker-pad-y: 6px;

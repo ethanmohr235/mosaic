@@ -716,6 +716,82 @@ def fit_checks(window):
     check("fit: `a` applies value and source as one undoable write", apply_and_undo)
 
 
+def topbar(window):
+    return js(window, "document.getElementById('topbar').textContent")
+
+
+def sim_text(window):
+    return js(window, "[...document.querySelectorAll('.view-motion .c-table')].map(t => t.textContent).join(' | ')")
+
+
+def u5_checks(window):
+    def mo_tion_opens_three_panes():
+        type_command(window, "mo tion", alt=True)
+        assert wait_until(lambda: {"scenarios", "sim", "rule @sel"} <= set(headers(window))), \
+            f"headers: {headers(window)}"
+        assert wait_until(lambda: "C1.current" in sim_text(window)), sim_text(window)
+        assert wait_until(lambda: "tick 0/49" in topbar(window)), topbar(window)
+        no_errors(window)
+
+    check("U5: `mo tion` opens scenarios | sim | rule @sel, and the sim pane owns the playhead",
+          mo_tion_opens_three_panes)
+
+    def playhead_moves():
+        press(window, "]")
+        assert wait_until(lambda: "tick 10/49" in topbar(window)), topbar(window)
+        press(window, ",")
+        assert wait_until(lambda: "tick 9/49" in topbar(window)), topbar(window)
+        type_command(window, "step 30")
+        assert wait_until(lambda: "tick 30/49" in topbar(window)), topbar(window)
+        assert wait_until(lambda: "@30" in sim_text(window)), sim_text(window)
+        no_errors(window)
+
+    check("U5: `] , ` and `step` move the shared playhead", playhead_moves)
+
+    def scenario_and_vs():
+        type_command(window, "set --scenario hot C1.voltage 30")
+        assert prop(ids["C1"], "voltage") == 10, "a scenario edit must not touch the garden"
+        assert wait_until(lambda: "hot" in js(window, "document.querySelector('.view-table') ? "
+                                               "[...document.querySelectorAll('.view-table')].map(t => t.textContent).join() : ''")), \
+            "the scenarios pane should list hot"
+        type_command(window, "sim --scenario hot")
+        assert wait_until(lambda: "varied" in sim_text(window)), sim_text(window)
+        press(window, "d")
+        assert wait_until(lambda: "sim --scenario hot --vs garden" in headers(window)), headers(window)
+        assert wait_until(lambda: "varied" in sim_text(window) and "0.1" in sim_text(window)
+                          and "0.0333" in sim_text(window)), sim_text(window)
+        no_errors(window)
+
+    check("U5: `set --scenario` writes an override; `d` compares against the garden", scenario_and_vs)
+
+    def rule_follows_the_row():
+        press(window, "g")
+        press(window, "Enter")
+        assert wait_until(lambda: "series" in js(window, "[...document.querySelectorAll('.motion-rule-name')]"
+                                                        ".map(n => n.textContent).join()")), "the rule pane should follow C1"
+        no_errors(window)
+
+    check("U5: ⏎ on a row selects its mote, and `rule @sel` shows the rules on it", rule_follows_the_row)
+
+    def solve_and_live():
+        type_command(window, "solve")
+        assert wait_until(lambda: abs((prop(ids["C1"], "current") or 0) - 10 / 300) < 1e-9), "solve should write"
+        type_command(window, "undo")
+        assert wait_until(lambda: prop(ids["C1"], "current") is None), "undo should take the solve back"
+        type_command(window, "solve --live on")
+        assert wait_until(lambda: "live" in topbar(window)), topbar(window)
+        type_command(window, "set C1.voltage 20")
+        assert wait_until(lambda: abs((prop(ids["C1"], "current") or 0) - 20 / 300) < 1e-9), "live should solve"
+        type_command(window, "undo")
+        assert wait_until(lambda: prop(ids["C1"], "voltage") == 10 and prop(ids["C1"], "current") is None), \
+            "one undo takes back the edit and its live solve"
+        type_command(window, "solve --live off")
+        assert wait_until(lambda: "live" not in topbar(window).replace("linked", "")), topbar(window)
+        no_errors(window)
+
+    check("U5: `solve` is one undo step; `solve --live on` solves after each edit", solve_and_live)
+
+
 def u4_restored_checks(window):
     def restored():
         assert wait_until(lambda: plot_command(window).startswith(PLOT), timeout=10), \
@@ -780,6 +856,7 @@ def drive(first, first_loaded):
         u3_checks(second)
         u4_checks(second)
         fit_checks(second)
+        u5_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)

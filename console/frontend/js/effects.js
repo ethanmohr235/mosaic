@@ -9,6 +9,10 @@
  *   garden     `cd`: the whole workspace is re-booted on the new garden
  *   undo/redo  log what was undone; every pane re-runs
  *   refresh    every pane re-runs
+ *   open_layout  an app that opens several panes (`mo tion`): they take
+ *              the focused pane's place (⌥⏎: a new split's)
+ *   live       `solve --live on|off`: the top bar's `live`
+ *   playhead   `step`, `play`, `pause`: the shared playhead
  *   pane_action  a line that acts on a pane of one view (`plot save ‹name›`,
  *              `plot export png`): the focused such pane's instance.action()
  *   error      shown in --fault on the command line and in the log */
@@ -87,6 +91,31 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
     return { message: text, level };
   }
 
+  function openLayout(e, { newPane }) {
+    actions.openLayout(e.tree, { newPane, focusCommand: e.focus || null });
+    store.log("result", `mo ${e.app}`, { level: "ok" });
+    return { message: "", level: "ok" };
+  }
+
+  function live(e) {
+    store.setLive(e.live);
+    store.log("result", e.message, { level: "ok" });
+    return { message: e.message, level: "ok" };
+  }
+
+  function playhead(e) {
+    const p = store.state.playhead;
+    if (!p.count) return simple({ effect: "error", message: "no run to move through -- open a sim pane" });
+    if (e.op === "step") {
+      store.setPlaying(false);
+      store.step(e.n, e.mode);
+    } else {
+      store.setPlaying(e.op === "play");
+    }
+    const text = `tick ${store.state.playhead.tick}/${p.count - 1}`;
+    return { message: text, level: "ok" };
+  }
+
   async function paneAction(e) {
     const instance = panes && panes.instanceFor(e.view);
     if (!instance || typeof instance.action !== "function") {
@@ -100,6 +129,9 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
 
   const HANDLERS = {
     pane_action: paneAction,
+    open_layout: openLayout,
+    live,
+    playhead,
     statement,
     open_view: openView,
     layout,

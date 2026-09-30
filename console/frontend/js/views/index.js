@@ -15,7 +15,8 @@
  *   }
  *
  * `ctx` is {api, store, components, navigate(id), setCommand(command),
- * runCommand(line)}; one per pane:
+ * runCommand(line), prefill(line), isFocused(), paneAction(viewId, action)};
+ * one per pane:
  *   api         the root bridge (js/bridge.js); an app's namespace is api.<app>
  *   store       js/store.js -- read state.selection / primary(), request
  *               changes with setSelection / toggleSelection, never copy them
@@ -35,6 +36,12 @@
  *               pane), and its message shows in the command line's
  *               status. Resolves to {message, level}. How a view writes:
  *               it never calls a write method on its namespace.
+ *   prefill(line)  put `line` on the command line for the user to finish
+ *               (the scenarios pane's `a`: `set --scenario hot `).
+ *   isFocused()  whether this pane is the focused one.
+ *   paneAction(viewId, action)  hand `action` to the pane showing
+ *               `viewId` (focused first), as a `pane_action` effect does:
+ *               its instance.action(action). Null when there is none.
  *
  * The instance:
  *
@@ -65,8 +72,12 @@ import monolithTable from "./monolith-table.js";
 import moteProps from "./mote-props.js";
 import moxiePlot from "./moxie-plot.js";
 import moxieFit from "./moxie-fit.js";
+import motionState from "./motion-state.js";
+import motionRule from "./motion-rule.js";
+import motionScenarios from "./motion-scenarios.js";
 
-export const VIEWS = [log, monolithTable, moteProps, moxiePlot, moxieFit];
+export const VIEWS = [log, monolithTable, moteProps, moxiePlot, moxieFit, motionState, motionRule,
+  motionScenarios];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;

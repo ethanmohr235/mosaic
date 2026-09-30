@@ -677,7 +677,7 @@ def _current(api):
 def test_mo_tion_opens_its_three_panes(api):
     effect = api.run("mo tion")
     assert effect["effect"] == "open_layout" and effect["app"] == "tion"
-    assert effect["tree"]["split"] == "row"
+    assert effect["tree"]["split"] == "row" and effect["focus"] == "sim"
 
 
 def test_sim_rule_why_and_scenarios_open_panes(api):

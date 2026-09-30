@@ -77,6 +77,9 @@ def test_d_toggles_vs_garden():
     line = motion.parse_text("sim --ticks 5")
     assert motion.rewrite(line, {"vs": "garden"}).text() == "sim --ticks 5 --vs garden"
     assert motion.rewrite(motion.rewrite(line, {"vs": "garden"}), {"vs": None}).text() == "sim --ticks 5"
+    assert motion.rewrite(line, {"scenario": "hot"}).text() == "sim --ticks 5 --scenario hot"
+    with pytest.raises(CommandError, match="no such change"):
+        motion.rewrite(line, {"ticks": 3})
 
 
 # ---- rows ----

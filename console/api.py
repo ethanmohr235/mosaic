@@ -264,7 +264,8 @@ class Api:
         if parsed.args:
             return _error(f"mo {parsed.head} takes nothing after the app")
         if app.layout:
-            return {"effect": "open_layout", "app": app.suffix, "tree": app.layout}
+            return {"effect": "open_layout", "app": app.suffix, "tree": app.layout,
+                    "focus": app.default_command}
         if app.default_view:
             return {"effect": "open_view", "view": app.default_view,
                     "command": app.default_command or app.suffix}
