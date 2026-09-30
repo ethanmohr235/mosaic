@@ -14,7 +14,12 @@ divider drag really split and resize panes, that the view picker places
 a view, that a statement typed at the command line lands in the log and
 selects its mote, that a saved layout and the history come back after a
 reload and after a relaunch on a fresh Api, and that `cd` swaps the
-whole workspace. Everything is driven the way a person does it -- key
+whole workspace. Once the Api has its `monolith` namespace (U2) it
+also drives the find table: a table appears, click + j j + shift-click
+selects three rows, `set @sel` writes them and one `undo` reverts them,
+a header click rewrites the pane's command, an inline edit writes, and
+the sorted find pane survives a relaunch. Without the namespace those
+checks are skipped (and say so). Everything is driven the way a person does it -- key
 events, clicks and drags -- because tests/test_console_api.py already
 covers the bridge on its own.
 
@@ -40,7 +45,8 @@ import webview  # noqa: E402  (after GARDENS_DIR is patched, matching app startu
 
 from core.db import get_connection, initialize_database  # noqa: E402
 from core.gardens import create_garden  # noqa: E402
-from core.motes import create_mote  # noqa: E402
+from core.motes import create_mote, get_mote  # noqa: E402
+from core.relationships import create_relationship  # noqa: E402
 from window_launcher import choose_port  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "console" / "frontend"
@@ -169,6 +175,20 @@ def seed():
     try:
         initialize_database(conn)
         ids["R1"] = create_mote(conn, {"name": "R1"})
+        # U2: a species and four instances for the find table.
+        ids["chore"] = create_mote(conn, {"name": "chore"})
+        for i in range(4):
+            ids[f"c{i}"] = create_mote(conn, {"name": f"chore{i}", "status": "open"})
+            create_relationship(conn, ids[f"c{i}"], ids["chore"], "instance_of")
+    finally:
+        conn.close()
+
+
+def prop(mote_id, key):
+    conn = get_connection(GARDEN)
+    try:
+        mote = get_mote(conn, mote_id)
+        return mote.properties.get(key) if mote else None
     finally:
         conn.close()
 
@@ -303,6 +323,103 @@ def garden_checks(window):
     check("`cd` swaps the workspace to another garden and back", cd_swaps)
 
 
+# ---------- U2: the find table (monolith:table) ----------
+
+TABLE_ROW = ".pane.focused .view-table .c-table-row"
+
+
+def table_keys(window, selector=TABLE_ROW):
+    return json.loads(js(window, f"""
+        JSON.stringify(Array.from(document.querySelectorAll({json.dumps(selector)})).map(r => r.dataset.key))
+    """))
+
+
+def click_row(window, index, shift=False, ctrl=False, col=0):
+    js(window, f"""
+        (() => {{
+          const n = document.querySelector('{TABLE_ROW}[data-index="{index}"] > .c-cell[data-col="{col}"]');
+          n.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, button: 0}}));
+          n.dispatchEvent(new MouseEvent('click', {{bubbles: true, button: 0,
+            shiftKey: {json.dumps(shift)}, ctrlKey: {json.dumps(ctrl)}}}));
+        }})();
+    """)
+
+
+def u2_checks(window):
+    chores = {ids[f"c{i}"] for i in range(4)}
+
+    def shows_table():
+        type_command(window, "find type:chore")
+        assert wait_until(lambda: set(table_keys(window)) >= chores, timeout=8), \
+            f"`find type:chore` should list the four chores, got {table_keys(window)}"
+        no_errors(window)
+
+    check("U2: `find` shows a table", shows_table)
+    if not results[-1][1]:
+        return
+
+    def selects_range():
+        click_row(window, 0)
+        press(window, "j")
+        press(window, "j")
+        click_row(window, 2, shift=True)
+        chosen = table_keys(window, TABLE_ROW + ".selected")
+        assert chosen == table_keys(window)[:3], f"click, j j, shift-click should select 3 rows, got {chosen}"
+        assert wait_until(lambda: "+2" in js(window, "document.getElementById('topbar').textContent")), \
+            "the top bar should read `sel X +2`"
+
+    check("U2: j/k plus a shift-click select three rows", selects_range)
+
+    def batch_set_and_undo():
+        chosen = table_keys(window, TABLE_ROW + ".selected")
+        type_command(window, "set @sel status done")
+        assert wait_until(lambda: all(prop(i, "status") == "done" for i in chosen)), \
+            f"`set @sel status done` should write all three: {[prop(i, 'status') for i in chosen]}"
+        type_command(window, "undo")
+        assert wait_until(lambda: all(prop(i, "status") == "open" for i in chosen)), \
+            "one `undo` should revert the whole batch"
+
+    check("U2: `set @sel` writes the selection and one undo reverts it", batch_set_and_undo)
+
+    def header_sort():
+        before = texts(window, ".pane.focused .c-head-command")
+        js(window, "document.querySelector('.pane.focused .view-table .c-table-head .c-cell[data-col=\"0\"]').click()")
+        assert wait_until(lambda: "--sort" in " ".join(texts(window, ".pane.focused .c-head-command"))), \
+            f"a header click should rewrite the pane command: {before} → {texts(window, '.pane.focused .c-head-command')}"
+        assert wait_until(lambda: count(window, ".pane.focused .view-table .c-table-head .c-cell") > 0)
+
+    check("U2: a header click sorts by rewriting the pane command", header_sort)
+
+    def inline_edit():
+        press(window, "Escape")  # clear the selection: the edit targets one row
+        keys = table_keys(window)
+        target = keys[-1]
+        click_row(window, len(keys) - 1)
+        press(window, "Escape")
+        press(window, "i")
+        assert wait_until(lambda: count(window, ".view-table .c-cell-input") == 1), "`i` should open an editor"
+        js(window, """
+            (() => { const i = document.querySelector('.view-table .c-cell-input');
+                     i.value = 'renamed chore'; i.dispatchEvent(new Event('input', {bubbles: true})); })();
+        """)
+        press(window, "Enter")
+        assert wait_until(lambda: prop(target, "name") == "renamed chore"), \
+            f"the inline edit should write the name, got {prop(target, 'name')}"
+        no_errors(window)
+
+    check("U2: an inline cell edit writes through `set`", inline_edit)
+
+
+def u2_restored_checks(window):
+    def restored():
+        assert wait_until(lambda: any(h.startswith("find") and "--sort" in h for h in headers(window)), timeout=10), \
+            f"the sorted find pane should survive a relaunch, got {headers(window)}"
+        assert wait_until(lambda: count(window, ".view-table .c-table-row") >= 4)
+        no_errors(window)
+
+    check("U2: a layout with a `find …` pane survives a relaunch", restored)
+
+
 # ---------- driving ----------
 
 def open_window(title):
@@ -313,6 +430,7 @@ def open_window(title):
     api._window = window
     window.events.closed += api.shutdown
     window.events.loaded += loaded.set
+    window.has_monolith = hasattr(api, "monolith")
     return window, loaded
 
 
@@ -349,6 +467,18 @@ def drive(first, first_loaded):
         restored_checks(second, "relaunch on a fresh Api")
         garden_checks(second)
         check("the relaunched page raised no JavaScript errors", lambda: no_errors(second))
+        if not second.has_monolith:
+            print("SKIP  U2 find-table checks: this Api has no `monolith` namespace yet")
+            return
+        u2_checks(second)
+        time.sleep(0.8)  # the sorted find pane's autosave
+        third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
+        opened.append(third)
+        assert third_loaded.wait(timeout=15), "the U2 relaunch never loaded"
+        opened.remove(second)
+        second.destroy()
+        install_collector(third)
+        u2_restored_checks(third)
     finally:
         for window in opened:
             window.destroy()
