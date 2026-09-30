@@ -46,7 +46,7 @@ absolute path.
 
 ## Tools
 
-44 tools, grouped: gardens (`list_gardens`, `create_garden`,
+47 tools, grouped: gardens (`list_gardens`, `create_garden`,
 `export_garden`), motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
@@ -55,6 +55,7 @@ absolute path.
 `template_for`, `create_instance`), graph (`neighborhood`,
 `whole_garden`), simulation (`preview_simulation`, `why`),
 dependencies (`impact`, `requires`, `producers`, `consumers`),
+the worksheet (`read_worksheet`, `write_worksheet`), `solve_health`,
 `check_roles`, `list_scenarios`, notes (`resolve_modoc`), and
 `reserved_names`.
 
@@ -122,6 +123,31 @@ previewed, not whether the answer is applied.
 which rules are asserted about one mote rather than a whole species --
 which is inferred from what `applies_to` points at, and changes the first
 time someone makes an instance of that mote. See `docs/simulation.md`.
+
+`read_worksheet` / `write_worksheet` are the fastest way for a client to
+build or edit a calculation: `bd.x = 80 in` is a given, `bd.l = sqrt(bd.x^2
++ bd.y^2)` is an equation and makes `l` free on `bd`, `bd.Ax = ?` frees a
+value with no number yet, `bd.Ax + bd.Bx == 0` is a relation that declares
+no freedom, and a trailing `! ΣFx` names the rule. Eight lines replace the
+ten motes and ten relationships the same model used to need.
+
+**`write_worksheet` replaces, and it deletes.** The lines are the whole set
+of the garden's `once`-scoped equations, so a rule with no line is removed
+(`deleted` says which). Call `read_worksheet` first and edit what comes
+back, rather than sending lines composed against a garden you have not
+read. Rules about a *species* are never rendered or touched — those are
+reusable models, and `untouched` counts them. Nothing is deleted while any
+line fails to parse.
+
+`solve_health` answers "can this be solved, and if not, which line is
+wrong" *before* anything runs. A failed solve says "underdetermined",
+which is true of the whole garden and names nothing; this names the coupled
+**block** of unknowns that is short an equation (`groups`), the free values
+nothing can determine at all (`culprits`), and the dimensionally
+inconsistent equations (`unitProblems`). Read `verdict`, not the totals:
+`equations == unknowns` is neither necessary nor sufficient, since three of
+each can be two blocks with one short and one surplus. See
+`docs/simulation.md`.
 
 ## Reaching it from other machines
 

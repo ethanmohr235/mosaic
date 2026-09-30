@@ -341,6 +341,83 @@ in place, since the motes still hold that solve's values. A garden from
 before this, which logged every run, has its run and derivation tables
 dropped on open (`core/db.py`); the next solve rebuilds the record.
 
+# The worksheet
+
+`core/worksheet.py` is a garden's calculation as lines of text — `bd.x = 80
+in`, `bd.l = sqrt(bd.x^2 + bd.y^2)`. It writes ordinary motes, rules,
+`applies_to` and freedoms, and nothing else; `docs/simulation.md` has the
+line grammar.
+
+**It is a projection, never a store.** There is no `worksheet` property and
+no saved source text: `read()` renders the garden's equations and their
+inputs back as lines, and `apply()` writes lines into the graph. That is
+`philosophy.md`'s "editors are shortcuts over the graph, never a separate
+store" taken at its word, and the price is paid rather than hidden —
+comments, blank lines and line order do not survive a round trip. What does
+survive is everything that means something: a line's `! name` becomes the
+rule's `name`, and every other line is reconstructed from what it wrote.
+
+Two decisions make the round trip *safe*, which is what a projection has to
+be before `apply(read())` can be a no-op rather than a loss:
+
+- **`=` declares a freedom; `==` does not.** `=` is the assignment — solve
+  for this — and `==` is a relation between values free for some other
+  reason. So `read()` renders `=` only where the left side is already a
+  freedom, and re-applying cannot widen the model behind the reader's back.
+- **A solved freedom is never printed as a given.** It is the answer, and
+  `bd.l = 100` would pin the value the worksheet exists to solve for.
+  `bd.l = ?` is how an unknown with no number yet is written, and how one
+  comes back.
+
+**Applying replaces.** The lines are the whole set of the garden's
+`once`-scoped equations, so a rule whose line is gone is deleted — the
+editor is an editor rather than an append-only log. A rule pointing at a
+*species* is asserted once per instance, which is a reusable model and not a
+line; those are neither rendered nor deleted, and counted separately so a
+surface can say so.
+
+**A rule a line makes is unnamed.** `core/rules.py::label_of` reads the
+equation as the label instead, everywhere a rule is named. A name that
+copies its equation is a second account of it that drifts the moment the
+equation is edited, which is what `FEA-Homework-4`'s rule names had already
+done. `core/query.py::Index.name_of` uses the same fallback, so a table row
+reads `bd.l == sqrt(bd.x^2 + bd.y^2)` rather than an id prefix.
+
+# Solve health
+
+`core/health.py::check()` answers "can this be solved, and if not, which
+line is wrong" **before anything is solved**. A failed solve says
+*underdetermined*, which is true of the whole garden and names nothing.
+
+**The verdict is read off the blocks, never off the totals.**
+`core/incidence.py::Index.blocks()` cuts the garden's free values into
+coupled groups — two values are in one block when some equation could
+determine both, transitively — and a block is the smallest group whose
+counts have to balance on its own, since no equation outside it can
+determine anything inside it. Three equations and three unknowns may be two
+blocks, one short and one surplus, and calling that balanced would be the
+most misleading thing this module could say. An equation that determines
+nothing is in no block, which is the structural form of "an inequality
+cannot make a deficient group solvable".
+
+Everything else it reports already existed and is only assembled here: the
+culprits come from `incidence.requires()`'s own stored/derived/missing
+distinction, and the unit problems from `simulation.check_garden()`, which
+labels each one with its rule — and since a worksheet rule is labelled by
+its equation, a units warning already reads back as the line that caused it.
+Nothing is re-derived; a second account of what depends on what would drift
+from the equations, which is why that index is built fresh per query.
+
+`solvable` is deliberately not "will solve": a balanced block can still be
+singular or inconsistent, and only running it can say.
+
+**Display units live in the surface, not the garden.** `roadmap.md` asks for
+the stored unit and the displayed one to be told apart. The stored one is
+the `units` map, and solving never changes it; the displayed one is view
+state, so `core/` offers `core/units.py::convert` and
+`core/health.py::stored_unit` and writes no display preference anywhere.
+Nothing about a person's current view of a number belongs in their data.
+
 # Dependencies
 
 `core/incidence.py` holds the bipartite relation between equations and

@@ -22,7 +22,7 @@ code.
 - **Commit style.** Write focused commits, and end each message with the
   `Co-Authored-By` line your harness gives you.
 
-## Status (2026-09-29)
+## Status (2026-09-30)
 
 - Roadmap **phase 1 (cleanup) is done**:
   - Momentum is removed
@@ -32,7 +32,20 @@ code.
 - Console **U1 (the shell) is done**:
   - the package is `console/`, launched by `run_console.py`
   - the grammar lives in `core/commands.py`
-- The next UI step is U2. The next roadmap step is phase 2.
+- Roadmap **phase 2's backend is done**:
+  - garden-scope names (`core/formula.py`), which deleted the
+    `related_to`-for-resolution edge
+  - the worksheet (`core/worksheet.py`), a projection of the graph
+  - solve health (`core/health.py`, `core/incidence.py::blocks`)
+  - `monoss worksheet read|apply` and `monoss health`; MCP
+    `read_worksheet`, `write_worksheet`, `solve_health`
+  - it needs a UI: `console.md` step U2+ — see the draft PR's *Handoff to
+    frontend*
+- Console **U2's core is done** (`core/table.py`, `core/findtext.py`,
+  `core/batch.py`, `core/views.py`), built in the cloud session at the
+  user's direction; `monolith/payload.py` re-exports from `core/table.py`
+  so the old window still works until U2 deletes it.
+- The next UI step is U2's frontend. The next roadmap step is phase 3.
 
 ## Split of work: cloud backend, local frontend
 

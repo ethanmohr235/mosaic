@@ -2,9 +2,12 @@
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 
+from core import health
 from core import modoc
+from core import worksheet
 from core.modoc_bind import resolve as resolve_modoc
 from core.motes import create_mote, list_motes, get_mote, delete_mote, search_motes, update_mote
 from core.species import (
@@ -269,6 +272,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     roles_sub = roles_parser.add_subparsers(dest="action")
     roles_sub.add_parser("check", help="Check every declared role's wiring")
+
+    ### Worksheet
+    worksheet_parser = subparsers.add_parser(
+        "worksheet", help="The garden's calculation as lines of text"
+    )
+    worksheet_sub = worksheet_parser.add_subparsers(dest="action")
+    worksheet_sub.add_parser("read", help="Print the garden's givens and equations as lines")
+    worksheet_apply = worksheet_sub.add_parser(
+        "apply",
+        help="Write lines into motes, rules and freedoms, deleting the rules whose lines are gone",
+    )
+    worksheet_apply.add_argument(
+        "--file", help="Read the lines from this file instead of standard input"
+    )
+
+    ### Health
+    health_parser = subparsers.add_parser(
+        "health", help="Whether the model is solvable, and which values are not"
+    )
+    health_parser.add_argument("--scenario", help="Ask the same question of a scenario")
 
     ### Why
     why_parser = subparsers.add_parser(
@@ -615,6 +638,52 @@ def _handle_roles(conn, args) -> None:
             print(f"  {line}")
 
 
+def _handle_worksheet(conn, args) -> None:
+    action = args.action or "read"
+    if action == "read":
+        text = worksheet.read(conn)
+        print(text if text else "Nothing to show -- this garden has no equations.")
+        return
+    if action != "apply":
+        print("Specify a worksheet action: read, apply")
+        return
+
+    path = getattr(args, "file", None)
+    text = Path(path).read_text() if path else sys.stdin.read()
+    applied = worksheet.apply(conn, text)
+    _print_applied(applied)
+
+
+def _print_applied(applied: worksheet.Applied) -> None:
+    print(
+        f"Wrote {applied.givens_written} given(s) and {applied.rules_written} rule(s)."
+        + (f" Created {', '.join(applied.motes_created)}." if applied.motes_created else "")
+    )
+    if applied.deleted:
+        print(f"{len(applied.deleted)} rule(s) had no line and were deleted:")
+        for label in applied.deleted:
+            print(f"  {label}")
+    if applied.untouched:
+        print(f"{applied.untouched} rule(s) about a species were left alone.")
+    for problem in applied.problems:
+        print(f"  problem: {problem}")
+
+
+def _handle_health(conn, args) -> None:
+    report = health.check(conn, getattr(args, "scenario", None))
+    print(report.summary)
+    for group in report.groups:
+        print(f"  {group.message}")
+    for culprit in report.culprits:
+        print(f"  {culprit.label}: {culprit.reason}")
+    for problem in report.unit_problems:
+        print(f"  units: {problem}")
+    if report.inert:
+        print(f"{len(report.inert)} relation(s) determine nothing (a check, or all givens):")
+        for inert in report.inert:
+            print(f"  {inert.label} on {inert.anchor}")
+
+
 def _handle_incidence(conn, args) -> None:
     """impact / requires / producers / consumers -- one index, four reads
     of it. The index is rebuilt per invocation on purpose: it is derived
@@ -684,6 +753,10 @@ def main() -> None:
                 _handle_scenario(conn, args)
             elif args.command == "roles":
                 _handle_roles(conn, args)
+            elif args.command == "worksheet":
+                _handle_worksheet(conn, args)
+            elif args.command == "health":
+                _handle_health(conn, args)
             elif args.command == "why":
                 _handle_why(conn, args)
             elif args.command in ("impact", "requires", "producers", "consumers"):

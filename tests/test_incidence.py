@@ -346,3 +346,87 @@ def test_the_touch_sets_come_from_the_real_evaluator():
         node.func.id for node in ast.walk(touch)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
+
+
+# ---- blocks: the smallest group whose counts have to balance ----
+#
+# Pure graph math over plain EquationTouch values, the way the rest of this
+# module is tested -- no database, because there is no parser here either.
+
+def touch(name: str, determines=(), reads=()) -> incidence.EquationTouch:
+    return incidence.EquationTouch(
+        rule_mote_id=name, rule_name=name, anchor_mote_id="m", equation=name,
+        determines=frozenset(determines), reads=frozenset(reads),
+    )
+
+
+def index_of(touches, freedoms) -> incidence.Index:
+    return incidence.Index(touches=tuple(touches), freedoms=frozenset(freedoms))
+
+
+def test_two_values_sharing_an_equation_are_one_block():
+    ax, bx = ("m", "Ax"), ("m", "Bx")
+    blocks = index_of([touch("sum", determines=[ax, bx])], [ax, bx]).blocks()
+    assert len(blocks) == 1
+    assert blocks[0].variables == frozenset({ax, bx})
+    assert blocks[0].shortfall == 1
+
+
+def test_values_in_unrelated_equations_are_separate_blocks():
+    a, b = ("m", "a"), ("m", "b")
+    blocks = index_of(
+        [touch("one", determines=[a]), touch("two", determines=[b])], [a, b]
+    ).blocks()
+    assert {block.variables for block in blocks} == {frozenset({a}), frozenset({b})}
+    assert all(block.shortfall == 0 for block in blocks)
+
+
+def test_a_block_is_transitive():
+    a, b, c = ("m", "a"), ("m", "b"), ("m", "c")
+    blocks = index_of(
+        [touch("ab", determines=[a, b]), touch("bc", determines=[b, c])], [a, b, c]
+    ).blocks()
+    assert len(blocks) == 1
+    assert blocks[0].variables == frozenset({a, b, c})
+    assert blocks[0].shortfall == 1
+
+
+def test_a_free_value_no_equation_determines_is_a_block_of_one():
+    """So "nothing constrains this" and "these three share two equations"
+    are the same answer read at two sizes."""
+    q = ("m", "q")
+    blocks = index_of([], [q]).blocks()
+    assert blocks == (incidence.Block(frozenset({q}), ()),)
+    assert blocks[0].shortfall == 1
+
+
+def test_an_equation_that_determines_nothing_is_in_no_block():
+    """A constraint cannot make a deficient group solvable, and this is the
+    structural form of saying so."""
+    a = ("m", "a")
+    blocks = index_of(
+        [touch("limit", reads=[a]), touch("real", determines=[a])], [a]
+    ).blocks()
+    assert len(blocks) == 1
+    assert [t.equation for t in blocks[0].equations] == ["real"]
+    assert blocks[0].shortfall == 0
+
+
+def test_a_surplus_block_has_a_negative_shortfall():
+    a = ("m", "a")
+    blocks = index_of(
+        [touch("one", determines=[a]), touch("two", determines=[a])], [a]
+    ).blocks()
+    assert blocks[0].shortfall == -1
+
+
+def test_blocks_come_back_largest_first():
+    a, b, c = ("m", "a"), ("m", "b"), ("m", "c")
+    blocks = index_of(
+        [touch("bc", determines=[b, c]), touch("a", determines=[a])], [a, b, c]
+    ).blocks()
+    assert [len(block.variables) for block in blocks] == [2, 1]
+
+
+def test_a_garden_with_no_freedoms_has_no_blocks():
+    assert index_of([touch("x", reads=[("m", "a")])], []).blocks() == ()

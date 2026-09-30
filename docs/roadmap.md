@@ -44,11 +44,19 @@ Each one was a separate act of filing. That lesson became a rule in
   `applies_to`, and freedoms. It's one editor among several, not the
   only way to model. Rules it creates are unnamed by default, with the
   equation as their label. A trailing comment (`! ΣFy`) names the rule.
-  Species and templates remain for reusable models.
+  Species and templates remain for reusable models. **Decided:** it is a
+  pure projection of the graph — no stored source text, so comments and
+  line order don't survive a reopen — and applying it replaces, so a rule
+  whose line is gone is deleted. `= ?` declares an unknown, and `==`
+  declares no freedom. See `simulation.md` → *The worksheet*.
 - **Solve health.** Show an equation/unknown count, and name the culprits
   when a system is over- or under-determined (`core/incidence.py`). Check
   units per line before solving. Show display units separately from
-  stored units.
+  stored units. **Decided:** the verdict is read off *coupled blocks*
+  rather than off the totals, since three equations and three unknowns can
+  be two blocks with one short; and a display unit is a surface's own view
+  state, never written into the garden, so `core/` offers only a
+  conversion. See `simulation.md` → *Solve health*.
 - **Checks.** A `check` relation is evaluated but never used to solve,
   and shows as a green/red checklist. This builds on the existing
   comparison constraints.
@@ -109,7 +117,7 @@ alongside all of them.
 | # | Phase | Proves |
 |---|---|---|
 | 1 | **Done.** Cleanup: remove Momentum; freeze Monarch; cut commit-tick and run history | Fewer surfaces, less code |
-| 2 | Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
+| 2 | **Backend done.** Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
 | 3 | Mora calc macros and LaTeX basics | A gradeable homework document |
 | 4 | Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
 | 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |

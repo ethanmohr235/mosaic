@@ -195,9 +195,9 @@ def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
 
     checker = _Checker(ctx)
     try:
-        if _is_bare_name(relation.left, key):
+        if checker.is_own_property(relation.left, key):
             other = relation.right
-        elif _is_bare_name(relation.right, key):
+        elif checker.is_own_property(relation.right, key):
             other = relation.left
         else:
             return None
@@ -211,8 +211,6 @@ def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
     return name if is_unit(name) else None
 
 
-def _is_bare_name(node: ast.AST, key: str) -> bool:
-    return isinstance(node, ast.Name) and node.id == key
 
 
 def _conflict(a: Dim, b: Dim) -> bool:
@@ -332,6 +330,24 @@ class _Checker:
         if _is_literal(base):
             return LITERAL
         return base * exponent
+
+    def is_own_property(self, node: ast.AST, key: str) -> bool:
+        """Whether one whole side of a relation is `key` on this context's
+        own mote -- either written bare (`resistance`) or by name
+        (`R1.resistance`, which is how a worksheet line writes it).
+
+        Both spellings mean the same property, so unit inference has to
+        accept both or a worksheet's own equations would be the one shape
+        it never fires for."""
+        if isinstance(node, ast.Name):
+            return node.id == key
+        if not isinstance(node, ast.Attribute) or node.attr != key:
+            return False
+        try:
+            _role, value = self._role_or_value(node)
+        except FormulaError:
+            return False
+        return isinstance(value, _Motes) and value.mote_ids == [self.ctx.mote_id]
 
     def _attribute(self, node: ast.Attribute):
         """`targets('a').voltage`, or `turbine.work` for a declared role.

@@ -25,6 +25,7 @@ from mcp.server.auth.settings import AuthSettings
 
 from core import derivations as derivations_repo
 from core import garden_io
+from core import health as health_repo
 from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo
@@ -36,6 +37,7 @@ from core import reserved as reserved_repo
 from core import simulation as simulation_repo
 from core import species as species_repo
 from core import sync as sync_repo
+from core import worksheet as worksheet_repo
 from core.db import DEFAULT_GARDEN, get_connection, initialize_database
 
 # How long a write waits out a lock held by another process (the GUI,
@@ -643,6 +645,79 @@ def check_roles(garden: str | None = None) -> dict[str, Any]:
         }
 
 
+def solve_health(garden: str | None = None) -> dict[str, Any]:
+    """Whether this garden's model can be solved, and which values stand in
+    the way -- answered **before** anything is run.
+
+    A failed solve says "underdetermined", which is true of the whole
+    garden and names nothing. This says which *coupled block* of unknowns
+    is short an equation (`groups`), which free values nothing can
+    determine at all (`culprits`), and which equations are dimensionally
+    inconsistent (`unitProblems`). Note that `equations == unknowns` is
+    neither necessary nor sufficient: read `verdict`, which is computed
+    from the blocks, not from the totals."""
+    with _connect(garden) as conn:
+        report = health_repo.check(conn)
+        return {
+            "equations": report.equations,
+            "unknowns": report.unknowns,
+            "checks": report.checks,
+            "verdict": report.verdict,
+            "solvable": report.solvable,
+            "summary": report.summary,
+            "groups": [
+                {"values": list(g.labels), "equations": list(g.equations),
+                 "shortfall": g.shortfall, "message": g.message}
+                for g in report.groups
+            ],
+            "culprits": [
+                {"value": c.label, "reason": c.reason} for c in report.culprits
+            ],
+            "inert": [
+                {"equation": i.equation, "label": i.label, "anchor": i.anchor}
+                for i in report.inert
+            ],
+            "unitProblems": list(report.unit_problems),
+        }
+
+
+def read_worksheet(garden: str | None = None) -> str:
+    """This garden's calculation as lines of text -- its givens, then its
+    equations -- the form `write_worksheet` takes back.
+
+    A projection of the graph, not a stored document: every `once`-scoped
+    rule and every number those rules read. A rule about a *species* is a
+    reusable model asserted once per instance and is deliberately absent."""
+    with _connect(garden) as conn:
+        return worksheet_repo.read(conn)
+
+
+def write_worksheet(text: str, garden: str | None = None) -> dict[str, Any]:
+    """Write lines of calculation into ordinary motes, rules, `applies_to`
+    and freedoms. `bd.x = 80 in` is a given; `bd.l = sqrt(bd.x^2 + bd.y^2)`
+    is an equation and makes `l` free on `bd`; `bd.Ax = ?` makes `Ax` free
+    with no value; `bd.Ax + bd.Bx == 0` is a relation that declares no
+    freedom; a trailing `! ΣFx` names the rule.
+
+    **This replaces, and it deletes.** The lines are the whole set of this
+    garden's `once`-scoped equations, so a rule whose line is absent is
+    removed -- `deleted` says which. Call `read_worksheet` first and edit
+    what it returns, rather than sending lines written from scratch against
+    a garden you have not read. Rules about a species are never touched
+    (`untouched` counts them). A line that does not parse is reported in
+    `problems` and nothing is deleted while any line is broken."""
+    with _connect(garden) as conn:
+        applied = worksheet_repo.apply(conn, text)
+        return {
+            "motesCreated": list(applied.motes_created),
+            "givensWritten": applied.givens_written,
+            "rulesWritten": applied.rules_written,
+            "deleted": list(applied.deleted),
+            "untouched": applied.untouched,
+            "problems": list(applied.problems),
+        }
+
+
 # ---- conventions ----
 
 
@@ -684,6 +759,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     preview_simulation,
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
+    solve_health, read_worksheet, write_worksheet,
     resolve_modoc,
     reserved_names,
 )

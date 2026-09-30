@@ -28,12 +28,14 @@ from mcp_server.server import (
     neighborhood,
     preview_simulation,
     producers,
+    read_worksheet,
     requires,
     reserved_names,
     resolve_modoc,
     search_motes,
     set_species,
     set_template,
+    solve_health,
     species_of,
     sync_init,
     sync_pull,
@@ -45,6 +47,7 @@ from mcp_server.server import (
     update_relationship,
     whole_garden,
     why,
+    write_worksheet,
 )
 
 # Every tool takes `garden` last and opens its own connection, so tests
@@ -578,3 +581,85 @@ def test_sync_run_pushes_and_pulls_in_one_call(sync_dir):
     result = sync_run(GARDEN)
     assert result["push"]["pushed"] == 1
     assert result["pull"] == {"applied": 0, "skipped": []}
+
+
+# ---- the worksheet and solve health ----
+
+FEA = "bd.x = 80 in\nbd.y = 60 in\n\nbd.l = sqrt(bd.x^2 + bd.y^2)"
+
+
+def test_write_worksheet_creates_the_motes_rules_and_freedoms(garden):
+    written = write_worksheet(FEA, garden=GARDEN)
+    assert written["motesCreated"] == ["bd"]
+    assert (written["givensWritten"], written["rulesWritten"]) == (2, 1)
+    assert written["problems"] == []
+
+    bd = next(m for m in list_motes(garden=GARDEN) if m["properties"].get("name") == "bd")
+    assert bd["properties"]["x"] == 80
+    assert bd["properties"]["freedoms"] == ["l"]
+
+
+def test_read_worksheet_round_trips_what_was_written(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    assert read_worksheet(garden=GARDEN) == FEA
+
+
+def test_read_worksheet_is_empty_for_a_garden_with_no_equations(garden):
+    create_mote({"name": "HW 4"}, GARDEN)
+    assert read_worksheet(garden=GARDEN) == ""
+
+
+def test_write_worksheet_deletes_the_rule_whose_line_is_gone(garden):
+    write_worksheet(FEA + "\nbd.area = bd.x * bd.y", garden=GARDEN)
+    written = write_worksheet(FEA, garden=GARDEN)
+    assert written["deleted"] == ["bd.area == bd.x * bd.y"]
+
+
+def test_write_worksheet_leaves_a_species_rule_alone_and_counts_it(garden):
+    species = create_mote({"name": "Resistor", "freedoms": "current"}, GARDEN)
+    instance = create_mote({"name": "R1", "resistance": 100, "voltage": 12}, GARDEN)
+    create_relationship(instance["id"], species["id"], INSTANCE_OF, GARDEN)
+    rule = create_mote({"equation": "voltage == current * resistance"}, GARDEN)
+    create_relationship(rule["id"], species["id"], APPLIES_TO, GARDEN)
+
+    written = write_worksheet(FEA, garden=GARDEN)
+    assert written["untouched"] == 1
+    assert written["deleted"] == []
+    assert get_mote(rule["id"], GARDEN) is not None
+
+
+def test_write_worksheet_reports_a_broken_line_and_deletes_nothing(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    written = write_worksheet("nonsense((", garden=GARDEN)
+    assert written["problems"] and "line 1" in written["problems"][0]
+    assert written["deleted"] == []
+
+
+def test_solve_health_reports_a_balanced_model(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    report = solve_health(garden=GARDEN)
+    assert (report["equations"], report["unknowns"]) == (1, 1)
+    assert report["verdict"] == "balanced"
+    assert report["solvable"]
+    assert report["groups"] == []
+
+
+def test_solve_health_names_the_block_that_is_short_an_equation(garden):
+    write_worksheet("bd.Ax = ?\nbd.Bx = ?\nbd.Ax + bd.Bx == 0", garden=GARDEN)
+    report = solve_health(garden=GARDEN)
+    assert report["verdict"] == "underdetermined"
+    assert not report["solvable"]
+    assert report["groups"][0]["values"] == ["bd.Ax", "bd.Bx"]
+    assert report["groups"][0]["shortfall"] == 1
+
+
+def test_solve_health_names_an_unconstrained_value(garden):
+    write_worksheet("bd.x = 80\nbd.q = ?\nbd.l = bd.x * 2", garden=GARDEN)
+    assert [c["value"] for c in solve_health(garden=GARDEN)["culprits"]] == ["bd.q"]
+
+
+def test_solve_health_reports_a_dimensional_mismatch(garden):
+    write_worksheet("bd.x = 80 in\nbd.t = 3 s\nbd.l = bd.x + bd.t", garden=GARDEN)
+    problems = solve_health(garden=GARDEN)["unitProblems"]
+    assert len(problems) == 1
+    assert "different dimensions" in problems[0]

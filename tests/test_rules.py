@@ -47,7 +47,16 @@ def test_motes_without_applies_to_are_not_rules(conn):
     assert list_rules(conn) == []
 
 
-def test_rule_name_falls_back_to_id_prefix(conn):
+def test_an_unnamed_rule_is_labelled_by_its_equation(conn):
+    """Unnamed by default, with the equation as the label -- a name that
+    copies its equation is a second account of it that drifts the moment
+    the equation is edited."""
     species = create_mote(conn, {"name": "S"})
-    rule_id = make_rule(conn, species, equation="x == 1")
-    assert list_rules(conn)[0].name == rule_id[:8]
+    make_rule(conn, species, equation="x == 1")
+    assert list_rules(conn)[0].name == "x == 1"
+
+
+def test_a_named_rule_keeps_its_name(conn):
+    species = create_mote(conn, {"name": "S"})
+    make_rule(conn, species, equation="x == 1", name="ΣFy")
+    assert list_rules(conn)[0].name == "ΣFy"

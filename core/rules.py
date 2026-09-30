@@ -79,7 +79,7 @@ class Rule:
 
     @property
     def name(self) -> str:
-        return str(self.mote.properties.get("name", self.mote.id[:8]))
+        return label_of(self.mote.properties, self.mote.id)
 
 
 def list_rules(conn: sqlite3.Connection) -> list[Rule]:
@@ -108,6 +108,26 @@ def list_rules(conn: sqlite3.Connection) -> list[Rule]:
             )
         )
     return rules
+
+
+def label_of(properties: dict, mote_id: str) -> str:
+    """What to call a rule: its `name`, else its equation, else its id.
+
+    The equation in the middle is what lets a rule be **unnamed by
+    default**. A worksheet line writes no name, because a name that copies
+    its equation is a second account of it that drifts the moment the
+    equation is edited -- which is exactly what `FEA-Homework-4`'s rule
+    names had done. Reading the equation as the label costs nothing and
+    cannot go stale. A trailing `! ΣFy` on the line writes a real name,
+    for the cases where a person has a better word for it than the algebra.
+    """
+    name = properties.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    equation = properties.get(EQUATION_KEY)
+    if isinstance(equation, str) and equation.strip():
+        return equation.strip()
+    return mote_id[:8]
 
 
 def parse_freedoms(value) -> list[str]:

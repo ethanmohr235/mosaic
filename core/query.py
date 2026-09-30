@@ -35,6 +35,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field as dataclass_field
 
 from core import kinds as kinds_repo
+from core import rules as rules_repo
 from core.entities import Mote, Relationship
 from core.species import INSTANCE_OF
 
@@ -334,9 +335,14 @@ class Index:
         )
 
     def name_of(self, mote_id: str) -> str:
+        """A mote's `name`, or -- for a rule a worksheet left unnamed --
+        its equation (core/rules.py::label_of). A row reading
+        `l == sqrt(x^2 + y^2)` says what that mote is; one reading
+        `1f3533ca` says nothing at all."""
         mote = self.motes.get(mote_id)
-        name = mote.properties.get(NAME_KEY) if mote else None
-        return name if isinstance(name, str) and name else mote_id[:8]
+        if mote is None:
+            return mote_id[:8]
+        return rules_repo.label_of(mote.properties, mote_id)
 
     def degree(self, mote_id: str) -> int:
         return len(self.outgoing.get(mote_id, [])) + len(self.incoming.get(mote_id, []))

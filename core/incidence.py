@@ -88,6 +88,31 @@ class Requirement:
 
 
 @dataclass(frozen=True)
+class Block:
+    """One coupled group: free values that share equations, and the
+    equations that could determine them.
+
+    This is the shape a "which lines are wrong" answer has. A garden's
+    count of equations against unknowns is a fact about the whole garden
+    and names nothing; a *block* is the smallest group whose counts have
+    to balance on their own, because no equation outside it can determine
+    anything inside it. Three unknowns and two equations in one garden may
+    be two blocks, one of them fine -- and saying which is the difference
+    between a message somebody can act on and one they cannot."""
+    variables: frozenset[Unknown]
+    equations: tuple[EquationTouch, ...]
+
+    @property
+    def shortfall(self) -> int:
+        """Unknowns minus equations. Positive means this group cannot be
+        solved on its own however the rest of the garden looks; negative
+        means it has more equations than it needs, which is normal and fine
+        as long as they agree (in any circuit one Kirchhoff equation is
+        implied by the others) -- so it is reported, never refused."""
+        return len(self.variables) - len(self.equations)
+
+
+@dataclass(frozen=True)
 class Index:
     """Every equation in the garden, indexed by the values it touches."""
     touches: tuple[EquationTouch, ...] = ()
@@ -188,6 +213,50 @@ class Index:
             producers=producers,
             needs=tuple(Need(v, needs[v]) for v in sorted(needs)),
         )
+
+    def blocks(self) -> tuple[Block, ...]:
+        """The garden's free values cut into coupled groups, largest first.
+
+        Two values are in the same block when some equation could determine
+        both, transitively. An equation belongs to the block of the values
+        it determines -- so a constraint, which determines nothing, is in no
+        block at all, which is correct: an inequality cannot make a
+        deficient group solvable.
+
+        A free value no equation determines comes back as a block of one
+        with no equations, so "nothing constrains this" and "these three
+        share two equations" are the same answer read at two sizes."""
+        groups: dict[Unknown, Unknown] = {v: v for v in self.freedoms}
+        for touch in self.touches:
+            determined = [v for v in touch.determines if v in groups]
+            for variable in determined[1:]:
+                self._union(groups, determined[0], variable)
+
+        members: dict[Unknown, set[Unknown]] = {}
+        for variable in groups:
+            members.setdefault(self._root(groups, variable), set()).add(variable)
+        equations: dict[Unknown, list[EquationTouch]] = {}
+        for touch in self.touches:
+            determined = [v for v in touch.determines if v in groups]
+            if determined:
+                equations.setdefault(self._root(groups, determined[0]), []).append(touch)
+
+        blocks = [
+            Block(frozenset(group), tuple(equations.get(root, ())))
+            for root, group in members.items()
+        ]
+        return tuple(sorted(blocks, key=lambda b: (-len(b.variables), sorted(b.variables))))
+
+    @staticmethod
+    def _root(groups: dict[Unknown, Unknown], variable: Unknown) -> Unknown:
+        while groups[variable] != variable:
+            variable = groups[variable]
+        return variable
+
+    def _union(self, groups: dict[Unknown, Unknown], a: Unknown, b: Unknown) -> None:
+        root_a, root_b = self._root(groups, a), self._root(groups, b)
+        if root_a != root_b:
+            groups[root_b] = root_a
 
     def _status(self, variable: Unknown) -> str:
         """Freedom is checked before any stored value, because a free

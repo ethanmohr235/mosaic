@@ -744,6 +744,177 @@ one therefore re-solves the garden as it stands now, which is the whole
 difference between a saved plot and a screenshot. Written and read in
 Moxie, and shaped exactly like `query`, Monolith's saved view.
 
+## The worksheet
+
+`core/worksheet.py` is a garden's calculation as lines of text, top to
+bottom:
+
+```text
+bd.x = 80 in
+bd.y = 60 in
+bd.Ax = ?
+bd.Bx = ?
+
+bd.l = sqrt(bd.x^2 + bd.y^2)
+bd.Ax + bd.Bx == 0            ! ΣFx
+```
+
+```
+monoss worksheet read
+monoss worksheet apply --file sheet.txt      # or on standard input
+```
+
+`FEA-Homework-4` is the case this exists for: 10 motes and 10
+relationships to express about 9 numbers and 5 equations, built one dialog
+at a time. Six of those relationships existed only so `bd.l` would resolve
+— [garden-scope names](#name-references) deleted those — and the rest was
+a mote and a rule per line. Eight lines say the same thing.
+
+| line | means |
+| --- | --- |
+| `bd.x = 80 in` | a **given**: the property, and `in` in the mote's `units` map |
+| `bd.l = sqrt(...)` | an **equation**: a rule mote, `applies_to bd`, and `l` free on `bd` |
+| `bd.Ax = ?` | an **unknown**: `Ax` free on `bd`, with no value |
+| `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
+| `bd.sigma <= 250` | a **check**: evaluated, never solved |
+| `... ! ΣFx` | names the rule that line makes |
+| (blank) | ignored |
+
+A single `=` is a given when its right side is a bare number, an unknown
+when it is `?`, and an equation otherwise. That is the whole rule, and it
+is what the shapes above already read as: `80 in` is not an expression (`in`
+is a Python keyword, so it cannot even parse as one) and `sqrt(bd.x^2 +
+bd.y^2)` obviously is.
+
+**`=` and `==` differ in one way that matters.** Both make an equation;
+only `=` also declares its left side a freedom. `=` is the assignment —
+*solve for this* — and `==` is a relation between values that are free for
+some other reason, which is how a residual is written without the parser
+guessing which of two unknowns it determines. `= ?` is how the person who
+wrote that residual says which values it may determine.
+
+**A rule a line makes is unnamed.** A name that copies its equation is a
+second account of it that drifts the moment the equation is edited — which
+is exactly what `FEA-Homework-4`'s rule names had done. So the equation
+*is* the label (`core/rules.py::label_of`), everywhere a rule is named: in
+a solve's messages, in `why`, in a table row. A trailing `! ΣFx` writes a
+real name, for when a person has a better word for it than the algebra.
+
+### A projection, never a store
+
+There is no `worksheet` property and no saved source text. `read()` renders
+the garden's equations and their inputs back as lines; `apply()` writes
+lines into ordinary motes, rules, `applies_to` and freedoms. That is
+`philosophy.md`'s rule — "editors are shortcuts over the graph, never a
+separate store" — taken at its word, and what it costs is real:
+**comments, blank lines and the order you typed in are not recoverable.** A
+line's `! name` survives because it becomes the rule's `name`; nothing else
+about the text does.
+
+`read()` is **complete** for what it covers, which is what makes the round
+trip safe: applying what it returns deletes nothing and widens nothing. Two
+details make that true. A solved freedom is never printed as a given — it
+is the answer, and printing `bd.l = 100` would pin the value the worksheet
+solves for. And a rule is rendered with `=` only when its left side is
+already a freedom; otherwise it keeps `==`, since a `=` would make that
+property free on the next apply.
+
+### Applying replaces
+
+The lines are the whole set of the garden's `once`-scoped equations, so **a
+rule whose line is gone is deleted**. That is what makes the editor an
+editor rather than an append-only log, and it is the one destructive thing
+here — `Applied.deleted` names what went. Nothing is deleted while any line
+fails to parse, so a half-written worksheet cannot take the rules out from
+under the lines that are fine.
+
+**A rule about a species is never rendered or deleted.** It is asserted
+once per instance — a reusable model, which species and templates are still
+for — and is not a line. `Applied.untouched` counts them, so a surface can
+say so rather than implying a worksheet is the whole garden.
+
+One asymmetry worth knowing: applying **adds** freedoms and never removes
+one. A freedom may have been declared in another surface about a mote the
+worksheet happens to mention, and taking it away would be reaching past
+what the lines are about.
+
+## Solve health
+
+```
+monoss health
+```
+
+```text
+3 equations, 3 unknowns -- underdetermined
+  2 unknowns (bd.Ax, bd.Bx) share 1 equation(s) -- another equation needed
+  1 unknown(s) (bd.l) have 2 equations -- 1 more than needed, which is fine
+    as long as they agree
+```
+
+A solve either answers or fails with a message about the system as a whole.
+That is correct and useless: "more unknowns than independent equations" is
+true of the whole garden and tells nobody which line to go fix.
+`core/health.py::check()` answers **before anything is solved**, from what
+already exists — `core/incidence.py` for the counts and the culprits,
+`check_garden` for the units. Nothing there is re-derived.
+
+**The count is not a verdict.** `equations == unknowns` is neither
+necessary nor sufficient: overdetermined is normal and fine as long as the
+extra equations agree (in any circuit one Kirchhoff current equation is
+implied by the others), and the example above has three of each while being
+genuinely underdetermined. So the verdict is read off the **blocks**, never
+off the totals.
+
+### Blocks are the smallest thing worth naming
+
+`Index.blocks()` cuts the garden's free values into coupled groups: two
+values are in one block when some equation could determine both,
+transitively, and an equation belongs to the block of the values it
+determines. A block is the smallest group whose counts have to balance on
+their own, because no equation outside it can determine anything inside it.
+Naming which block is short is the difference between a message somebody
+can act on and one they cannot.
+
+A constraint determines nothing, so it is in no block at all — which is the
+structural form of "an inequality cannot make a deficient group solvable".
+A free value no equation determines comes back as a block of one with no
+equations, so "nothing constrains this" and "these three share two
+equations" are the same answer read at two sizes.
+
+Alongside the blocks, `check()` reports:
+
+- **`culprits`** — free values nothing can determine, and values an
+  equation reads that nothing holds. The part somebody has to act on.
+- **`inert`** — equations that touch nothing the solver may determine. Not
+  an error (a check is *meant* to constrain rather than determine), but
+  when a system is overdetermined this is the honest shortlist, rather than
+  pretending one equation can be blamed.
+- **`unit_problems`** — the same dimensional check `unit check` runs, and
+  already per line: each problem is labelled with the rule it was found on,
+  and a worksheet rule is labelled by its own equation, so a warning reads
+  back as the line that caused it.
+- **`checks`** — comparison relations, counted apart from the equations.
+  Counting one among them would make a model look balanced because of a
+  line that cannot determine anything.
+
+`solvable` means nothing is structurally wrong, deliberately not "will
+solve": a block whose counts balance can still be singular or inconsistent,
+and only running it can say. A scenario can be passed to ask the same
+question of a hypothetical, which matters most when it changes `freedoms`
+rather than a value.
+
+### Display units versus stored units
+
+The unit in a mote's `units` map is the unit the value is **stored** in,
+and solving never changes it (see [Units](#units)). What a *surface* shows
+is separate, and deliberately not in the garden: it is view state, so
+`core/` offers only `core/units.py::convert` and
+`core/health.py::stored_unit`, and no display preference is written
+anywhere. A worksheet typed in inches whose `l` comes out as `2.54` is
+correct — the equation named metres, so the solve labelled it `m` (see
+[Inference](#inference)) — and showing `100 in` is the reader's own choice,
+converted on the way to the screen.
+
 ## Dependency queries
 
 `why` reads what the last solve recorded. These four read the *rules*,

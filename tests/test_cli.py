@@ -1,7 +1,10 @@
+import io
+
 import pytest
 
 from cli.main import (
     _handle_garden,
+    _handle_health,
     _handle_incidence,
     _handle_model,
     _handle_modoc,
@@ -12,6 +15,7 @@ from cli.main import (
     _handle_species,
     _handle_unit,
     _handle_why,
+    _handle_worksheet,
     build_parser,
 )
 from core.gardens import garden_exists
@@ -680,3 +684,107 @@ def test_simulate_run_with_strict_constraints_fails(conn, capsys):
 
     assert "Simulation failed" in out
     assert "constraint check failed" in out
+
+
+# ---- worksheet ----
+
+FEA = "bd.x = 80 in\nbd.y = 60 in\n\nbd.l = sqrt(bd.x^2 + bd.y^2)"
+
+
+def test_worksheet_apply_reads_a_file_and_says_what_it_wrote(conn, capsys, tmp_path):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text(FEA)
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    out = capsys.readouterr().out
+    assert "Wrote 2 given(s) and 1 rule(s)." in out
+    assert "Created bd." in out
+
+
+def test_worksheet_apply_reads_standard_input(conn, capsys, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO(FEA))
+    _handle_worksheet(conn, parse(["worksheet", "apply"]))
+    assert "Wrote 2 given(s)" in capsys.readouterr().out
+
+
+def test_worksheet_read_prints_the_lines_back(conn, capsys, tmp_path):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text(FEA)
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    capsys.readouterr()
+
+    _handle_worksheet(conn, parse(["worksheet", "read"]))
+    assert capsys.readouterr().out.strip() == FEA
+
+
+def test_worksheet_read_says_so_on_an_empty_garden(conn, capsys):
+    _handle_worksheet(conn, parse(["worksheet", "read"]))
+    assert "no equations" in capsys.readouterr().out
+
+
+def test_worksheet_apply_names_the_rules_it_deleted(conn, capsys, tmp_path):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text(FEA + "\nbd.area = bd.x * bd.y")
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    sheet.write_text(FEA)
+    capsys.readouterr()
+
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    out = capsys.readouterr().out
+    assert "1 rule(s) had no line and were deleted" in out
+    assert "bd.area == bd.x * bd.y" in out
+
+
+def test_worksheet_apply_reports_a_broken_line(conn, capsys, tmp_path):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text("bd.x = 80\nnonsense((")
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    assert "problem: line 2" in capsys.readouterr().out
+
+
+def test_worksheet_rejects_an_unknown_action(conn, capsys):
+    args = parse(["worksheet", "read"])
+    args.action = "frobnicate"
+    _handle_worksheet(conn, args)
+    assert "Specify a worksheet action" in capsys.readouterr().out
+
+
+# ---- health ----
+
+def test_health_prints_the_counts_and_the_verdict(conn, capsys, tmp_path):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text(FEA)
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    capsys.readouterr()
+
+    _handle_health(conn, parse(["health"]))
+    assert "1 equation, 1 unknown -- balanced" in capsys.readouterr().out
+
+
+def test_health_names_the_block_that_is_short_an_equation(conn, capsys, tmp_path):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text("bd.Ax = ?\nbd.Bx = ?\nbd.Ax + bd.Bx == 0")
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    capsys.readouterr()
+
+    _handle_health(conn, parse(["health"]))
+    out = capsys.readouterr().out
+    assert "underdetermined" in out
+    assert "bd.Ax, bd.Bx" in out
+    assert "another equation needed" in out
+
+
+def test_health_reports_a_dimensional_mismatch_against_its_line(conn, capsys, tmp_path):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text("bd.x = 80 in\nbd.t = 3 s\nbd.l = bd.x + bd.t")
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+    capsys.readouterr()
+
+    _handle_health(conn, parse(["health"]))
+    out = capsys.readouterr().out
+    assert "units: bd.l == bd.x + bd.t on bd" in out
+    assert "different dimensions" in out
+
+
+def test_health_on_an_empty_garden_says_nothing_is_wrong(conn, capsys):
+    _handle_health(conn, parse(["health"]))
+    assert capsys.readouterr().out.strip() == "0 equations, 0 unknowns -- balanced"
