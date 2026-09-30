@@ -63,6 +63,8 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query` and `plot` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
+The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
+
 A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below). The names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
 
 # Units
@@ -414,8 +416,8 @@ the user should approve in the app, or need a live window. See
 # What belongs on which surface
 
 `core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/`,
-`monolith/`, `motion/`, `moxie/`, `gardens_app/` and `mcp_server/`
-are nine adapters over it, and each one's job is a
+`monolith/`, `motion/`, `moxie/`, `gardens_app/`, `console/` and
+`mcp_server/` are ten adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -464,6 +466,16 @@ The charter:
   it cannot switch that window's garden; each row offers **Open in**
   instead. Deliberately not: anything inside a garden -- it never reads
   or writes a mote.
+* **Console** -- the one tiled Mosaic window the windows above are being
+  ported into (`docs/console.md`; `run_console.py`, `console/`). Its
+  root bridge (`console/api.py`) owns the single garden connection,
+  lock and undo stack every ported app's namespace will share, and
+  answers the command line: `core/commands.py` parses a line as an app
+  suffix, a verb or a `core/command_bar.py` statement, so the grammar
+  stays in `core/`. Layouts and command history are UI state, kept in
+  a per-garden sidecar (`gardens/<name>.db.console.json`) that follows
+  the garden through rename, trash and restore and never syncs. An app
+  not yet ported opens its old window from the console.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.

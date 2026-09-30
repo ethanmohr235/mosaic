@@ -119,6 +119,10 @@ APPS = {
     "monolith": ("Monolith", REPO_ROOT / "run_monolith.py", "--view"),
     "motion": ("Motion", REPO_ROOT / "run_motion.py", "--focus"),
     "moxie": ("Moxie", REPO_ROOT / "run_moxie.py", "--focus"),
+    # The console (docs/console.md): the one window the others are
+    # being ported into. Listed so an old window can open it; it takes
+    # no focus flag -- selection lives in the console's own store.
+    "console": ("Mosaic", REPO_ROOT / "run_console.py", None),
 }
 
 

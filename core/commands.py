@@ -1,0 +1,320 @@
+# core/commands.py
+"""The console's merged grammar (docs/console.md -> Command line and
+grammar). One line typed at the `[mo]` prompt opens with one of three
+things, decided by its first token alone:
+
+    tion                an app suffix: open that app (CONSOLE_APPS below)
+    layout save two     a verb (core/reserved.py::RESERVED_VERBS)
+    R1.x = 5 ohm        anything else: a modeling statement, handed to
+                        core/command_bar.py::run_command unchanged
+
+Verb-first, quote to escape. A first token that *is* a reserved word --
+case-sensitive, lowercase -- is that word, even if a mote shares its
+name. A quoted first token (`"log" -> R1`) or an `#id` is never a verb,
+which is how such a mote stays reachable; whoever creates one is warned
+(run_statement below). Nothing else about command_bar's grammar changes.
+
+`@sel` stands for the selection's primary mote wherever a mote id is
+expected: expand_sel() swaps it for `#<id>` before parsing.
+
+Pure: no UI, no Api. The console's root API (console/api.py) is one
+caller; the CLI or MCP can run the same lines."""
+import re
+import shlex
+import sqlite3
+from dataclasses import dataclass, replace
+from typing import Sequence
+
+from core import command_bar
+from core import motes as motes_repo
+from core.command_bar import CommandError, CommandResult
+from core.reserved import RESERVED_VERBS, reserved_words
+
+
+@dataclass(frozen=True)
+class ConsoleApp:
+    """One app the console can open by suffix (`mo tion`).
+
+    `default_view` is None until the app's port step lands; while it is,
+    `legacy` names the old window to launch instead (an api_common.APPS
+    id, or "gardens" for the Gardens window). This table is the single
+    source of truth for which apps are ported."""
+    suffix: str
+    name: str
+    default_view: str | None = None
+    legacy: str | None = None
+    default_command: str | None = None  # canonical command for default_view
+
+
+CONSOLE_APPS: tuple[ConsoleApp, ...] = (
+    ConsoleApp("nolith", "Monolith", legacy="monolith"),
+    ConsoleApp("te", "Inspector"),
+    ConsoleApp("xie", "Moxie", legacy="moxie"),
+    ConsoleApp("tion", "Motion", legacy="motion"),
+    ConsoleApp("ra", "Mora", legacy="mora"),
+    ConsoleApp("nastery", "Monastery", legacy="monastery"),
+    ConsoleApp("narch", "Monarch", legacy="monarch"),
+    ConsoleApp("saic", "Home", legacy="gardens"),
+)
+
+# Verbs a view answers directly, rather than the root API acting on them.
+VERB_VIEWS: dict[str, str] = {"log": "log"}
+
+LAYOUT_OPS: dict[str, str] = {
+    "save": "save the current panes as ‹name›",
+    "load": "restore a saved layout",
+    "list": "list saved layouts",
+    "rm": "delete a saved layout",
+}
+
+APP, VERB, STATEMENT = "app", "verb", "statement"
+
+_ESCAPE_CHARS = ("'", '"', "#")
+_FIRST_TOKEN_RE = re.compile(r"(\S*)(\s*)(.*)", re.DOTALL)
+_WORD_PREFIX_RE = re.compile(r"[a-z]*")
+_SEL = "@sel"
+
+
+def find_app(suffix: str) -> ConsoleApp | None:
+    return next((app for app in CONSOLE_APPS if app.suffix == suffix), None)
+
+
+def app_description(app: ConsoleApp) -> str:
+    if app.default_view:
+        return f"{app.name} — {app.default_view}"
+    if app.legacy:
+        return f"{app.name} — old window"
+    return f"{app.name} — not available yet"
+
+
+# ---- parsing ------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ParsedLine:
+    kind: str  # APP, VERB or STATEMENT
+    head: str  # the reserved word; "" for a statement
+    args: tuple[str, ...]  # shlex tokens after `head`; () for a statement
+    text: str  # the whole line, stripped
+
+
+def parse(line: str) -> ParsedLine:
+    """Which of the three forms `line` is. Raises CommandError only for
+    a verb or app line whose arguments don't tokenize (an unclosed
+    quote); a statement is never judged here -- run_command does that."""
+    text = (line or "").strip()
+    word, _sep, rest = _FIRST_TOKEN_RE.match(text).groups()
+    if not word or word.startswith(_ESCAPE_CHARS):
+        return ParsedLine(STATEMENT, "", (), text)
+    if word in RESERVED_VERBS:
+        kind = VERB
+    elif find_app(word) is not None:
+        kind = APP
+    else:
+        return ParsedLine(STATEMENT, "", (), text)
+    try:
+        args = tuple(shlex.split(rest))
+    except ValueError as e:
+        raise CommandError(f"{word}: {e}") from None
+    return ParsedLine(kind, word, args, text)
+
+
+def expand_sel(line: str, selection: Sequence[str]) -> str:
+    """`line` with every `@sel` outside quotes replaced by `#<primary
+    id>` -- the first item of `selection`. Raises CommandError when the
+    line uses `@sel` and nothing is selected. Batch (whole-set)
+    semantics arrive with `set` in U2."""
+    ref = f"#{selection[0]}" if selection else ""
+    out: list[str] = []
+    quote: str | None = None
+    used = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote is None and _sel_at(line, i):
+            out.append(ref)
+            used = True
+            i += len(_SEL)
+            continue
+        if ch in ("'", '"'):
+            quote = None if quote == ch else (ch if quote is None else quote)
+        out.append(ch)
+        i += 1
+    if used and not selection:
+        raise CommandError("@sel is empty -- select a mote first")
+    return "".join(out)
+
+
+def resolve_view(command: str) -> tuple[str, str]:
+    """(view id, canonical command) for the view that answers `command`
+    -- what a pane mounts when a layout restores it. `""` is the empty
+    pane (the view picker). Raises CommandError for a line no view
+    answers."""
+    parsed = parse(command)
+    if not parsed.text:
+        return "", ""
+    if parsed.kind == VERB and parsed.head in VERB_VIEWS and not parsed.args:
+        return VERB_VIEWS[parsed.head], parsed.text
+    if parsed.kind == APP and not parsed.args:
+        app = find_app(parsed.head)
+        if app.default_view:
+            return app.default_view, app.default_command or app.suffix
+    raise CommandError(f"no view answers {parsed.text!r}")
+
+
+def _sel_at(line: str, i: int) -> bool:
+    if not line.startswith(_SEL, i):
+        return False
+    end = i + len(_SEL)
+    before_ok = i == 0 or not _is_word_char(line[i - 1])
+    after_ok = end >= len(line) or not _is_word_char(line[end])
+    return before_ok and after_ok
+
+
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_"
+
+
+# ---- statements ---------------------------------------------------------
+
+def run_statement(conn: sqlite3.Connection, text: str, confirm: bool = False) -> CommandResult:
+    """core/command_bar.py::run_command, plus the one thing the console
+    adds: a warning when the line just created a mote whose name is a
+    reserved word, since that mote can't be reached by typing its bare
+    name at the start of a line any more."""
+    result = command_bar.run_command(conn, text, confirm=confirm)
+    warning = _created_reserved_warning(conn, result)
+    if warning:
+        result = replace(result, message=result.message + warning)
+    return result
+
+
+def reserved_name_warning(name: str, mote_id: str) -> str | None:
+    if name not in reserved_words():
+        return None
+    return (f' -- "{name}" is a console word, so reach this mote as '
+            f'"{name}" (quoted) or #{mote_id[:8]}')
+
+
+def _created_reserved_warning(conn: sqlite3.Connection, result: CommandResult) -> str | None:
+    if not (result.ok and result.created and result.mote_id):
+        return None
+    mote = motes_repo.get_mote(conn, result.mote_id)
+    name = mote.properties.get("name") if mote else None
+    return reserved_name_warning(name, mote.id) if isinstance(name, str) else None
+
+
+# ---- completion ---------------------------------------------------------
+
+@dataclass(frozen=True)
+class CompletionRow:
+    value: str
+    description: str = ""
+    dim: bool = False
+    current: bool = False
+
+
+@dataclass(frozen=True)
+class Completion:
+    """`replace_from` is an index into the line: accepting rows[i]
+    replaces line[replace_from:cursor] with its value. `ghost` is what
+    the best row adds after what is already typed."""
+    hint: str = ""
+    rows: tuple[CompletionRow, ...] = ()
+    ghost: str = ""
+    replace_from: int = 0
+
+
+def complete(
+    conn: sqlite3.Connection,
+    line: str,
+    cursor: int | None = None,
+    *,
+    gardens: Sequence[str] = (),
+    layouts: Sequence[str] = (),
+    current_garden: str | None = None,
+) -> Completion:
+    """Completion for the token ending at `cursor` (end of line by
+    default). The first token offers app suffixes, verbs and mote names;
+    after `cd` and `layout` their own arguments; anything else is
+    core/command_bar.py::suggest."""
+    line = line or ""
+    cursor = len(line) if cursor is None else max(0, min(cursor, len(line)))
+    head = line[:cursor]
+    lead = len(head) - len(head.lstrip())
+    word, sep, rest = _FIRST_TOKEN_RE.match(head[lead:]).groups()
+    if not sep:
+        if _WORD_PREFIX_RE.fullmatch(word):
+            return _complete_first(conn, line, cursor, word, lead)
+        return _complete_statement(conn, line, cursor)
+    if word in RESERVED_VERBS:
+        choices = _verb_choices(word, rest, gardens, layouts, current_garden)
+        return _complete_from(RESERVED_VERBS[word]["usage"], choices, rest, cursor)
+    if find_app(word) is not None:
+        return Completion(replace_from=cursor)
+    return _complete_statement(conn, line, cursor)
+
+
+def _complete_first(conn, line: str, cursor: int, partial: str, lead: int) -> Completion:
+    apps = [_app_row(app) for app in CONSOLE_APPS if app.suffix.startswith(partial)]
+    verbs = [
+        CompletionRow(verb, meta["describe"])
+        for verb, meta in RESERVED_VERBS.items() if verb.startswith(partial)
+    ]
+    words = reserved_words()
+    motes = [
+        CompletionRow(name)
+        for name in command_bar.suggest(conn, line, cursor) if name not in words
+    ]
+    dim = [
+        _app_row(app, dim=True) for app in CONSOLE_APPS if not app.suffix.startswith(partial)
+    ]
+    rows = tuple(apps + verbs + motes + dim)
+    return Completion("mo ‹app›", rows, _ghost(rows, partial), lead)
+
+
+def _app_row(app: ConsoleApp, dim: bool = False) -> CompletionRow:
+    return CompletionRow(app.suffix, app_description(app), dim=dim)
+
+
+def _verb_choices(verb, rest, gardens, layouts, current_garden) -> list[CompletionRow]:
+    done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
+    if verb == "cd" and not done:
+        return [CompletionRow(g, current=g == current_garden) for g in gardens]
+    if verb == "layout" and not done:
+        return [CompletionRow(op, desc) for op, desc in LAYOUT_OPS.items()]
+    if verb == "layout" and len(done) == 1 and done[0] in ("save", "load", "rm"):
+        return [CompletionRow(name) for name in layouts]
+    return []
+
+
+def _complete_from(hint: str, choices: list[CompletionRow], rest: str, cursor: int) -> Completion:
+    partial = "" if not rest or rest[-1].isspace() else rest.split()[-1]
+    needle = partial.lower()
+    rows = tuple(row for row in choices if row.value.lower().startswith(needle))
+    return Completion(hint, rows, _ghost(rows, partial), cursor - len(partial))
+
+
+def _complete_statement(conn, line: str, cursor: int) -> Completion:
+    head = line[:cursor]
+    partial = _statement_partial(head)
+    rows = tuple(CompletionRow(value) for value in command_bar.suggest(conn, line, cursor))
+    return Completion("", rows, _ghost(rows, partial), cursor - len(partial))
+
+
+def _statement_partial(head: str) -> str:
+    """The token command_bar.suggest completes, by its own rules: the
+    property after an `Name.`, else the trailing identifier."""
+    prop_match = command_bar._PROP_TOKEN_RE.search(head)
+    if prop_match:
+        return prop_match.group(2)
+    name_match = command_bar._NAME_TOKEN_RE.search(head)
+    return name_match.group(1) if name_match else ""
+
+
+def _ghost(rows: Sequence[CompletionRow], typed: str) -> str:
+    best = next((row for row in rows if not row.dim), None)
+    if not typed or best is None:
+        return ""
+    if not best.value.lower().startswith(typed.lower()):
+        return ""
+    return best.value[len(typed):]

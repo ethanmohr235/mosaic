@@ -37,24 +37,19 @@ def delete_garden(name: str) -> None:
         trash.unlink()
     garden_db_path(name).rename(trash)
 
-    # The sync-dir pointer (set_sync_dir) is trashed alongside the .db,
-    # not left behind -- otherwise a brand-new, unrelated garden later
-    # created under this same name would silently inherit it and start
-    # pushing/pulling through a sync server that has nothing to do with
-    # it. restore_garden() below brings it back with the rest.
-    sync_dir = _sync_dir_path(name)
-    if sync_dir.exists():
-        sync_trash = _sync_dir_trash_path(name)
-        if sync_trash.exists():
-            sync_trash.unlink()
-        sync_dir.rename(sync_trash)
-
-    auto_sync = _auto_sync_path(name)
-    if auto_sync.exists():
-        auto_sync_trash = _auto_sync_trash_path(name)
-        if auto_sync_trash.exists():
-            auto_sync_trash.unlink()
-        auto_sync.rename(auto_sync_trash)
+    # The sidecars (the sync-dir pointer, the auto-sync flag, the
+    # console's UI state) are trashed alongside the .db, not left behind
+    # -- otherwise a brand-new, unrelated garden later created under this
+    # same name would silently inherit them, and with the sync pointer
+    # start pushing/pulling through a sync server that has nothing to do
+    # with it. restore_garden() below brings them back with the rest. A
+    # trashed sidecar from an older copy is dropped even when this copy
+    # has none, so a restore never pairs this .db with another's.
+    for sidecar in _sidecar_paths(name):
+        sidecar_trash = _trashed(sidecar)
+        sidecar_trash.unlink(missing_ok=True)
+        if sidecar.exists():
+            sidecar.rename(sidecar_trash)
 
 
 def restore_garden(name: str) -> None:
@@ -65,13 +60,29 @@ def restore_garden(name: str) -> None:
         raise FileExistsError(f"Garden already exists: {name!r}")
     trash.rename(garden_db_path(name))
 
-    sync_trash = _sync_dir_trash_path(name)
-    if sync_trash.exists():
-        sync_trash.rename(_sync_dir_path(name))
+    for sidecar in _sidecar_paths(name):
+        sidecar_trash = _trashed(sidecar)
+        if sidecar_trash.exists():
+            sidecar_trash.rename(sidecar)
 
-    auto_sync_trash = _auto_sync_trash_path(name)
-    if auto_sync_trash.exists():
-        auto_sync_trash.rename(_auto_sync_path(name))
+
+def _sidecar_paths(name: str) -> tuple[Path, ...]:
+    """Every file beside a garden's .db that is named after it, and so
+    belongs to it: deleted, restored and renamed with it."""
+    return (_sync_dir_path(name), _auto_sync_path(name), console_state_path(name))
+
+
+def _trashed(path: Path) -> Path:
+    return path.with_name(path.name + ".trash")
+
+
+def console_state_path(name: str) -> Path:
+    """The console's per-garden UI state -- saved layouts and command
+    history (console/state.py). UI state, not knowledge: a sidecar
+    rather than motes, so it never syncs, but named after the garden so
+    it follows the garden through rename, trash and restore."""
+    path = garden_db_path(name)
+    return path.with_name(path.name + ".console.json")
 
 
 def create_garden(name: str) -> str:
@@ -91,9 +102,9 @@ def create_garden(name: str) -> str:
 def rename_garden(old: str, new: str) -> str:
     """Rename a garden in place, sidecars and all.
 
-    The .db is only half of a garden on disk: _sync_dir_path() and
-    _auto_sync_path() sit beside it named after it, so a rename that
-    moved only the database would silently strand both -- the renamed
+    The .db is only half of a garden on disk: _sidecar_paths() sit
+    beside it named after it, so a rename that moved only the database
+    would silently strand them -- the renamed
     garden would come back unsynced, and a later garden reusing the old
     name would inherit a sync server that has nothing to do with it.
     Same reasoning as delete_garden()'s trashing of the sidecars.
@@ -117,9 +128,9 @@ def rename_garden(old: str, new: str) -> str:
 
     garden_db_path(old).rename(garden_db_path(new))
 
-    auto_sync = _auto_sync_path(old)
-    if auto_sync.exists():
-        auto_sync.rename(_auto_sync_path(new))
+    for old_sidecar, new_sidecar in zip(_sidecar_paths(old), _sidecar_paths(new)):
+        if old_sidecar.exists():
+            old_sidecar.rename(new_sidecar)
 
     # The default-garden pointer holds a name, not a path, so a rename
     # would otherwise leave it aimed at a garden that no longer exists --
@@ -162,10 +173,6 @@ def _sync_dir_path(name: str) -> Path:
     return path.with_name(path.name + ".sync_dir")
 
 
-def _sync_dir_trash_path(name: str) -> Path:
-    return _sync_dir_path(name).with_name(_sync_dir_path(name).name + ".trash")
-
-
 def get_sync_dir(name: str) -> str | None:
     """The sync server URL this garden syncs through (core/sync.py), or
     None if `sync init` has never been run for it. Per garden, not per device --
@@ -192,10 +199,6 @@ def clear_sync_dir(name: str) -> None:
 def _auto_sync_path(name: str) -> Path:
     path = garden_db_path(name)
     return path.with_name(path.name + ".auto_sync")
-
-
-def _auto_sync_trash_path(name: str) -> Path:
-    return _auto_sync_path(name).with_name(_auto_sync_path(name).name + ".trash")
 
 
 def get_auto_sync_enabled(name: str) -> bool:

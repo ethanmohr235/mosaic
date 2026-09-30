@@ -1,6 +1,7 @@
 # core/reserved.py
 """Central list of reserved names -- property keys and relationship types
-recognized by convention rather than enforced by schema. See
+recognized by convention rather than enforced by schema, plus the
+console's verbs (RESERVED_VERBS, at the bottom). See
 docs/architecture.md's reserved-name list, which this must be kept in
 sync with. Exposed to the frontend via Api.reserved_names() so the
 detail panel can flag them instead of leaving them looking like
@@ -213,3 +214,34 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
 # on import of core.model_resolver, above, so every provider is present
 # by the time this runs.
 PROPERTY_MODEL_PROVIDERS: dict[str, dict] = describe_providers()
+
+# The console's verbs (docs/console.md -> Command line and grammar): the
+# first word of a line typed at the `[mo]` prompt. Reserved in a
+# different sense from the sets above -- a verb names no property and no
+# relationship type, but it *does* shadow a mote of the same name as the
+# first token of a line, because the console reads verb-first. A mote
+# named `log` still works; it is reached as `"log"` (quoted) or `#<id>`,
+# and core/commands.py warns whoever creates one. Each console step adds
+# its own verbs here (`find` in U2, ...). Ordered as the completion popup
+# lists them, and kept in sync by hand with docs/architecture.md.
+RESERVED_VERBS: dict[str, dict[str, str]] = {
+    "cd": {"usage": "cd ‹garden›", "describe": "switch this workspace's garden"},
+    "layout": {"usage": "layout save|load|list|rm ‹name›",
+               "describe": "save or restore pane layouts"},
+    "refresh": {"usage": "refresh",
+                "describe": "re-read the garden (picks up MCP/CLI/sync edits)"},
+    "undo": {"usage": "undo", "describe": "undo the last edit"},
+    "redo": {"usage": "redo", "describe": "redo"},
+    "log": {"usage": "log", "describe": "command and error log"},
+}
+
+
+def reserved_words() -> set[str]:
+    """Every word the console reads as its own when it opens a line: the
+    verbs above plus the app suffixes (`tion`, `xie`, ...). The suffixes
+    live with the rest of each app's console entry in
+    core/commands.py::CONSOLE_APPS, which imports this module -- hence
+    the import here rather than at the top."""
+    from core.commands import CONSOLE_APPS
+
+    return set(RESERVED_VERBS) | {app.suffix for app in CONSOLE_APPS}

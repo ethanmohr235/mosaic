@@ -51,3 +51,12 @@ def test_open_app_ignores_mote_id_where_the_script_has_no_flag_for_it(monkeypatc
     api_common.open_app("monarch", "test", "mote-1")
     _name, script, _flag = api_common.APPS["monarch"]
     assert calls[-1][0] == [sys.executable, str(script), "--garden", "test"]
+
+
+def test_open_app_can_open_the_console(monkeypatch):
+    """An old window opening Mosaic: run_console.py takes --garden and no
+    focus flag (the console's selection lives in its own store)."""
+    calls = _launched(monkeypatch)
+    api_common.open_app("console", "test", "mote-1")
+    assert calls[-1][0][1].endswith("run_console.py")
+    assert calls[-1][0][2:] == ["--garden", "test"]
