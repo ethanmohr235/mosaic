@@ -111,6 +111,8 @@ export function createKeys({ store, panes, actions, commandLine, runner }) {
       if (commandLine.isActive()) return commandLine.hints();
       const pane = panes.focused();
       const own = pane && pane.instance && pane.instance.hints ? pane.instance.hints() : [];
+      // A text-editing view has every key but ^w, so the shell's don't apply.
+      if (pane && pane.instance && pane.instance.textEditing) return [...own, ["^w", "tile"]];
       return [...own, ...SHELL_HINTS];
     },
     editFocused,

@@ -13,12 +13,26 @@
  *     create(ctx) -> instance,           // one instance per pane showing this view
  *   }
  *
- * `ctx` is {api, store, components, navigate(id)}:
+ * `ctx` is {api, store, components, navigate(id), setCommand(command),
+ * runCommand(line)}; one per pane:
  *   api         the root bridge (js/bridge.js); an app's namespace is api.<app>
  *   store       js/store.js -- read state.selection / primary(), request
  *               changes with setSelection / toggleSelection, never copy them
- *   components  js/components.js -- table, kvGrid, popupList, paneHeader, h
+ *   components  js/components.js -- table (markTable, swatch), kvGrid,
+ *               popupList, paneHeader, h
  *   navigate(id)  select mote `id` (the primary); every linked pane follows
+ *   setCommand(command)  replace THIS pane's command in place, for a
+ *               gesture that changes what the pane shows (a header-click
+ *               sort). Same view instance, no remount, no history entry;
+ *               the layout is marked dirty and autosaved, and run() is
+ *               called with the new command. Resolves once it has run.
+ *               The command must still be one this view answers.
+ *   runCommand(line)  run `line` as if typed at the command line (with
+ *               the current selection for @sel): it enters history and
+ *               the log, its effect is applied (a write re-runs every
+ *               pane), and its message shows in the command line's
+ *               status. Resolves to {message, level}. How a view writes:
+ *               it never calls a write method on its namespace.
  *
  * The instance:
  *
@@ -30,7 +44,8 @@
  *                         level being "ok" | "warn" | "fault" | "idle".
  *   unmount()             remove every listener, timer and animation frame
  *                         the instance added. Leaks are bugs.
- *   hints()               [[key, label], ...] for the key-hint bar while focused
+ *   hints()               [[key, label], ...] for the key-hint bar while focused;
+ *                         store.emit("hints") when they change (entering an editor)
  *   onKey(event)          the view's own keys; return true when handled so
  *                         the shell doesn't also act on it
  *   textEditing?          true while the view is capturing typing: the shell
@@ -44,8 +59,9 @@
  * Register a new view by importing it below and adding it to VIEWS. */
 
 import log from "./log.js";
+import monolithTable from "./monolith-table.js";
 
-export const VIEWS = [log];
+export const VIEWS = [log, monolithTable];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;

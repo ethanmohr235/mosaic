@@ -1,6 +1,6 @@
-/* The shared pieces every view and the shell draw with: table, kvGrid,
- * popupList, paneHeader, plus promptInput (the block-cursor text field)
- * and the h() element helper. These are the only copies (docs/console.md → *Architecture*): a view that needs a
+/* The shared pieces every view and the shell draw with: table (with
+ * markTable and swatch), kvGrid, popupList, paneHeader, plus promptInput
+ * (the block-cursor text field) and the h() element helper. These are the only copies (docs/console.md → *Architecture*): a view that needs a
  * table, a key/value grid, a popup list or a pane header uses these
  * rather than growing its own. Styling is in shell.css under the same
  * class names; nothing here sets a color or a size.
@@ -26,36 +26,107 @@ function append(node, content) {
 
 /**
  * A dense table: a --dim header row, then one line-height row per item,
- * no padding between rows. The selected row is inverted.
+ * no padding between rows. Selected rows are inverted, and the primary
+ * one is bold too. Numbers are right-aligned (`align: "right"`).
  *
- *   columns  [{key, label, width: "1fr" | "max-content" | "var(--kv-key)" ..., align: "left"|"right",
- *              render?(row) -> string|Node, level?(row) -> "ok"|"warn"|"fault"|null}]
- *   rows     the items
+ *   columns  [{key, label, width: "1fr" | "max-content" | "12ch" ..., align: "left"|"right",
+ *              render?(row, column) -> string|Node, level?(row) -> "ok"|"warn"|"fault"|null}]
+ *   rows     the items (ignored when `groups` is given)
+ *   groups   [{key, label, count, rows, labelled}]: rows under a group row
+ *            (label, count, "select all"); an unlabelled group draws none
  *   rowKey   (row) -> key used for selection and data-key
  *   selected Set/array of keys drawn inverted
- *   onRow    (row, event) -> void, on click
+ *   primary  the key among them drawn bold (the selection's first)
+ *   cursor   {index, col}: the keyboard cursor, distinct from the
+ *            selection -- a `›` in the drawn row `index`'s left margin
+ *            and an underline under its cell `col` (col may be null)
+ *   sort     {key, dir: "asc"|"desc"}: column `key`'s header gets ▲ / ▼
+ *   onRow    (row, event, index) -> void, on click; index = drawn row index
+ *   onHeader (column, event) -> void, on a header click; without it the
+ *            header isn't clickable
+ *   onGroup  (group, event) -> void, on a group row's "select all"
  *   canClick (row) -> bool: which rows onRow applies to (default: all)
  *   header   false to omit the header row
+ *
+ * Rows carry data-key and data-index and cells data-col (the column
+ * index), so a view can find a cell again. markTable() re-marks the
+ * selection and cursor without redrawing.
  */
-export function table({ columns, rows, rowKey = (r) => r.id, selected = [], onRow = null,
+export function table({ columns, rows = [], groups = null, rowKey = (r) => r.id, selected = [],
+  primary = null, cursor = null, sort = null, onRow = null, onHeader = null, onGroup = null,
   canClick = () => true, header = true }) {
-  const chosen = new Set(selected);
   const template = columns.map((c) => c.width || "1fr").join(" ");
   const root = h("div", "c-table");
-  if (header) root.appendChild(tableRow("c-table-head", columns.map((c) => cell(c, c.label || "")), template));
-  rows.forEach((row) => {
-    const key = rowKey(row);
-    const cells = columns.map((c) => cell(c, c.render ? c.render(row) : row[c.key], c.level && c.level(row)));
-    const line = tableRow("c-table-row", cells, template);
-    if (key !== null && key !== undefined) line.dataset.key = key;
-    if (chosen.has(key)) line.classList.add("selected");
-    if (onRow && canClick(row)) {
-      line.classList.add("clickable");
-      line.addEventListener("click", (event) => onRow(row, event));
+  if (header) root.appendChild(headRow(columns, template, sort, onHeader));
+  let index = 0;
+  for (const group of groups || [{ rows, labelled: false }]) {
+    if (group.labelled) root.appendChild(groupRow(group, onGroup));
+    for (const row of group.rows) {
+      root.appendChild(bodyRow({ row, index, columns, template, rowKey, onRow, canClick }));
+      index += 1;
     }
-    root.appendChild(line);
-  });
+  }
+  markTable(root, { selected, primary, cursor });
   return root;
+}
+
+/** Re-mark a table()'s selected, primary and cursor rows in place. */
+export function markTable(root, { selected = [], primary = null, cursor = null }) {
+  const chosen = new Set([...selected].map(String));
+  const first = primary === null || primary === undefined ? null : String(primary);
+  const col = cursor && cursor.col !== null && cursor.col !== undefined ? cursor.col : -1;
+  root.querySelectorAll(":scope > .c-table-row").forEach((line) => {
+    const key = line.dataset.key;
+    const here = !!cursor && Number(line.dataset.index) === cursor.index;
+    line.classList.toggle("selected", key !== undefined && chosen.has(key));
+    line.classList.toggle("primary", key !== undefined && key === first);
+    line.classList.toggle("cursor", here);
+    line.querySelectorAll(":scope > .c-cell").forEach((node) => {
+      node.classList.toggle("cursor-cell", here && Number(node.dataset.col) === col);
+    });
+  });
+  root.querySelectorAll(":scope > .c-table-head > .c-cell").forEach((node) => {
+    node.classList.toggle("cursor-col", Number(node.dataset.col) === col);
+  });
+}
+
+function headRow(columns, template, sort, onHeader) {
+  const cells = columns.map((c, i) => {
+    const arrow = sort && sort.key === c.key ? (sort.dir === "desc" ? " ▼" : " ▲") : "";
+    const node = cell(c, `${c.label || ""}${arrow}`, null, i);
+    if (onHeader) {
+      node.classList.add("clickable");
+      node.addEventListener("click", (event) => onHeader(c, event));
+    }
+    return node;
+  });
+  return tableRow("c-table-head", cells, template);
+}
+
+function groupRow(group, onGroup) {
+  const all = h("span", "c-group-all", "select all");
+  if (onGroup) {
+    all.classList.add("clickable");
+    all.addEventListener("click", (event) => onGroup(group, event));
+  }
+  const count = String(group.count ?? group.rows.length);
+  const line = h("div", "c-table-group", [h("span", "c-group-label", group.label || ""),
+    h("span", "c-group-count", count), h("span", "grow"), all]);
+  line.dataset.group = group.key ?? "";
+  return line;
+}
+
+function bodyRow({ row, index, columns, template, rowKey, onRow, canClick }) {
+  const key = rowKey(row);
+  const cells = columns.map((c, i) => cell(c, c.render ? c.render(row, c) : row[c.key], c.level && c.level(row), i));
+  const line = tableRow("c-table-row", cells, template);
+  if (key !== null && key !== undefined) line.dataset.key = key;
+  line.dataset.index = String(index);
+  if (onRow && canClick(row)) {
+    line.classList.add("clickable");
+    line.addEventListener("click", (event) => onRow(row, event, index));
+  }
+  return line;
 }
 
 function tableRow(className, cells, template) {
@@ -64,9 +135,22 @@ function tableRow(className, cells, template) {
   return line;
 }
 
-function cell(column, content, level = null) {
+function cell(column, content, level = null, index = 0) {
   const node = h("span", `c-cell${column.align === "right" ? " right" : ""}`, content ?? "");
+  node.dataset.col = String(index);
   if (level) node.classList.add(`lvl-${level}`);
+  return node;
+}
+
+/**
+ * A small square in `color` (a palette value or a var(--token)), drawn
+ * as the text glyph ■ so it needs no size of its own: the graph's square
+ * nodes, in a table cell before a mote's name. Inside a selected row it
+ * turns --bg like everything else.
+ */
+export function swatch(color) {
+  const node = h("span", "c-swatch", "■");
+  node.style.setProperty("--swatch", color);
   return node;
 }
 
