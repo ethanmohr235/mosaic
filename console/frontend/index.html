@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mosaic</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="shell.css">
+  <!-- Classic script: the window-wide middle-click and click-away rules. -->
+  <script src="focus.js"></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <header id="topbar" class="bar topbar"></header>
+  <main id="workspace" class="workspace"></main>
+  <footer class="shell-foot">
+    <div id="popup" class="popup" hidden data-keep-focus></div>
+    <div id="cmdline" class="bar cmdline"></div>
+    <div id="hintbar" class="hintbar"></div>
+  </footer>
+</body>
+</html>

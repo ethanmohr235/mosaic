@@ -1,0 +1,109 @@
+/* The console's design tokens: the only place a color, font or size is
+ * written down. Every value comes from the handoff
+ * (docs/design/mosaic-console/README.md) or, for a spacing the README
+ * leaves implicit, from the design canvas's 3e / 2a / 2b screens.
+ * docs/console.md → *Visual system*: don't add a color, font, size,
+ * radius, shadow or animation that isn't here -- raise it as a question.
+ *
+ * Dark only. Not used yet: the handoff's --c-task/--c-note/--c-event/
+ * --c-source type colors (motes are colored by species; the palette
+ * retune lands with U3) and the plot series colors (U4). */
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("vendor/fonts/GeistMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("vendor/fonts/GeistMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("vendor/fonts/GeistMono-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Neutrals (no chroma). */
+  --bg: oklch(0.135 0 0);
+  --bg-raised: oklch(0.16 0 0);
+  --bg-bar: oklch(0.18 0 0);
+  --track: oklch(0.22 0 0);
+  --line: oklch(0.30 0 0);
+  --line-strong: oklch(0.42 0 0);
+  --ghost: oklch(0.45 0 0);
+  --dim: oklch(0.58 0 0);
+  --fg: oklch(0.88 0 0);
+  --bright: oklch(0.97 0 0);
+
+  /* Status. Fixed, separate from species color. */
+  --ok: oklch(0.80 0.13 150);
+  --warn: oklch(0.82 0.12 85);
+  --fault: oklch(0.70 0.17 25);
+  --idle: var(--dim);
+
+  /* Type. One family, one body size; hierarchy is weight + brightness. */
+  --font: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-body: 12px;
+  --lh-body: 18px;
+  --fs-title: 13px;
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-bold: 600;
+
+  /* Shell structure. */
+  --topbar-h: 26px;
+  --cmdline-h: 26px;
+  --hintbar-h: 22px;
+  --prompt-h: 25px;          /* the [mo] box: full bar height minus its 1px border */
+  --prompt-pad-x: 7px;
+  --prompt-gap: 6px;         /* [mo] box → typed text */
+  --suffix-gap: 5px;         /* [mo] box → app suffix in the top bar */
+  --bar-gap: 8px;
+  --hint-gap: 14px;
+  --tab-pad-x: 6px;
+  --cursor-w: 7px;
+  --cursor-h: 15px;
+
+  /* Panes. */
+  --pad-x: 10px;
+  --group-gap: 14px;
+  --row-h: 18px;             /* = line height; rows carry no padding */
+  --header-h: 24px;
+  --header-gap: 6px;
+  --table-head-pad: 4px;
+  --col-gap: 10px;
+  --kv-key: 84px;
+  --kv-key-wide: 104px;
+  --gap: 1px;                /* tiled panes: 1px gaps over --line */
+  --divider-hit: 3px;        /* invisible grab margin either side of a divider */
+  --picker-pad-y: 6px;
+  --picker-gap: 4px;
+  --picker-key: 150px;
+  --picker-row-pad: 6px;
+
+  /* Popups (completion, history). */
+  --popup-w: 560px;
+  --popup-pad-x: 8px;
+  --popup-pad-y: 2px;
+  --popup-key: 110px;
+  --popup-mo: 36px;          /* app-switch rows: `mo` | suffix | description */
+  --popup-app: 90px;
+  --popup-time: 48px;
+  --popup-rows: 12;          /* rows shown before the list scrolls */
+
+  /* Shape. */
+  --radius: 0px;
+  --border: 1px;             /* every border is 1px of --line (popups: --line-strong) */
+  --focus-ring: inset 0 0 0 1px var(--fg);
+  --blink: 1s;
+}
