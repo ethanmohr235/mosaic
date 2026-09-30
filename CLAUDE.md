@@ -82,7 +82,13 @@ code.
   and `set` verbs (`core/commands.py`; `set @sel` writes the whole
   selection as one undo step), and Monolith's old window is deleted.
   At the user's direction the cloud session now does frontend work too,
-  since the local session stopped. The next UI step is U3 (props).
+  since the local session stopped.
+- Console **U3 is done**: the `mote:props` pane (`open @sel|#id|name`,
+  `mo te`) and the `p` float over the same view; `core/inspect.py` is the
+  payload both it and the old floating panel draw; `rename`, `unlink`
+  and `template` verbs; every typed statement is undoable
+  (`core/command_bar.py`'s write journal). The next UI step is U4
+  (Moxie).
 
 ## Split of work: cloud backend, local frontend
 

@@ -410,6 +410,149 @@ def u2_checks(window):
     check("U2: an inline cell edit writes through `set`", inline_edit)
 
 
+# ---------- U3: the props pane (mote:props) and the `p` float ----------
+
+PROPS = ".pane .view-props"
+
+
+def props_title(window, root=PROPS):
+    got = texts(window, f"{root} .props-title")
+    return got[0].lstrip("■ ").strip() if got else ""  # past the species swatch
+
+
+def props_keys(window, root=PROPS):
+    return texts(window, f"{root} .props-row .props-key")
+
+
+def type_in_editor(window, text, root=PROPS):
+    js(window, f"""
+        (() => {{ const i = document.querySelector({json.dumps(root + ' .c-cell-input')});
+                 i.value = {json.dumps(text)}; i.dispatchEvent(new Event('input', {{bubbles: true}})); }})();
+    """)
+    press(window, "Enter")
+
+
+def props_cursor_to(window, key, root=PROPS):
+    """`g` to the top, then j until the cursor row is `key`'s."""
+    press(window, "g")
+    for _ in range(40):
+        current = texts(window, f"{root} .props-row.cursor .props-key")
+        if current and current[0] == key:
+            return True
+        press(window, "j")
+    return False
+
+
+def u3_checks(window):
+    def follows_selection():
+        type_command(window, "find type:chore --sort name")
+        assert wait_until(lambda: len(table_keys(window)) >= 4, timeout=8)
+        click_row(window, 0)
+        type_command(window, "open @sel", alt=True)
+        assert wait_until(lambda: props_title(window).startswith("chore0"), timeout=8), \
+            f"the props pane should show the clicked row, got {props_title(window)!r}"
+        # Select another row by clicking it in the table pane.
+        js(window, f"""
+            (() => {{
+              const n = document.querySelector('.view-table .c-table-row[data-index="1"] > .c-cell[data-col="0"]');
+              n.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, button: 0}}));
+              n.dispatchEvent(new MouseEvent('click', {{bubbles: true, button: 0}}));
+            }})();
+        """)
+        assert wait_until(lambda: props_title(window).startswith("chore1")), \
+            f"`open @sel` should follow the selection, got {props_title(window)!r}"
+        no_errors(window)
+
+    check("U3: `open @sel` follows the selection", follows_selection)
+    if not results[-1][1]:
+        return
+    target = ids["c1"]
+
+    def focus_props():
+        js(window, "document.querySelector('.pane .view-props').closest('.pane')"
+                   ".dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0}))")
+        assert wait_until(lambda: count(window, ".pane.focused .view-props") == 1)
+
+    def add_rename_and_undo():
+        focus_props()
+        press(window, "a")
+        assert wait_until(lambda: count(window, f"{PROPS} .c-cell-input") == 1), "`a` should open an editor"
+        type_in_editor(window, "color red")
+        assert wait_until(lambda: prop(target, "color") == "red"), "adding a property should write it"
+        assert wait_until(lambda: "color" in props_keys(window))
+        assert props_cursor_to(window, "color"), f"no color row in {props_keys(window)}"
+        press(window, "r")
+        assert wait_until(lambda: count(window, f"{PROPS} .c-cell-input") == 1), "`r` should open an editor"
+        type_in_editor(window, "hue")
+        assert wait_until(lambda: prop(target, "hue") == "red" and prop(target, "color") is None), \
+            "renaming should move the value"
+        type_command(window, "undo")
+        assert wait_until(lambda: prop(target, "color") == "red" and prop(target, "hue") is None), \
+            "one undo should take back the rename"
+        no_errors(window)
+
+    check("U3: add, rename and undo from the props pane", add_rename_and_undo)
+
+    def link_from_props():
+        focus_props()
+        press(window, "l")
+        assert wait_until(lambda: count(window, f"{PROPS} .c-cell-input") == 1), "`l` should open an editor"
+        type_in_editor(window, "blocks chore2")
+        assert wait_until(lambda: any("blocks" in t for t in texts(window, f"{PROPS} .props-rel-key"))), \
+            "a link row should appear"
+        no_errors(window)
+
+    check("U3: `l` links to another mote", link_from_props)
+
+    def delete_and_follow():
+        focus_props()
+        assert props_cursor_to(window, "color"), f"no color row in {props_keys(window)}"
+        press(window, "d")
+        assert prop(target, "color") == "red", "one `d` only arms the delete"
+        press(window, "d")
+        assert wait_until(lambda: prop(target, "color") is None), "`d d` should delete the property"
+        press(window, "G")  # the bottom rows are the links
+        for _ in range(10):
+            if any("blocks" in t for t in texts(window, f"{PROPS} .props-row.cursor .props-rel-key")):
+                break
+            press(window, "k")
+        press(window, "Enter")
+        assert wait_until(lambda: props_title(window).startswith("chore2")), \
+            f"⏎ on a link row should walk to it, got {props_title(window)!r}"
+        assert wait_until(lambda: "sel chore2" in js(window, "document.getElementById('topbar').textContent")), \
+            "the top bar should name the mote walked to"
+        no_errors(window)
+
+    check("U3: `d d` deletes and ⏎ on a link walks there", delete_and_follow)
+
+    def float_toggles():
+        focus_props()
+        shown = props_title(window)
+        press(window, "x")  # close the props pane: the float is for layouts without one
+        assert wait_until(lambda: count(window, ".pane .view-props") == 0)
+        press(window, "p")
+        assert wait_until(lambda: count(window, ".props-float:not([hidden]) .view-props") == 1), \
+            "`p` should open the float"
+        assert wait_until(lambda: props_title(window, ".props-float") == shown), \
+            f"the float should show the selection, {shown!r}, got {props_title(window, '.props-float')!r}"
+        press(window, "Escape")
+        assert wait_until(lambda: count(window, ".props-float:not([hidden])") == 0), "`esc` should close it"
+        type_command(window, "open @sel", alt=True)  # back, for the relaunch check
+        assert wait_until(lambda: count(window, ".pane .view-props") == 1)
+        no_errors(window)
+
+    check("U3: `p` opens the props float and `esc` closes it", float_toggles)
+
+
+def u3_restored_checks(window):
+    def restored():
+        assert wait_until(lambda: any(h == "open @sel" for h in headers(window)), timeout=10), \
+            f"the props pane should survive a relaunch, got {headers(window)}"
+        no_errors(window)
+
+    check("U3: a layout with an `open @sel` pane survives a relaunch", restored)
+
+
 def u2_restored_checks(window):
     def restored():
         assert wait_until(lambda: any(h.startswith("find") and "--sort" in h for h in headers(window)), timeout=10), \
@@ -471,6 +614,7 @@ def drive(first, first_loaded):
             print("SKIP  U2 find-table checks: this Api has no `monolith` namespace yet")
             return
         u2_checks(second)
+        u3_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)
@@ -479,6 +623,7 @@ def drive(first, first_loaded):
         second.destroy()
         install_collector(third)
         u2_restored_checks(third)
+        u3_restored_checks(third)
     finally:
         for window in opened:
             window.destroy()

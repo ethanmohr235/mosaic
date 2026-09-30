@@ -313,8 +313,8 @@ def run_template(conn: sqlite3.Connection, args: Sequence[str], selection: Seque
     button follows."""
     if len(args) != 2:
         raise CommandError(f"usage: {RESERVED_VERBS['template']['usage']}")
-    (mote_id,) = _one_target(conn, args[0], selection)
-    (species_id,) = _one_target(conn, args[1], selection)
+    (mote_id,) = one_target(conn, args[0], selection)
+    (species_id,) = one_target(conn, args[1], selection)
     steps = []
     for rel in rel_repo.list_relationships(conn, type_=species_repo.TEMPLATE_OF):
         if rel.to_id == species_id and rel_repo.delete_relationship(conn, rel.id):
@@ -329,7 +329,8 @@ def run_template(conn: sqlite3.Connection, args: Sequence[str], selection: Seque
 WRITE_VERBS = {"set": run_set, "rename": run_rename, "unlink": run_unlink, "template": run_template}
 
 
-def _one_target(conn, target: str, selection: Sequence[str]) -> list[str]:
+def one_target(conn, target: str, selection: Sequence[str]) -> list[str]:
+    """Exactly one mote for `target` (`@sel` is the primary here)."""
     ids = _set_targets(conn, target, selection[:1])
     if len(ids) != 1:
         raise CommandError(f"{target} must name one mote")

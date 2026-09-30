@@ -22,7 +22,7 @@ BRIDGE = {
     "refresh", "switch_garden", "shutdown",
 }
 # api.monolith (U2). The walk collects bare method names.
-MONOLITH_BRIDGE = {"table", "rewrite"}
+MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ def test_pywebview_walk_reaches_no_connection(api):
     assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api, api.monolith]
+    assert seen["objects"] == [api, api.monolith, api.mote]
 
 
 # ---- statements --------------------------------------------------------------
@@ -474,3 +474,16 @@ def test_unlink_by_type_and_by_id_and_template(api, chores):
 def test_u3_verbs_say_what_is_wrong(api, chores, line, message):
     effect = api.run(line)
     assert effect["effect"] == "error" and message in effect["message"]
+
+
+
+def test_mote_inspect_follows_the_selection_or_a_named_mote(api, chores):
+    empty = api.mote.inspect("open @sel", [])
+    assert "empty" in empty
+    followed = api.mote.inspect("open @sel", chores[:3])
+    assert followed["id"] == chores[0] and followed["follows"] and followed["selectionCount"] == 3
+    assert followed["species"]["label"] == "chore"
+    pinned = api.mote.inspect("open chore2", chores[:1])
+    assert pinned["id"] == chores[2] and not pinned["follows"]
+    assert "error" in api.mote.inspect("open ghost", [])
+    assert "error" in api.mote.inspect("find", [])

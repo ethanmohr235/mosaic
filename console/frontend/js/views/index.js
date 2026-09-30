@@ -6,9 +6,10 @@
  *     id:         "log",                 // view id: picker, completion, pane header
  *     app:        null | "nolith" | ...  // the app suffix it belongs to (null = the shell)
  *     describe:   "command and error log",   // one line, shown in the picker
- *     commands:   [{verb: "log", complete?(line, cursor) -> rows}],
- *                                        // verbs this view answers; commands[0].verb
- *                                        // is the canonical command the picker places
+ *     commands:   [{verb: "log", canonical?: "log", complete?(line, cursor) -> rows}],
+ *                                        // verbs this view answers; commands[0]'s
+ *                                        // canonical line (else its verb) is what
+ *                                        // the picker places
  *     followsSel: false,                 // re-run on selection change even without @sel
  *     create(ctx) -> instance,           // one instance per pane showing this view
  *   }
@@ -20,7 +21,8 @@
  *               changes with setSelection / toggleSelection, never copy them
  *   components  js/components.js -- table (markTable, swatch), kvGrid,
  *               popupList, paneHeader, h
- *   navigate(id)  select mote `id` (the primary); every linked pane follows
+ *   navigate(id, label?)  select mote `id` (the primary); every linked
+ *               pane follows. `label` is what the top bar calls it.
  *   setCommand(command)  replace THIS pane's command in place, for a
  *               gesture that changes what the pane shows (a header-click
  *               sort). Same view instance, no remount, no history entry;
@@ -60,14 +62,17 @@
 
 import log from "./log.js";
 import monolithTable from "./monolith-table.js";
+import moteProps from "./mote-props.js";
 
-export const VIEWS = [log, monolithTable];
+export const VIEWS = [log, monolithTable, moteProps];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;
 }
 
-/** The command the picker places for a view: its first verb, else its id. */
+/** The command the picker places for a view: its first command's
+ * `canonical` line (`open @sel`), else that command's verb, else its id. */
 export function canonicalCommand(view) {
-  return (view.commands && view.commands[0] && view.commands[0].verb) || view.id;
+  const first = view.commands && view.commands[0];
+  return (first && (first.canonical || first.verb)) || view.id;
 }

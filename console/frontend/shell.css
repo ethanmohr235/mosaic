@@ -559,3 +559,99 @@ body.dragging-col { cursor: row-resize; }
 }
 
 .view-table .c-table-empty { padding: var(--table-head-pad) var(--pad-x); color: var(--dim); }
+
+/* ---------- mote:props (the inspector) ----------
+ * The handoff's props layout: the name as a title, a key/value grid, then
+ * `links N` and a `→ relation  target` row per relationship. Rows share
+ * the table's cursor mark (`›`) and cell editor. */
+
+.view-props { padding: var(--table-head-pad) var(--pad-x); }
+
+.props-title {
+  font-size: var(--fs-title);
+  font-weight: var(--w-bold);
+  color: var(--bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.props-title .dim { font-size: var(--fs-body); font-weight: var(--w-regular); }
+
+.props-note,
+.props-section { padding-top: var(--table-head-pad); }
+
+.props-empty { padding: var(--table-head-pad) 0; }
+
+.props-grid { display: flex; flex-direction: column; }
+
+.props-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--kv-key) 1fr;
+  column-gap: var(--col-gap);
+  min-height: var(--row-h);
+  padding-left: var(--pad-x);
+  margin-left: calc(-1 * var(--pad-x));
+  cursor: default;
+}
+
+.props-grid.wide .props-row { grid-template-columns: var(--kv-key-wide) 1fr; }
+.props-row:hover { background: var(--bg-bar); }
+
+.props-row.cursor::before {
+  content: "›";
+  position: absolute;
+  left: 0;
+  color: var(--bright);
+}
+
+.props-row.armed { color: var(--fault); }
+.props-row.armed .props-key { color: var(--fault); }
+
+.props-key {
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.props-key.reserved { color: var(--ghost); }
+
+.props-rel-key {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.props-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.props-link { cursor: pointer; }
+.props-link:hover { color: var(--bright); }
+.props-options { white-space: normal; }
+
+/* ---------- the `p` float ----------
+ * The props view over any layout without a props pane: the popup style
+ * (--bg-raised, 1px --line-strong, no shadow, no leader line), pinned
+ * under the top bar at the right. */
+
+.props-float {
+  position: fixed;
+  top: calc(var(--topbar-h) + var(--gap));
+  right: var(--gap);
+  width: min(var(--popup-w), calc(100vw - 2 * var(--pad-x)));
+  max-height: calc(100vh - var(--topbar-h) - var(--cmdline-h) - var(--hintbar-h) - 2 * var(--gap));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: var(--border) solid var(--line-strong);
+  z-index: 10;
+}
+
+.props-float .view-props { overflow: auto; min-height: 0; }
+.props-float[hidden] { display: none; }

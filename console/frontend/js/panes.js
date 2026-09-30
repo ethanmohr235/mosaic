@@ -35,7 +35,7 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
       api,
       store,
       components,
-      navigate: (id) => store.setSelection([id]),
+      navigate: (id, label = null) => store.setSelection([id], label ? { [id]: label } : {}),
       setCommand: (command) => setPaneCommand(pane, command),
       runCommand: (line) => onRun(line),
     };
@@ -309,6 +309,11 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
     flashGuide,
     hideGuide,
     focused: () => panes.get(store.state.focusedId) || null,
+    /** The id of a pane showing view `viewId`, or null (the `p` float asks). */
+    findView(viewId) {
+      for (const [id, pane] of panes) if (pane.view && pane.view.id === viewId) return id;
+      return null;
+    },
     linkedCount: () => [...panes.values()].filter(isLinked).length,
     count: () => panes.size,
     /** Pane id → its on-screen rect, for ^w h/j/k/l. */

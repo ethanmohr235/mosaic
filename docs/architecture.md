@@ -653,7 +653,12 @@ The charter:
   lock and undo stack every ported app's namespace will share, and
   answers the command line: `core/commands.py` parses a line as an app
   suffix, a verb or a `core/command_bar.py` statement, so the grammar
-  stays in `core/`. Layouts and command history are UI state, kept in
+  stays in `core/`. Every write a line makes comes back as one undo
+  step: a verb's from `core/batch.py`-style commands, a statement's
+  from `core/command_bar.py`'s journal, which records the inverse of
+  each primitive write as the line runs -- and takes them all back if
+  the line fails halfway, so a statement never lands half-written. The
+  old windows' `/` bar pushes the same step. Layouts and command history are UI state, kept in
   a per-garden sidecar (`gardens/<name>.db.console.json`) that follows
   the garden through rename, trash and restore and never syncs. An app
   not yet ported opens its old window from the console.
@@ -1110,6 +1115,17 @@ until two motes happen to agree. The "usually has" chips are the
 template's keys this mote lacks. A species with no template offers none,
 which is honest: nothing in the garden has said what that kind of mote
 usually carries.
+
+**The console's props pane reads the same payload.** What the panel draws
+for a mote -- the editor kind per property, the enum vocabulary, the
+template's hints, the relationship rows -- is `core/inspect.py::inspect`,
+and `InspectorApi` only wraps it, so the old windows' floating panel and
+the console's `mote:props` pane (and its `p` float, `console/mote.py`)
+cannot disagree about what a mote is. The console writes differently on
+purpose: every edit there is a command (`set`, `rename`, `unlink`,
+`A -> type -> B`, `template`), so it is in the history and the log, where
+the old panel calls `inspector_*` methods directly (docs/console.md ->
+*Settled for U3*).
 
 **What stayed in app chrome.** The panel is for one mote. A selection of
 two hundred is a different question, so Monarch's and Monolith's bulk

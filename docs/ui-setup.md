@@ -29,8 +29,8 @@ once its app is ported. New UI is built only in the console.
 
 One window, one garden at a time, every pane the output of a command.
 Its design, grammar and view contract are in `docs/console.md`. This
-section covers what it does today (steps U1–U2): the shell, the `log`
-view and the `find` table.
+section covers what it does today (steps U1–U3): the shell, the `log`
+view, the `find` table and the props pane.
 
 ### The shell
 
@@ -53,17 +53,54 @@ view and the `find` table.
 |---|---|
 | `tion`, `xie`, `nolith`, … | Open that app. Unported apps open their old window. |
 | `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). `nolith` is `find` with no conditions. |
+| `open @sel\|#id\|<name>` | A mote's properties and links (below). `te` is `open @sel`. |
+| `rename <target> <old> <new>` | Rename a property, keeping its value and unit. Refuses to overwrite a key that exists. |
+| `unlink <target> <type> <other>` or `unlink <target> #<rel>` | Remove a relationship (either direction). |
+| `template <mote> <species>` | Make a mote the one its species' new instances start from. |
 | `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. |
 | `log` | The command and error log for this session. |
 | `cd <garden>` | Switch the workspace to another garden, with its own layouts and history. |
 | `layout save\|load\|list\|rm <name>` | Save or restore the pane layout. |
 | `refresh` | Re-read the garden (picks up MCP, CLI and sync edits). |
-| `undo`, `redo` | Same as Ctrl+Z / Ctrl+Shift+Z. |
+| `undo`, `redo` | Same as Ctrl+Z / Ctrl+Shift+Z. Every write undoes as one step, a typed statement included. |
 | anything else | A modeling statement, as in the old `/` bar: `R1.x = 5 ohm`, `A -> B`, `R1 : Resistor`, `R1.x ?`, `delete R1`. |
 
 `@sel` stands for the selected mote (the primary) anywhere a mote is
 expected, except after `set`, where it is the whole selection. A mote
 named like a verb (`log`, `find`) is reached as `"log"` or `#id`.
+
+### Props (`open`, `mo te`, and `p`)
+
+One mote: its name as the title with its species, a key/value grid with
+a typed value per property (a number shows its unit, a reference is a
+link, an enum shows its choices while you edit), the keys its species'
+template says it usually has, then `links N` with a `→ type  target`
+row per relationship (`←` for one pointing in; `instance_of` is how a
+species shows). `open @sel` follows the selection; `open #id` stays on
+one mote, and walking a link from it re-points the pane.
+
+| Key | Does |
+|---|---|
+| `j` `k`, `g` `G` | Move the cursor |
+| `i` / double-click | Edit the value (empty clears it) |
+| `⏎` | Edit; on a link or reference, walk there; on a boolean, flip it; on a hint, add it |
+| `a` | Add a property: `key value` |
+| `r` | Rename the key |
+| `d` `d` | Delete the property or link (the first `d` arms it) |
+| `l` | Link: `type target` |
+
+Every edit is a command (`set`, `rename`, `unlink`, `A -> type -> B`,
+`template`) run through the command line, so it is in the history, the
+log and undo. With several motes selected the pane shows the first and
+says so; `set @sel …` writes them all.
+
+**`p`** opens the same view floating over a layout that has no props
+pane (with one, it focuses that pane). It follows the selection, has
+the keys while open, and `p` or `esc` closes it.
+
+Not in the console yet: the calendar picker for a date (dates edit as
+`2026-10-02` text until U7), "open in Mora" (U6) and a solved value's
+`why` (U5).
 
 ### The table (`find`, `mo nolith`)
 
@@ -144,6 +181,10 @@ Boots on a seeded temp garden and checks the following:
 - a header click rewrites the pane's command with `--sort`
 - an inline cell edit writes through `set`
 - a sorted `find` pane survives a relaunch
+- `open @sel` follows a table click; add, rename (and one `undo`), link,
+  `d d` delete and `⏎` on a link from the props pane
+- `p` opens the float on the selection and `esc` closes it
+- an `open @sel` pane survives a relaunch
 
 ---
 

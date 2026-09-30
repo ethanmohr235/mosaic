@@ -17,6 +17,7 @@ import { createCommandLine } from "./commandline.js";
 import { createKeys } from "./keys.js";
 import { createTopbar } from "./topbar.js";
 import { createHintbar } from "./hintbar.js";
+import { createFloat } from "./float.js";
 
 const FIRST_PANE = "log";
 
@@ -67,8 +68,10 @@ function wire(api) {
     onSubmit: (line, options) => runner.run(line, options),
     onLeave: () => shell.panes.focusDom(),
   });
+  shell.float = createFloat({ store, api, components, panes: shell.panes,
+    onRun: (line) => shell.runLine(line) });
   shell.keys = createKeys({ store, panes: shell.panes, actions: shell.actions,
-    commandLine: shell.commandLine, runner });
+    commandLine: shell.commandLine, runner, float: shell.float });
   createTopbar({ root: $("topbar"), store, panes: shell.panes, actions: shell.actions, components });
   createHintbar({ root: $("hintbar"), store, keys: shell.keys, components });
 

@@ -26,6 +26,7 @@ from typing import Any
 import api_common
 from console import state as state_repo
 from console.monolith import MonolithApi
+from console.mote import MoteApi
 from console.session import Session, locked
 from core import commands
 from core import gardens as gardens_repo
@@ -51,6 +52,7 @@ class Api:
         self._window = None  # set by window_launcher.launch_window
         # App namespaces over the same session (docs/console.md -> Architecture).
         self.monolith = MonolithApi(self._session)
+        self.mote = MoteApi(self._session)
 
     # ---- boot and gardens ----
 

@@ -94,6 +94,7 @@ def relationships_of(conn, mote_id: str) -> list[dict]:
     relationship; the panel now says so, and the species dropdown
     that used to duplicate it is gone."""
     rows = []
+    species = set(species_ids(conn))
     for rel in rel_repo.list_relationships(conn):
         if rel.from_id != mote_id and rel.to_id != mote_id:
             continue
@@ -108,6 +109,9 @@ def relationships_of(conn, mote_id: str) -> list[dict]:
             "otherId": other_id,
             "otherLabel": label(other) if other else other_id,
             "otherSpeciesId": other_species[0].id if other_species else None,
+            # A species at the other end (every `instance_of` row) draws in
+            # its own lifted color rather than as an untyped mote.
+            "otherIsSpecies": other_id in species,
             "reserved": rel.type in RESERVED_RELATIONSHIP_TYPES,
         })
     rows.sort(key=lambda r: (r["direction"] != "out", r["type"], r["otherLabel"].lower()))

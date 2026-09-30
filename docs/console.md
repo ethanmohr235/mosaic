@@ -132,7 +132,7 @@ These are user-facing names. Python packages keep their current names
 | Suffix | App | Views (proposed ids) | Notes |
 |---|---|---|---|
 | `mo nolith` | Monolith | `monolith:table`, `monolith:vars` | General table. Project variables pane per roadmap. |
-| `mo te` | Inspector | `mote:props` | Follows `@sel`. |
+| `mo te` | Inspector | `mote:props` | `open @sel` follows the selection; `open #id` is pinned. |
 | `mo xie` | Moxie | `moxie:plot`, `moxie:fit` | |
 | `mo tion` | Motion | `motion:scenarios`, `motion:state`, `motion:rule` | Timeline sits under state. No runs list. |
 | `mo ra` | Mora | `mora:doc` | Text-editing pane (see *Keyboard*). |
@@ -210,7 +210,7 @@ phase that builds them.
 - **`mote:props` is a pane** that follows `@sel`'s primary. It is the
   main place a mote is edited, and it follows the handoff's props
   layout: title, key/value grid, `links N`, `→ relation target`.
-- **Floating on demand.** A key (choose it in U3) pops the same editor
+- **Floating on demand.** `p` (settled in U3) pops the same editor
   as a floating panel over any layout that has no props pane, and it
   closes on `esc`.
 - Pane and float are **one component**, so what you can do to a mote is
@@ -309,7 +309,7 @@ own plan-mode phase and ships something usable.
 |---|---|---|
 | U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
 | U2 | **Done.** **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
-| U3 | **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
+| U3 | **Done.** **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
 | U4 | **Moxie → `mo xie`.** `plot` / `fit` panes on the restyled `plot.js`. | Commands carry view state (ranges, series). |
 | U5 | **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list. | A live, ticking view inside the contract. |
 | U6 | **Mora → `mo ra`.** Document pane as a text-editing pane. | Keyboard capture and `esc` work for editors. |
@@ -359,7 +359,10 @@ Each step's done-check is the same:
   each app's canonical commands in its port step. U2 built `find …`
   (view `monolith:table`, `mo nolith` = `find`) and `set
   @sel|#id|‹name› ‹key› ‹value›|--clear`, where `set`'s `@sel` is the
-  whole selection and everywhere else `@sel` is the primary. Confirm
+  whole selection and everywhere else `@sel` is the primary. U3 added
+  `open @sel|#id|‹name›` (view `mote:props`, `mo te` = `open @sel`),
+  `rename`, `unlink` and `template`, which also take the whole
+  selection. Confirm
   those, and whether the old window's bulk link, relationship matrix,
   bulk delete and *save view* come back as commands (`link @sel …`,
   `delete @sel`, `view save ‹name›`) -- U2 did not port them.

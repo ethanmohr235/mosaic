@@ -8,16 +8,19 @@
  *      field has focus (it keeps its own native undo).
  *   4. The focused view's onKey() goes next; true means it's handled.
  *   5. A text-editing view (or any text field) keeps every other key.
+ *      (While the `p` float is open, steps 4 and 5 are the float's: it has
+ *      the keys ahead of the focused pane.)
  *   6. Otherwise the shell: `:` or `/` to the command line, `e` edit the
- *      pane's command, `x` close the pane, `1`–`9` switch layouts.
+ *      pane's command, `x` close the pane, `p` the props float, `1`–`9`
+ *      switch layouts.
  *
  * After `^w`: v s split · h j k l focus · < > resize · o only · = equalize
  * · x swap. `esc` or any other key cancels the prefix. */
 
 const TILING_HINTS = [["^w v", "vsplit"], ["^w s", "split"], ["^w hjkl", "focus"], ["^w < >", "resize"],
   ["^w o", "only"], ["^w =", "equalize"], ["^w x", "swap"]];
-const SHELL_HINTS = [[":", "command"], ["e", "edit pane command"], ["x", "close pane"], ["^w", "tile"],
-  ["1–9", "layouts"]];
+const SHELL_HINTS = [[":", "command"], ["e", "edit pane command"], ["x", "close pane"], ["p", "props"],
+  ["^w", "tile"], ["1–9", "layouts"]];
 const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"]);
 
 function isTextField(el) {
@@ -26,7 +29,7 @@ function isTextField(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable;
 }
 
-export function createKeys({ store, panes, actions, commandLine, runner }) {
+export function createKeys({ store, panes, actions, commandLine, runner, float }) {
   let prefix = false;
 
   function tiling(key) {
@@ -49,6 +52,7 @@ export function createKeys({ store, panes, actions, commandLine, runner }) {
     if (key === ":" || key === "/") commandLine.focus();
     else if (key === "e") editFocused();
     else if (key === "x") actions.close();
+    else if (key === "p") float.toggle();
     else if (/^[1-9]$/.test(key)) actions.switchLayout(Number(key));
     else return false;
     return true;
@@ -95,6 +99,12 @@ export function createKeys({ store, panes, actions, commandLine, runner }) {
     if (commandLine.isActive()) return;
     const inField = isTextField(event.target);
     if (!inField && undoKey(event)) return consume(event);
+    if (float.isOpen()) {
+      if (float.onKey(event)) return consume(event);
+      if (float.textEditing() || inField) return;
+      if (shell(event)) consume(event);
+      return;
+    }
     const pane = panes.focused();
     const instance = pane && pane.instance;
     if (instance && instance.onKey && instance.onKey(event)) return consume(event);
@@ -109,6 +119,9 @@ export function createKeys({ store, panes, actions, commandLine, runner }) {
     hints() {
       if (prefix) return TILING_HINTS;
       if (commandLine.isActive()) return commandLine.hints();
+      if (float.isOpen()) {
+        return float.textEditing() ? [...float.hints(), ["^w", "tile"]] : [...float.hints(), ...SHELL_HINTS];
+      }
       const pane = panes.focused();
       const own = pane && pane.instance && pane.instance.hints ? pane.instance.hints() : [];
       // A text-editing view has every key but ^w, so the shell's don't apply.
