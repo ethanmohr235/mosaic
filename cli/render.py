@@ -448,6 +448,31 @@ def _check_mark(check) -> str:
     return "FAIL" if check.status == simulation.FAIL else "??  "
 
 
+def print_verification(comparisons, unit: str | None = None, figures: int | None = None) -> None:
+    """Hand, external and % error in aligned columns. The error is
+    relative to the external value, which is the reference."""
+    if not comparisons:
+        print("(nothing to verify -- mark an external value with `checks`)")
+        return
+    rows = [("", "hand", "external", "error")]
+    for c in comparisons:
+        error = f"{c.error:+.2f}%" if c.error is not None else "-"
+        rows.append((
+            c.label,
+            c.hand.converted(unit).text(figures) or "-",
+            c.external.converted(unit).text(figures) or "-",
+            error,
+        ))
+    widths = [max(len(row[i]) for row in rows) for i in range(4)]
+    for row in rows:
+        print("  " + "  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip())
+    for c in comparisons:
+        if c.note:
+            print(f"  {c.label} external: {c.note}")
+        if c.problem:
+            print(f"  {c.label}: {c.problem}")
+
+
 def _print_section(section) -> None:
     if section is None:
         return
@@ -461,6 +486,8 @@ def _print_section(section) -> None:
         print_checks(section.checks)
     if section.rows:
         print_calc_rows(section.rows, figures=section.figures)
+    if section.comparisons:
+        print_verification(section.comparisons, figures=section.figures)
 
 
 def _inline_text(nodes, document, resolution) -> str:

@@ -104,6 +104,8 @@ class SectionResult:
     heading: str
     rows: tuple = ()
     checks: tuple = ()
+    # `\verification`: `core/calc.py::Comparison`, hand beside external.
+    comparisons: tuple = ()
     # The section's `{unit, figures}`, already applied to each row's unit
     # and carried here for the figures a renderer passes to `row.text()`.
     # Converting once here rather than in each renderer is what keeps the
@@ -113,7 +115,7 @@ class SectionResult:
 
     @property
     def empty(self) -> bool:
-        return not self.rows and not self.checks
+        return not self.rows and not self.checks and not self.comparisons
 
 
 @dataclass(frozen=True)
@@ -285,6 +287,7 @@ SECTION_HEADINGS = {
     "answers": "Answers",
     "assumptions": "Assumptions",
     "checks": "Checks",
+    "verification": "Verification",
 }
 
 
@@ -378,6 +381,21 @@ def _section(conn: sqlite3.Connection, node: modoc.Section) -> SectionResult:
             "a check is a relation, not a quantity -- \\checks takes no unit or figures"
         )
         return SectionResult(node.kind, heading, checks=calc.checks(conn), error=error)
+
+    if node.kind == "verification":
+        # The hand value's unit is the table's, since each row compares
+        # two values of one quantity; a format's unit converts both, and
+        # its figures quote them.
+        comparisons = tuple(
+            dataclasses.replace(
+                c,
+                hand=c.hand.converted(node.format.unit),
+                external=c.external.converted(node.format.unit),
+            )
+            for c in calc.verification(conn)
+        )
+        return SectionResult(node.kind, heading, comparisons=comparisons,
+                             figures=node.format.figures)
 
     reader = _SECTION_READERS.get(node.kind)
     if reader is None:

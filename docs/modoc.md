@@ -63,7 +63,7 @@ Each on its own line.
 | `\include{Method}` | another note's blocks, spliced in |
 | `\graph{...}` | a saved Moxie view, drawn here -- see below |
 | `\work{bd.l}` | the shown work for one value -- see below |
-| `\given` `\answers` `\assumptions` `\checks` | a calc section -- see below |
+| `\given` `\answers` `\assumptions` `\checks` `\verification` | a calc section -- see below |
 | blank line | paragraph break |
 
 A wrapped `\item` continues on the next line. A block command's argument
@@ -243,14 +243,15 @@ never made. The values found with it are named instead.
 
 ### The calc sections
 
-Four block macros, each taking nothing but an optional `{unit, figures}`:
+Five block macros, each taking nothing but an optional `{unit, figures}`:
 
 | | |
 | --- | --- |
 | `\given` | every number the equations read and are not free to determine |
 | `\answers` | every value the solver is free to determine, and what it holds |
 | `\assumptions` | every value marked `source: assumed` |
-| `\checks` | every comparison relation, and whether the values satisfy it |
+| `\checks` | every check (a comparison, or an equality marked `check: true`), and whether the values satisfy it |
+| `\verification` | each external value beside the hand value it verifies, with the % error |
 
 **They take no argument, and that is the design.** What belongs in a given
 list is a property of the garden, not something the note restates -- a note
@@ -283,6 +284,24 @@ prints beside the value. `external` marks a value that came from outside
 the garden -- an FEA probe, a measurement -- which is what a verification
 table compares against a hand calc. The solver never reads it: where a
 value came from changes nothing about how it is used.
+
+### `\verification` -- hand vs. external
+
+An external value names the hand value it verifies with `checks`, in its
+own `source` entry:
+
+    bd.sigma:      210  (MPa, solved)
+    bd.sigma_fea:  30000  (psi)
+    source:  {"sigma_fea": {"kind": "external", "note": "FEA probe", "checks": "sigma"}}
+
+`\verification` then prints one row per such pair: the hand value, the
+external value converted into the hand value's unit, and the error
+`(hand - external) / |external|` as a percentage -- relative to the
+external value, which is the reference the hand calc is being verified
+against. `measured` works the same as `external`. A row that cannot be
+computed (the hand value not solved yet, an external of zero, units of two
+dimensions) says why instead of printing a number. An external value that
+names nothing is not a comparison and is left out.
 
 ## Numbers and cross-references
 

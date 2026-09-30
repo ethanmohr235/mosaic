@@ -761,3 +761,11 @@ def test_import_csv_dry_run_writes_nothing_then_imports(garden):
 def test_import_csv_refuses_a_bad_file(garden):
     result = import_csv("x [nope]\n1\n", "bad.csv", garden=GARDEN)
     assert not result["imported"] and result["problems"]
+
+
+def test_calc_sections_carries_the_verification_table(garden):
+    create_mote({"name": "bd", "sigma": 210, "sigma_fea": 200,
+                 "source": {"sigma_fea": {"kind": "external", "checks": "sigma"}}}, GARDEN)
+    (row,) = calc_sections(garden=GARDEN)["verification"]
+    assert row["label"] == "bd.sigma" and row["externalKey"] == "sigma_fea"
+    assert row["errorPercent"] == pytest.approx(5.0)

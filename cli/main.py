@@ -345,6 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("assumptions", "Every value marked `source: assumed`"),
         ("external", "Every value marked `source: external`"),
         ("checks", "Every comparison relation, and whether it holds"),
+        ("verification", "Hand values beside the external values that verify them"),
     ):
         section = calc_sub.add_parser(name, help=help_text)
         if name != "checks":
@@ -732,9 +733,14 @@ def _handle_calc(conn, args) -> None:
     if action == "checks":
         render.print_checks(calc.checks(conn))
         return
+    if action == "verification":
+        render.print_verification(
+            calc.verification(conn), getattr(args, "unit", None), getattr(args, "figures", None)
+        )
+        return
     reader = _CALC_SECTIONS.get(action)
     if reader is None:
-        print(f"Specify a calc action: {', '.join([*_CALC_SECTIONS, 'checks', 'work'])}")
+        print(f"Specify a calc action: {', '.join([*_CALC_SECTIONS, 'checks', 'verification', 'work'])}")
         return
     render.print_calc_rows(
         reader(conn), getattr(args, "unit", None), getattr(args, "figures", None)

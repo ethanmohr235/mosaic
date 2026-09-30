@@ -320,3 +320,45 @@ def test_a_mote_no_equation_mentions_contributes_no_givens(conn):
     create_mote(conn, {"name": "HW 4", "estimate": 3})
     worksheet.apply(conn, FEA)
     assert "HW 4" not in worksheet.read(conn)
+
+
+# ---- equality checks ----
+
+BEAM = """\
+b.W = 1000
+b.a = 2
+b.L = 5
+b.R2 = b.W * b.a / b.L
+b.R1 = b.W * (b.L - b.a) / b.L
+b.R1 + b.R2 ?= b.W  ! ΣFy
+"""
+
+
+def test_a_question_equals_line_is_an_equality_check():
+    (line,) = [l for l in worksheet.parse(BEAM).lines if l.check]
+    assert line.kind == worksheet.EQUATION
+    assert line.relation == "b.R1 + b.R2 == b.W"
+    assert line.name == "ΣFy" and not line.free
+
+
+def test_a_check_is_stored_as_equals_with_check_true_and_round_trips(conn):
+    applied = worksheet.apply(conn, BEAM)
+    assert applied.problems == ()
+    (check,) = [r for r in list_rules(conn) if r.is_check]
+    assert check.equation == "b.R1 + b.R2 == b.W"
+    assert check.mote.properties["check"] is True
+
+    run_simulation(conn)
+    assert get_mote(conn, named(conn, "b").id).properties["R1"] == pytest.approx(600)
+
+    text = worksheet.read(conn)
+    assert "b.R1 + b.R2 ?= b.W  ! ΣFy" in text
+    again = worksheet.apply(conn, text)
+    assert again.deleted == () and again.motes_created == ()
+    assert [r.is_check for r in list_rules(conn)].count(True) == 1
+
+
+def test_retyping_a_check_with_double_equals_makes_it_an_equation_again(conn):
+    worksheet.apply(conn, BEAM)
+    worksheet.apply(conn, BEAM.replace("?=", "=="))
+    assert not any(r.is_check for r in list_rules(conn))

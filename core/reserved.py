@@ -27,7 +27,7 @@ from core.modoc import ABOUT, MODOC_KEY
 from core.providers import describe_providers
 from core.query import QUERY_KEY
 from core.roles import ROLES_KEY
-from core.rules import APPLIES_TO, EQUATION_KEY, FREEDOMS_KEY
+from core.rules import APPLIES_TO, CHECK_KEY, EQUATION_KEY, FREEDOMS_KEY, TOLERANCE_KEY
 from core.scenarios import OVERRIDES, VARIES
 from core.species import INSTANCE_OF, TEMPLATE_OF
 from core.sweep import PLOT_KEY
@@ -37,6 +37,7 @@ RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
     ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY, GARDEN_KEY,
+    CHECK_KEY, TOLERANCE_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -57,6 +58,14 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "own, and *replaces* rather than adds to what its species declare -- "
         "which is how two instances of one species can pose opposite "
         "questions (sizing vs rating).",
+    CHECK_KEY: "On a rule mote: `true` makes the rule a check -- evaluated "
+        "against the answer after solving and shown green or red, but never "
+        "used to determine a value, even when written with `==` (`sum(Fy) == "
+        "0` verifying equilibrium). A comparison (`<=`, `>=`, `<`, `>`) is "
+        "always a check and needs no marking.",
+    TOLERANCE_KEY: "On a check: how close an equality must come, as a fraction "
+        "of the largest magnitude the relation involves. Defaults to 0.001 "
+        "(0.1%). Comparisons ignore it.",
     ROLES_KEY: "On a mote acting as a species: the named parts its instances "
         "are wired to, as {'turbine': {'arity': 'one'}}. A role is an "
         "ordinary relationship whose *type* is the role's name, so a rule can "

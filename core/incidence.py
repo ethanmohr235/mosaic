@@ -45,6 +45,9 @@ class EquationTouch:
     equation: str
     determines: frozenset[Unknown] = frozenset()
     reads: frozenset[Unknown] = frozenset()
+    # Marked `check: true`: evaluated against the answer, never solved,
+    # even though it is written with `==`. It then determines nothing.
+    check: bool = False
 
     @property
     def touches(self) -> frozenset[Unknown]:

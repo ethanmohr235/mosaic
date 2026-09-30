@@ -764,7 +764,20 @@ def _in_declared_units(properties: dict[str, dict], mote_id: str, key: str, valu
 # it, since `efficiency <= 1` landing on exactly 1.0 through floating
 # point should pass; strict ones do not, because `< 1` excluding 1 is the
 # whole of what makes it strict.
-def _satisfied(operator: str, difference: float) -> bool:
+#
+# An equality reaches here only as a marked check (`check: true`), and
+# gets a *relative* tolerance instead: `scale` is the largest magnitude
+# the relation involved, so `sum(Fy) == 0` over kilonewton forces is not
+# held to a nanonewton. The absolute floor keeps a relation whose every
+# term is zero from demanding exactly zero of floating point.
+def _satisfied(
+    operator: str,
+    difference: float,
+    scale: float = 0.0,
+    tolerance: float = rules_repo.DEFAULT_TOLERANCE,
+) -> bool:
+    if operator == EQUALS:
+        return abs(difference) <= max(tolerance * scale, _TOLERANCE)
     if operator == "<=":
         return difference <= _TOLERANCE
     if operator == ">=":
@@ -796,7 +809,8 @@ def _split_relations(
                 operators[rule.mote.id] = relation_operator(rule.equation)
             except FormulaError:
                 operators[rule.mote.id] = EQUALS
-        target = equations if operators[rule.mote.id] == EQUALS else constraints
+        solves = operators[rule.mote.id] == EQUALS and not rule.is_check
+        target = equations if solves else constraints
         target.append((rule, mote_id))
     return equations, constraints
 
@@ -853,7 +867,8 @@ def constraint_results(
                 f"depends on values this run did not determine "
                 f"({describe_unknowns(evaluated.terms)})",
             ))
-        elif _satisfied(evaluated.operator, evaluated.constant):
+        elif _satisfied(evaluated.operator, evaluated.constant,
+                        evaluated.scale, rule.tolerance):
             results.append(ConstraintResult(
                 rule.mote.id, label, rule.equation, PASS,
                 off_by=abs(evaluated.constant),
@@ -861,10 +876,20 @@ def constraint_results(
         else:
             results.append(ConstraintResult(
                 rule.mote.id, label, rule.equation, FAIL,
-                f"off by {abs(evaluated.constant):g}",
+                _off_by(evaluated, rule.tolerance),
                 off_by=abs(evaluated.constant),
             ))
     return results
+
+
+def _off_by(evaluated, tolerance: float) -> str:
+    """A failure's detail. An equality check says what it was allowed,
+    since "off by 0.4" means nothing without knowing 0.1% of what."""
+    detail = f"off by {abs(evaluated.constant):g}"
+    if evaluated.operator == EQUALS:
+        allowed = max(tolerance * evaluated.scale, _TOLERANCE)
+        detail += f", allowed {allowed:g} ({tolerance:g} relative)"
+    return detail
 
 
 def _check_constraints(
@@ -922,7 +947,7 @@ def check_constraints(
     )
     pairs = _rule_instances(rules_repo.list_rules(conn), view)
     constraints = [(rule, mote_id) for rule, mote_id in pairs
-                   if _operator_of(rule) != "=="]
+                   if _operator_of(rule) != "==" or rule.is_check]
     return [_unchecked(r) for r in constraint_results(view, constraints, {}, model_cache={})]
 
 
@@ -1452,15 +1477,17 @@ def _touch(
         if read.kind in (PROPERTY_READ, PREVIOUS_READ, MISSING_READ)
     )
     try:
-        determines = referenced if relation_operator(rule.equation) == EQUALS else frozenset()
+        solves = relation_operator(rule.equation) == EQUALS and not rule.is_check
+        determines = referenced if solves else frozenset()
     except FormulaError:
-        determines = referenced
+        determines = frozenset() if rule.is_check else referenced
     read_variables |= referenced - determines
     return incidence_repo.EquationTouch(
         rule_mote_id=rule.mote.id,
         rule_name=rule.name,
         anchor_mote_id=mote_id,
         equation=rule.equation,
+        check=rule.is_check,
         determines=determines,
         reads=read_variables - determines,
     )

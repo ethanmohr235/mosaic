@@ -46,6 +46,16 @@ APPLIES_TO = "applies_to"
 EQUATION_KEY = "equation"
 FREEDOMS_KEY = "freedoms"
 
+# A rule carrying `check: true` is evaluated against the answer and never
+# solved, whatever its operator -- how `sum(Fy) == 0` verifies
+# equilibrium instead of being used to find a force. A comparison (`<=`)
+# is always a check and needs no marking.
+CHECK_KEY = "check"
+# How close an equality check must come: |lhs - rhs| within this
+# fraction of the largest magnitude the relation involves. Per rule.
+TOLERANCE_KEY = "tolerance"
+DEFAULT_TOLERANCE = 1e-3
+
 # How widely a rule is asserted -- see the module docstring.
 EACH = "each"
 ONCE = "once"
@@ -80,6 +90,35 @@ class Rule:
     @property
     def name(self) -> str:
         return label_of(self.mote.properties, self.mote.id)
+
+    @property
+    def is_check(self) -> bool:
+        return is_check(self.mote.properties)
+
+    @property
+    def tolerance(self) -> float:
+        return tolerance_of(self.mote.properties)
+
+
+def is_check(properties: dict) -> bool:
+    """Whether a rule is marked as a check. Only a real `true` (or the
+    text "true", as a hand edit or a CSV writes it) counts: anything else
+    leaves the rule solving, which is what it did before the key existed."""
+    value = properties.get(CHECK_KEY)
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return value is True
+
+
+def tolerance_of(properties: dict) -> float:
+    """A rule's relative tolerance, or DEFAULT_TOLERANCE when it has no
+    usable one. A negative, zero-or-less or non-numeric value is ignored
+    rather than read as "exact", since exact equality of computed floats
+    fails for reasons that have nothing to do with the model."""
+    value = properties.get(TOLERANCE_KEY)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0:
+        return DEFAULT_TOLERANCE
+    return float(value)
 
 
 def list_rules(conn: sqlite3.Connection) -> list[Rule]:

@@ -371,6 +371,26 @@ is the whole of what makes them strict.
 Chained comparisons (`0 <= x <= 1`) are rejected with advice to write
 them as two relations -- which is what they are.
 
+### Equality checks
+
+An equation can be a check too. A rule carrying the reserved `check: true`
+is evaluated against the answer and never solved, whatever its operator,
+which is how `R1 + R2 == W` verifies the reactions two moment equations
+found instead of being used to find one of them. It counts among the
+checks, not the equations, in solve health; it determines nothing in the
+incidence index; and it never stands in for a missing equation -- a value
+only a check mentions stays unsolved.
+
+An equality needs a tolerance, and a relative one: `|lhs - rhs|` may be
+up to the rule's `tolerance` (default `0.001`, i.e. 0.1%) times the
+largest magnitude the relation involved, with the solver's own absolute
+tolerance as a floor so a relation whose terms are all zero is not held to
+exact floating point. A failure says what it was allowed: `off by 10,
+allowed 1 (0.001 relative)`. A comparison ignores `tolerance`.
+
+In the worksheet an equality check is written `?=`:
+`b.R1 + b.R2 ?= b.W  ! ΣFy`.
+
 ## Name references
 
 A dotted identifier that isn't a declared role reaches a mote by its
@@ -777,6 +797,7 @@ a mote and a rule per line. Eight lines say the same thing.
 | `bd.Ax = ?` | an **unknown**: `Ax` free on `bd`, with no value |
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
 | `bd.sigma <= 250` | a **check**: evaluated, never solved |
+| `b.R1 + b.R2 ?= b.W` | an **equality check**: stored as `==` with `check: true` |
 | `... ! ΣFx` | names the rule that line makes |
 | (blank) | ignored |
 

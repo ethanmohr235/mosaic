@@ -78,6 +78,10 @@ class Source:
     when the bare word is not enough."""
     kind: str
     note: str = ""
+    # For an external value: the key on the same mote holding the hand
+    # calculation it verifies (`sigma_fea` checks `sigma`). Empty for one
+    # that verifies nothing, which the V&V table then leaves out.
+    checks: str = ""
 
 
 def parse_source_property(value) -> dict[str, Source]:
@@ -99,7 +103,12 @@ def parse_source_property(value) -> dict[str, Source]:
             found[key] = Source(entry.strip())
         elif isinstance(entry, dict) and isinstance(entry.get("kind"), str):
             note = entry.get("note")
-            found[key] = Source(entry["kind"].strip(), note if isinstance(note, str) else "")
+            checks = entry.get("checks")
+            found[key] = Source(
+                entry["kind"].strip(),
+                note if isinstance(note, str) else "",
+                checks.strip() if isinstance(checks, str) else "",
+            )
     return found
 
 
@@ -333,6 +342,87 @@ def checks(conn: sqlite3.Connection, scenario: str | None = None) -> tuple:
     it -- `core/simulation.py::check_constraints` unchanged. Here so a note
     reaches one module for all five sections rather than three."""
     return tuple(simulation.check_constraints(conn, scenario))
+
+
+# ---- verification: hand vs. external ----
+
+
+@dataclass(frozen=True)
+class Comparison:
+    """One row of a V&V table: a hand-calculated value beside the external
+    value that verifies it, and how far apart they are.
+
+    `external` is converted into the hand value's unit so the two columns
+    read against each other. `error` is the percentage by which the hand
+    value differs from the external one, *relative to the external* --
+    the external value (an FEA probe, a measurement) is the reference the
+    hand calc is being verified against. None where it cannot be
+    computed, and `problem` says why."""
+    mote_id: str
+    mote: str
+    key: str
+    external_key: str
+    hand: Quantity
+    external: Quantity
+    note: str = ""
+    error: float | None = None
+    problem: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.mote}.{self.key}"
+
+
+def verification(conn: sqlite3.Connection) -> tuple[Comparison, ...]:
+    """Every external value that names the hand value it verifies.
+
+    Paired through the external value's own `source` entry, which is
+    where the pairing was decided to live: `bd.sigma_fea` carrying
+    `source: {sigma_fea: {kind: external, note: "FEA probe", checks:
+    "sigma"}}` sits beside `bd.sigma` in the table. An external value that
+    names nothing is not a comparison, and is left to `\given`'s
+    listing of where values came from."""
+    found = []
+    for mote in motes_repo.list_motes(conn):
+        name = _name(mote.properties, mote.id)
+        for external_key, source in parse_source_property(
+            mote.properties.get(SOURCE_KEY)
+        ).items():
+            if source.kind not in (EXTERNAL, MEASURED) or not source.checks:
+                continue
+            found.append(_compare(
+                mote.id, name, source.checks, external_key, source.note,
+                quantity(mote.properties, source.checks),
+                quantity(mote.properties, external_key),
+            ))
+    return tuple(sorted(found, key=lambda c: (c.mote.casefold(), c.key, c.external_key)))
+
+
+def _compare(
+    mote_id: str, mote: str, key: str, external_key: str, note: str,
+    hand: Quantity, external: Quantity,
+) -> Comparison:
+    def made(problem: str = "", error: float | None = None, shown: Quantity = external):
+        return Comparison(mote_id, mote, key, external_key, hand, shown, note, error, problem)
+
+    if not hand.numeric:
+        return made(f"{mote}.{key} holds no number yet -- solve first")
+    if not external.numeric:
+        return made(f"{mote}.{external_key} holds no number")
+    if bool(hand.unit) != bool(external.unit) and "1" not in (hand.unit, external.unit):
+        return made(f"one of {key} and {external_key} has a unit and the other does not")
+    shown = external
+    if hand.unit and external.unit and hand.unit != external.unit:
+        try:
+            shown = Quantity(
+                units_repo.convert(float(external.value), external.unit, hand.unit), hand.unit)
+        except UnitError as e:
+            return made(str(e))
+    if shown.value == 0:
+        return made("the external value is zero, so a percentage error is undefined",
+                    shown=shown)
+    error = (float(hand.value) - float(shown.value)) / abs(float(shown.value)) * 100.0
+    return made(error=error, shown=shown)
 
 
 # ---- shown work ----

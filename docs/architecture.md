@@ -94,7 +94,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source` and `garden` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check` and `tolerance` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 
@@ -180,6 +180,13 @@ limit is often what the run was for -- with `strict_constraints`
 promoting them to a failure, mirroring `strict_units`. A constraint
 depending on something the run could not determine is reported as *not
 checked*, never as passing.
+
+A rule marked `check: true` is sorted with the constraints whatever its
+operator, which is how an *equality* is checked rather than solved. Its
+tolerance is relative (`tolerance`, default 0.001) and sized by
+`Equation.scale`, the largest magnitude the relation took, so no second
+evaluation is needed. `core/rules.py::is_check` is the one reading of the
+key; simulation, incidence (`EquationTouch.check`) and health all ask it.
 
 # Scenarios
 

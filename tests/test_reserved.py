@@ -13,7 +13,7 @@ def test_reserved_properties_match_the_documented_list():
     assert RESERVED_PROPERTIES == {
         "equation", "freedoms", "url",
         "provider", "configuration", "units", "roles", "modoc", "query",
-        "plot", "source", "garden",
+        "plot", "source", "garden", "check", "tolerance",
     }
 
 

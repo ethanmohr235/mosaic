@@ -507,3 +507,18 @@ def test_including_a_name_nobody_has_says_so(conn):
 def test_a_note_with_no_includes_is_parsed_and_numbered_as_before(conn):
     note = create_mote(conn, {MODOC_KEY: "\\begin{equation}\na\n\\end{equation}"})
     assert assemble(conn, note).blocks[0].number == 1
+
+
+def test_the_verification_section_lists_hand_beside_external(conn):
+    create_mote(conn, {
+        "name": "bd", "sigma": 210.0, "sigma_fea": 200.0,
+        "units": {"sigma": "MPa", "sigma_fea": "MPa"},
+        "source": {"sigma_fea": {"kind": "external", "checks": "sigma"}},
+    })
+    document, resolution = on_a_new_note(conn, "\\verification{kPa, 3}")
+    (section,) = resolution.sections.values()
+    assert section.heading == "Verification" and not section.empty
+    (row,) = section.comparisons
+    assert row.hand.text(section.figures) == "210000 kPa"
+    assert row.external.text(section.figures) == "200000 kPa"
+    assert row.error == pytest.approx(5.0)

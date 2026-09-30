@@ -170,8 +170,8 @@ def check(conn: sqlite3.Connection, scenario: str | None = None) -> Health:
 
 
 def _count(index: incidence_repo.Index) -> tuple[int, int]:
-    """`(equations, checks)`. A comparison relation is checked rather than
-    solved (`core/simulation.py` splits them before anything is solved), so
+    """`(equations, checks)`. A comparison relation, or an equality marked
+    `check: true`, is checked rather than solved (`core/simulation.py` splits them before anything is solved), so
     counting one among the equations would make a model look balanced
     because of a line that cannot determine anything.
 
@@ -184,7 +184,7 @@ def _count(index: incidence_repo.Index) -> tuple[int, int]:
             operator = relation_operator(touch.equation)
         except FormulaError:
             continue
-        if operator == "==":
+        if operator == "==" and not touch.check:
             equations += 1
         else:
             checks += 1

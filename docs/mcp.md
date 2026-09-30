@@ -175,6 +175,13 @@ carrying `garden: <name>` owns that garden and is its cover), plus
 `start_project` creates a garden for a mote and writes the property in one
 step. See `docs/architecture.md` -> *Projects*.
 
+`calc_sections` also returns `verification`: each external value that
+names the hand value it verifies (`source: {sigma_fea: {kind: external,
+checks: sigma}}`), with both values and `errorPercent`, relative to the
+external value. A rule marked `check: true` (with an optional relative
+`tolerance`, default 0.001) is evaluated, never solved, and appears under
+`checks` with the comparisons.
+
 `import_csv` takes the file's text and its name, and makes one mote per
 row; `load [kN]` in the header gives a column its unit, and each value is
 marked `source: measured`. Any problem refuses the whole file, and

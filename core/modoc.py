@@ -54,7 +54,7 @@ META_COMMANDS = (CAPTION_COMMAND, LABEL_COMMAND)
 # take nothing, because what goes in them is a property of the garden
 # rather than of the note (docs/modoc.md, "The calc sections").
 WORK_COMMAND = "work"
-SECTION_COMMANDS = ("given", "answers", "assumptions", "checks")
+SECTION_COMMANDS = ("given", "answers", "assumptions", "checks", "verification")
 CALC_COMMANDS = (WORK_COMMAND, *SECTION_COMMANDS)
 
 # Block commands with one braced argument, and what each makes.

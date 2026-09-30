@@ -824,6 +824,14 @@ def calc_sections(
                  "detail": c.detail, "offBy": c.off_by}
                 for c in calc_repo.checks(conn)
             ],
+            "verification": [
+                {"label": c.label, "moteId": c.mote_id, "key": c.key,
+                 "externalKey": c.external_key,
+                 "hand": c.hand.converted(unit).text(figures),
+                 "external": c.external.converted(unit).text(figures),
+                 "errorPercent": c.error, "note": c.note, "problem": c.problem}
+                for c in calc_repo.verification(conn)
+            ],
         }
 
 

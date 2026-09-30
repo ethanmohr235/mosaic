@@ -43,6 +43,7 @@ surface can say so rather than implying a worksheet is the whole garden.
 | `bd.Ax = ?` | an **unknown**: `Ax` free on `bd`, with no value |
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
 | `bd.sigma <= 250` | a **check**: evaluated, never solved (`core/formula.py`) |
+| `bd.R1 + bd.R2 ?= bd.W` | an **equality check**: stored as `==` with `check: true` |
 | `... ! ΣFx` | names the rule that line makes |
 | (blank) | ignored |
 
@@ -64,6 +65,12 @@ do. `bd.Ax = ?` is how the person who wrote the residual says which
 values it is allowed to determine, and it is what makes the projection
 complete: every freedom either heads an assignment line or has a `= ?` one.
 
+`?=` is the worksheet's spelling of an equality that is checked rather
+than solved -- `ΣFy` verifying the reactions two moment equations found.
+It is not in the expression language: the rule stores `==` and carries
+`check: true` (`core/rules.py`), which is what every other surface reads.
+Retyping the line with `==` makes it an equation again.
+
 One asymmetry worth knowing: applying **adds** freedoms and never removes
 one, unlike rules. A freedom may have been declared in another surface
 about a mote the worksheet happens to mention, and taking it away would be
@@ -72,7 +79,7 @@ reaching past what the lines are about.
 import ast
 import re
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from core import command_bar
 from core import motes as motes_repo
@@ -91,13 +98,14 @@ EQUATION = "equation"
 BLANK = "blank"
 
 COMMENT_MARKER = "!"
+CHECK_MARKER = "?="
 ASSIGN = "="
 UNKNOWN_MARKER = "?"
 
 # `lhs <op> rhs`, with the comparison left for core/formula.py to read. A
 # lone `=` is matched only after `==` has been ruled out, which is what the
 # negative lookarounds do.
-_RELATION_RE = re.compile(r"^(?P<lhs>.+?)\s*(?P<op>==|<=|>=|<|>)\s*(?P<rhs>.+)$")
+_RELATION_RE = re.compile(r"^(?P<lhs>.+?)\s*(?P<op>\?=|==|<=|>=|<|>)\s*(?P<rhs>.+)$")
 _ASSIGN_RE = re.compile(r"^(?P<lhs>[^=<>]+?)\s*=\s*(?P<rhs>.+)$")
 _TARGET_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*$")
 
@@ -117,6 +125,7 @@ class Line:
     relation: str = ""      # an equation's text, as core/formula.py reads it
     name: str = ""          # the trailing `! ...`
     free: bool = False      # whether this line makes `key` a freedom of `mote`
+    check: bool = False     # written `?=`: an equality checked, never solved
     problem: str = ""
 
     @property
@@ -191,6 +200,10 @@ def _split_comment(raw: str) -> tuple[str, str]:
 
 def _read(number: int, text: str, body: str, name: str) -> Line:
     relation = _RELATION_RE.match(body)
+    if relation and relation.group("op") == CHECK_MARKER:
+        lhs, rhs = relation.group("lhs"), relation.group("rhs")
+        line = _equation(number, text, f"{lhs.strip()} == {rhs.strip()}", name, lhs, assigns=False)
+        return replace(line, check=True)
     if relation:
         return _equation(number, text, body, name, relation.group("lhs"), assigns=False)
 
@@ -364,6 +377,8 @@ def _write_rule(conn, index, created: list[str], line: Line) -> str:
     properties = {rules_repo.EQUATION_KEY: line.relation}
     if line.name:
         properties["name"] = line.name
+    if line.check:
+        properties[rules_repo.CHECK_KEY] = True
     if rule_id is None:
         rule_id = motes_repo.create_mote(conn, properties)
         rel_repo.create_relationship(conn, rule_id, anchor_id, rules_repo.APPLIES_TO)
@@ -371,6 +386,8 @@ def _write_rule(conn, index, created: list[str], line: Line) -> str:
         motes_repo.update_mote(conn, rule_id, properties)
         if not line.name:
             motes_repo.delete_property(conn, rule_id, "name")
+        if not line.check:
+            motes_repo.delete_property(conn, rule_id, rules_repo.CHECK_KEY)
     if line.free:
         _free(conn, _resolve(conn, index, created, line.mote), line.key)
     return rule_id
@@ -486,7 +503,8 @@ def _render(
     name = anchor.properties.get("name") if anchor else None
     if isinstance(name, str) and name.isidentifier():
         relation = _qualify(relation, name)
-    line = _as_assignment(relation, free.get(rule.target_id, set()))
+    line = (_as_check(relation) if rule.is_check
+            else _as_assignment(relation, free.get(rule.target_id, set())))
     declared = rule.mote.properties.get("name")
     if isinstance(declared, str) and declared.strip():
         line = f"{line}  {COMMENT_MARKER} {declared.strip()}"
@@ -510,6 +528,15 @@ def _as_assignment(relation: str, free: set[str]) -> str:
     if target is None or target.group(2) not in free:
         return relation
     return f"{match.group('lhs').strip()} {ASSIGN} {match.group('rhs').strip()}"
+
+
+def _as_check(relation: str) -> str:
+    """An equality marked `check: true` written back as `?=`. A comparison
+    marked the same way keeps its operator, which already says it."""
+    match = _RELATION_RE.match(relation)
+    if not match or match.group("op") != "==":
+        return relation
+    return f"{match.group('lhs').strip()} {CHECK_MARKER} {match.group('rhs').strip()}"
 
 
 def _render_givens(

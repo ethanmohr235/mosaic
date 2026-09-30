@@ -288,3 +288,82 @@ def test_a_rule_that_does_not_parse_is_not_a_constraint(conn):
     rule = create_mote(conn, {"name": "Broken", "equation": "this is not a relation"})
     create_relationship(conn, rule, mote, APPLIES_TO)
     assert check_constraints(conn) == []
+
+
+### equality checks (`check: true`)
+
+def add_check(conn, target_id, name, equation, **extra):
+    rule_id = create_mote(conn, {"name": name, "equation": equation, "check": True, **extra})
+    create_relationship(conn, rule_id, target_id, APPLIES_TO)
+    return rule_id
+
+
+@pytest.fixture
+def beam(conn):
+    """Two reactions found from moments, then vertical equilibrium checked
+    rather than solved -- the textbook use of a check."""
+    b = create_mote(conn, {"name": "b", "W": 1000, "a": 2, "L": 5, "freedoms": "R1, R2"})
+    add_rule(conn, b, "Moment about 1", "R2 * L == W * a")
+    add_rule(conn, b, "Moment about 2", "R1 * L == W * (L - a)")
+    return b
+
+
+def test_a_marked_equality_is_checked_and_never_solved(conn, beam):
+    add_check(conn, beam, "ΣFy", "R1 + R2 == W")
+    result = run_simulation(conn)
+    assert result.constraint_violations == []
+    assert get_mote(conn, beam).properties["R1"] == pytest.approx(600)
+    (check,) = check_constraints(conn)
+    assert check.status == simulation.PASS and check.equation == "R1 + R2 == W"
+
+
+def test_a_check_cannot_stand_in_for_a_missing_equation(conn):
+    b = create_mote(conn, {"name": "b", "W": 10, "freedoms": "R"})
+    add_check(conn, b, "Check", "R == W")
+    result = run_simulation(conn)
+    assert result.unsolved == [(b, "R")]
+
+
+def test_an_equality_check_fails_beyond_its_relative_tolerance(conn, beam):
+    add_check(conn, beam, "ΣFy", "R1 + R2 == W * 1.01")
+    run_simulation(conn)
+    (check,) = check_constraints(conn)
+    assert check.status == simulation.FAIL
+    assert "off by 10" in check.detail and "0.001 relative" in check.detail
+
+
+def test_a_wider_tolerance_passes_the_same_check(conn, beam):
+    add_check(conn, beam, "ΣFy", "R1 + R2 == W * 1.01", tolerance=0.02)
+    run_simulation(conn)
+    (check,) = check_constraints(conn)
+    assert check.status == simulation.PASS
+
+
+def test_rounding_within_the_default_tolerance_passes(conn, beam):
+    add_check(conn, beam, "ΣFy", "R1 + R2 == 1000.4")
+    run_simulation(conn)
+    assert check_constraints(conn)[0].passed
+
+
+def test_a_check_determines_nothing_in_the_incidence_index(conn, beam):
+    check_id = add_check(conn, beam, "ΣFy", "R1 + R2 == W")
+    touch = next(t for t in incidence_index(conn).touches if t.rule_mote_id == check_id)
+    assert touch.check and touch.determines == frozenset()
+    assert check_id not in {e.rule_mote_id for e in incidence_index(conn).producers((beam, "R1"))}
+
+
+def test_only_a_real_true_marks_a_check():
+    from core.rules import is_check, tolerance_of, DEFAULT_TOLERANCE
+    assert is_check({"check": True}) and is_check({"check": "True "})
+    assert not is_check({"check": 1}) and not is_check({"check": "yes"}) and not is_check({})
+    assert tolerance_of({"tolerance": 0.05}) == 0.05
+    for bad in (0, -1, "x", True, None):
+        assert tolerance_of({"tolerance": bad}) == DEFAULT_TOLERANCE
+
+
+def test_solve_health_counts_a_marked_equality_as_a_check(conn, beam):
+    from core import health
+    add_check(conn, beam, "ΣFy", "R1 + R2 == W")
+    report = health.check(conn)
+    assert (report.equations, report.unknowns, report.checks) == (2, 2, 1)
+    assert report.solvable

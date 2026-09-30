@@ -72,14 +72,19 @@ Each one was a separate act of filing. That lesson became a rule in
   conversion. See `simulation.md` → *Solve health*.
 - **Checks.** A `check` relation is evaluated but never used to solve,
   and shows as a green/red checklist. This builds on the existing
-  comparison constraints.
+  comparison constraints. **Decided:** a rule carrying reserved `check:
+  true` is a check whatever its operator; an equality check's tolerance is
+  relative, 0.1% by default, overridable per rule with `tolerance`; the
+  worksheet writes one as `?=`. See `simulation.md` -> *Equality checks*.
 - **External values / V&V.** A given can be marked `source: external`
   with a note (e.g. an FEA probe). Mora gets a hand vs. external vs. %
   error table. Measured data can be imported from CSV. **Decided:** one
   mote per row, the header naming properties with an optional unit in
   brackets (`load [kN]`), each value marked `source: measured` with the
   file as its note, and every row linked to one import mote recording the
-  file.
+  file. An external value names the hand value it verifies with `checks`
+  in its own `source` entry, and the % error is relative to the external
+  value. See `modoc.md` -> *`\verification`*.
 - **Uncertainty.** A given can carry `±`. First-order propagation uses
   the Newton Jacobian, and every result shows its ±.
 - **Materials provider.** A built-in provider supplies E, ν, Sy, and ρ
@@ -149,7 +154,7 @@ alongside all of them.
 | 4 | **Backend done.** Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
 | 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
-| 7 | Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
+| 7 | **Backend done except Moxie export.** Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
 | 8 | Uncertainty propagation | Lab reports |
 | 9 | Cross-garden search, archive, materials provider | Payoff of many small gardens |
 

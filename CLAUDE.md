@@ -59,8 +59,13 @@ code.
   tree and the cover (`name`, `due`, `status`, `author`, `revision`);
   `monoss project start|stop|tree|check`; MCP `project_tree`,
   `start_project`.
-- Roadmap **phase 7's core is in progress**: CSV import is done
-  (`core/csv_import.py`, `monoss import csv`, MCP `import_csv`).
+- Roadmap **phase 7's backend is done** (Moxie's publication export is
+  UI and stays with the local session):
+  - checks: reserved `check: true` / `tolerance` on a rule, `?=` in the
+    worksheet (`core/rules.py`, `core/simulation.py`)
+  - the V&V table: `source: {..., checks: <key>}`, `calc.verification`,
+    `\verification`, `monoss calc verification`
+  - CSV import (`core/csv_import.py`, `monoss import csv`, MCP `import_csv`)
 - The next UI step is U2's frontend.
 
 ## Split of work: cloud backend, local frontend

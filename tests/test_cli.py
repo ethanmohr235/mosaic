@@ -960,3 +960,16 @@ def test_import_csv_dry_run_then_import(capsys, monkeypatch, tmp_path, conn):
     assert "loads.csv: 1 row(s); columns name, load [kN]" in out
     assert "Imported 1 row(s)" in out
     assert len(motes_repo.list_motes(conn)) == 2
+
+
+def test_calc_verification_prints_hand_external_and_error(conn, capsys):
+    from cli.main import _handle_calc
+    from core import motes as motes_repo
+    motes_repo.create_mote(conn, {"name": "bd", "sigma": 210, "sigma_fea": 200,
+                                  "source": {"sigma_fea": {"kind": "external", "note": "FEA",
+                                                           "checks": "sigma"}}})
+    _handle_calc(conn, parse(["calc", "verification"]))
+    out = capsys.readouterr().out
+    assert "hand" in out and "external" in out
+    assert "bd.sigma  210   200       +5.00%" in out
+    assert "bd.sigma external: FEA" in out

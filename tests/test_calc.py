@@ -299,3 +299,43 @@ A.x - A.y == 2""")
     assert calc.SUBSTITUTED not in kinds
     assert "no one expression" in shown.note
     assert shown.also_determined == ("A.y",)
+
+
+# ---- verification (hand vs. external) ----
+
+def fea(conn, **extra):
+    return create_mote(conn, {
+        "name": "bd", "sigma": 210.0, "sigma_fea": 30000.0, "load": 5,
+        UNITS_KEY: {"sigma": "MPa", "sigma_fea": "psi"},
+        "source": {"sigma_fea": {"kind": "external", "note": "FEA probe", "checks": "sigma"},
+                   "load": "external"},
+        **extra,
+    })
+
+
+def test_source_reads_what_an_external_value_checks():
+    sources = calc.parse_source_property({"a": {"kind": "external", "checks": " b "}, "c": "external"})
+    assert sources["a"].checks == "b" and sources["c"].checks == ""
+
+
+def test_verification_pairs_an_external_value_with_the_hand_value_it_names(conn):
+    fea(conn)
+    (row,) = calc.verification(conn)
+    assert (row.label, row.external_key, row.note) == ("bd.sigma", "sigma_fea", "FEA probe")
+    # 30000 psi is 206.84 MPa, shown in the hand value's unit.
+    assert row.external.unit == "MPa"
+    assert row.external.value == pytest.approx(206.8427, rel=1e-5)
+    assert row.error == pytest.approx((210 - 206.8427) / 206.8427 * 100, rel=1e-4)
+    assert row.problem == ""
+
+
+@pytest.mark.parametrize("extra, problem", [
+    ({"sigma": None}, "holds no number yet"),
+    ({"sigma_fea": 0, UNITS_KEY: {"sigma": "MPa", "sigma_fea": "MPa"}}, "is zero"),
+    ({UNITS_KEY: {"sigma": "MPa", "sigma_fea": "m"}}, "cannot convert"),
+    ({UNITS_KEY: {"sigma": "MPa"}}, "has a unit and the other does not"),
+])
+def test_a_comparison_that_cannot_be_made_says_why(conn, extra, problem):
+    fea(conn, **extra)
+    (row,) = calc.verification(conn)
+    assert row.error is None and problem in row.problem
