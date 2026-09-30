@@ -269,6 +269,36 @@ phase that builds them.
   **Not ported:** baselines (`--baseline`) and the grid (tiling replaces
   it). The old window is deleted.
 
+### Settled for `fit` and the U4 follow-ups (2026-09-30)
+
+- **`fit` fits a model to measured points.**
+  ```
+  fit C1.current vs C1.voltage --data I vs V [--from "bench.csv"] --free C1.r_a C1.r_b [--scenario s]
+  fit … --apply
+  ```
+  The data is every mote carrying both keys (`I`, `V`); `--from`
+  narrows it to one CSV import's rows (`imported_from`). `--free` names
+  the inputs the fit may move, starting from their current values.
+  Levenberg–Marquardt over the existing sweep solve, numpy only
+  (`core/fit.py`): each value with its σ, RMS, R², iterations and
+  whether it converged; a point that fails to solve is reported, not
+  dropped. Also `monoss fit` and an MCP tool.
+- **`--apply` writes value, σ and source**, as one undo step: the
+  fitted value, its σ into the reserved `uncertainty` map, and `source:
+  {kind: fitted, note: ‹the fit line›}` (`fitted` is a new source kind).
+- **Its own pane, `moxie:fit`**: data dots, the fitted curve, and a
+  results column. Nothing is written without `--apply`.
+- **Unitless series split by magnitude.** Series with no unit whose
+  ranges differ by more than 100× take a second y axis, as two
+  dimensions do (`core/plotview.py::_bands`).
+- **Small plot-pane fixes first:** hide the rail in a narrow pane (its
+  content moves to the status line, `r` toggles it); rail headings
+  ellipsize; the y title ellipsizes; correlation labels avoid dots and
+  hide when they can't fit; a truncated pane header shows its full
+  command on hover; the garden is read under the lock and solved outside
+  it, and a pane cancels its own stale runs; `plot save ‹name›` enters
+  the history once; PNG export embeds Geist.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
