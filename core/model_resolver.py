@@ -7,7 +7,7 @@ gets re-resolved from the database mid-formula-evaluation. See
 docs/simulation.md, Physical property models.
 
 Importing this module registers every built-in provider (currently Ideal
-Gas and CoolProp) -- the single explicit registration point. Anything that
+Gas, CoolProp and materials) -- the single explicit registration point. Anything that
 resolves a model imports this module first, so registration always
 happens before resolution; providers are never resolved via dynamic
 import from a database string.
@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable
 
 from core.coolprop_provider import CoolPropProvider
 from core.ideal_gas_provider import IdealGasProvider
+from core.materials_provider import MaterialsProvider
 from core.entities import Relationship
 from core.providers import InvalidModelConfiguration, PropertyModelError, PropertyProvider, register_provider, resolve_provider
 
@@ -25,6 +26,7 @@ CONFIGURATION_KEY = "configuration"
 
 register_provider("ideal_gas", IdealGasProvider)
 register_provider("coolprop", CoolPropProvider)
+register_provider("materials", MaterialsProvider)
 
 
 def model_ids_in(relationships: Iterable[Relationship]) -> set[str]:

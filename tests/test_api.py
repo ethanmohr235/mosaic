@@ -431,7 +431,7 @@ def test_reserved_names_returns_the_full_reference_not_just_names(api):
     assert "provider" in reserved["propertyMeanings"]
     assert "instance_of" in reserved["relationshipTypeMeanings"]
     # ...plus what each provider can compute, for the property-model note.
-    assert set(reserved["propertyModelProviders"]) == {"ideal_gas", "coolprop"}
+    assert set(reserved["propertyModelProviders"]) == {"ideal_gas", "coolprop", "materials"}
     ideal_gas = reserved["propertyModelProviders"]["ideal_gas"]
     assert any(c["operation"] == "pressure" for c in ideal_gas["capabilities"])
 

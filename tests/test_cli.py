@@ -1008,3 +1008,10 @@ def test_archive_refuses_cli_writes_and_search_spans_gardens(capsys, monkeypatch
     assert "beam" in out
     assert "un-archived 'test'" in out
     assert [m.properties.get("name") for m in motes_repo.list_motes(conn)] == ["beam"]
+
+
+def test_model_materials_lists_the_bundled_alloys(conn, capsys):
+    from cli.main import _handle_model
+    _handle_model(conn, parse(["model", "materials"]))
+    out = capsys.readouterr().out
+    assert "6061-T6" in out and "E 68.9 GPa, nu 0.33, Sy 276 MPa, rho 2700 kg/m^3" in out

@@ -50,8 +50,11 @@ def test_property_model_providers_match_the_registry():
     # global that other tests (test_providers.py) register throwaway
     # providers into, so it can hold more than just the two built-ins.
     assert set(PROPERTY_MODEL_PROVIDERS) <= set(list_providers())
-    assert set(PROPERTY_MODEL_PROVIDERS) == {"ideal_gas", "coolprop"}
+    assert set(PROPERTY_MODEL_PROVIDERS) == {"ideal_gas", "coolprop", "materials"}
     for provider in PROPERTY_MODEL_PROVIDERS.values():
         assert provider["capabilities"]
         for cap in provider["capabilities"]:
-            assert cap["operation"] and cap["inputs"] and cap["output"]
+            # `inputs` may be empty: a material's yield strength depends on
+            # nothing but which material (core/materials_provider.py).
+            assert cap["operation"] and cap["output"]
+            assert isinstance(cap["inputs"], (list, tuple))

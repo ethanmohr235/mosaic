@@ -46,8 +46,8 @@ absolute path.
 
 ## Tools
 
-55 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `propagate_uncertainty`, motes (`list_motes`, `search_motes`, `get_mote`,
+56 tools, grouped: gardens (`list_gardens`, `create_garden`,
+`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `propagate_uncertainty`, `list_materials`, motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
@@ -193,6 +193,11 @@ query forms as `search_motes`; each hit names its garden and project.
 `archive_garden` archives a garden and its subtree (`archived: true` on
 its owner, or a marker inside a loose garden); **every write tool then
 refuses that garden** until `archive_garden(..., archived=false)`.
+
+`list_materials` lists the alloys the `materials` property provider
+bundles. Use one through a property-model mote (`provider: materials`,
+`configuration: {material: "6061-T6"}`) and `property('material',
+'yield_strength')` in an equation, not by copying the number.
 
 `import_csv` takes the file's text and its name, and makes one mote per
 row; `load [kN]` in the header gives a column its unit, and each value is

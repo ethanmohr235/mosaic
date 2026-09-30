@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core import calc
 from core import csv_import
+from core import materials_provider
 from core import uncertainty
 from core import health
 from core import projects
@@ -221,6 +222,8 @@ def build_parser() -> argparse.ArgumentParser:
     model_sub.add_parser("list", help="List property models")
     model_show = model_sub.add_parser("show", help="Show a property model's details")
     model_show.add_argument("--id", required=True, help="Property-model mote id")
+    model_sub.add_parser(
+        "materials", help="The bundled materials the `materials` provider knows")
     model_caps = model_sub.add_parser("capabilities", help="List a property model's capabilities")
     model_caps.add_argument("--id", required=True, help="Property-model mote id")
 
@@ -603,8 +606,13 @@ def _handle_model(conn, args) -> None:
         render.print_model_list(conn)
     elif args.action in ("show", "capabilities"):
         render.print_model_detail(conn, args.id, header=args.action == "show")
+    elif args.action == "materials":
+        for m in materials_provider.list_materials():
+            print(f"{m['name']:<16} {m['description']}  "
+                  f"(E {m['youngs_modulus'] / 1e9:g} GPa, nu {m['poisson_ratio']:g}, "
+                  f"Sy {m['yield_strength'] / 1e6:g} MPa, rho {m['density']:g} kg/m^3)")
     else:
-        print("Specify a model action: list, show, capabilities")
+        print("Specify a model action: list, show, capabilities, materials")
 
 
 def _handle_unit(conn, args) -> None:

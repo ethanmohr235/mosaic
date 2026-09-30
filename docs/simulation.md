@@ -1098,7 +1098,7 @@ configuration:  {"gas_constant": 287.05}
 
 `provider` names a registered `PropertyProvider` (`core/providers.py`);
 `configuration` is whatever that provider needs to construct itself.
-Two providers are built in, both in SI units:
+Three providers are built in, all in SI units:
 
 - `ideal_gas` (`core/ideal_gas_provider.py`), needing no external
   dependency: `pressure(density, temperature)`, `density(pressure,
@@ -1126,6 +1126,21 @@ Two providers are built in, both in SI units:
   CoolProp itself silently returns a `-1` sentinel there instead of
   erroring, which `evaluate()` catches rather than letting flow through
   as a bogus quality value.
+- `materials` (`core/materials_provider.py`), structural material
+  properties shaped like `coolprop` (decided): configuration `{"material":
+  "6061-T6"}` names a bundled alloy by name or alias (case, spaces and
+  hyphens ignored), and operations take no inputs --
+  `youngs_modulus()`, `poisson_ratio()`, `yield_strength()`, `density()`,
+  and `shear_modulus()` (E / 2(1+ν) unless given). A rule reads one
+  through the part's material, `stress <= property('material',
+  'yield_strength')`, so the number is never copied onto a mote and
+  changing the material is editing one configuration. The data is a file,
+  `core/data/materials.json`, not code: nominal, room-temperature,
+  typical handbook values with their source stated in the file. A garden
+  gives `values` (SI) in the configuration to override one property or to
+  define a custom material. Temperature-dependent operations
+  (`youngs_modulus_t(temperature)`) wait for published data. `monoss
+  model materials` and MCP `list_materials` list what is bundled.
 
 A rule reaches this through the `property()` builtin rather than
 knowing anything about `ideal_gas` itself:

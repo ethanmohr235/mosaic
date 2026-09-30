@@ -93,7 +93,11 @@ Each one was a separate act of filing. That lesson became a rule in
   first order *is* the Jacobian's and works for every backend. See
   `simulation.md` -> *Uncertainty*.
 - **Materials provider.** A built-in provider supplies E, ν, Sy, and ρ
-  for common alloys, shaped like the CoolProp provider.
+  for common alloys, shaped like the CoolProp provider. **Decided:** a
+  PropertyProvider over a bundled, cited data file
+  (`core/data/materials.json`), nominal values only; a configuration's
+  `values` adds or overrides. See `simulation.md` -> *Physical property
+  models*.
 - **Time simulation** keeps ticks, but runs become curves to plot. Cut
   *commit tick N* and saved run history.
 
@@ -163,7 +167,7 @@ alongside all of them.
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
 | 7 | **Backend done except Moxie export.** Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
 | 8 | **Backend done.** Uncertainty propagation | Lab reports |
-| 9 | Cross-garden search, archive, materials provider | Payoff of many small gardens |
+| 9 | **Backend done.** Cross-garden search, archive, materials provider | Payoff of many small gardens |
 
 ## Acceptance workflows
 

@@ -57,6 +57,7 @@ from mcp_server.server import (
     write_worksheet as _ww,
     search_gardens,
     archive_garden,
+    list_materials,
 )
 
 # Every tool takes `garden` last and opens its own connection, so tests
@@ -798,3 +799,8 @@ def test_search_gardens_and_archive_garden(garden):
     assert search_motes("beam", garden=GARDEN)
     assert not archive_garden(GARDEN, archived=False)["archived"]
     create_mote({"name": "x"}, GARDEN)
+
+
+def test_list_materials_names_the_bundled_alloys():
+    names = {m["name"] for m in list_materials()}
+    assert {"6061-T6", "A36", "Ti-6Al-4V"} <= names

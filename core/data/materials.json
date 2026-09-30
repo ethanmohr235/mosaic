@@ -1,0 +1,101 @@
+{
+  "about": "Nominal room-temperature properties for common engineering alloys, in SI base units (Pa, kg/m^3). Typical values as listed by MatWeb / ASM handbooks for the stated temper; a specification minimum can be lower. Check against your course's or project's own reference before relying on one, and add a material by adding an entry here or by giving `values` in a property model's configuration.",
+  "materials": {
+    "6061-T6": {
+      "description": "Aluminum 6061-T6",
+      "aliases": ["Al 6061-T6", "AA6061-T6"],
+      "youngs_modulus": 68.9e9,
+      "poisson_ratio": 0.33,
+      "yield_strength": 276e6,
+      "density": 2700
+    },
+    "7075-T6": {
+      "description": "Aluminum 7075-T6",
+      "aliases": ["Al 7075-T6", "AA7075-T6"],
+      "youngs_modulus": 71.7e9,
+      "poisson_ratio": 0.33,
+      "yield_strength": 503e6,
+      "density": 2810
+    },
+    "2024-T3": {
+      "description": "Aluminum 2024-T3",
+      "aliases": ["Al 2024-T3", "AA2024-T3"],
+      "youngs_modulus": 73.1e9,
+      "poisson_ratio": 0.33,
+      "yield_strength": 345e6,
+      "density": 2780
+    },
+    "A36": {
+      "description": "Structural steel, ASTM A36",
+      "aliases": ["ASTM A36", "A36 steel"],
+      "youngs_modulus": 200e9,
+      "poisson_ratio": 0.26,
+      "yield_strength": 250e6,
+      "density": 7850
+    },
+    "1018-CD": {
+      "description": "Carbon steel AISI 1018, cold drawn",
+      "aliases": ["AISI 1018", "1018"],
+      "youngs_modulus": 205e9,
+      "poisson_ratio": 0.29,
+      "yield_strength": 370e6,
+      "density": 7870
+    },
+    "1045-CD": {
+      "description": "Carbon steel AISI 1045, cold drawn",
+      "aliases": ["AISI 1045", "1045"],
+      "youngs_modulus": 205e9,
+      "poisson_ratio": 0.29,
+      "yield_strength": 530e6,
+      "density": 7850
+    },
+    "4140-annealed": {
+      "description": "Alloy steel AISI 4140, annealed",
+      "aliases": ["AISI 4140", "4140"],
+      "youngs_modulus": 205e9,
+      "poisson_ratio": 0.29,
+      "yield_strength": 415e6,
+      "density": 7850
+    },
+    "304-annealed": {
+      "description": "Stainless steel AISI 304, annealed",
+      "aliases": ["AISI 304", "304", "SS304"],
+      "youngs_modulus": 193e9,
+      "poisson_ratio": 0.29,
+      "yield_strength": 215e6,
+      "density": 8000
+    },
+    "316-annealed": {
+      "description": "Stainless steel AISI 316, annealed",
+      "aliases": ["AISI 316", "316", "SS316"],
+      "youngs_modulus": 193e9,
+      "poisson_ratio": 0.30,
+      "yield_strength": 290e6,
+      "density": 8000
+    },
+    "Ti-6Al-4V": {
+      "description": "Titanium Ti-6Al-4V (Grade 5), annealed",
+      "aliases": ["Grade 5 titanium", "Ti64"],
+      "youngs_modulus": 113.8e9,
+      "poisson_ratio": 0.342,
+      "yield_strength": 880e6,
+      "density": 4430
+    },
+    "C11000-annealed": {
+      "description": "Copper C11000 (ETP), annealed",
+      "aliases": ["C11000", "C110", "copper"],
+      "youngs_modulus": 115e9,
+      "poisson_ratio": 0.31,
+      "yield_strength": 69e6,
+      "density": 8890
+    },
+    "C36000-H02": {
+      "description": "Free-cutting brass C36000, half hard",
+      "aliases": ["C36000", "C360", "brass"],
+      "youngs_modulus": 97e9,
+      "poisson_ratio": 0.31,
+      "yield_strength": 310e6,
+      "density": 8500
+    }
+  }
+}

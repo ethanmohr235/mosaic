@@ -31,6 +31,7 @@ from core import csv_import as csv_import_repo
 from core import uncertainty as uncertainty_repo
 from core import projects as projects_repo
 from core import search as search_repo
+from core import materials_provider
 from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo
@@ -726,6 +727,18 @@ def project_tree() -> dict[str, Any]:
     }
 
 
+def list_materials() -> list[dict[str, Any]]:
+    """The bundled materials the `materials` property provider knows: name,
+    description, aliases, and nominal room-temperature `youngs_modulus`,
+    `poisson_ratio`, `yield_strength` (Pa) and `density` (kg/m^3). Use one
+    on a property-model mote -- `provider: materials`, `configuration:
+    {material: "6061-T6"}` -- reached from a part via `uses_model` on the
+    mote a rule navigates to, then read it in an equation with
+    `property('material', 'yield_strength')` rather than copying the
+    number. `configuration.values` overrides or defines a material."""
+    return materials_provider.list_materials()
+
+
 def search_gardens(
     query: str, per_garden: int = 20, include_archived: bool = True
 ) -> dict[str, Any]:
@@ -997,7 +1010,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
     project_tree, start_project, import_csv, propagate_uncertainty,
-    search_gardens, archive_garden,
+    search_gardens, archive_garden, list_materials,
     calc_sections, shown_work,
     resolve_modoc,
     reserved_names,
