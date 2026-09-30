@@ -6,8 +6,8 @@
  * radius, shadow or animation that isn't here -- raise it as a question.
  *
  * Dark only. Not used yet: the handoff's --c-task/--c-note/--c-event/
- * --c-source type colors (motes are colored by species; the palette
- * retune lands with U3) and the plot series colors (U4). */
+ * --c-source type colors (motes are colored by species, below) and the
+ * plot series colors (U4). */
 
 @font-face {
   font-family: "Geist Mono";
@@ -51,6 +51,16 @@
   --fault: oklch(0.70 0.17 25);
   --idle: var(--dim);
 
+  /* Species. Not colors but the band js/palette.js computes them in:
+   * golden-angle hues at two tones, and the lift a species mote itself
+   * gets toward --bright. Untyped motes use --dim. */
+  --species-l1: 0.78;
+  --species-c1: 0.13;
+  --species-l2: 0.82;
+  --species-c2: 0.11;
+  --species-lift: 0.08;
+  --species-hue-offset: 25;
+
   /* Type. One family, one body size; hierarchy is weight + brightness. */
   --font: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --fs-body: 12px;
@@ -82,6 +92,7 @@
   --header-gap: 6px;
   --table-head-pad: 4px;
   --col-gap: 10px;
+  --col-max: 32ch;           /* a data table column never grows past this (monolith:table) */
   --kv-key: 84px;
   --kv-key-wide: 104px;
   --gap: 1px;                /* tiled panes: 1px gaps over --line */

@@ -409,6 +409,65 @@ body.dragging-col { cursor: row-resize; }
 .c-table-row.selected .c-cell,
 .c-table-row.selected .c-cell * { color: var(--bg); }
 
+.c-table-row.primary { font-weight: var(--w-bold); }
+
+/* The keyboard cursor: a `›` in the row's left padding, and a 1px
+ * underline under the cursor cell. Not a color of its own. */
+.c-table-row { position: relative; }
+
+.c-table-row.cursor::before {
+  content: "›";
+  position: absolute;
+  left: 0;
+  color: var(--bright);
+}
+
+.c-table-row.selected.cursor::before { color: var(--bg); }
+.c-cell.cursor-cell { box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--bright); }
+.c-table-row.selected .c-cell.cursor-cell { box-shadow: inset 0 calc(-1 * var(--border)) 0 var(--bg); }
+.c-table-head .c-cell.cursor-col { color: var(--fg); }
+.c-table-head .c-cell.clickable { cursor: pointer; }
+.c-table-head .c-cell.clickable:hover { color: var(--fg); }
+
+.c-table-group {
+  display: flex;
+  gap: var(--col-gap);
+  padding: var(--table-head-pad) var(--pad-x) 0;
+  white-space: nowrap;
+}
+
+.c-group-label {
+  color: var(--bright);
+  font-weight: var(--w-bold);
+}
+
+.c-group-count,
+.c-group-all { color: var(--dim); }
+.c-group-all.clickable { cursor: pointer; }
+.c-group-all.clickable:hover { color: var(--fg); }
+
+.c-swatch { color: var(--swatch, var(--dim)); }
+
+/* An inline cell editor: raised like a popup, ringed like the focused
+ * pane, and exactly the cell's size. */
+.c-cell-input {
+  display: block;
+  width: 100%;
+  height: var(--row-h);
+  padding: 0;
+  border: 0;
+  outline: 0;
+  box-shadow: var(--focus-ring);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  font-weight: var(--w-regular);
+  caret-color: var(--fg);
+  user-select: text;
+}
+
+.c-table-row.selected .c-cell .c-cell-input { color: var(--fg); }
+
 /* ---------- key/value grid ---------- */
 
 .c-kv {
@@ -487,3 +546,16 @@ body.dragging-col { cursor: row-resize; }
 /* ---------- views ---------- */
 
 .view-log { padding-top: var(--table-head-pad); }
+
+/* monolith:table -- the table scrolls both ways under a header that stays put. */
+.view-table { scroll-padding-top: calc(var(--row-h) + var(--table-head-pad)); }
+.view-table .c-table { width: max-content; min-width: 100%; }
+
+.view-table .c-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+}
+
+.view-table .c-table-empty { padding: var(--table-head-pad) var(--pad-x); color: var(--dim); }

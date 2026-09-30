@@ -21,19 +21,25 @@ import { createPicker } from "./picker.js";
 
 const GUIDE_LINGER_MS = 1000;
 
-export function createPanes({ root, store, api, components, onEdit, onPlace, onCancel, isCommandLineActive }) {
+export function createPanes({ root, store, api, components, onEdit, onPlace, onCancel, onRun,
+  isCommandLineActive }) {
   const { h } = components;
   const panes = new Map();
   const splitEls = new Map();
   const guide = createGuide(h);
   let guideTimer = 0;
 
-  const ctx = {
-    api,
-    store,
-    components,
-    navigate: (id) => store.setSelection([id]),
-  };
+  /** The ctx a view instance gets (views/index.js): shared, plus two per-pane calls. */
+  function ctxFor(pane) {
+    return {
+      api,
+      store,
+      components,
+      navigate: (id) => store.setSelection([id]),
+      setCommand: (command) => setPaneCommand(pane, command),
+      runCommand: (line) => onRun(line),
+    };
+  }
 
   /* ---------- pane records ---------- */
 
@@ -103,7 +109,18 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
     if (!resolved || resolved.error) return showError(pane, (resolved && resolved.error) || "can't resolve");
     const view = viewById(resolved.view);
     if (!view) return showError(pane, `no view named ${resolved.view} in this window`);
-    if (mountInstance(pane, view.create(ctx), view, resolved.command || command)) await runPane(pane);
+    if (mountInstance(pane, view.create(ctxFor(pane)), view, resolved.command || command)) await runPane(pane);
+  }
+
+  /** ctx.setCommand: the view rewrote its own command (a header-click
+   * sort, say). Swap it in place -- same view instance, no remount, no
+   * history entry -- mark the layout (dirty, autosaved) and re-run. */
+  function setPaneCommand(pane, command) {
+    if (panes.get(pane.id) !== pane || !pane.instance || !command) return Promise.resolve();
+    pane.command = command;
+    pane.runCommand = command;
+    store.setTree(T.setCommand(store.state.tree, pane.id, command));
+    return runPane(pane);
   }
 
   function pickerFor(pane) {
