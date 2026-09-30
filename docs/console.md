@@ -219,6 +219,21 @@ phase that builds them.
 - The float follows the handoff's popup style: `--bg-raised`, 1px
   `--line-strong`, no shadow, no leader line.
 
+### Settled for U3 (2026-09-30)
+
+- **Floating inspector key: `p`.** A shell key, like `e` and `x`: it
+  toggles the props float for the selection's primary, and `esc` closes
+  it.
+- **Props edits are commands.** Every edit in the props pane or float
+  runs a line through the command line (`set #id key value`, `rename`,
+  `A -> type -> B`, `unlink`, `template`, `open`), so it is in the
+  history, the log and undo, exactly as the U2 table's edits are.
+- **Command-line undo, per statement form.** Each write path in
+  `core/command_bar.py` returns an undo Command on its result, which the
+  console (and the old windows' `/` bar) push.
+- **Species palette: 24 entries** (12 golden-angle hues at two tones in
+  the design's band), as U2's `palette.js` has them.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
@@ -352,13 +367,6 @@ Each step's done-check is the same:
   the same statements the command line accepts. Is the worksheet a
   pane that's just a persistent, editable list of them? Settle this in
   roadmap phase 2.
-- **Floating inspector key.** Settle it in U3.
-- **Species palette retune.** Confirm how many entries fit the narrower
-  band before hues become hard to tell apart. Settle it in U3.
-- **Command-line undo.** Statements run through `core/command_bar.py`
-  record no undo command, so `undo` can't reverse a typed edit yet
-  (the old windows' `/` bar has the same gap). Close it in U3, where
-  editing a mote becomes the same everywhere.
 - **Size tokens added in U1.** The shell took these from the design
   canvas rather than the handoff README. Confirm or replace them:
   `--popup-mo` 36px, `--popup-app` 90px, `--picker-key` 150px,
