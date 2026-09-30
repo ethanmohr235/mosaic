@@ -132,15 +132,15 @@ def expected_kelvin(spec) -> float:
 
 
 def show_linear_refuses(conn) -> None:
-    """The default solver, previewed in memory so nothing is written or
-    logged -- this run is meant to fail."""
+    """The default solver, previewed in memory so nothing is written --
+    this run is meant to fail."""
     # The failure is the point here, and the script reports it below, so
     # don't also let the engine log it as a warning to stderr.
     engine_log = logging.getLogger("core.simulation")
     previous_level = engine_log.level
     engine_log.setLevel(logging.ERROR)
     try:
-        preview = run_time_series(conn, step_count=1, commit=False, solver="linear")
+        preview = run_time_series(conn, step_count=1, solver="linear")
     finally:
         engine_log.setLevel(previous_level)
     print("With the default `linear` solver:")

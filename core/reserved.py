@@ -139,9 +139,9 @@ RELATIONSHIP_TYPE_MEANINGS: dict[str, str] = {
         "run unless a scenario selects it -- the same exclusion a template "
         "gets. Mirrors template_of one arrow over.",
     VARIES: "scenario mote --varies--> override. Gathers the overrides one "
-        "scenario applies. A scenario run never writes to the graph: it "
-        "answers what would happen, so run_time_series(commit=True, "
-        "scenario=...) refuses outright.",
+        "scenario applies. A scenario solve never writes to the graph: it "
+        "answers what would happen, so it reports the changes it would "
+        "make and leaves the motes and their provenance alone.",
     ABOUT: "note mote --about--> subject. Optional, and only meaningful on a "
         "mote carrying a `modoc` note: it moves the mote that note's "
         "\\val{key} and \\graph read from, so a note can live on its own "

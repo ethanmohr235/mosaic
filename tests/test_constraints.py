@@ -190,7 +190,7 @@ def test_each_step_checks_its_own_constraints(conn):
     mote = create_mote(conn, {"name": "P1", "size": 1})
     set_species(conn, mote, species)
 
-    result = run_time_series(conn, step_count=3, commit=False)
+    result = run_time_series(conn, step_count=3)
     assert [s.constraint_violations == [] for s in result.steps] == [True, True, False]
     assert result.constraint_violations == [
         v for v in result.constraint_violations if v.startswith("step 2:")

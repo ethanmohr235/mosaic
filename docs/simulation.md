@@ -7,10 +7,9 @@ Simulation has its own window: **Motion** (`run_motion.py`, and
 tick is solved in memory and nothing is written to the garden yet -- and
 scrub the timeline to step or play through the sequence, with each
 node's value at that tick on its card and every value that moved traced
-as a lane in the dock. **Commit tick N** re-runs to that tick and writes
-it for real; **Save** logs the whole run for later review without
-touching the graph. A scenario run can never be committed, since it
-answers what *would* happen.
+as a lane in the dock. **Solve** solves the garden once and writes the
+answer back; in Fast mode that happens on its own after every edit. A
+scenario is never written, since it answers what *would* happen.
 
 > This used to live in Monarch, as a settings popover and a bottom scrub
 > bar. It moved out wholesale: Monarch is a graph editor, and simulation
@@ -19,8 +18,8 @@ answers what *would* happen.
 See "Time-based simulation" below.
 Programmatically, a single steady-state solve is
 `core.simulation.run_simulation(conn)`; a time-based run is
-`core.simulation.run_time_series(conn, step_count, commit)` (see "Run
-history" below for its `save` option).
+`core.simulation.run_time_series(conn, step_count)`, which is always a
+preview.
 
 A third question -- how one value moves as another changes -- has an
 answer shaped like a curve rather than like a state, and so has its own
@@ -164,7 +163,7 @@ Solving runs in two stages:
 
 ## Solvers
 
-`run_simulation`/`run_time_series` (and Motion's `preview`/`commit`/`save`) all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
+`run_simulation`/`run_time_series` (and Motion's `preview`/`solve`) all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
 
 - **`linear`** (the default). Exact, non-iterative least-squares solve of whatever's left after substitution. Fails with **could not be resolved** if any equation is genuinely nonlinear in its unknowns.
 - **`newton`**. Finds a root of the combined residual by Newton-Raphson with a numeric (finite-difference) Jacobian, so it can solve the cases `linear` can't -- an equation of state, a nonlinear structural relation, a `property()` call whose input is itself unknown. Being iterative, it needs a starting guess for each unknown (the mote's existing property value if there is one, otherwise `1.0`) and can fail to converge or find a different root than expected for a badly-conditioned or multi-rooted system. Configuration: `max_iterations` (default 50), `tolerance` (default `1e-9`), `epsilon` (the finite-difference step, default `1e-6`).
@@ -202,28 +201,16 @@ also why nothing is freedom-idempotent mid-run the way a single solve
 is: each step deliberately builds on the last.
 
 **Preview** computes the whole requested number of steps entirely in
-memory. Nothing is written to the garden -- not even a log entry --
-until you explicitly commit. If a step fails to solve, the run stops
+memory. Nothing is written to the garden, provenance included; a time
+series is only ever a preview. If a step fails to solve, the run stops
 there but keeps every step computed before it, so you can still scrub
-to and commit an earlier good one rather than losing the whole preview.
+through the good ones rather than losing the whole preview.
 
 **Scrubbing** moves through the already-computed steps client-side (no
 further solving) to see how far each property has come from where it
-started, at whichever step you're looking at. The slider's own tick 0
-is the real, unprojected garden -- exactly what's in the database right
-now -- with tick 1 through N being the cumulative state after that many
-steps. Motes touched as of the current tick get a dashed ring on the
-graph canvas, and selecting one shows its projected values directly in
-the inspector panel rather than requiring a separate changes list; the
-panel marks itself read-only while a preview is open, since committing
-always re-solves from whatever is in the database at that moment --
-editing mid-preview could silently diverge from what was previewed.
-
-**Commit** re-solves up to whichever step you chose -- deterministic,
-since it starts from the same garden state and rules every time -- and
-writes only that cumulative result, in one shot, the same way a single
-`run_simulation()` call always has. Re-running afterward continues from
-the committed values, not the original ones.
+started, at whichever step you're looking at. Tick 0 is the real,
+unprojected garden -- exactly what's in the database right now -- with
+tick 1 through N being the cumulative state after that many steps.
 
 A rule with no `t`/`prev()` in it just solves to the same values every
 step, which is a perfectly normal, boring, valid case -- not every rule
@@ -233,59 +220,29 @@ re-checked each step).
 
 ## Running and re-running
 
-A single `run_simulation()` call (used by the worked example scripts) is
-*implemented as* committing a 1-step time series, not merely equivalent
-to one. It writes solved values straight onto the motes and is
-idempotent: freedoms are re-derived from the graph every time, so a
-solved value never gets mistaken for a fixed input. What it keeps of its
-own is how it reports: it raises `SimulationError` instead of returning
-a result carrying an error, because a caller asking for one answer wants
-either the answer or the reason. It also logs a failed run, where a
-preview deliberately leaves no trace.
+A single `run_simulation()` call (what Motion's **Solve**, `simulate`
+and the worked example scripts use) solves the garden once and writes
+the solved values straight onto the motes. It is idempotent: freedoms
+are re-derived from the graph every time, so a solved value never gets
+mistaken for a fixed input. It raises `SimulationError` instead of
+returning a result carrying an error, because a caller asking for one
+answer wants either the answer or the reason, and a failed solve writes
+nothing.
 
-A committed or *saved* run (see "Run history" below) is logged to
-`simulation_runs`/`simulation_changes` -- including a failed single-step
-run, with old and new values for each change. A discarded preview leaves
-no trace. The per-garden run counter (`run_number` -- unrelated to a
-time-based run's own step/tick numbering, a different thing that used to
-confusingly share the same name) comes from that log.
+It goes through the same `solve_view()` as each step of a preview, so a
+one-step preview shows exactly what a solve would write. The difference
+is `prev(x)`: a solve that writes back is one-shot and has no previous
+step, so a rule using `prev()` is refused rather than quietly advanced
+by a tick. A recurrence is something you preview.
 
-## Run history
-
-Every logged run can be reviewed later, independent of whether it's still
-the graph's current state:
-
-- **Entering a run** (from the runs panel) drops into the same scrub bar
-  used for live previews, but walking through *that run's own ticks
-  only* -- unrelated to any other run. A steady-state run has exactly
-  one tick (before/after); a run committed or saved from an N-step
-  time-series has N, each logged individually rather than only their net
-  result, specifically so this is possible.
-- **Save simulation**, next to Discard/Commit on the sim bar, logs the
-  *entire* previewed run for later review without writing anything to
-  the graph -- unlike Commit, which always writes up to whichever tick
-  is currently scrubbed to. This is for comparing hypothetical parameter
-  sets (e.g. running the same turbine with several different inlet
-  conditions) where no single result needs to become the graph's
-  canonical state just to keep a record of it. Programmatically:
-  `core.simulation.run_time_series(conn, step_count, commit=False,
-  save=True)`.
-
-A run's `committed` flag (`core.simulation.RunRecord.committed`)
-distinguishes the two in the runs panel and CLI history: `True` for a
-normal commit (or any plain `run_simulation()` call, which always
-writes), `False` for a saved-only run or any [scenario](#scenarios) run.
-
-`RunRecord.scenario_id` names the scenario a run was solved under, or is
-null for the garden as it stands. `simulate history` and `simulate show`
-print it, because two runs over the same rules that reached different
-answers differ only by which question they answered.
+Nothing keeps a log of past runs. The garden's state is its motes; what
+the last solve did is kept only as far as `why` needs it (below).
 
 ## Why a value is what it is
 
-Every logged run records not only *that* a property changed but which
-equations, reading which known values, determined it. `why` walks that
-record backwards:
+The last solve that wrote to the garden records not only *that* a
+property changed but which equations, reading which known values,
+determined it. `why` walks that record backwards:
 
 ```
 monoss why <mote-id> <property>          # argparse CLI
@@ -322,33 +279,25 @@ later block. Once `voltage == 0` has determined a ground node it
 re-evaluates to the trivially true `0 == 0`, which stays in the open set
 but constrains nothing.
 
-Recursion stops on anything the run did not derive -- a stored property,
-a `property()` model evaluation, or the state entering the first step --
-which is exactly the set of things that need no explanation. A value the
-run never determined reports that plainly rather than failing.
-
-`prev(x)` is followed into the step before, because that is literally
-where it came from: the value `x` had entering this step is the one the
-last step determined. At step 0 there is no earlier step, and the answer
-is that it came from the garden.
+Recursion stops on anything the solve did not derive -- a stored
+property or a `property()` model evaluation -- which is exactly the set
+of things that need no explanation. A value the last solve never
+determined reports that plainly rather than failing.
 
 **Values shown are in each dimension's base SI unit** -- what the solver
 worked in -- not the unit a mote declares. A resistance recorded as
 `4.7 kohm` explains as `4700`, so that the equation printed beside it
-multiplies out. The change log (`simulate show`) converts back into each
-mote's own unit instead; the two are deliberately different views.
+multiplies out. The changes `simulate` prints are converted back into
+each mote's own unit instead; the two are deliberately different views.
 
-`why` defaults to the garden's most recent successful run, which is the
-one whose values are on the motes now. `--run` explains an earlier one,
-`--step` a particular step within a time-series run (the default is the
-last step that determined the value), and `--depth` bounds how far back
-the recursion goes.
-
-A **discarded preview records nothing** -- committing re-solves from the
-database anyway, and that solve is what gets recorded. A **saved** run
-records its derivations without touching the graph. A **failed** run
-records neither derivations nor changes: the partial work of a solve that
-did not finish describes a state the garden never reached.
+`why` explains the last solve that wrote to the garden, which is the one
+whose values are on the motes now; `--depth` bounds how far back the
+recursion goes. Each successful solve replaces the whole record, right
+after its write-back, so it never describes values the motes no longer
+hold. A **preview** or a **scenario** solve records nothing, since
+neither writes. A **failed** solve records nothing either and leaves the
+previous record in place: the motes still hold the last good solve's
+values, so its record is still the right explanation of them.
 
 ## Comparison relations
 
@@ -392,7 +341,7 @@ the **answer**, a dimensional mismatch one about the **model**, and
 folding them together would make neither readable.
 
 ```text
-Solved 2 values across 1 mote from 2 equations (run #1). 1 constraint problem.
+Solved 2 values across 1 mote from 2 equations. 1 constraint problem.
   constraint: Efficiency limit on T1: efficiency <= 1 is not satisfied (off by 0.2)
 ```
 
@@ -625,11 +574,10 @@ High Load varies 1 mote(s):
 ```
 
 **A scenario run never writes to the graph.** `run_simulation` with a
-scenario solves, logs the run as uncommitted with its `scenario_id`, and
-reports what *would* change; `run_time_series` refuses `commit=True`
-outright, since committing is an explicit request to make something the
-garden's state. `save=True` keeps the run for later comparison, which is
-usually what a scenario is for.
+scenario solves and reports what *would* change, and records no
+provenance; `run_time_series` under a scenario is a preview like any
+other. To compare scenarios, preview them side by side (Motion's
+comparison panes).
 
 This is not a limitation to lift later. The answer to a hypothetical is
 not the garden's state, and "where would a scenario run's results be
@@ -704,12 +652,12 @@ Three shapes, the same machinery three ways:
 
 ### A sweep writes nothing
 
-No write-back, no run-log row, no scenario motes created and destroyed
+No write-back, no provenance, no scenario motes created and destroyed
 around the edges. A sweep leaves the garden exactly as it found it,
 which is what makes it safe to fire on every frame of a dragged slider.
 This is not a default to be lifted later: the answer to "what would this
 be across that range" is not the garden's state, for the same reason a
-[scenario](#scenarios) run is never committed.
+[scenario](#scenarios) run is never written.
 
 The mechanism is ordinary. `solve_properties()` (in `core/simulation.py`,
 alongside the `solve_view()` that `run_simulation` and `run_time_series`
@@ -779,9 +727,9 @@ Moxie, and shaped exactly like `query`, Monolith's saved view.
 
 ## Dependency queries
 
-`why` reads the run log. These four read the *rules*, so they answer
-before anything has been solved, and they answer about the model rather
-than about one run:
+`why` reads what the last solve recorded. These four read the *rules*,
+so they answer before anything has been solved, and they answer about
+the model rather than about one solve:
 
 ```
 monoss impact    <mote-id> <property> [--distance N]
@@ -1009,8 +957,8 @@ mixed units combine correctly:
 
 Crucially, **solving never changes the unit a property is recorded in**.
 If R1 declares its voltage in `mV`, it gets `14100`; if it declares `V`,
-it gets `14.1`. The same is true of logged changes and of every step of
-a time-based run.
+it gets `14.1`. The same is true of the changes a solve reports and of
+every step of a time-based run.
 
 An unrecognized unit name fails the run rather than being ignored --
 treating `kohm` as if it were already ohms would be a silent

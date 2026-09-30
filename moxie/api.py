@@ -252,7 +252,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
     def sweep(self, spec: dict, indices: list[int] | None = None,
               generation: int | None = None, channel: str = "default") -> dict:
         """Solve the garden once per case at every point of the axis and
-        return the curves. Writes nothing, logs no run.
+        return the curves. Writes nothing.
 
         `indices` restricts the pass to those points of the axis, which is
         how the coarse-then-fine refinement works: the frontend asks for

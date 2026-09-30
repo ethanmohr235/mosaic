@@ -38,9 +38,7 @@ from cli.render import (
     equation_lines,
     explanation_lines,
     impact_lines,
-    label,
     requirement_lines,
-    run_summary_line,
     scenario_lines,
     variable,
 )
@@ -52,10 +50,7 @@ from core.simulation import (
     SimulationError,
     check_garden,
     check_roles,
-    get_run,
     incidence_index,
-    list_runs,
-    run_changes,
     run_simulation,
 )
 from core.units import UnitError, convert, describe, dimension_of, list_units
@@ -109,13 +104,10 @@ HELP_TEXT = """
 
     simulate [strict_units=true] [strict_constraints=true]  Run the garden's simulation rules
         [scenario=<id>]
-    simulate history [limit=<n>]                            List past simulation runs
-    simulate show id=<run_id>                               Show one run's changes
 
     roles check                                            Check how assemblies are wired to their parts
 
-    why id=<mote_id> key=<property> [run=<run_id>]         Explain how a solved value was determined
-        [step=<n>] [depth=<n>]
+    why id=<mote_id> key=<property> [depth=<n>]            Explain how the last solve determined a value
     impact id=<mote_id> key=<property> [distance=<n>]      What could move if this value changed
     requires id=<mote_id> key=<property>                   What must be known to determine this value
     producers id=<mote_id> key=<property>                  Which equations could determine it
@@ -508,31 +500,6 @@ def repl(garden: str | None = None) -> None:
                     for line in change_lines(result.changes):
                         print(line)
 
-                elif action == "history":
-                    action_args = parse_properties(args[1:])
-                    limit = action_args.get("limit")
-                    for run in list_runs(conn, limit=limit):
-                        print(run_summary_line(conn, run))
-
-                elif action == "show":
-                    action_args = parse_properties(args[1:])
-                    if "id" not in action_args:
-                        print("Error: 'id' is required")
-                        continue
-                    run = get_run(conn, action_args["id"])
-                    if run is None:
-                        print("No run found.")
-                        continue
-                    applied = "applied to graph" if run.committed else "saved (not applied to graph)"
-                    print(f"Run {run.run_id}")
-                    print(f"run=#{run.run_number}  {run.ran_at}  status={run.status}  ({applied})")
-                    if run.scenario_id:
-                        print(f"scenario: {label(conn, run.scenario_id)}")
-                    if run.detail:
-                        print(f"detail: {run.detail}")
-                    for line in change_lines(run_changes(conn, run.run_id)):
-                        print(line)
-
                 else:
                     print(f"Unknown simulate action: {action}")
 
@@ -545,8 +512,6 @@ def repl(garden: str | None = None) -> None:
                     conn,
                     str(action_args["id"]),
                     str(action_args["key"]),
-                    run_id=action_args.get("run"),
-                    step=action_args.get("step"),
                     depth=int(action_args.get("depth", derivations.DEFAULT_DEPTH)),
                 )
                 if explanation.derived:

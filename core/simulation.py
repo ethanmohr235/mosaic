@@ -19,7 +19,6 @@ import logging
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 
 from core import derivations as derivations_repo
 from core import incidence as incidence_repo
@@ -29,7 +28,6 @@ from core import rules as rules_repo
 from core import scenarios as scenarios_repo
 from core import solver_registry  # noqa: F401 -- registers built-in solver backends
 from core import species as species_repo
-from core.db import generate_uuid
 from core.formula import (
     EQUALS,
     describe as describe_unknowns,
@@ -89,8 +87,6 @@ class Change:
 
 @dataclass(frozen=True)
 class SimulationResult:
-    run_id: str
-    run_number: int
     values: dict[Unknown, float]
     changes: list[Change]
     equation_count: int
@@ -109,8 +105,7 @@ class SimulationResult:
         text = (
             f"Solved {len(self.values)} value{'' if len(self.values) == 1 else 's'} "
             f"across {motes} mote{'' if motes == 1 else 's'} "
-            f"from {self.equation_count} equation{'' if self.equation_count == 1 else 's'} "
-            f"(run #{self.run_number})."
+            f"from {self.equation_count} equation{'' if self.equation_count == 1 else 's'}."
         )
         if self.unsolved:
             text += f" {len(self.unsolved)} declared freedom(s) had no equation."
@@ -127,10 +122,9 @@ class SimulationResult:
 
 @dataclass(frozen=True)
 class StepResult:
-    """One step of a time-based run -- the same shape as SimulationResult
-    minus the audit-log fields (run_id/run_number), since only a
-    committed run's *final* cumulative state used to get logged -- now
-    every step does, see run_time_series()'s save parameter."""
+    """One step of a time-based preview -- the same shape as
+    SimulationResult minus the fields that only make sense once per
+    solve (dimension warnings, the scenario)."""
     step: int
     values: dict[Unknown, float]
     changes: list[Change]
@@ -155,16 +149,14 @@ class StepResult:
 @dataclass(frozen=True)
 class TimeSeriesResult:
     """The result of run_time_series(): every step computed before a
-    failure (if any) stopped the run early, so a user can still scrub to
-    and commit an earlier good step rather than losing the whole run."""
+    failure (if any) stopped the run early, so a user can still scrub
+    through the good steps rather than losing the whole run."""
     steps: list[StepResult]
     failed_at: int | None = None   # step index that raised, if the run stopped early
     error: str | None = None
-    run_id: str | None = None      # set when commit=True or save=True and at least one step succeeded
     # Checked once against the starting garden rather than per step: the
     # rules and declared units are the same every step, only values move.
     dimension_warnings: list[str] = field(default_factory=list)
-    run_number: int | None = None  # this garden's own run counter, set alongside run_id
 
     @property
     def constraint_violations(self) -> list[str]:
@@ -199,35 +191,27 @@ class _GardenView:
     neighbors: dict[str, list[str]] = field(default_factory=dict)
 
 
-def step_payloads(steps: "list[StepResult] | list[RunTick]") -> list[dict]:
-    """The canonical JSON-safe form of a run's steps, shared by every
-    adapter that has to put them on a wire (monarch/api.py's JS bridge,
+def step_payloads(steps: list[StepResult]) -> list[dict]:
+    """The canonical JSON-safe form of a preview's steps, shared by every
+    adapter that has to put them on a wire (motion/api.py's JS bridge,
     mcp_server/server.py's tools) so the same object never reaches two
-    surfaces in two shapes -- which it previously did, one of them
-    silently missing equation_count.
+    surfaces in two shapes.
 
     Lives here rather than in an adapter because the reason this
     conversion exists is a property of the data: StepResult.values and
     .unsolved are keyed by (mote_id, key) tuples, which JSON has no way
     to represent. `changes` already carries everything a caller needs,
-    and unsolved counts stay prose-only inside each step's summary.
-
-    RunTick (a logged run read back) has no equation_count -- the log
-    records what changed, not how many equations produced it -- so that
-    key, and constraint_violations with it, are present only for a
-    freshly solved StepResult."""
-    payloads = []
-    for step in steps:
-        payload = {
+    and unsolved counts stay prose-only inside each step's summary."""
+    return [
+        {
             "step": step.step,
             "changes": [dataclasses.asdict(c) for c in step.changes],
             "summary": step.summary,
+            "equation_count": step.equation_count,
+            "constraint_violations": list(step.constraint_violations),
         }
-        if isinstance(step, StepResult):
-            payload["equation_count"] = step.equation_count
-            payload["constraint_violations"] = list(step.constraint_violations)
-        payloads.append(payload)
-    return payloads
+        for step in steps
+    ]
 
 
 @dataclass(frozen=True)
@@ -300,8 +284,9 @@ def solve_view(
     whatever comes down to a single unknown, hand the rest to the selected
     backend, check the constraints, report what stayed unsolved.
     run_simulation() and run_time_series() differ from each other only in
-    the bookkeeping around this -- what gets logged, what gets written
-    back, and whether a failure ends the run or only the step.
+    the bookkeeping around this -- whether the answer and its provenance
+    are written back, and whether a failure ends the run or only the
+    step.
 
     It is also the entirety of what core/sweep.py needs: a sweep is N of
     these over N overridden copies of the same garden. That is why this is
@@ -387,8 +372,11 @@ def run_simulation(
     scenario: str | None = None,
     strict_constraints: bool = False,
 ) -> SimulationResult:
-    """Solve the garden and write the results back. Raises SimulationError
-    (after logging the failed run) if the rules can't be satisfied.
+    """Solve the garden and write the results back, replacing the
+    garden's provenance (core/derivations.py) with this solve's. Raises
+    SimulationError if the rules can't be satisfied, and then writes
+    nothing: the motes still hold the last good solve's values, so its
+    provenance is still the right explanation of them.
 
     `solver` picks the backend that finishes whatever the substitution
     loop couldn't resolve on its own -- see core/solvers.py. The default,
@@ -402,19 +390,17 @@ def run_simulation(
     always has.
 
     `scenario` names a mote gathering overrides (see core/scenarios.py).
-    Solving under one **never writes to the graph** -- the run is logged
-    like a saved one so it can be reviewed and compared, and the returned
-    changes say what *would* happen. That is not a limitation to lift
-    later: the answer to a hypothetical is not the garden's state, and
-    the question of where a scenario run's results would be written has
-    no good answer.
+    Solving under one **never writes to the graph** -- neither values nor
+    provenance -- and the returned changes say what *would* happen. That
+    is not a limitation to lift later: the answer to a hypothetical is
+    not the garden's state, and the question of where a scenario solve's
+    results would be written has no good answer.
 
     `strict_constraints` promotes an unsatisfied constraint from a report
     on the result to a SimulationError, mirroring `strict_units`. Off by
     default for the same reason: a constraint says something about the
     answer, and seeing an answer that breaks a limit is often exactly why
     you ran it."""
-    run_number = _next_run_number(conn)
     properties = {m.id: m.properties for m in list_motes(conn)}
     relationships = list_relationships(conn)
     case = _resolve_scenario(conn, scenario)
@@ -434,28 +420,21 @@ def run_simulation(
         solved = result.values
         violations = result.constraint_violations
     except SimulationError as e:
-        _log_run(conn, run_number, "error", str(e), [], committed=False, scenario_id=scenario)
-        logger.warning("simulation run #%s failed: %s", run_number, e)
+        logger.warning("simulation failed: %s", e)
         raise
     except SolverError as e:
-        _log_run(conn, run_number, "error", str(e), [], committed=False, scenario_id=scenario)
-        logger.warning("simulation run #%s failed: %s", run_number, e)
+        logger.warning("simulation failed: %s", e)
         raise SimulationError(str(e)) from e
 
     if case is None:
         inferred_units = _infer_missing_units(view, result.equations, solved, model_cache)
         properties = _apply_inferred_units(conn, view.properties, inferred_units)
         changes = _write_back(conn, properties, solved)
+        _record_provenance(conn, journal)
     else:
         changes = _changes_for(view.properties, solved)
-    run_id = _log_run(
-        conn, run_number, "ok", None, [changes],
-        committed=case is None, step_journals=[journal], scenario_id=scenario,
-    )
-    logger.info("simulation run #%s solved %s values", run_number, len(solved))
+    logger.info("simulation solved %s values", len(solved))
     return SimulationResult(
-        run_id=run_id,
-        run_number=run_number,
         values=solved,
         changes=changes,
         equation_count=result.equation_count,
@@ -469,75 +448,40 @@ def run_simulation(
 def run_time_series(
     conn: sqlite3.Connection,
     step_count: int,
-    commit: bool,
-    save: bool = False,
     solver: str = _DEFAULT_SOLVER,
     solver_configuration: dict | None = None,
     strict_units: bool = False,
     scenario: str | None = None,
     strict_constraints: bool = False,
-    detail: str | None = None,
 ) -> TimeSeriesResult:
-    """Runs step_count steps entirely in memory, each step's solve
-    starting from the *previous* step's solved values rather than
+    """A preview: runs step_count steps entirely in memory, each step's
+    solve starting from the *previous* step's solved values rather than
     re-reading the database -- this is what lets a rule use prev(x) to
-    express a recurrence. `solver`/`solver_configuration` are the same
-    per-run backend choice run_simulation() takes, applied to every step.
-
-    Three mutually exclusive modes:
-    - commit=False, save=False (default): a pure preview. Nothing is
-      written or logged.
-    - commit=True: writes the *cumulative* result (start state -> however
-      far the run got) to the graph, and logs every computed step
-      individually (see _log_run) so it can later be scrubbed through
-      via run_ticks() -- exactly like an ordinary run_simulation() call,
-      just with more than one tick.
-    - save=True: logs every computed step individually, same as commit,
-      but never writes the graph -- for keeping a hypothetical run (e.g.
-      one of several parameter sets being compared) around for later
-      review without it becoming the garden's canonical state.
+    express a recurrence. Nothing is written, provenance included.
+    `solver`/`solver_configuration` are the same backend choice
+    run_simulation() takes, applied to every step.
 
     A step that fails to solve stops the run there but keeps every step
     computed before it (see TimeSeriesResult.failed_at/error), so a
-    caller can still commit or save an earlier successful step rather
-    than losing the whole run.
+    caller can still scrub through the good steps rather than losing the
+    whole run.
 
     `strict_units` is the same opt-in run_simulation() takes. It is
     checked once up front, before any step runs, and raises rather than
     being captured as a failed step -- nothing about it can change
     part-way through a run.
 
-    `scenario` names a mote gathering overrides (see core/scenarios.py).
-    It cannot be combined with commit=True: a scenario run is
-    hypothetical by construction, and `commit` is an explicit request to
-    make something the garden's state, so silently ignoring one of the
-    two would be worse than refusing. save=True keeps the run for
-    comparison, which is what a scenario is usually for.
-
-    `detail` is an optional free-text note attached to the logged run
-    (simulation_runs.detail, the same column a failed run's error message
-    lives in) -- a caller can use it to mark runs of a kind a frontend
-    wants to tell apart later, e.g. Motion's Fast mode tagging its own
-    auto-commits so they can be filtered out of the Saved-runs list
-    without losing them from the audit trail."""
-    if commit and save:
-        raise ValueError("commit and save are mutually exclusive")
-    if commit and scenario is not None:
-        raise ValueError(
-            "a scenario run cannot be committed -- it answers what would happen, "
-            "not what did. Use save=True to keep it for comparison."
-        )
+    `scenario` names a mote gathering overrides (see core/scenarios.py);
+    the garden is previewed as that scenario would have it."""
     if step_count < 1:
         raise ValueError("step_count must be at least 1")
 
     relationships = list_relationships(conn)
     rules = rules_repo.list_rules(conn)
     case = _resolve_scenario(conn, scenario)
-    baseline = scenarios_repo.apply(
+    running = scenarios_repo.apply(
         {m.id: dict(m.properties) for m in list_motes(conn)}, case
     )
-    running = {mid: dict(props) for mid, props in baseline.items()}
-    cumulative: dict[Unknown, float] = {}
     # Built once and reused across every step: the `uses_model` graph and
     # provider configuration don't change step-to-step (only solved
     # values do), so a provider should be constructed at most once per
@@ -545,23 +489,14 @@ def run_time_series(
     model_cache: dict[str, PropertyProvider] = {}
 
     steps: list[StepResult] = []
-    journals: list[Journal] = []
     failed_at: int | None = None
     error: str | None = None
-    # A pure preview is discarded, so recording what it did would be work
-    # nobody can ever read -- committing re-solves from the database
-    # anyway (see the commit path below), and that solve is journalled.
-    recording = commit or save
 
     # Rules and declared units don't change between steps, so this is
     # checked once against the starting state rather than N times.
     starting_view = _build_view(running, relationships)
     starting_pairs = _rule_instances(rules, starting_view)
     _validate_units(starting_view, starting_pairs)
-    # Also the equations _infer_missing_units() below reads from -- rules
-    # don't change step-to-step, so the split done here for the pre-flight
-    # check is reused rather than repeated at commit time.
-    starting_equations, _starting_constraints = _split_relations(starting_pairs)
     warnings = _dimension_warnings(
         starting_view, starting_pairs, strict_units, model_cache
     )
@@ -569,13 +504,12 @@ def run_time_series(
     for step in range(step_count):
         view = _build_view(running, relationships)
         pairs = _rule_instances(rules, view)
-        journal = Journal() if recording else None
         try:
             result = solve_view(
                 view, pairs, solver, solver_configuration,
                 tick=float(step), previous=running,
                 strict_constraints=strict_constraints,
-                model_cache=model_cache, journal=journal,
+                model_cache=model_cache,
             )
             solved = result.values
             violations = result.constraint_violations
@@ -585,7 +519,6 @@ def run_time_series(
             break
 
         changes = _changes_for(view.properties, solved)
-        cumulative.update(solved)
         # The running state deliberately mirrors the database's own
         # representation -- values in whatever unit each mote declares,
         # not the solver's base units. Every step re-reads it through the
@@ -601,28 +534,8 @@ def run_time_series(
                 result.unsolved, violations,
             )
         )
-        if journal is not None:
-            journals.append(journal)
 
-    run_id = run_number = None
-    if (commit or save) and steps:
-        run_number = _next_run_number(conn)
-        if commit:
-            inferred_units = _infer_missing_units(
-                starting_view, starting_equations, cumulative, model_cache
-            )
-            baseline = _apply_inferred_units(conn, baseline, inferred_units)
-            _write_back(conn, baseline, cumulative)
-        run_id = _log_run(
-            conn, run_number, "ok", detail, [s.changes for s in steps],
-            committed=commit, step_journals=journals, scenario_id=scenario,
-        )
-        logger.info(
-            "simulation time series %s %s steps, %s values",
-            "committed" if commit else "saved", len(steps), len(cumulative),
-        )
-
-    return TimeSeriesResult(steps, failed_at, error, run_id, warnings, run_number)
+    return TimeSeriesResult(steps, failed_at, error, warnings)
 
 
 def _build_view(
@@ -769,7 +682,7 @@ def _declared_units(properties: dict[str, dict], mote_id: str) -> dict[str, str]
     """One mote's declared units, straight from a properties dict.
 
     Taken from the properties rather than a _GardenView so the write-back
-    and change-logging paths -- which work against a plain baseline dict,
+    and change-reporting paths -- which work against a plain baseline dict,
     not a view -- can reach the same information without threading an
     extra argument through."""
     return parse_units_property(properties.get(mote_id, {}).get(UNITS_KEY))
@@ -1856,7 +1769,7 @@ def _initial_guess(view: _GardenView) -> Callable[[Unknown], float]:
 def _changes_for(properties: dict[str, dict], values: dict[Unknown, float]) -> list[Change]:
     """Old/new pairs for a set of solved values against a baseline
     properties dict -- pure, no DB write. Shared by every step of a
-    preview (which never writes) and by the final commit (which does).
+    preview (which never writes) and by run_simulation()'s write-back.
 
     Solved values arrive in base units; old values are whatever the mote
     stores. Both sides are put in the mote's own declared unit so a change
@@ -1905,14 +1818,6 @@ def _unsolved(view: _GardenView, solved: dict[Unknown, float]) -> list[Unknown]:
     return sorted(declared - set(solved))
 
 
-def _next_run_number(conn: sqlite3.Connection) -> int:
-    """Derived rather than stored -- the log already knows how many runs
-    this garden has seen."""
-    cursor = conn.cursor()
-    cursor.execute("SELECT COALESCE(MAX(run_number), 0) + 1 AS next FROM simulation_runs")
-    return int(cursor.fetchone()["next"])
-
-
 def _resolve_scenario(
     conn: sqlite3.Connection, scenario_id: str | None
 ) -> scenarios_repo.Scenario | None:
@@ -1933,193 +1838,8 @@ def _resolve_scenario(
     return case
 
 
-def _log_run(
-    conn: sqlite3.Connection,
-    run_number: int,
-    status: str,
-    detail: str | None,
-    step_changes: list[list[Change]],
-    committed: bool,
-    step_journals: list[Journal] | None = None,
-    scenario_id: str | None = None,
-) -> str:
-    """step_changes[i] is tick i's own changes (0-indexed, oldest first).
-    A steady-state run logs a single tick; a committed or saved
-    time-series run logs one per computed step, so a later run_ticks()
-    can scrub through exactly what happened tick by tick. `committed`
-    records whether these values were actually written to the graph
-    (core/db.py's simulation_runs.committed) -- a saved-only run (see
-    run_time_series's save parameter) never touches motes/mote_properties
-    at all, only this log.
-
-    step_journals[i] is tick i's provenance (see core/provenance.py),
-    written in the same transaction as its changes so the two can never
-    disagree about what a run did. A failed run logs neither, exactly as
-    it already logged no changes: the partial derivations of a solve that
-    did not finish describe a state the garden never reached."""
-    run_id = generate_uuid()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO simulation_runs "
-        "(id, run_number, ran_at, status, detail, committed, scenario_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (run_id, run_number, datetime.now(timezone.utc).isoformat(), status, detail,
-         int(committed), scenario_id),
-    )
-    cursor.executemany(
-        "INSERT INTO simulation_changes (run_id, step, mote_id, key, old_value, new_value) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        [
-            (run_id, step, c.mote_id, c.key, _text(c.old_value), _text(c.new_value))
-            for step, changes in enumerate(step_changes)
-            for c in changes
-        ],
-    )
-    for step, journal in enumerate(step_journals or []):
-        derivations_repo.log_journal(cursor, run_id, step, journal)
+def _record_provenance(conn: sqlite3.Connection, journal: Journal) -> None:
+    """Replace the garden's provenance with this solve's, straight after
+    its write-back, so `why` always explains the values the motes hold."""
+    derivations_repo.replace_journal(conn.cursor(), journal)
     conn.commit()
-    return run_id
-
-
-def _text(value: float | None) -> str | None:
-    return None if value is None else repr(value)
-
-
-def _parse(value: str | None) -> float | None:
-    return None if value is None else float(value)
-
-
-@dataclass(frozen=True)
-class RunRecord:
-    """One logged row from simulation_runs (core/db.py) -- every run is
-    kept, successful or not, since a failed run is exactly the one worth
-    looking back at. change_count is folded in via a join so listing runs
-    doesn't need a separate query per row -- counted as distinct
-    (mote_id, key) pairs touched overall, not raw simulation_changes rows,
-    since a multi-tick run has one row per property per tick."""
-    run_id: str
-    run_number: int
-    ran_at: str
-    status: str
-    detail: str | None
-    committed: bool
-    change_count: int
-    scenario_id: str | None = None
-
-
-_RUN_COLUMNS = (
-    "r.id AS id, r.run_number AS run_number, r.ran_at AS ran_at, r.status AS status, "
-    "r.detail AS detail, r.committed AS committed, r.scenario_id AS scenario_id, "
-    "COUNT(DISTINCT c.mote_id || ':' || c.key) AS change_count"
-)
-
-
-def _row_to_run(row: sqlite3.Row) -> RunRecord:
-    return RunRecord(
-        run_id=row["id"], run_number=row["run_number"], ran_at=row["ran_at"],
-        status=row["status"], detail=row["detail"], committed=bool(row["committed"]),
-        change_count=row["change_count"], scenario_id=row["scenario_id"],
-    )
-
-
-def list_runs(conn: sqlite3.Connection, limit: int | None = None) -> list[RunRecord]:
-    """Every logged run, most recent first."""
-    query = (
-        f"SELECT {_RUN_COLUMNS} FROM simulation_runs r "
-        "LEFT JOIN simulation_changes c ON c.run_id = r.id "
-        "GROUP BY r.id ORDER BY r.ran_at DESC"
-    )
-    params: tuple = ()
-    if limit is not None:
-        query += " LIMIT ?"
-        params = (limit,)
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    return [_row_to_run(row) for row in cursor.fetchall()]
-
-
-def get_run(conn: sqlite3.Connection, run_id: str) -> RunRecord | None:
-    cursor = conn.cursor()
-    cursor.execute(
-        f"SELECT {_RUN_COLUMNS} FROM simulation_runs r "
-        "LEFT JOIN simulation_changes c ON c.run_id = r.id "
-        "WHERE r.id = ? GROUP BY r.id",
-        (run_id,),
-    )
-    row = cursor.fetchone()
-    return _row_to_run(row) if row else None
-
-
-def run_changes(conn: sqlite3.Connection, run_id: str) -> list[Change]:
-    """The net old->new change per property across a run's whole
-    duration -- old_value from its earliest tick, new_value from its
-    latest -- the same shape run_simulation() itself returns, just read
-    back rather than freshly solved. For a single-tick run this is
-    identical to that tick's own changes. See run_ticks() for the
-    tick-by-tick breakdown instead of this folded net view."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT mote_id, key, old_value, new_value FROM simulation_changes "
-        "WHERE run_id = ? ORDER BY step ASC, mote_id, key",
-        (run_id,),
-    )
-    net: dict[tuple[str, str], Change] = {}
-    for row in cursor.fetchall():
-        key = (row["mote_id"], row["key"])
-        new_value = _parse(row["new_value"])
-        old_value = net[key].old_value if key in net else _parse(row["old_value"])
-        net[key] = Change(row["mote_id"], row["key"], old_value, new_value)
-    return sorted(net.values(), key=lambda c: (c.mote_id, c.key))
-
-
-@dataclass(frozen=True)
-class RunTick:
-    """One tick within a logged run -- what "entering" a run in the UI
-    scrubs through. A steady-state run has exactly one (step 0); a run
-    committed or saved from an N-step time-series preview has N."""
-    step: int
-    changes: list[Change]
-    summary: str
-
-
-def run_ticks(conn: sqlite3.Connection, run_id: str) -> list[RunTick]:
-    """A run's own internal ticks, oldest first -- unrelated to any other
-    run in the garden's history."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT step, mote_id, key, old_value, new_value FROM simulation_changes "
-        "WHERE run_id = ? ORDER BY step ASC, mote_id, key",
-        (run_id,),
-    )
-    by_step: dict[int, list[Change]] = {}
-    for row in cursor.fetchall():
-        by_step.setdefault(row["step"], []).append(
-            Change(row["mote_id"], row["key"], _parse(row["old_value"]), _parse(row["new_value"]))
-        )
-    return [
-        RunTick(
-            step=step, changes=changes,
-            summary=f"Tick {step + 1} · {len(changes)} change{'' if len(changes) == 1 else 's'}",
-        )
-        for step, changes in sorted(by_step.items())
-    ]
-
-
-def mote_history(conn: sqlite3.Connection, mote_id: str) -> dict[str, list[float]]:
-    """Every value a mote's properties have taken across the garden's
-    *committed* run history, oldest first per key -- feeds the
-    inspector's sparklines. Excludes saved-only (uncommitted) runs: those
-    are hypothetical and were never this mote's real state, so mixing
-    them in would misrepresent the trend."""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT c.key AS key, c.new_value AS new_value FROM simulation_changes c "
-        "JOIN simulation_runs r ON r.id = c.run_id "
-        "WHERE c.mote_id = ? AND r.committed = 1 "
-        "ORDER BY r.ran_at ASC, c.step ASC",
-        (mote_id,),
-    )
-    history: dict[str, list[float]] = {}
-    for row in cursor.fetchall():
-        history.setdefault(row["key"], []).append(_parse(row["new_value"]))
-    return history

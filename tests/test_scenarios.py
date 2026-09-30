@@ -23,7 +23,6 @@ from core.scenarios import (
 from core.simulation import (
     SimulationError,
     incidence_index,
-    list_runs,
     run_simulation,
     run_time_series,
 )
@@ -71,37 +70,18 @@ def test_a_scenario_run_does_not_disturb_a_previous_real_answer(conn, resistor):
     assert get_mote(conn, resistor).properties["voltage"] == 6
 
 
-def test_a_scenario_run_is_logged_as_uncommitted_and_names_its_scenario(conn, resistor):
+def test_a_scenario_run_names_its_scenario(conn, resistor):
     scenario = make_scenario(conn, "High Load", resistor, {"current": 10})
-    result = run_simulation(conn, scenario=scenario)
-
-    run = next(r for r in list_runs(conn) if r.run_id == result.run_id)
-    assert run.committed is False
-    assert run.scenario_id == scenario
-    assert result.scenario_id == scenario
+    assert run_simulation(conn, scenario=scenario).scenario_id == scenario
+    assert run_simulation(conn).scenario_id is None
 
 
-def test_an_ordinary_run_records_no_scenario(conn, resistor):
-    result = run_simulation(conn)
-    run = next(r for r in list_runs(conn) if r.run_id == result.run_id)
-    assert run.scenario_id is None
-    assert run.committed is True
-
-
-def test_a_time_series_scenario_cannot_be_committed(conn, resistor):
+def test_a_time_series_scenario_leaves_the_graph_alone(conn, resistor):
     scenario = make_scenario(conn, "High", resistor, {"current": 10})
-    with pytest.raises(ValueError, match="cannot be committed"):
-        run_time_series(conn, step_count=1, commit=True, scenario=scenario)
+    result = run_time_series(conn, step_count=1, scenario=scenario)
 
-
-def test_a_time_series_scenario_can_be_saved_for_comparison(conn, resistor):
-    scenario = make_scenario(conn, "High", resistor, {"current": 10})
-    result = run_time_series(conn, step_count=1, commit=False, save=True, scenario=scenario)
-
-    assert result.run_id is not None
+    assert result.steps[0].changes[0].new_value == 30
     assert "voltage" not in get_mote(conn, resistor).properties
-    run = next(r for r in list_runs(conn) if r.run_id == result.run_id)
-    assert run.scenario_id == scenario
 
 
 ### what a scenario can change
@@ -142,7 +122,7 @@ def test_a_scenario_composes_with_a_time_series(conn):
     set_species(conn, mote, species)
     scenario = make_scenario(conn, "Fast", mote, {"rate": 3})
 
-    result = run_time_series(conn, step_count=3, commit=False, scenario=scenario)
+    result = run_time_series(conn, step_count=3, scenario=scenario)
     assert [list(step.values.values())[0] for step in result.steps] == [3, 9, 27]
 
 

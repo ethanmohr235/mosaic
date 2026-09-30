@@ -182,7 +182,7 @@ stepper that flipped **Real** to **Projected**, and an `Apply t+N…`
 button committed the projection to the graph. All of it is gone, and the
 reason is worth keeping written down. A note says what a garden *is*.
 What it will be after N steps is a simulation, which is Motion's window
-(`preview_simulation` / `run_ticks` on the MCP surface); how a value
+(`preview_simulation` on the MCP surface); how a value
 moves as another one changes is a sweep, which is Moxie's. A note editor
 that could also run and commit a simulation was holding a lever that
 belonged in another room -- and the projection was never quite the same

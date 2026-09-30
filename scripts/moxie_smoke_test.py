@@ -168,8 +168,8 @@ def series_count(window, plot=0):
     return count(window, f'.plot-cell[data-plot="{plot}"] path.series-path')
 
 
-def run_count():
-    return get_conn().execute("SELECT COUNT(*) FROM simulation_runs").fetchone()[0]
+def derivation_count():
+    return get_conn().execute("SELECT COUNT(*) FROM simulation_derivations").fetchone()[0]
 
 
 def seed():
@@ -272,14 +272,13 @@ def run_checks(window):
     check("clicking a property draws a curve with the right numbers",
           clicking_a_property_draws_a_curve_with_the_right_numbers)
 
-    def a_sweep_writes_nothing_and_logs_nothing():
+    def a_sweep_writes_nothing():
         properties = get_mote(get_conn(), ids["circuit"]).properties
         assert "current" not in properties, \
             f"a sweep must not write a solved value, found {properties.get('current')}"
-        assert run_count() == 0, "a sweep must not log a run"
+        assert derivation_count() == 0, "a sweep must not record provenance"
 
-    check("a sweep writes nothing and logs nothing",
-          a_sweep_writes_nothing_and_logs_nothing)
+    check("a sweep writes nothing, provenance included", a_sweep_writes_nothing)
 
     def a_broken_constraint_is_shaded_and_named():
         assert wait_until(lambda: count(window, ".violated-span") >= 1), \

@@ -8,19 +8,24 @@ pretending to a single cause.
 """
 import pytest
 
-from core.derivations import DEFAULT_DEPTH, explain
-from core.motes import create_mote, update_mote
+from core.derivations import (
+    DEFAULT_DEPTH,
+    NO_SOLVE_NOTE,
+    UNDETERMINED_NOTE,
+    explain,
+)
+from core.motes import create_mote, get_mote, update_mote
 from core.provenance import (
     DERIVED_READ,
     MODEL_READ,
-    PREVIOUS_READ,
     PROPERTY_READ,
     SOLVER,
     SUBSTITUTION,
 )
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
-from core.simulation import run_simulation, run_time_series
+from core.scenarios import OVERRIDES, VARIES
+from core.simulation import SimulationError, run_simulation, run_time_series
 from core.species import set_species
 
 
@@ -207,66 +212,27 @@ def test_an_unrecognized_unit_does_not_break_recording(conn):
     mote = create_mote(conn, {"name": "T1", "a": 1, "units": {"a": "furlongs"}})
     set_species(conn, mote, species)
 
-    from core.simulation import SimulationError
     with pytest.raises(SimulationError, match="unrecognized unit"):
         run_simulation(conn)
 
 
-### Time series
-
-def test_a_previous_read_is_attributed_to_the_step_before(conn):
-    species = create_mote(conn, {"name": "Population", "freedoms": "size"})
-    add_rule(conn, species, "Growth", "size == prev(size) * 2")
-    mote = create_mote(conn, {"name": "P1", "size": 1})
-    set_species(conn, mote, species)
-
-    result = run_time_series(conn, step_count=3, commit=True)
-    assert result.run_id is not None
-
-    at_step_2 = explain(conn, mote, "size", run_id=result.run_id, step=2)
-    previous = next(i for i in at_step_2.inputs if i.kind == PREVIOUS_READ)
-    assert previous.derivation is not None
-    assert previous.derivation.step == 1
-    assert previous.derivation.value == pytest.approx(4)
-
-
-def test_a_previous_read_at_step_zero_stops_at_the_garden(conn):
-    species = create_mote(conn, {"name": "Population", "freedoms": "size"})
-    add_rule(conn, species, "Growth", "size == prev(size) * 2")
-    mote = create_mote(conn, {"name": "P1", "size": 1})
-    set_species(conn, mote, species)
-
-    result = run_time_series(conn, step_count=2, commit=True)
-    at_step_0 = explain(conn, mote, "size", run_id=result.run_id, step=0)
-
-    previous = next(i for i in at_step_0.inputs if i.kind == PREVIOUS_READ)
-    assert previous.value == 1
-    assert previous.derivation is None
-
-
-def test_without_a_step_the_last_one_to_determine_a_value_is_used(conn):
-    species = create_mote(conn, {"name": "Population", "freedoms": "size"})
-    add_rule(conn, species, "Growth", "size == prev(size) * 2")
-    mote = create_mote(conn, {"name": "P1", "size": 1})
-    set_species(conn, mote, species)
-
-    result = run_time_series(conn, step_count=3, commit=True)
-    assert explain(conn, mote, "size", run_id=result.run_id).step == 2
-
-
 ### What gets recorded at all
 
-def test_a_discarded_preview_records_nothing(conn, chain):
-    run_time_series(conn, step_count=2, commit=False)
-    assert explain(conn, chain, "c").note == "this garden has no logged runs"
+def _derivation_count(conn) -> int:
+    return conn.execute("SELECT COUNT(*) FROM simulation_derivations").fetchone()[0]
 
 
-def test_a_saved_run_records_derivations_without_touching_the_graph(conn, chain):
-    result = run_time_series(conn, step_count=1, commit=False, save=True)
+def test_a_preview_records_nothing(conn, chain):
+    run_time_series(conn, step_count=2)
+    assert explain(conn, chain, "c").note == NO_SOLVE_NOTE
 
-    assert explain(conn, chain, "c", run_id=result.run_id).method == SUBSTITUTION
-    from core.motes import get_mote
-    assert "c" not in get_mote(conn, chain).properties
+
+def test_a_preview_leaves_the_last_solve_explained(conn, chain):
+    run_simulation(conn)
+    update_mote(conn, chain, {"a": 10})
+    run_time_series(conn, step_count=1)
+
+    assert explain(conn, chain, "c").value == 11
 
 
 def test_a_failed_run_records_no_derivations(conn):
@@ -275,16 +241,52 @@ def test_a_failed_run_records_no_derivations(conn):
     mote = create_mote(conn, {"name": "T1"})
     set_species(conn, mote, species)
 
-    from core.simulation import SimulationError
     with pytest.raises(SimulationError):
         run_simulation(conn)
     assert explain(conn, mote, "x").equations == ()
 
 
-def test_explaining_a_garden_with_no_runs_says_so(conn, chain):
+def test_a_failed_solve_keeps_the_last_good_solve_explained(conn, chain):
+    """The motes still hold the last good solve's values, so its
+    provenance is still the right explanation of them."""
+    run_simulation(conn)
+    breaker = create_mote(conn, {"name": "Broken", "freedoms": "x,y"})
+    add_rule(conn, breaker, "Only rule", "x + y == 1")
+    set_species(conn, create_mote(conn, {"name": "T1"}), breaker)
+    before = _derivation_count(conn)
+
+    with pytest.raises(SimulationError):
+        run_simulation(conn)
+
+    assert _derivation_count(conn) == before
+    assert explain(conn, chain, "c").value == 11
+
+
+def test_a_scenario_solve_keeps_the_last_real_solve_explained(conn, chain):
+    run_simulation(conn)
+    override = create_mote(conn, {"a": 100})
+    create_relationship(conn, override, chain, OVERRIDES)
+    scenario = create_mote(conn, {"name": "Big"})
+    create_relationship(conn, scenario, override, VARIES)
+
+    result = run_simulation(conn, scenario=scenario)
+
+    assert any(c.key == "c" and c.new_value == 201 for c in result.changes)
+    assert explain(conn, chain, "c").value == 11
+    assert get_mote(conn, chain).properties["c"] == 11
+
+
+def test_explaining_a_garden_with_no_solve_says_so(conn, chain):
     explanation = explain(conn, chain, "c")
-    assert explanation.note == "this garden has no logged runs"
+    assert explanation.note == NO_SOLVE_NOTE
     assert explanation.value is None
+
+
+def test_a_value_the_last_solve_did_not_determine_says_so(conn, chain):
+    run_simulation(conn)
+    explanation = explain(conn, chain, "a")
+    assert not explanation.derived
+    assert explanation.note == UNDETERMINED_NOTE
 
 
 ### Property models
@@ -316,20 +318,31 @@ def test_a_property_model_evaluation_is_recorded_as_an_input(conn):
 
 ### Re-running
 
-def test_explaining_defaults_to_the_most_recent_run(conn, chain):
+def test_a_second_solve_replaces_the_first(conn, chain):
     run_simulation(conn)
+    first = _derivation_count(conn)
     update_mote(conn, chain, {"a": 10})
     run_simulation(conn)
 
-    assert explain(conn, chain, "c").value == 21
+    assert _derivation_count(conn) == first
+    explanation = explain(conn, chain, "c")
+    assert explanation.value == 21
+    assert explanation.inputs[0].derivation.value == 20
 
 
-def test_an_earlier_run_can_still_be_explained_by_id(conn, chain):
-    first = run_simulation(conn)
-    update_mote(conn, chain, {"a": 10})
+def test_a_second_solve_drops_values_it_no_longer_determines(conn, chain):
     run_simulation(conn)
+    other = create_mote(conn, {"name": "Unrelated", "freedoms": "y"})
+    add_rule(conn, other, "Y rule", "y == 1")
+    loner = create_mote(conn, {"name": "Y1"})
+    set_species(conn, loner, other)
+    run_simulation(conn)
+    assert explain(conn, loner, "y").derived
 
-    assert explain(conn, chain, "c", run_id=first.run_id).value == 11
+    from core.motes import delete_mote
+    delete_mote(conn, loner)
+    run_simulation(conn)
+    assert explain(conn, loner, "y").note == UNDETERMINED_NOTE
 
 
 def test_default_depth_is_generous_enough_for_an_ordinary_chain(conn, chain):

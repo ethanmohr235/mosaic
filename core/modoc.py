@@ -4,7 +4,7 @@
 A note is a string in the reserved `modoc` property of an ordinary mote
 (docs/architecture.md's Notes section). It is not a separate object type,
 and `.modoc` files are an import/export shape -- the property is the
-canonical copy, which is what puts notes inside mote_history, garden
+canonical copy, which is what puts notes inside sync, garden
 export and undo for free.
 
 This module is the *language* and nothing else: parsing is pure, takes no

@@ -374,8 +374,8 @@ def preview_simulation(
     scenario: str | None = None,
 ) -> dict[str, Any]:
     """Solve the garden's rules for `step_count` steps entirely in
-    memory and return what *would* change. Writes nothing and logs
-    nothing. Each step starts from the previous step's solved values, so
+    memory and return what *would* change. Writes nothing, provenance
+    included. Each step starts from the previous step's solved values, so
     a rule can use `t` or `prev(x)` to express time-dependent behavior.
     Applying a run to the graph is deliberately not exposed here -- do
     that in the app.
@@ -400,7 +400,7 @@ def preview_simulation(
     determine is reported as *not checked* rather than passing."""
     with _connect(garden) as conn:
         result = simulation_repo.run_time_series(
-            conn, step_count, commit=False, solver=solver,
+            conn, step_count, solver=solver,
             solver_configuration=solver_configuration, scenario=scenario,
         )
         return {
@@ -409,51 +409,6 @@ def preview_simulation(
             "error": result.error,
             "constraint_violations": result.constraint_violations,
         }
-
-
-def list_runs(limit: int | None = None, garden: str | None = None) -> list[dict[str, Any]]:
-    """Past simulation runs, most recent first. Includes failed runs and
-    runs that were saved for review without being applied to the graph
-    (`committed` tells them apart). `scenario_id` names the scenario a
-    run was solved under, or is null for the garden as it stands -- which
-    is what makes two runs over the same rules comparable."""
-    with _connect(garden) as conn:
-        runs = simulation_repo.list_runs(conn, limit=limit)
-        return [dataclasses.asdict(r) for r in runs]
-
-
-def get_run(run_id: str, garden: str | None = None) -> dict[str, Any] | None:
-    """One logged run's status and metadata, or null if no run has that
-    id."""
-    with _connect(garden) as conn:
-        run = simulation_repo.get_run(conn, run_id)
-        return dataclasses.asdict(run) if run is not None else None
-
-
-def run_changes(run_id: str, garden: str | None = None) -> list[dict[str, Any]]:
-    """A logged run's net old -> new property changes. For the
-    tick-by-tick breakdown of a multi-step run, use run_ticks()."""
-    with _connect(garden) as conn:
-        changes = simulation_repo.run_changes(conn, run_id)
-        return [dataclasses.asdict(c) for c in changes]
-
-
-def run_ticks(run_id: str, garden: str | None = None) -> dict[str, Any]:
-    """A logged run's individual steps, oldest first, as {"steps": [...]}
-    -- the same shape preview_simulation() returns, since they are the
-    same steps whether freshly solved or read back out of the log. A
-    steady-state run has exactly one; a run committed from an N-step
-    preview has N."""
-    with _connect(garden) as conn:
-        return {"steps": simulation_repo.step_payloads(simulation_repo.run_ticks(conn, run_id))}
-
-
-def mote_history(mote_id: str, garden: str | None = None) -> dict[str, list[float]]:
-    """Every value this mote's properties have taken across the garden's
-    committed run history, oldest first per key. Excludes saved-only
-    runs, which were never the mote's real state."""
-    with _connect(garden) as conn:
-        return simulation_repo.mote_history(conn, mote_id)
 
 
 # ---- notes ----
@@ -467,8 +422,8 @@ def resolve_modoc(mote: str, garden: str | None = None) -> dict[str, Any]:
     A note has one reading -- the garden as it stands. It used to take a
     `step` and resolve against a simulation preview that far ahead; ask
     preview_simulation() for that instead, which is the tool for what a
-    garden will be rather than what it is. Nothing here writes or logs
-    either way, and writing a note is ordinary update_mote() on the
+    garden will be rather than what it is. Nothing here writes either
+    way, and writing a note is ordinary update_mote() on the
     `modoc` property; there is no separate write tool.
 
     `diagnostics` is what is wrong with the note (unknown commands,
@@ -533,8 +488,6 @@ def _figure_summary(node, figure) -> dict[str, Any]:
 def why(
     mote_id: str,
     key: str,
-    run_id: str | None = None,
-    step: int | None = None,
     depth: int = derivations_repo.DEFAULT_DEPTH,
     garden: str | None = None,
 ) -> dict[str, Any]:
@@ -542,20 +495,20 @@ def why(
     produced it, the known values they read, and -- recursively -- how
     each of those was itself determined.
 
-    Defaults to the garden's most recent successful run, which is the one
-    whose values are on the motes now. `method` is "substitution" when
+    Explains the last solve that wrote to the garden (a solve made in
+    the app or the CLI), which is the one whose values are on the motes
+    now; previews and scenario solves are never recorded. `method` is "substitution" when
     one equation determined the value alone, or "solver" when several
     equations determined several values *together*; in that case
     `also_determined` names the others and no finer attribution exists.
-    An empty `equations` with a `note` means the run did not derive this
-    value at all -- it was set directly, or is unchanged.
+    An empty `equations` with a `note` means the last solve did not
+    derive this value at all -- it was set directly, or is unchanged --
+    or that no solve has been recorded yet.
 
     Values are in each dimension's base SI unit, which is what the solver
     worked in, not the unit a mote declares."""
     with _connect(garden) as conn:
-        explanation = derivations_repo.explain(
-            conn, mote_id, key, run_id=run_id, step=step, depth=depth
-        )
+        explanation = derivations_repo.explain(conn, mote_id, key, depth=depth)
         return dataclasses.asdict(explanation)
 
 
@@ -728,7 +681,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     list_species, species_of, instances_of, set_species, set_template, template_for,
     create_instance,
     neighborhood, whole_garden,
-    preview_simulation, list_runs, get_run, run_changes, run_ticks, mote_history,
+    preview_simulation,
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
     resolve_modoc,

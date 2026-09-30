@@ -1208,7 +1208,7 @@ const Inspector = (() => {
     const answer = await bridge(() => api.inspector_why(moteId, key));
     state.why[key] = answer && answer.lines && answer.lines.length
       ? answer.lines.join("\n")
-      : "No logged run determined this value.";
+      : "The last solve did not determine this value.";
     render();
   }
 

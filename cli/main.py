@@ -40,11 +40,9 @@ from cli.render import (
     explanation_lines,
     impact_lines,
     requirement_lines,
-    run_summary_line,
     scenario_lines,
     variable,
 )
-from cli.render import label as _label_or_id
 from core import derivations
 from core import model_resolver
 from core.scenarios import get_scenario, list_scenarios
@@ -53,10 +51,7 @@ from core.simulation import (
     SimulationError,
     check_garden,
     check_roles,
-    get_run,
     incidence_index,
-    list_runs,
-    run_changes,
     run_simulation,
 )
 from core.units import UnitError, convert, describe, dimension_of, list_units
@@ -235,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ------------------ SIMULATE COMMANDS ------------------
     simulate_parser = subparsers.add_parser(
-        "simulate", help="Run the garden's simulation rules, or inspect past runs"
+        "simulate", help="Solve the garden's simulation rules and write the answer back"
     )
     simulate_sub = simulate_parser.add_subparsers(dest="action")
     run_parser = simulate_sub.add_parser("run", help="Run the simulation (default)")
@@ -256,12 +251,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--scenario",
         help="Solve under this scenario mote's overrides. Never writes to the graph -- "
-             "the run is logged for comparison and reports what would change",
+             "reports what would change",
     )
-    history_parser = simulate_sub.add_parser("history", help="List past simulation runs")
-    history_parser.add_argument("--limit", type=int, help="Show only the N most recent runs")
-    show_parser = simulate_sub.add_parser("show", help="Show one run's changes")
-    show_parser.add_argument("--id", required=True, help="Run id")
 
     ### Scenarios
     scenario_parser = subparsers.add_parser(
@@ -285,13 +276,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     why_parser.add_argument("mote_id", help="Mote whose property to explain")
     why_parser.add_argument("key", help="Property key to explain")
-    why_parser.add_argument(
-        "--run", help="Explain as of this run id (default: the most recent successful run)"
-    )
-    why_parser.add_argument(
-        "--step", type=int,
-        help="Explain as of this step within the run (default: the last step that determined it)",
-    )
     why_parser.add_argument(
         "--depth", type=int, default=derivations.DEFAULT_DEPTH,
         help=f"How far back to follow derived inputs (default: {derivations.DEFAULT_DEPTH})",
@@ -572,34 +556,12 @@ def _handle_simulate(conn, args) -> None:
         for line in change_lines(result.changes):
             print(line)
 
-    elif action == "history":
-        for run in list_runs(conn, limit=getattr(args, "limit", None)):
-            print(run_summary_line(conn, run))
-
-    elif action == "show":
-        run = get_run(conn, args.id)
-        if run is None:
-            print("No run found.")
-            return
-        applied = "applied to graph" if run.committed else "saved (not applied to graph)"
-        print(f"Run {run.run_id}")
-        print(f"run=#{run.run_number}  {run.ran_at}  status={run.status}  ({applied})")
-        if run.scenario_id:
-            print(f"scenario: {_label_or_id(conn, run.scenario_id)}")
-        if run.detail:
-            print(f"detail: {run.detail}")
-        for line in change_lines(run_changes(conn, run.run_id)):
-            print(line)
-
     else:
-        print("Specify a simulate action: run, history, show")
+        print("Specify a simulate action: run")
 
 
 def _handle_why(conn, args) -> None:
-    explanation = derivations.explain(
-        conn, args.mote_id, args.key,
-        run_id=args.run, step=args.step, depth=args.depth,
-    )
+    explanation = derivations.explain(conn, args.mote_id, args.key, depth=args.depth)
     if explanation.derived:
         print(BASE_UNIT_NOTE)
     for line in explanation_lines(conn, explanation):

@@ -46,51 +46,114 @@ def test_generate_uuid_is_unique():
     assert len(values) == 100
 
 
-def test_initialize_database_migrates_a_pre_run_number_garden():
-    # Simulates a garden created before simulation_runs.tick was renamed
-    # to run_number and committed/step were added -- initialize_database
-    # must bring it up to the current shape without losing data.
+_OLD_RUN_HISTORY = """
+    DROP TABLE simulation_derivations;
+    DROP TABLE simulation_derivation_equations;
+    DROP TABLE simulation_derivation_inputs;
+    CREATE TABLE simulation_runs (
+        id TEXT PRIMARY KEY, run_number INTEGER NOT NULL, ran_at TEXT NOT NULL,
+        status TEXT NOT NULL, detail TEXT, committed INTEGER NOT NULL DEFAULT 1,
+        scenario_id TEXT
+    );
+    CREATE TABLE simulation_changes (
+        run_id TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, mote_id TEXT NOT NULL,
+        key TEXT NOT NULL, old_value TEXT, new_value TEXT
+    );
+    CREATE INDEX idx_simulation_changes_run ON simulation_changes(run_id);
+    CREATE TABLE simulation_derivations (
+        run_id TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, block INTEGER NOT NULL,
+        mote_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+        method TEXT NOT NULL, detail TEXT
+    );
+    CREATE TABLE simulation_derivation_equations (
+        run_id TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, block INTEGER NOT NULL,
+        rule_mote_id TEXT NOT NULL, rule_name TEXT NOT NULL,
+        anchor_mote_id TEXT NOT NULL, equation TEXT NOT NULL
+    );
+    CREATE TABLE simulation_derivation_inputs (
+        run_id TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, block INTEGER NOT NULL,
+        kind TEXT NOT NULL, mote_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL
+    );
+    CREATE INDEX idx_simulation_derivations_lookup
+        ON simulation_derivations(run_id, mote_id, key);
+    INSERT INTO simulation_runs VALUES ('r1', 3, '2026-01-01T00:00:00+00:00', 'ok', NULL, 1, NULL);
+    INSERT INTO simulation_changes VALUES ('r1', 0, 'm1', 'x', '1.0', '2.0');
+    INSERT INTO simulation_derivations VALUES ('r1', 0, 0, 'm1', 'x', '2.0', 'substitution', NULL);
+    INSERT INTO simulation_derivation_equations VALUES ('r1', 0, 0, 'rule', 'double', 'm1', 'x == 2');
+    INSERT INTO simulation_derivation_inputs VALUES ('r1', 0, 0, 'property', 'm1', 'y', '1.0');
+"""
+
+
+def _tables(cur) -> set[str]:
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    return {row["name"] for row in cur.fetchall()}
+
+
+def _columns(cur, table: str) -> set[str]:
+    cur.execute(f"PRAGMA table_info({table})")
+    return {row["name"] for row in cur.fetchall()}
+
+
+def test_a_fresh_garden_keeps_no_run_history():
     create_garden("test")
     conn = db.get_connection("test")
     cur = conn.cursor()
-    cur.executescript("""
-        DROP TABLE simulation_changes;
-        DROP TABLE simulation_runs;
-        CREATE TABLE simulation_runs (
-            id TEXT PRIMARY KEY, tick INTEGER NOT NULL, ran_at TEXT NOT NULL,
-            status TEXT NOT NULL, detail TEXT
-        );
-        CREATE TABLE simulation_changes (
-            run_id TEXT NOT NULL, mote_id TEXT NOT NULL, key TEXT NOT NULL,
-            old_value TEXT, new_value TEXT
-        );
-        INSERT INTO simulation_runs VALUES ('r1', 3, '2026-01-01T00:00:00+00:00', 'ok', NULL);
-        INSERT INTO simulation_changes VALUES ('r1', 'm1', 'x', '1.0', '2.0');
-    """)
+
+    assert not {"simulation_runs", "simulation_changes"} & _tables(cur)
+    assert "run_id" not in _columns(cur, "simulation_derivations")
+    assert "step" not in _columns(cur, "simulation_derivations")
+    conn.close()
+
+
+def test_initialize_database_drops_an_old_run_history_garden():
+    # A garden from when every run was logged and derivations were keyed
+    # by run and step. The log is dropped rather than converted: `why`
+    # explains only the last solve now, and the next solve rebuilds it.
+    create_garden("test")
+    conn = db.get_connection("test")
+    cur = conn.cursor()
+    cur.executescript(_OLD_RUN_HISTORY)
     conn.commit()
 
-    db.initialize_database(conn)  # re-run the migration path
+    db.initialize_database(conn)
 
-    cur.execute("PRAGMA table_info(simulation_runs)")
-    run_columns = {row["name"] for row in cur.fetchall()}
-    assert "tick" not in run_columns
-    assert {"run_number", "committed"} <= run_columns
+    tables = _tables(cur)
+    assert not {"simulation_runs", "simulation_changes"} & tables
+    for table in (
+        "simulation_derivations",
+        "simulation_derivation_equations",
+        "simulation_derivation_inputs",
+    ):
+        assert table in tables
+        assert not {"run_id", "step"} & _columns(cur, table)
+        cur.execute(f"SELECT COUNT(*) AS n FROM {table}")
+        assert cur.fetchone()["n"] == 0
 
-    cur.execute("SELECT run_number, committed FROM simulation_runs WHERE id = 'r1'")
-    row = cur.fetchone()
-    assert row["run_number"] == 3
-    assert row["committed"] == 1  # every pre-existing run was a write
+    cur.execute("SELECT name FROM sqlite_master WHERE type='index'")
+    indexes = {row["name"] for row in cur.fetchall()}
+    assert "idx_simulation_changes_run" not in indexes
+    assert "idx_simulation_derivations_lookup" in indexes
+    conn.close()
 
-    cur.execute("PRAGMA table_info(simulation_changes)")
-    change_columns = {row["name"] for row in cur.fetchall()}
-    assert "step" in change_columns
 
-    cur.execute("SELECT step, old_value, new_value FROM simulation_changes WHERE run_id = 'r1'")
-    row = cur.fetchone()
-    assert row["step"] == 0
-    assert row["old_value"] == "1.0"
-    assert row["new_value"] == "2.0"
+def test_reopening_a_migrated_garden_keeps_its_derivations():
+    # Idempotent: once the old tables are gone, opening again must not
+    # drop the new ones -- they hold the last solve's provenance.
+    create_garden("test")
+    conn = db.get_connection("test")
+    cur = conn.cursor()
+    cur.executescript(_OLD_RUN_HISTORY)
+    conn.commit()
+    db.initialize_database(conn)
+    cur.execute(
+        "INSERT INTO simulation_derivations VALUES (0, 'm1', 'x', '2.0', 'substitution', NULL)"
+    )
+    conn.commit()
 
+    db.initialize_database(conn)
+
+    cur.execute("SELECT COUNT(*) AS n FROM simulation_derivations")
+    assert cur.fetchone()["n"] == 1
     conn.close()
 
 

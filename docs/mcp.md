@@ -53,8 +53,7 @@ absolute path.
 `update_relationship`, `delete_relationship`), species (`list_species`,
 `species_of`, `instances_of`, `set_species`, `set_template`,
 `template_for`, `create_instance`), graph (`neighborhood`,
-`whole_garden`), simulation (`preview_simulation`, `list_runs`,
-`get_run`, `run_changes`, `run_ticks`, `mote_history`, `why`),
+`whole_garden`), simulation (`preview_simulation`, `why`),
 dependencies (`impact`, `requires`, `producers`, `consumers`),
 `check_roles`, `list_scenarios`, notes (`resolve_modoc`), and
 `reserved_names`.
@@ -73,15 +72,12 @@ deliberately differs from `monarch/api.py`, which interprets incoming strings
 as JSON because GUI text fields deliver everything as text.
 
 `preview_simulation` computes a run entirely in memory and returns what
-*would* change — nothing is written or logged. Applying a run to the
-graph is not exposed; do that in the app or the CLI.
+*would* change — nothing is written. Solving and writing the answer back
+is not exposed; do that in the app or the CLI.
 
-A run's steps come back as `{"steps": [...]}` from both
-`preview_simulation` and `run_ticks`, with each step carrying `step`,
-`changes` and `summary` (plus `equation_count` when freshly solved
-rather than read back from the log). They are the same steps either way,
-so they have the same shape either way — `run_ticks` used to return a
-bare list.
+Its steps come back as `{"steps": [...]}`, each carrying `step`,
+`changes`, `summary`, `equation_count` and `constraint_violations` — the
+same shape Motion's timeline receives (`core.simulation.step_payloads`).
 
 `resolve_modoc(mote, step)` reads a mote's `.modoc` note and everything
 its macros currently resolve to -- which mote each `\mote{...}` points at,
@@ -102,9 +98,9 @@ units. Call it before hand-writing an `equation` or a property-model
 mote — `docs/simulation.md` has the same content with more prose, but
 isn't itself reachable over MCP.
 
-`why` explains how a solved value was determined, recursively. It reads
-the run log only, so it needs a run to have happened; a preview leaves
-nothing for it to read.
+`why` explains how a solved value was determined, recursively, as of the
+last solve that wrote to the garden. It needs such a solve to have
+happened; a preview or a scenario solve leaves nothing for it to read.
 
 The four dependency tools read the *rules* instead, so they answer
 before anything has been solved. Note that MonOSS solves constraint

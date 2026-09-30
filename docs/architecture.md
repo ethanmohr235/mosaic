@@ -117,11 +117,11 @@ Equations are written in a small expression language parsed against a strict whi
 
 Each side of a relation evaluates to a ratio of two linear expressions, and the denominator is cleared once against the relation as a whole, so an equation that is only nonlinear as *written* (`I / I0 == 0.1`) is solved as the linear equation it is equivalent to rather than having to be rearranged by hand. Solving then happens in two stages. A substitution loop repeatedly resolves any equation that has come down to a single unknown and feeds the answer back, which allows nonlinear formulas as long as the nonlinear part involves values already known. Whatever remains -- a still-linear system of several unknowns, or an equation genuinely nonlinear in its unknowns -- goes to a solver backend chosen per run via `solver`/`solver_configuration` (`core/solvers.py`), the same pluggable-by-name pattern physical property models use for `provider`/`configuration`. The default, `linear`, is an exact single least-squares solve and fails on genuine nonlinearity; `newton` solves that iteratively instead. See `docs/simulation.md` for the full solver reference.
 
-`core.simulation.run_time_series()` is the only solve-and-write path there is: `run_simulation()` is that function called with one step and `commit=True`, unpacked into a single result. The two used to be parallel implementations of the same thing, which is how "a steady-state run is a one-step time series" could be true in the documentation and only approximately true in the code.
+`core.simulation.run_simulation()` is the only path that writes: it solves the garden once, writes the solved values back onto the motes, and replaces the garden's provenance (below) in the same step. `run_time_series()` is a preview and never writes. Both call the same `solve_view()`, which is what makes a one-step preview show exactly what a solve would write.
 
-A run can be time-based: `run_time_series()` solves a requested number of discrete steps, each one starting from the *previous* step's solved values rather than the database, so a rule can use the reserved `t` (the current step index) or `prev(x)` (the value `x` had entering the step) to express time-dependent behavior or a recurrence. This is computed entirely in memory and nondestructive by default -- nothing is written, and nothing is logged -- until a specific step is explicitly committed, which re-solves up to that step (deterministic, given the same garden and rules) and writes only the cumulative result in one shot. A single steady-state `run_simulation()` call is equivalent to committing a 1-step time series.
+A preview can be time-based: `run_time_series()` solves a requested number of discrete steps, each one starting from the *previous* step's solved values rather than the database, so a rule can use the reserved `t` (the current step index) or `prev(x)` (the value `x` had entering the step) to express time-dependent behavior or a recurrence. It is computed entirely in memory and writes nothing. A solve that writes back is one-shot and has no previous step, so a rule using `prev()` is refused there rather than advanced by a tick.
 
-Every logged run (failures included) is recorded in `simulation_runs` and `simulation_changes` -- a discarded preview leaves no trace, but a *saved* run (kept for review without being written to the graph -- see `docs/simulation.md`) is logged just like a committed one. The per-garden run counter (`run_number`) is derived from that log, and is a different thing from a time-based run's own step numbering (which resets to 0 every run and is never persisted on its own -- each of a run's own steps/ticks is logged individually now, so it can be scrubbed back through later). See `docs/simulation.md` for the language reference and what is deferred.
+No log of past runs is kept. The garden's state is its motes, and the only record of how they got their solved values is the last solve's provenance. See `docs/simulation.md` for the language reference and what is deferred.
 
 # Comparison relations
 
@@ -166,11 +166,10 @@ database (`_build_view` has been pure since units), so a scenario is one
 pure function inserted ahead of another.
 
 A scenario run **never writes to the graph**. `run_simulation` with a
-scenario logs an uncommitted run recording its `scenario_id` and reports
-what would change; `run_time_series` refuses `commit=True` outright,
-since committing is an explicit request to make something the garden's
-state. The answer to a hypothetical is not state, and there is no good
-answer to where a scenario run's results would be written.
+scenario reports what would change and records no provenance, and
+`run_time_series` is a preview under any scenario. The answer to a
+hypothetical is not state, and there is no good answer to where a
+scenario run's results would be written.
 
 An override may carry `freedoms`, which changes the question rather than
 the inputs -- sizing becomes rating. That is what made moving freedoms
@@ -201,8 +200,8 @@ door. Both existing functions call it; neither changed behaviour.
 
 `solve_properties()` takes properties and relationships rather than a
 connection, and that is the structural version of the rule that matters
-here: **a sweep writes nothing and logs nothing**. There is no database
-in reach to write to. No write-back, no run-log row, no scenario motes
+here: **a sweep writes nothing**. There is no database
+in reach to write to. No write-back, no provenance, no scenario motes
 created and destroyed around the edges — which is what makes it safe to
 run on every frame of a dragged slider, and is the same refusal a
 scenario run makes for the same reason.
@@ -278,11 +277,11 @@ See `docs/simulation.md` for the reference and
 
 # Provenance
 
-Every logged run also records *why* each value came out as it did:
-which equations, reading which already-known values, determined it.
-`core/provenance.py` collects this during the solve and `core/derivations.py`
-persists and replays it, backing the `why` command in both CLI surfaces
-and the MCP server.
+The last solve that wrote to the garden also records *why* each value
+came out as it did: which equations, reading which already-known values,
+determined it. `core/provenance.py` collects this during the solve and
+`core/derivations.py` persists and replays it, backing the `why` command
+in both CLI surfaces, Motion and the MCP server.
 
 The recording is pure and DB-free, and -- importantly -- it does not touch
 `core/formula.py`. Reads are captured by handing the evaluator a dict
@@ -298,13 +297,18 @@ the case where a block holds one equation and one value. What a solver
 backend returns cannot be attributed any more finely than "these
 equations determined these values together", and the record says so
 rather than implying a tree. Recorded values are in base SI units --
-what the solver worked in -- unlike the change log, which converts back
-into each mote's declared unit.
+what the solver worked in -- unlike a solve's reported changes, which
+convert back into each mote's declared unit.
 
-A discarded preview records nothing (committing re-solves, and that
-solve is recorded); a saved run records derivations without touching the
-graph; a failed run records neither, exactly as it already recorded no
-changes.
+Only one solve's record is kept. `run_simulation()` replaces the whole
+set (`derivations.replace_journal`) right after its write-back, so `why`
+always explains the values the motes hold. The three
+`simulation_derivation*` tables carry no run id and no step for that
+reason. A preview or a scenario solve writes nothing and so records
+nothing; a failed solve records nothing and leaves the previous record
+in place, since the motes still hold that solve's values. A garden from
+before this, which logged every run, has its run and derivation tables
+dropped on open (`core/db.py`); the next solve rebuilds the record.
 
 # Dependencies
 
@@ -564,7 +568,7 @@ either. This was briefly got wrong, and the cost was immediate and
 visible: because a kind displaces the species in the detail panel's type
 label, a project that gained a note stopped reading as a project. The
 consequence worth stating is what nobody had to build:
-notes are inside `mote_history`, garden export/import, the UI's undo, and
+notes are inside sync, garden export/import, the UI's undo, and
 MCP's `update_mote` already, because they are properties. `.modoc` files
 exist only for import and export, and a file is exactly the property's
 string -- no header naming the garden it came from, which was the first
@@ -589,7 +593,7 @@ a free variable with no solver behind it is useless rather than correct.
 
 **A note has no clock.** Every macro resolves against the garden as it
 stands, and there is no step to ask for. Notes used to resolve at `t+N`
-against `run_time_series(commit=False)`, with Mora carrying a stepper and
+against a `run_time_series()` preview, with Mora carrying a stepper and
 an `Apply t+N…` button that committed the projection; all of it is
 removed. The line it was crossing is the one the windows are divided on:
 a note reports what a garden *is*, Motion is where a garden moves through
@@ -817,7 +821,7 @@ purpose. `valueEditor` lets a host offer a better editor for a value the
 generic ones would flatten -- what is left there is Monarch's `provider`
 summary, and the list is meant to keep shrinking: the interval picker
 used to be in it and is now everyone's. `advancedSections` adds to the Advanced pane, which is also where the
-two window-specific powers live: Motion's `why` (the run log's answer
+two window-specific powers live: Motion's `why` (the last solve's answer
 for where a solved value came from -- it is the only window with a
 solver, so `inspector_why` returns None in the other five and the
 control is never drawn) and Monarch's "+ New instance". Anything only
@@ -938,7 +942,7 @@ is the window's own state in `localStorage`, not the garden's. See
 # Simulation
 
 Motion (`motion/`) is a sixth window: the garden as a system that runs.
-Scenarios, solvers, runs, provenance and rule authoring are one subject,
+Scenarios, solvers, previews, provenance and rule authoring are one subject,
 and it is the one subject Monarch could not give a full window to -- it
 lived there as a settings popover, a bottom scrub bar and a runs panel,
 gating every edit in the graph behind "commit or discard first". Moving
@@ -948,8 +952,8 @@ answers only for attractor mode) and gave simulation the room it needed.
 **Nothing about the engine moved.** `core/simulation.py` never imported
 from `monarch/`, so the split was two thin layers: the bridge methods
 (now `motion/api.py`) and the UI. `core/simulation.py::step_payloads`
-was already the shared shape for a run's steps, which is why a replayed
-run and a live preview reach Motion's timeline through one path.
+was already the shared shape for a preview's steps, and Motion's timeline
+and the MCP server both take them in that one shape.
 
 **What a node *is* is derived, like everything else.** A mote carries no
 coordinates and no declared role in a simulation, so `motion/payload.py`
@@ -974,7 +978,7 @@ appears in Motion by being registered, not by editing the window.
 Motion is a sixth process on the same terms as the other four:
 `motion/app.py::choose_port` asks for 42006 and falls back to an
 ephemeral port, and `.webview_data_motion/` is its own WebKit storage.
-A commit made here is not observed by an open Monarch until it refetches
+A solve made here is not observed by an open Monarch until it refetches
 -- the same rule every adapter lives under. See `docs/ui-setup.md`.
 
 # Annotations
@@ -994,8 +998,7 @@ An annotation's `anchor_mode` is `"world"` (a fixed point in the graph's
 own coordinate space, panning and zooming with it) or `"mote"` (an
 offset from a mote's position, so the note tracks it if the mote moves).
 A mote-anchored annotation's `mote_id` carries no foreign key, on
-purpose, mirroring `simulation_changes`' own no-FK-on-`mote_id`
-precedent: deleting the mote it's anchored to must neither cascade the
+purpose: deleting the mote it's anchored to must neither cascade the
 note away nor block the delete, so the row is left to outlive it,
 orphaned rather than destroyed. `frontend_shared/annotations.js` treats
 that as best-effort -- it resolves a live mote-anchored note through

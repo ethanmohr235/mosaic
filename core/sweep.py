@@ -12,7 +12,7 @@ over, and this re-solves the whole garden at every step, reading the
 properties you asked about out of each solve. The mechanism is entirely
 `core/simulation.py`'s: a perturbed copy of the properties dict, run
 through `solve_properties()`. What makes it a sweep rather than N runs is
-what it deliberately does *not* do -- no write-back, no run log, no
+what it deliberately does *not* do -- no write-back, no provenance, no
 scenario motes created and destroyed around the edges. A sweep leaves the
 garden exactly as it found it, which is what makes it safe to fire on
 every frame of a dragged slider.
@@ -362,7 +362,7 @@ def run_sweep(
     should_cancel: Callable[[], bool] | None = None,
 ) -> SweepResult:
     """Solve the garden once per case at every point of `axis`, reading
-    `outputs` out of each solve. Writes nothing and logs nothing.
+    `outputs` out of each solve. Writes nothing.
 
     `indices` restricts the sweep to those points of the axis -- every
     fourth one for a coarse first pass, then the rest to refine it. The
