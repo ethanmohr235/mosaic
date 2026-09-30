@@ -27,6 +27,7 @@ from core import calc as calc_repo
 from core import derivations as derivations_repo
 from core import garden_io
 from core import health as health_repo
+from core import projects as projects_repo
 from core import scenarios as scenarios_repo
 from core import gardens as gardens_repo
 from core import graph as graph_repo
@@ -684,6 +685,49 @@ def solve_health(garden: str | None = None) -> dict[str, Any]:
         }
 
 
+def _owner_json(owner: "projects_repo.Owner | None") -> dict[str, Any] | None:
+    if owner is None:
+        return None
+    return {"garden": owner.garden, "moteId": owner.mote_id, "name": owner.name,
+            "owns": owner.owns, "properties": owner.properties}
+
+
+def _node_json(node: "projects_repo.Node") -> dict[str, Any]:
+    return {"garden": node.garden, "name": node.name, "loose": node.loose,
+            "owner": _owner_json(node.owner),
+            "children": [_node_json(child) for child in node.children]}
+
+
+def project_tree() -> dict[str, Any]:
+    """Every garden, nested under the mote that owns it -- what Home lists.
+
+    A mote carrying `garden: <name>` owns that garden and is its cover;
+    nesting is recursion. Roots are gardens nobody owns (hubs and loose
+    gardens alike). Reads every garden, read-only. `problems` is the
+    one-owner check: two owners for one garden, a claim on a garden that
+    doesn't exist, or an ownership loop -- each with a ready sentence."""
+    return {
+        "roots": [_node_json(node) for node in projects_repo.tree()],
+        "problems": [
+            {"kind": p.kind, "garden": p.garden, "message": p.message,
+             "owners": [_owner_json(o) for o in p.owners]}
+            for p in projects_repo.check()
+        ],
+    }
+
+
+def start_project(mote_id: str, name: str | None = None, garden: str | None = None) -> dict[str, Any]:
+    """Give a mote (in `garden`) a garden of its own: creates the garden and
+    writes `garden: <name>` onto the mote in one step, making the mote the
+    project's cover. With no `name`, one is derived from the mote's name
+    and never collides with an existing garden; a `name` given explicitly
+    adopts a loose garden of that name. Refused if the mote already owns a
+    garden or the named garden already has an owner."""
+    with _connect(garden) as conn:
+        created, _ = projects_repo.start_project(conn, mote_id, name)
+        return {"garden": created, "owner": mote_id}
+
+
 def read_worksheet(garden: str | None = None) -> str:
     """This garden's calculation as lines of text -- its givens, then its
     equations -- the form `write_worksheet` takes back.
@@ -844,6 +888,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
+    project_tree, start_project,
     calc_sections, shown_work,
     resolve_modoc,
     reserved_names,

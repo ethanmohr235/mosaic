@@ -54,7 +54,12 @@ code.
   - new reserved property `source` (`assumed`, `external`)
   - `monoss calc ...`; MCP `calc_sections`, `shown_work`
   - the UI it needs is Mora / console step U6
-- The next UI step is U2's frontend. The next roadmap step is phase 4.
+- Roadmap **phase 4's backend is done, less the cover** (`core/projects.py`):
+  the reserved `garden` property, `start_project`, the one-owner check and
+  the ownership tree; `monoss project start|stop|tree|check`; MCP
+  `project_tree`, `start_project`. Which properties the cover shows is
+  still an open question.
+- The next UI step is U2's frontend. The next roadmap step is phase 7's core.
 
 ## Split of work: cloud backend, local frontend
 

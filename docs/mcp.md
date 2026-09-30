@@ -46,8 +46,8 @@ absolute path.
 
 ## Tools
 
-49 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), motes (`list_motes`, `search_motes`, `get_mote`,
+51 tools, grouped: gardens (`list_gardens`, `create_garden`,
+`export_garden`), projects (`project_tree`, `start_project`), motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
@@ -168,6 +168,12 @@ inconsistent equations (`unitProblems`). Read `verdict`, not the totals:
 `equations == unknowns` is neither necessary nor sufficient, since three of
 each can be two blocks with one short and one surplus. See
 `docs/simulation.md`.
+
+`project_tree` is every garden nested under the mote that owns it (a mote
+carrying `garden: <name>` owns that garden and is its cover), plus
+`problems` from the one-owner check: `disputed`, `missing` and `loop`.
+`start_project` creates a garden for a mote and writes the property in one
+step. See `docs/architecture.md` -> *Projects*.
 
 ## Reaching it from other machines
 

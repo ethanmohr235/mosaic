@@ -50,6 +50,8 @@ from mcp_server.server import (
     whole_garden,
     why,
     write_worksheet,
+    project_tree,
+    start_project,
 )
 
 # Every tool takes `garden` last and opens its own connection, so tests
@@ -723,3 +725,23 @@ def test_shown_work_on_an_unsolved_garden_says_so_rather_than_failing(garden):
     shown = shown_work(bd["id"], "l", garden=GARDEN)
     assert shown["steps"] == []
     assert shown["note"]
+
+
+def test_start_project_then_the_tree_shows_it_under_its_owner(garden):
+    hw = create_mote({"name": "HW 4"}, GARDEN)
+    result = start_project(hw["id"], garden=GARDEN)
+    assert result == {"garden": "hw-4", "owner": hw["id"]}
+    tree = project_tree()
+    (root,) = tree["roots"]
+    assert root["garden"] == GARDEN and root["loose"]
+    (child,) = root["children"]
+    assert child["garden"] == "hw-4" and child["name"] == "HW 4"
+    assert child["owner"]["moteId"] == hw["id"]
+    assert tree["problems"] == []
+
+
+def test_project_tree_reports_two_owners(garden):
+    create_mote({"name": "One", "garden": "p"}, GARDEN)
+    create_mote({"name": "Two", "garden": "p"}, GARDEN)
+    kinds = {p["kind"] for p in project_tree()["problems"]}
+    assert "disputed" in kinds

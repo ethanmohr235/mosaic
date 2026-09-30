@@ -22,6 +22,37 @@ Relationships should have the ability to modify the properties of motes programm
 
 The user should be able to create multiple object graphs that are completely separate from each other. These are called gardens.
 
+## Projects: motes own gardens
+
+`core/projects.py` reads the one convention `overview.md` -> *Structure*
+builds projects from: a mote carrying the reserved `garden: <name>`
+property owns that garden and is its cover.
+
+- `owners()` scans every garden for claims, keyed by the garden claimed.
+  It asks SQLite for the `garden` key alone and loads full properties only
+  for the motes that carry it, since the scan crosses the whole library.
+  It is read-only; it never writes to a garden it opened to look.
+- `check()` is the one-owner check. It reports, never raises: `disputed`
+  (two motes claim one garden), `missing` (a claim on a garden not on
+  disk) and `loop` (a garden that owns itself through some chain, found
+  by a depth-first walk). Each `Problem` carries a ready sentence.
+- `tree()` is what Home draws. Roots are the gardens nobody owns -- a hub
+  and a loose demo alike. A disputed garden hangs under every claimant so
+  the duplicate stays visible, and a garden caught in a loop becomes a
+  root of its own rather than vanishing.
+- `start_project(conn, mote_id, name=None)` creates the garden and writes
+  the property in one step. A name derived from the mote's never adopts
+  an existing garden (it steps to `-2`, `-3`); a name passed in adopts a
+  loose one. It refuses a mote that already owns a garden and a garden
+  that already has an owner. Undo clears the property and leaves the
+  garden on disk, loose: a garden is a file another surface may have
+  open. `stop_owning` is the property half alone.
+- `Owner.properties` is the cover's whole property dict. Which of them a
+  cover shows (`roadmap.md` -> *Cover fields*) is still open, so no field
+  is picked out here yet.
+
+`monoss project start|stop|tree|check`; MCP `project_tree`, `start_project`.
+
 # Species
 
 A mote can act as a "species" -- a shared type that other motes are declared instances of. A species is still just a mote; nothing marks it as special structurally. Membership is a relationship: a mote is an instance of a species by having an `instance_of` relationship pointing at it. `instance_of` is a reserved relationship type recognized by the engine and UI, the same way any type system needs some minimal way to express "is-a."
@@ -61,7 +92,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot` and `source` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source` and `garden` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 

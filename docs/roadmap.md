@@ -32,6 +32,13 @@ Each one was a separate act of filing. That lesson became a rule in
 - Home replaces the Gardens window's list. It shows the ownership tree
   plus loose gardens, and opens them. Health indicators (solve and
   document) come later.
+- **Decided in building it:** `garden` is a reserved property. The
+  one-owner check reports two claims, a claim on a missing garden and an
+  ownership loop, and never refuses to open anything. A name *Start
+  project* derives from the mote never adopts an existing garden, while a
+  name given explicitly adopts a loose one. Undo of *Start project* clears
+  the property and leaves the garden on disk. See `architecture.md` ->
+  *Projects*.
 
 ### Calculation
 - **Garden-scope names.** A formula reference `bd.l` falls back, after
@@ -129,7 +136,7 @@ alongside all of them.
 | 1 | **Done.** Cleanup: remove Momentum; freeze Monarch; cut commit-tick and run history | Fewer surfaces, less code |
 | 2 | **Backend done.** Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
 | 3 | **Backend done.** Mora calc macros and LaTeX basics | A gradeable homework document |
-| 4 | Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
+| 4 | **Backend done, less the cover.** Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
 | 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
 | 7 | Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |

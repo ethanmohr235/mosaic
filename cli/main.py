@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core import calc
 from core import health
+from core import projects
 from core import modoc
 from core import worksheet
 from core.modoc_bind import assemble as assemble_modoc
@@ -294,6 +295,28 @@ def build_parser() -> argparse.ArgumentParser:
         "health", help="Whether the model is solvable, and which values are not"
     )
     health_parser.add_argument("--scenario", help="Ask the same question of a scenario")
+
+    ### Project
+    project_parser = subparsers.add_parser(
+        "project", help="Which motes own which gardens: start a project, see the tree"
+    )
+    project_sub = project_parser.add_subparsers(dest="action")
+    project_start = project_sub.add_parser(
+        "start", help="Give a mote a garden of its own, creating it (the mote becomes its cover)"
+    )
+    project_start.add_argument("mote_id", help="The mote that will own the project")
+    project_start.add_argument(
+        "--name", help="The garden's name; a loose garden of this name is adopted. "
+        "Derived from the mote's name when omitted"
+    )
+    project_stop = project_sub.add_parser(
+        "stop", help="Drop a mote's claim on its garden, leaving the garden loose"
+    )
+    project_stop.add_argument("mote_id")
+    project_sub.add_parser("tree", help="Every garden, nested under the mote that owns it")
+    project_sub.add_parser(
+        "check", help="Gardens with two owners, claims on missing gardens, and loops"
+    )
 
     ### Calc
     calc_parser = subparsers.add_parser(
@@ -748,6 +771,48 @@ def _handle_health(conn, args) -> None:
             print(f"  {inert.label} on {inert.anchor}")
 
 
+def _handle_project(args) -> None:
+    """tree and check read every garden, so they take no --garden; start
+    and stop write one mote, in the garden --garden names."""
+    if args.action == "tree":
+        roots = projects.tree()
+        if not roots:
+            print("No gardens.")
+        for root in roots:
+            _print_project_node(root, 0)
+        return
+    if args.action == "check":
+        problems = projects.check()
+        if not problems:
+            print("Every garden has at most one owner.")
+        for problem in problems:
+            print(f"  {problem.kind}: {problem.message}")
+        return
+
+    garden = resolve_garden(args.garden)
+    conn = get_connection(garden)
+    try:
+        initialize_database(conn)
+        if args.action == "start":
+            created, _ = projects.start_project(conn, args.mote_id, args.name)
+            print(f"Started project {created} (owned by {args.mote_id} in {garden}).")
+        elif args.action == "stop":
+            claimed, _ = projects.stop_owning(conn, args.mote_id)
+            print(f"{args.mote_id} no longer owns {claimed}; the garden is loose."
+                  if claimed else f"{args.mote_id} owns no garden.")
+        else:
+            print("Usage: monoss project start|stop|tree|check")
+    finally:
+        conn.close()
+
+
+def _print_project_node(node, depth: int) -> None:
+    label = node.garden if node.loose else f"{node.name}  [{node.garden}]"
+    print("  " * depth + label)
+    for child in node.children:
+        _print_project_node(child, depth + 1)
+
+
 def _handle_incidence(conn, args) -> None:
     """impact / requires / producers / consumers -- one index, four reads
     of it. The index is rebuilt per invocation on purpose: it is derived
@@ -783,6 +848,10 @@ def main() -> None:
     try:
         if args.command == "garden":
             _handle_garden(args)
+            return
+
+        if args.command == "project":
+            _handle_project(args)
             return
 
         if args.command == "sync" and args.action == "init":

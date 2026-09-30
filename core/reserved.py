@@ -21,6 +21,7 @@ removed that reason, and with it the third place the same facts were
 written down."""
 from core.calc import SOURCE_KEY
 from core.links import URL_PROPERTY
+from core.projects import GARDEN_KEY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
 from core.providers import describe_providers
@@ -35,7 +36,7 @@ from core.units import UNITS_KEY
 RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
-    ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY,
+    ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY, GARDEN_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -98,6 +99,12 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "which is what a verification table compares against a hand calc. "
         "Opt-in per property, and unread by the solver -- a value's "
         "provenance changes nothing about how it is used.",
+    GARDEN_KEY: "The name of a garden this mote owns, making the mote that "
+        "project's cover. Nesting is recursion: a mote inside the owned garden "
+        "can own one of its own. A garden has at most one owner -- two claims, "
+        "a claim on a garden that doesn't exist, or a loop are flagged by "
+        "`project_tree`'s problems, never enforced. Written by `start_project`, "
+        "which creates the garden in the same step.",
     "url": "A web address or local file path. core/links.py classifies it "
         "as a URL (has a scheme, or looks like a bare domain) or an "
         "explicit local path ('/', '~', './', '../', or a drive letter) "

@@ -923,3 +923,24 @@ def test_an_included_note_renders_inline(conn, capsys):
     create_mote(conn, {"name": "Method", "modoc": "How it was done."})
     out = render_note(conn, capsys, "\\section{Top}\n\n\\include{Method}")
     assert "Top" in out and "How it was done." in out
+
+
+def test_project_start_tree_and_check(capsys, monkeypatch):
+    import sys
+    from cli.main import main
+    from core import motes as motes_repo
+    from core.db import get_connection
+    from core.gardens import create_garden
+
+    create_garden("college")
+    c = get_connection("college")
+    mid = motes_repo.create_mote(c, {"name": "HW 4"})
+    c.close()
+
+    for argv in (["project", "start", mid], ["project", "tree"], ["project", "check"]):
+        monkeypatch.setattr(sys, "argv", ["monoss", "--garden", "college", *argv])
+        main()
+    out = capsys.readouterr().out
+    assert "Started project hw-4" in out
+    assert "college\n  HW 4  [hw-4]" in out
+    assert "Every garden has at most one owner." in out
