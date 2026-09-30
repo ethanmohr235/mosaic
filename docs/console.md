@@ -241,6 +241,34 @@ phase that builds them.
 - **Species palette: 24 entries** (12 golden-angle hues at two tones in
   the design's band), as U2's `palette.js` has them.
 
+### Settled for U4 (2026-09-30)
+
+- **U4 is `plot` only.** `fit` (fitting a rule's chosen inputs to data
+  series, least squares with numpy) is its own step after U4, with its
+  own plan. `moxie:fit` waits for it.
+- **The `plot` grammar.** Names are garden-scope names (`bd.l`).
+  ```
+  plot bd.sigma bd.tau vs bd.l 4:24 --steps 200
+  plot bd.sigma vs bd.l 4:24 --set bd.E=200e9 --scenario hot --log
+  plot bd.sigma vs bd.l 4:24 by bd.w 1:3     # surface
+  plot sigma vs l --across                   # correlate: one dot per mote with both keys
+  plot "Load curve"      plot #id            # a saved plot, re-solved
+  plot save "Load curve"                     # the only write (undoable)
+  plot export csv|png
+  ```
+  The command parses in `core/` to the spec Saved Plot motes already
+  hold (`core/sweep.py::PLOT_KEY`), so `\graph{…}` and existing saved
+  plots are unchanged.
+- **Series colours: six tokens**, `--s1`…`--s6` in `tokens.css`: Moxie's
+  six colour-vision-checked hues retuned into the design's band, with
+  `--s1`/`--s2` equal to `--c-note`/`--c-event`. A seventh series repeats
+  hue 1 with a dash pattern.
+- **Ported from the old window:** sweep, surface and correlate; knobs
+  (`--set`, dragged in the pane to rewrite the command) and the
+  sensitivity ranking at the cursor; `plot save`; CSV/PNG export.
+  **Not ported:** baselines (`--baseline`) and the grid (tiling replaces
+  it). The old window is deleted.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
@@ -317,7 +345,7 @@ own plan-mode phase and ships something usable.
 | U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
 | U2 | **Done.** **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
 | U3 | **Done.** **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
-| U4 | **Moxie → `mo xie`.** `plot` / `fit` panes on the restyled `plot.js`. | Commands carry view state (ranges, series). |
+| U4 | **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*). `fit` is the step after. | Commands carry view state (ranges, series). |
 | U5 | **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list. | A live, ticking view inside the contract. |
 | U6 | **Mora → `mo ra`.** Document pane as a text-editing pane. | Keyboard capture and `esc` work for editors. |
 | U7 | **Monastery → `mo nastery`.** Agenda pane. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
