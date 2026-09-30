@@ -291,7 +291,7 @@ def print_modoc(document: "modoc.Document", resolution) -> None:
     for index, block in enumerate(document.blocks):
         if index:
             print()
-        _print_block(block, resolution)
+        _print_block(block, document, resolution)
 
 
 def print_diagnostics(document: "modoc.Document", resolution) -> int:
@@ -306,28 +306,93 @@ def print_diagnostics(document: "modoc.Document", resolution) -> int:
     return len(found)
 
 
-def _print_block(block, resolution) -> None:
+def _print_block(block, document, resolution) -> None:
     if isinstance(block, modoc.Heading):
-        text = _inline_text(block.content, resolution)
+        text = _inline_text(block.content, document, resolution)
         print(text if block.level == 1 else text.upper())
         if block.level == 1:
             print("=" * len(text))
     elif isinstance(block, modoc.Paragraph):
-        print(textwrap.fill(_inline_text(block.content, resolution), _WIDTH))
+        print(textwrap.fill(_inline_text(block.content, document, resolution), _WIDTH))
     elif isinstance(block, modoc.ItemList):
-        for item in block.items:
-            print(textwrap.fill(
-                _inline_text(item, resolution), _WIDTH,
-                initial_indent="  - ", subsequent_indent="    ",
-            ))
+        _print_items(block, document, resolution)
     elif isinstance(block, modoc.Equation):
-        print(f"    {_math_text(block.text)}")
+        _print_equation(_math_text(block.text), block.number)
+    elif isinstance(block, modoc.Cited):
+        _print_cited(block, resolution)
+    elif isinstance(block, modoc.Table):
+        _print_table(block, document, resolution)
     elif isinstance(block, modoc.Graph):
         _print_figure(resolution.graphs.get(modoc.graph_key(block)))
+        _print_caption(modoc.FIGURE_LABEL, block, document, resolution)
     elif isinstance(block, modoc.Work):
         print_work(resolution.works.get(modoc.work_key(block)))
     elif isinstance(block, modoc.Section):
         _print_section(resolution.sections.get(modoc.section_key(block)))
+
+
+def _print_items(block, document, resolution) -> None:
+    """`- ` for a bullet, `1. ` for an ordered list. The markers are padded
+    to the same width so a ten-item list does not step in and out."""
+    width = len(f"{len(block.items)}. ") if block.ordered else 2
+    for index, item in enumerate(block.items, start=1):
+        marker = f"{index}. ".ljust(width) if block.ordered else "- ".ljust(width)
+        print(textwrap.fill(
+            _inline_text(item, document, resolution), _WIDTH,
+            initial_indent="  " + marker, subsequent_indent="  " + " " * width,
+        ))
+
+
+def _print_equation(text: str, number: int) -> None:
+    """The number to the right, as LaTeX sets it -- far enough from the maths
+    to read as a label rather than as part of it."""
+    line = f"    {text}"
+    if not number:
+        print(line)
+        return
+    tag = f"({number})"
+    padding = max(_WIDTH - len(line) - len(tag), 2)
+    print(f"{line}{' ' * padding}{tag}")
+
+
+def _print_cited(block, resolution) -> None:
+    """A cited rule prints its equation and says whose it is -- the name is
+    the point, since the citation exists to be referred to by it."""
+    rule = resolution.rules.get(block.rule)
+    if rule is None or rule.error:
+        print(f"    [{rule.error if rule else 'unresolved'}]")
+        return
+    _print_equation(_math_text(rule.equation), block.number)
+    print(f"      -- {rule.name}")
+
+
+def _print_table(block, document, resolution) -> None:
+    rows = [
+        [_inline_text(cell, document, resolution) for cell in row]
+        for row in (block.header, *block.rows)
+    ]
+    widths = [
+        max(len(row[i]) if i < len(row) else 0 for row in rows)
+        for i in range(max(len(row) for row in rows))
+    ]
+    for index, row in enumerate(rows):
+        print("  " + "  ".join(
+            cell.ljust(widths[i]) for i, cell in enumerate(row)
+        ).rstrip())
+        if index == 0:
+            print("  " + "  ".join("-" * width for width in widths))
+    _print_caption(modoc.TABLE_LABEL, block, document, resolution)
+
+
+def _print_caption(kind: str, block, document, resolution) -> None:
+    if not block.number and not block.caption:
+        return
+    word = modoc.LABEL_WORDS.get(kind, kind)
+    text = _inline_text(block.caption, document, resolution)
+    print(textwrap.fill(
+        f"{word} {block.number}{': ' + text if text else ''}", _WIDTH,
+        initial_indent="  ", subsequent_indent="  ",
+    ))
 
 
 def print_work(shown, indent: str = "    ") -> None:
@@ -398,7 +463,7 @@ def _print_section(section) -> None:
         print_calc_rows(section.rows, figures=section.figures)
 
 
-def _inline_text(nodes, resolution) -> str:
+def _inline_text(nodes, document, resolution) -> str:
     parts = []
     for node in nodes:
         if isinstance(node, modoc.Text):
@@ -413,6 +478,10 @@ def _inline_text(nodes, resolution) -> str:
         elif isinstance(node, modoc.Value):
             result = resolution.values.get(modoc.value_key(node))
             parts.append(result.text if result else f"?{node.expression}")
+        elif isinstance(node, modoc.Ref):
+            # Resolved against the document, not the garden -- what a
+            # cross-reference says is a fact about the text.
+            parts.append(modoc.reference_text(document, node))
     return "".join(parts)
 
 

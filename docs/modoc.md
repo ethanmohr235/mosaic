@@ -54,7 +54,13 @@ Each on its own line.
 | `\section{...}` | title |
 | `\subsection{...}` | section rule |
 | `\begin{itemize}` / `\item ...` / `\end{itemize}` | bulleted list |
-| `\begin{equation}` ... `\end{equation}` | display math |
+| `\begin{enumerate}` ... | the same, numbered |
+| `\begin{equation}` ... `\end{equation}` | display math, numbered |
+| `\begin{tabular}` ... `\end{tabular}` | a table -- see below |
+| `\begin{figure}` ... `\end{figure}` | a captioned, numbered figure |
+| `\caption{...}` / `\label{...}` | inside an environment -- see below |
+| `\rule{ΣFx}` | a rule's equation, cited -- see below |
+| `\include{Method}` | another note's blocks, spliced in |
 | `\graph{...}` | a saved Moxie view, drawn here -- see below |
 | `\work{bd.l}` | the shown work for one value -- see below |
 | `\given` `\answers` `\assumptions` `\checks` | a calc section -- see below |
@@ -65,7 +71,8 @@ may contain inline macros (`\section{Status of \mote{atlas}{Atlas}}`).
 
 ### Inline
 
-`\textbf{...}`, `\emph{...}`, `\texttt{...}`, and `$...$` for maths.
+`\textbf{...}`, `\emph{...}`, `\texttt{...}`, `\ref{...}`, and `$...$` for
+maths.
 
 Maths is the one place this grammar does not look inside. A `$...$` body
 and an `\begin{equation}` body are kept as the TeX you typed and are
@@ -277,6 +284,108 @@ the garden -- an FEA probe, a measurement -- which is what a verification
 table compares against a hand calc. The solver never reads it: where a
 value came from changes nothing about how it is used.
 
+## Numbers and cross-references
+
+Equations, figures and tables are numbered, and a `\label` inside one is
+what a `\ref` elsewhere finds.
+
+    \begin{equation}
+    \label{eq:pyth}
+    l = \sqrt{x^2 + y^2}
+    \end{equation}
+
+    By \ref{eq:pyth}, the bar is \val{bd.l}{in} long.
+
+`\ref{eq:pyth}` reads as **Equation 1** -- the kind and the number, not a
+bare digit, so a cross-reference reads as one in a sentence. It may point
+forward as well as back. A `\ref` naming no label renders visibly broken
+(`?eq:pyth`) and shows up under Problems, and a `\label` used twice is
+reported rather than one of them silently winning.
+
+**Three counters, as in LaTeX.** An equation, a figure and a table are
+numbered independently, because a reader looking for Figure 2 should not
+have to know how many equations came before it. `\rule` shares the equation
+counter, since what it prints *is* a numbered equation.
+
+Every `\begin{equation}` is numbered whether or not it is labelled, so the
+numbers a reader sees do not shift the day somebody adds a label.
+
+`\caption{...}` and `\label{...}` go **inside** the environment they are
+about, on their own lines. They are the same two lines in every
+environment, which is why they are read once rather than being each
+environment's own syntax. Outside one, they are a diagnostic.
+
+### `tabular` -- a table
+
+    \begin{tabular}
+    Quantity & Symbol & Value
+    Run      & x      & \val{bd.x}
+    Rise     & y      & \val{bd.y}
+    \caption{Inputs to the bar}
+    \label{tab:in}
+    \end{tabular}
+
+Cells are separated by `&`, rows by lines, and **the first row is the
+header** -- a convention rather than a syntax, because `\hline` and a column
+spec would be two more things to type in a format whose point is to stay
+skimmable in a plain textarea. A trailing `\\` is stripped if you type one
+out of LaTeX habit, and is not required if you don't.
+
+A cell may hold inline macros, so a table of values is a table of lookups
+rather than a table of copies.
+
+### `figure` -- a captioned graph
+
+    \begin{figure}
+    \graph{Load curve}
+    \caption{Load against deflection}
+    \label{fig:load}
+    \end{figure}
+
+A bare `\graph{...}` is unchanged and stays **unnumbered**: it is an
+illustration dropped between two paragraphs. Wrapped in a `figure` it
+becomes something a reader can be sent to. Those are two different things
+to want, and the figure itself is identical either way.
+
+A `figure` needs exactly one `\graph` in it, since it has one caption and
+one number.
+
+### `\rule` -- cite a rule
+
+    \rule{ΣFx}
+
+Prints that rule's equation as a numbered equation, **read from the graph**
+rather than copied into the note. That is the whole point: a document citing
+a rule shows what the rule says *now*, and cannot drift from it the way a
+retyped equation does -- which is exactly the drift `FEA-Homework-4`'s rule
+names had already suffered.
+
+The rule's own name is its label, so `\ref{ΣFx}` works with no separate
+`\label`: a rule already has a name, and asking for a second one would be
+asking twice. A rule a worksheet left unnamed is labelled by its equation
+(`core/rules.py::label_of`), so `\rule{bd.l == bd.x * 2}` cites it too --
+though naming it with a trailing `! ΣFx` on the worksheet line reads better.
+
+Only a mote that really is a rule is citable: an `equation` **and** an
+`applies_to`. A mote with an equation and no `applies_to` is a half-built
+rule the solver skips, and quoting it as though it governed something would
+be the document saying more than the garden does.
+
+### `\include` -- one document across several notes
+
+    \include{Method}
+
+Splices that note's blocks in where the line stands. It is the one macro
+that changes the *document* rather than resolving to something inside it,
+so it is not grammar: `core/modoc_bind.py::assemble()` needs the garden to
+find the note, and the numbering runs over the assembled result -- an
+equation in an included section is Equation 3 of the document, not Equation
+1 of its own note. A `\ref` reaches a `\label` in either direction across
+the splice.
+
+A note that includes itself, a cycle between two notes, and a chain more
+than eight deep are each refused with a diagnostic rather than followed.
+
 ## No clock
 
 Everything above resolves against **the garden as it stands**, and that
@@ -346,7 +455,8 @@ it is, ask `preview_simulation`.
 
 | | |
 | --- | --- |
-| `core/modoc.py` | the grammar. Pure -- no connection, no resolution |
+| `core/modoc.py` | the grammar, and the numbering. Pure -- no connection |
+| `core/modoc_bind.py::assemble` | `\include` spliced in, then numbered as one |
 | `core/modoc_bind.py` | what the macros mean, against a garden |
 | `core/calc.py` | what goes in the five calc sections, and the shown work |
 | `core/plotview.py` | a saved Moxie view, re-solved for a `\graph` |
@@ -359,6 +469,10 @@ disagree about typography and never about meaning.
 
 ## Not yet
 
-* No `\include` -- a note is one property.
-* No tables, figures-with-captions, references or footnotes.
+* No footnotes, no bibliography, no `\cite` (`roadmap.md` → *Not
+  planned*).
+* A table's columns cannot be aligned or spanned -- no column spec, no
+  `\multicolumn`.
+* `\ref` reads as "Equation 1", never as a page or a section number:
+  a note has no pages, and sections are not numbered.
 * `\graph` has two forms. A third waits until these two are used in anger.

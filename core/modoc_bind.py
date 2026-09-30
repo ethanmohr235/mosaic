@@ -32,6 +32,7 @@ from core.calc import format_value  # noqa: F401 -- re-exported
 from core import modoc
 from core import kinds as kinds_repo
 from core import plotview
+from core import rules as rules_repo
 from core.entities import Mote, Relationship
 from core.formula import Context, FormulaError, evaluate_expression
 from core.motes import list_motes
@@ -75,6 +76,22 @@ class ValueResult:
 
 
 @dataclass(frozen=True)
+class CitedRule:
+    """What a `\\rule{...}` came to: the rule's equation, read from the
+    graph rather than copied into the note.
+
+    That is the whole point of citing one. A document showing what a rule
+    says *now* cannot drift from it the way a retyped equation does --
+    which is exactly the drift `FEA-Homework-4`'s rule names had already
+    suffered (core/rules.py::label_of)."""
+    ref: str
+    mote_id: str | None = None
+    name: str = ""
+    equation: str = ""
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class SectionResult:
     """What one of the four calc sections came to: its rows (or, for
     `\\checks`, its constraint results) and a heading for it.
@@ -107,6 +124,7 @@ class Resolution:
     graphs: dict[str, plotview.Figure] = field(default_factory=dict)
     works: dict[str, calc.Work] = field(default_factory=dict)
     sections: dict[str, SectionResult] = field(default_factory=dict)
+    rules: dict[str, CitedRule] = field(default_factory=dict)
     diagnostics: list[modoc.Diagnostic] = field(default_factory=list)
 
 
@@ -129,6 +147,79 @@ class _Garden:
 
     def context(self, mote_id: str) -> Context:
         return expression_context(self.properties, self.relationships, mote_id)
+
+
+def assemble(
+    conn: sqlite3.Connection, note_id: str, depth: int = 0, seen: tuple = ()
+) -> modoc.Document:
+    """A note's document with every `\\include` spliced in, numbered over the
+    whole of it.
+
+    `\\include` is the one macro that changes the *document* rather than
+    resolving to something inside it, so it cannot be grammar: it needs the
+    garden to find the note, and the numbering has to count over the
+    assembled result -- an equation in an included section is "Equation 3"
+    of the document, not "Equation 1" of its own file.
+
+    A cycle is refused with a diagnostic rather than followed: a note that
+    includes itself is a mistake, and recursing until Python's stack gives
+    out is a worse way to say so. So is depth: a chain long enough to hit
+    the limit is a structure nobody meant."""
+    source = modoc.read_source(conn, note_id)
+    document = modoc.parse(source)
+    if not modoc.includes(document):
+        return document
+    return modoc.numbered(modoc.Document(
+        _spliced(conn, document, note_id, depth, seen),
+        list(document.diagnostics),
+    ))
+
+
+MAX_INCLUDE_DEPTH = 8
+
+
+def _spliced(
+    conn: sqlite3.Connection,
+    document: modoc.Document,
+    note_id: str,
+    depth: int,
+    seen: tuple,
+) -> list[modoc.Block]:
+    blocks: list[modoc.Block] = []
+    chain = (*seen, note_id)
+    for block in document.blocks:
+        if not isinstance(block, modoc.Include):
+            blocks.append(block)
+            continue
+        included, problem = _included(conn, block, chain, depth)
+        if problem is not None:
+            document.diagnostics.append(
+                modoc.Diagnostic(block.line, "bad_include", problem))
+            continue
+        blocks.extend(included.blocks)
+        document.diagnostics.extend(included.diagnostics)
+    return blocks
+
+
+def _included(
+    conn: sqlite3.Connection, block: modoc.Include, chain: tuple, depth: int
+) -> tuple[modoc.Document | None, str | None]:
+    if depth >= MAX_INCLUDE_DEPTH:
+        return None, (
+            f"\\include{{{block.ref}}} is more than {MAX_INCLUDE_DEPTH} notes deep "
+            f"-- a chain that long is a structure nobody meant"
+        )
+    mote, error = _find(block.ref, list_motes(conn))
+    if mote is None:
+        return None, f"\\include{{{block.ref}}}: {error}"
+    if mote.id in chain:
+        return None, (
+            f"\\include{{{block.ref}}} would include a note that is already "
+            f"including this one"
+        )
+    if not modoc.has_modoc(mote.properties):
+        return None, f"\\include{{{block.ref}}}: that mote carries no note"
+    return assemble(conn, mote.id, depth + 1, chain), None
 
 
 def resolve(
@@ -172,13 +263,19 @@ def resolve(
         modoc.work_key(node): _work(conn, node, anchor_id, motes)
         for node in modoc.works(document)
     }
+    rules = {
+        node.rule: _cited(node.rule, motes, garden.relationships)
+        for node in modoc.cited(document)
+    }
     # One read of the garden per *kind* of section, however many times the
     # note asks for one -- the same reason `graphs` is keyed by its view.
     sections = {
         modoc.section_key(node): _section(conn, node)
         for node in modoc.sections(document)
     }
-    return Resolution(anchor_id, links, values, graphs, works, sections, diagnostics)
+    return Resolution(
+        anchor_id, links, values, graphs, works, sections, rules, diagnostics
+    )
 
 
 # --- the calc sections -----------------------------------------------
@@ -223,6 +320,53 @@ _SECTION_READERS = {
     "answers": calc.answers,
     "assumptions": calc.assumptions,
 }
+
+
+def _cited(ref: str, motes: list[Mote], relationships: list[Relationship]) -> CitedRule:
+    """The rule a `\\rule{...}` names, and the equation it currently says.
+
+    A mote is only citable as a rule if it *is* one -- an `equation` plus an
+    `applies_to` (core/rules.py). A mote with an equation and no
+    `applies_to` is a half-built rule the solver skips, and quoting it in a
+    document as though it governed something would be the document saying
+    more than the garden does."""
+    mote, error = _find(ref, motes)
+    if mote is None:
+        # A rule a worksheet left unnamed has no `name` property at all --
+        # its label *is* its equation (core/rules.py::label_of). So cite it
+        # by what it is called, which for that rule is the equation itself.
+        mote = _rule_by_label(ref, motes, relationships)
+        if mote is None:
+            return CitedRule(ref, error=error)
+    equation = mote.properties.get(rules_repo.EQUATION_KEY)
+    if not rules_repo.has_equation(mote.properties):
+        return CitedRule(ref, mote.id, _name(mote), error="that mote carries no equation")
+    if mote.id not in rules_repo.rule_ids_in(relationships):
+        return CitedRule(
+            ref, mote.id, _name(mote), str(equation),
+            error=(
+                "that mote has an equation but no applies_to, so it governs "
+                "nothing and the solver skips it"
+            ),
+        )
+    return CitedRule(
+        ref, mote.id, rules_repo.label_of(mote.properties, mote.id), str(equation)
+    )
+
+
+def _rule_by_label(
+    ref: str, motes: list[Mote], relationships: list[Relationship]
+) -> Mote | None:
+    """A rule whose label matches, which is only ever reached for one that
+    has no `name`. Exactly one match, on the same terms `_find` insists on:
+    a citation is meant to pick one specific rule."""
+    rule_ids = rules_repo.rule_ids_in(relationships)
+    matches = [
+        mote for mote in motes
+        if mote.id in rule_ids
+        and rules_repo.label_of(mote.properties, mote.id) == ref.strip()
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _section(conn: sqlite3.Connection, node: modoc.Section) -> SectionResult:
@@ -280,6 +424,12 @@ def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Dia
         if shown is not None and shown.error:
             found.append(modoc.Diagnostic(
                 node.line, "unresolved_work", f"\\work{{{node.target}}}: {shown.error}"
+            ))
+    for node in modoc.cited(document):
+        rule = resolution.rules.get(node.rule)
+        if rule is not None and rule.error:
+            found.append(modoc.Diagnostic(
+                node.line, "unresolved_rule", f"\\rule{{{node.rule}}}: {rule.error}"
             ))
     for node in modoc.sections(document):
         section = resolution.sections.get(modoc.section_key(node))

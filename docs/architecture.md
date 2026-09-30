@@ -737,6 +737,34 @@ figure of its own -- there is one place a figure is designed, one place
 it is computed (`core/sweep.py`), and one renderer that draws it in both
 windows (`frontend_shared/plot.js`). The note refers.
 
+**A document can span several notes, and is numbered as one.**
+`\include{Method}` is the only macro that changes the *document* rather
+than resolving to something inside it, so it is not grammar:
+`core/modoc_bind.py::assemble()` needs the garden to find the note, and
+`core/modoc.py::numbered()` then counts over the assembled result -- an
+equation in an included section is Equation 3 of the document, not
+Equation 1 of its own note, and a `\ref` crosses the splice in either
+direction. That is also why numbering is a separate pure pass rather than
+something the parser does on the way past: it has to be safe to run twice,
+since each piece is parsed (and numbered) before the whole is assembled.
+A cycle and a chain over eight deep are refused with a diagnostic.
+
+**A cross-reference is a fact about the text, not about the garden.**
+`\label`/`\ref` resolve in `core/modoc.py` with no connection in reach,
+which is why `reference_text()` lives there and every surface can call it.
+Three counters, as in LaTeX -- an equation, a figure and a table are
+numbered independently, because a reader looking for Figure 2 should not
+have to know how many equations came before it. A bare `\graph` earns no
+number: it is an illustration between two paragraphs, and only a `figure`
+environment makes it something a reader is sent to.
+
+**`\rule{ΣFx}` cites a rule**, printing the equation the graph currently
+holds as a numbered equation. A document that retyped it could drift, which
+is exactly what `FEA-Homework-4`'s rule names had already done. Only a mote
+that really is a rule is citable -- an `equation` *and* an `applies_to` --
+since quoting a half-built one would be the document saying more than the
+garden does. The rule's own name is its label, because it already has one.
+
 Storage is one reserved property on an ordinary mote, and that is the
 whole design. A note is not a new object type, and carrying one is
 deliberately **not** a kind (Kinds above): every entry in that table is a

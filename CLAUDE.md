@@ -45,7 +45,16 @@ code.
   `core/batch.py`, `core/views.py`), built in the cloud session at the
   user's direction; `monolith/payload.py` re-exports from `core/table.py`
   so the old window still works until U2 deletes it.
-- The next UI step is U2's frontend. The next roadmap step is phase 3.
+- Roadmap **phase 3's backend is done**:
+  - the calc macros `\work`, `\given`, `\answers`, `\assumptions`,
+    `\checks`, and `\val{bd.l}{in, 4}` (`core/calc.py`)
+  - LaTeX basics: numbered equations, `\label`/`\ref`, `\rule` citing a
+    rule, `figure` captions, `tabular`, `enumerate`, and `\include`
+    (`core/modoc.py`, `core/modoc_bind.py::assemble`)
+  - new reserved property `source` (`assumed`, `external`)
+  - `monoss calc ...`; MCP `calc_sections`, `shown_work`
+  - the UI it needs is Mora / console step U6
+- The next UI step is U2's frontend. The next roadmap step is phase 4.
 
 ## Split of work: cloud backend, local frontend
 

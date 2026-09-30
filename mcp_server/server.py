@@ -433,7 +433,9 @@ def resolve_modoc(mote: str, garden: str | None = None) -> dict[str, Any]:
     unresolvable references); a note always resolves, however broken."""
     with _connect(garden) as conn:
         source = modoc_repo.read_source(conn, mote)
-        document = modoc_repo.parse(source)
+        # assemble(), not parse(): `\include` splices another note's blocks
+        # in, and the numbering counts over the whole assembled document.
+        document = modoc_bind_repo.assemble(conn, mote)
         resolution = modoc_bind_repo.resolve(conn, mote, document)
         return {
             "source": source,

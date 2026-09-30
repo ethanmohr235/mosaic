@@ -9,6 +9,7 @@ from core import calc
 from core import health
 from core import modoc
 from core import worksheet
+from core.modoc_bind import assemble as assemble_modoc
 from core.modoc_bind import resolve as resolve_modoc
 from core.motes import create_mote, list_motes, get_mote, delete_mote, search_motes, update_mote
 from core.species import (
@@ -488,7 +489,9 @@ def _handle_modoc(conn, args) -> None:
         print("Specify a modoc action: render, check, values, export, import")
         return
 
-    document = modoc.parse(modoc.read_source(conn, args.id))
+    # assemble(), not parse(): a note's `\include`s are spliced in and the
+    # whole assembled document is numbered as one.
+    document = assemble_modoc(conn, args.id)
     resolution = resolve_modoc(conn, args.id, document)
     if args.action == "check":
         if render.print_diagnostics(document, resolution) == 0:

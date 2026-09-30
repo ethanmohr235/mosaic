@@ -24,6 +24,7 @@ Two rules the grammar leans on, both deliberate:
   the broken part visibly broken -- so every failure becomes a
   Diagnostic and parsing carries on.
 """
+import dataclasses
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -39,7 +40,15 @@ ABOUT = "about"
 # two paragraphs. It is recognized at block level only. So are the calc
 # sections and `\work`, for the same reason -- each is a table or a run of
 # display maths, not something that belongs mid-sentence.
-INLINE_COMMANDS = ("mote", "val", "textbf", "emph", "texttt")
+INLINE_COMMANDS = ("mote", "val", "ref", "textbf", "emph", "texttt")
+
+# Block commands that take one braced argument.
+CAPTION_COMMAND = "caption"
+LABEL_COMMAND = "label"
+# `\caption` and `\label` are about the environment around them rather than
+# part of its body, so they are read by the environment and never appear as
+# blocks of their own.
+META_COMMANDS = (CAPTION_COMMAND, LABEL_COMMAND)
 
 # The five calc sections. `\work` takes the value to show; the other four
 # take nothing, because what goes in them is a property of the garden
@@ -48,8 +57,10 @@ WORK_COMMAND = "work"
 SECTION_COMMANDS = ("given", "answers", "assumptions", "checks")
 CALC_COMMANDS = (WORK_COMMAND, *SECTION_COMMANDS)
 
+# Block commands with one braced argument, and what each makes.
+_BLOCK_HANDLERS = ("section", "subsection", "graph", "rule", "include")
 BLOCK_COMMANDS = (
-    "section", "subsection", "graph", "item", "begin", "end", *CALC_COMMANDS,
+    *_BLOCK_HANDLERS, "item", "begin", "end", *META_COMMANDS, *CALC_COMMANDS,
 )
 
 _ESCAPABLE = "\\{}%$"
@@ -72,6 +83,13 @@ _COMMENT_RE = re.compile(r"(?<!\\)%")
 # `\section{Status of \mote{x}{Atlas}}` has to reach the outer close.
 _BLOCK_RE = re.compile(r"^\\(?P<cmd>[a-zA-Z]+)(?:\[(?P<ref>[^\[\]]*)\])?\{(?P<arg>.*)\}$")
 _ENVIRONMENT_RE = re.compile(r"^\\(begin|end)\{([a-zA-Z]*)\}$")
+# `\caption{...}` / `\label{...}` on their own line inside an environment.
+_META_RE = re.compile(
+    r"^\\(?P<cmd>" + "|".join(META_COMMANDS) + r")\{(?P<arg>.*)\}$"
+)
+# A `\graph{...}` line, wherever it is -- used both as a block of its own
+# and to find the one inside a `figure` environment.
+_FIGURE_RE = re.compile(r"^\\graph\{(?P<arg>[^{}]*)\}$")
 # A calc block: `\work{bd.l}`, `\work{bd.l}{in, 3}`, `\given`, `\checks{3}`.
 # Braces are non-greedy here, unlike _BLOCK_RE's, because a calc argument
 # holds a reference or a format spec rather than inline macros -- so the
@@ -173,7 +191,18 @@ class Value:
     format: Format = field(default_factory=Format)
 
 
-Inline = Text | Styled | Math | Link | Value
+@dataclass(frozen=True)
+class Ref:
+    """`\\ref{eq:bar}` -- the number of whatever carries that `\\label`.
+
+    Resolved against the *document* rather than against the garden, which
+    is why it needs no binder: a cross-reference is a fact about the text,
+    and numbering it is `numbered()` below."""
+    name: str
+    line: int
+
+
+Inline = Text | Styled | Math | Link | Value | Ref
 
 
 # --- block nodes -----------------------------------------------------
@@ -193,14 +222,24 @@ class Paragraph:
 
 @dataclass(frozen=True)
 class ItemList:
+    """`itemize` or, when `ordered`, `enumerate`. One node for both, because
+    a list is a list and the only difference is what the marker says."""
     items: list[list[Inline]]
     line: int
+    ordered: bool = False
 
 
 @dataclass(frozen=True)
 class Equation:
+    """Display maths, numbered in document order.
+
+    `label` is a `\\label{...}` line inside the environment, and is what a
+    `\\ref{...}` elsewhere finds. Numbered whether or not it is labelled, so
+    the numbers a reader sees do not shift when somebody adds a label."""
     text: str
     line: int
+    label: str = ""
+    number: int = 0
 
 
 @dataclass(frozen=True)
@@ -212,8 +251,67 @@ class Graph:
     *is* -- which properties, which ranges, which scenarios, a line or a
     surface or a scatter -- lives on that mote rather than in this
     argument. Which mote it names is core/plotview.py's business, for the
-    same reason `\\mote{...}` leaves resolution to core/modoc_bind.py."""
+    same reason `\\mote{...}` leaves resolution to core/modoc_bind.py.
+
+    A bare `\\graph` has no caption and **no number**: it is an illustration
+    dropped between two paragraphs. Wrapped in `\\begin{figure}` it becomes
+    a numbered, captioned figure a reader can be sent to by `\\ref`. Those
+    are two different things to want, and one node carries both because the
+    figure itself is identical either way."""
     view: str
+    line: int
+    caption: list[Inline] = field(default_factory=list)
+    label: str = ""
+    number: int = 0
+
+
+@dataclass(frozen=True)
+class Table:
+    """`\\begin{tabular}`: rows of cells, `&` between them.
+
+    The first row is the header, which is a convention rather than a
+    syntax -- `\\hline` and a column spec would be two more things to type
+    for a format whose point is to stay skimmable in a plain textarea. A
+    table is numbered and captioned like a figure."""
+    header: list[list[Inline]]
+    rows: list[list[list[Inline]]]
+    line: int
+    caption: list[Inline] = field(default_factory=list)
+    label: str = ""
+    number: int = 0
+
+
+@dataclass(frozen=True)
+class Cited:
+    """`\\rule{ΣFx}`: a rule's equation, quoted as a numbered equation.
+
+    The equation is read from the graph rather than copied into the note,
+    which is the whole point -- a document citing a rule shows what that
+    rule says *now*, and cannot drift from it the way a retyped equation
+    does. Which mote the name finds is core/modoc_bind.py's business.
+
+    The rule's own name is its label, so `\\ref{ΣFx}` works without a
+    separate `\\label` line: a rule already has a name, and asking for a
+    second one would be asking twice."""
+    rule: str
+    line: int
+    number: int = 0
+
+    @property
+    def label(self) -> str:
+        return self.rule
+
+
+@dataclass(frozen=True)
+class Include:
+    """`\\include{Method}`: another note's blocks, spliced in here.
+
+    The one macro that changes the *document* rather than resolving to
+    something inside it, which is why splicing is
+    core/modoc_bind.py::assemble() and not part of the grammar: it needs the
+    garden to find the note, and the numbering has to run over the whole
+    assembled thing rather than over each piece."""
+    ref: str
     line: int
 
 
@@ -246,13 +344,37 @@ class Section:
     format: Format = field(default_factory=Format)
 
 
-Block = Heading | Paragraph | ItemList | Equation | Graph | Work | Section
+Block = (
+    Heading | Paragraph | ItemList | Equation | Graph | Table | Cited | Include
+    | Work | Section
+)
+
+# What a `\label` can point at, and which counter numbers it.
+EQUATION_LABEL = "equation"
+FIGURE_LABEL = "figure"
+TABLE_LABEL = "table"
+
+
+@dataclass(frozen=True)
+class Label:
+    """Where a `\\ref` lands: what kind of thing was labelled, and its
+    number. The kind is carried so a renderer can write "Figure 2" rather
+    than a bare 2 -- which is the difference between a cross-reference and
+    a number sitting in a sentence."""
+    kind: str
+    number: int
+    line: int = 0
 
 
 @dataclass(frozen=True)
 class Document:
     blocks: list[Block] = field(default_factory=list)
     diagnostics: list[Diagnostic] = field(default_factory=list)
+    # Every `\label` in the document, and what it points at. Filled in by
+    # numbered() rather than by the parser, because an `\include` splices
+    # blocks in and the numbers have to be counted over the whole assembled
+    # document rather than over each piece of it.
+    labels: dict[str, Label] = field(default_factory=dict)
 
 
 # --- parsing ---------------------------------------------------------
@@ -263,7 +385,103 @@ def parse(source: str) -> Document:
     parser = _Parser()
     for number, raw in enumerate(source.splitlines(), start=1):
         parser.feed(number, strip_comment(raw).strip())
-    return parser.finish()
+    return numbered(parser.finish())
+
+
+# Which counter each numbered block draws from. Three counters, as in
+# LaTeX: an equation, a figure and a table are numbered independently,
+# because a reader looking for "Figure 2" should not have to know how many
+# equations came before it.
+# The diagnostics numbered() works out for itself, and so must not inherit.
+_RECOMPUTED = frozenset({"unresolved_ref", "duplicate_label"})
+
+_COUNTERS: dict[type, str] = {
+    Equation: EQUATION_LABEL,
+    Cited: EQUATION_LABEL,
+    Graph: FIGURE_LABEL,
+    Table: TABLE_LABEL,
+}
+
+
+def numbered(document: Document) -> Document:
+    """The document with every numbered block numbered and every `\\label`
+    collected, plus a diagnostic for a duplicate label or a `\\ref` to one
+    that does not exist.
+
+    Pure and recomputed from scratch, so it can be run again over a
+    document that has had `\\include`s spliced into it
+    (core/modoc_bind.py::assemble) without the first pass' numbers
+    surviving to confuse the second. A bare `\\graph` -- an illustration
+    between two paragraphs rather than a figure a reader is sent to -- has
+    no caption and no label, and is left unnumbered."""
+    counters: dict[str, int] = {}
+    blocks: list[Block] = []
+    labels: dict[str, Label] = {}
+    # Anything this pass is about to work out again is dropped first, which
+    # is what makes running it twice safe. A `\ref` in an included note may
+    # point at a `\label` in the note that included it, so the first pass
+    # over each piece on its own is *bound* to call some of them dangling;
+    # only the assembled document knows.
+    diagnostics = [d for d in document.diagnostics if d.kind not in _RECOMPUTED]
+
+    for block in document.blocks:
+        kind = _COUNTERS.get(type(block))
+        if kind is None or not _is_numbered(block):
+            blocks.append(block)
+            continue
+        counters[kind] = counters.get(kind, 0) + 1
+        block = dataclasses.replace(block, number=counters[kind])
+        blocks.append(block)
+        if block.label:
+            if block.label in labels:
+                diagnostics.append(Diagnostic(
+                    block.line, "duplicate_label",
+                    f"\\label{{{block.label}}} is used twice -- a \\ref to it "
+                    f"cannot say which one was meant",
+                ))
+            labels.setdefault(block.label, Label(kind, counters[kind], block.line))
+
+    document = Document(blocks, diagnostics, labels)
+    document.diagnostics.extend(_dangling_refs(document))
+    return document
+
+
+def _is_numbered(block: Block) -> bool:
+    """A `\\graph` earns a number by being a figure -- captioned or labelled
+    -- rather than by being a graph. Everything else in the counter table is
+    numbered always."""
+    if isinstance(block, Graph):
+        return bool(block.caption or block.label)
+    return True
+
+
+def _dangling_refs(document: Document) -> list[Diagnostic]:
+    return [
+        Diagnostic(
+            node.line, "unresolved_ref",
+            f"\\ref{{{node.name}}} names no \\label in this document",
+        )
+        for node in _inlines(document)
+        if isinstance(node, Ref) and node.name not in document.labels
+    ]
+
+
+LABEL_WORDS = {
+    EQUATION_LABEL: "Equation",
+    FIGURE_LABEL: "Figure",
+    TABLE_LABEL: "Table",
+}
+
+
+def reference_text(document: Document, node: Ref) -> str:
+    """How a `\\ref` reads: `Figure 2`, or a visibly broken `?name` for one
+    that points nowhere. Here rather than in each renderer, because what a
+    cross-reference *says* is part of the document and only its typography
+    belongs to a surface."""
+    label = document.labels.get(node.name)
+    if label is None:
+        return f"?{node.name}"
+    return f"{LABEL_WORDS.get(label.kind, label.kind)} {label.number}"
 
 
 def strip_comment(line: str) -> str:
@@ -274,26 +492,34 @@ def strip_comment(line: str) -> str:
 
 class _Parser:
     """A line-at-a-time block parser. A class rather than a closure over
-    six locals because `itemize` and `equation` are open/close states,
-    and threading those through a fold reads worse than holding them."""
+    six locals because an environment is an open/close state, and threading
+    that through a fold reads worse than holding it.
+
+    One state covers every environment. It used to be a field per
+    environment -- `_items` and `_equation`, each with its own feed and
+    close -- and adding `enumerate`, `tabular` and `figure` to that shape
+    would have meant five of everything. What differs between them is only
+    how the collected body is read at `\\end`, so that is the only thing
+    kept per environment (`_CLOSERS`); `\\caption` and `\\label` are the
+    same two lines inside all of them and are read once, here."""
 
     def __init__(self) -> None:
         self.blocks: list[Block] = []
         self.diagnostics: list[Diagnostic] = []
         self._para: list[str] = []
         self._para_line = 0
-        # [line, text] pairs, not bare strings: a bad \val on the
-        # third item should be reported at the third item, not at the
-        # \begin{itemize} the whole list opened on.
-        self._items: list[list] | None = None
-        self._equation: list[str] | None = None
+        self._env: str | None = None
+        # [line, text] pairs, not bare strings: a bad \val on the third item
+        # should be reported at the third item, not at the \begin the whole
+        # list opened on.
+        self._body: list[list] = []
+        self._caption = ""
+        self._label = ""
         self._open_line = 0
 
     def feed(self, number: int, line: str) -> None:
-        if self._equation is not None:
-            self._feed_equation(number, line)
-        elif self._items is not None:
-            self._feed_item(number, line)
+        if self._env is not None:
+            self._feed_environment(number, line)
         elif not line:
             self._flush()
         elif line.startswith("\\"):
@@ -302,45 +528,113 @@ class _Parser:
             self._push(number, line)
 
     def finish(self) -> Document:
-        for state, name in ((self._items, "itemize"), (self._equation, "equation")):
-            if state is not None:
-                self.diagnostics.append(Diagnostic(
-                    self._open_line, "unterminated",
-                    f"\\begin{{{name}}} was never closed with \\end{{{name}}}",
-                ))
-        self._close_itemize(self._open_line)
-        self._close_equation(self._open_line)
+        if self._env is not None:
+            self.diagnostics.append(Diagnostic(
+                self._open_line, "unterminated",
+                f"\\begin{{{self._env}}} was never closed with \\end{{{self._env}}}",
+            ))
+            self._close(self._open_line)
         self._flush()
         return Document(self.blocks, self.diagnostics)
 
-    # -- states --
+    # -- environments --
 
-    def _feed_equation(self, number: int, line: str) -> None:
-        if line == "\\end{equation}":
-            self._close_equation(number)
-        else:
-            self._equation.append(line)
+    def _open(self, number: int, name: str) -> None:
+        self._flush()
+        self._env, self._open_line = name, number
+        self._body, self._caption, self._label = [], "", ""
 
-    def _feed_item(self, number: int, line: str) -> None:
-        if line == "\\end{itemize}":
-            self._close_itemize(number)
-        elif line.startswith("\\item"):
-            self._items.append([number, line[len("\\item"):].strip()])
-        elif line and self._items:
-            self._items[-1][1] += " " + line
-        elif line:
-            self.diagnostics.append(Diagnostic(
-                number, "stray_text", "text inside itemize before the first \\item",
+    def _feed_environment(self, number: int, line: str) -> None:
+        if line == f"\\end{{{self._env}}}":
+            self._close(number)
+            return
+        meta = _META_RE.match(line)
+        if meta is not None:
+            # `\caption` and `\label` are about the environment rather than
+            # part of its body, in every environment that has one.
+            if meta.group("cmd") == CAPTION_COMMAND:
+                self._caption = meta.group("arg").strip()
+            else:
+                self._label = meta.group("arg").strip()
+            return
+        self._body.append([number, line])
+
+    def _close(self, number: int) -> None:
+        name, body = self._env, self._body
+        self._env, self._body = None, []
+        if name is None:
+            return
+        _CLOSERS[name](self, name, body, self._open_line or number)
+
+    def _close_list(self, name: str, body: list[list], line: int) -> None:
+        """`\\item` starts an item and a bare line continues the one
+        before, so an item that wraps in the editor is still one item."""
+        items: list[list] = []
+        for at, text in body:
+            if text.startswith("\\item"):
+                items.append([at, text[len("\\item"):].strip()])
+            elif text and items:
+                items[-1][1] += " " + text
+            elif text:
+                self.diagnostics.append(Diagnostic(
+                    at, "stray_text", f"text inside {name} before the first \\item",
+                ))
+        if items:
+            self.blocks.append(ItemList(
+                [self._inline(at, text) for at, text in items],
+                line,
+                ordered=name == "enumerate",
             ))
 
-    def _feed_command(self, number: int, line: str) -> None:
-        if line == "\\begin{itemize}":
-            self._flush()
-            self._items, self._open_line = [], number
+    def _close_equation(self, _name: str, body: list[list], line: int) -> None:
+        self.blocks.append(Equation(
+            " ".join(text for _at, text in body).strip(), line, self._label,
+        ))
+
+    def _close_tabular(self, _name: str, body: list[list], line: int) -> None:
+        """Rows of cells, `&` between them, the first row the header. A
+        trailing `\\\\` is stripped rather than required: a LaTeX habit
+        should not be a syntax error, and its absence should not be one
+        either."""
+        rows = [
+            [self._inline(at, cell.strip()) for cell in _row_cells(text)]
+            for at, text in body if text.strip(" \\")
+        ]
+        if not rows:
+            self.diagnostics.append(Diagnostic(
+                line, "empty_table", "\\begin{tabular} has no rows in it",
+            ))
             return
-        if line == "\\begin{equation}":
-            self._flush()
-            self._equation, self._open_line = [], number
+        self.blocks.append(Table(
+            rows[0], rows[1:], line, self._inline(line, self._caption), self._label,
+        ))
+
+    def _close_figure(self, _name: str, body: list[list], line: int) -> None:
+        """A figure is a `\\graph` with a caption and a number around it, so
+        the environment only has to find the graph inside itself."""
+        views = [
+            match.group("arg").strip()
+            for _at, text in body
+            if (match := _FIGURE_RE.match(text)) is not None
+        ]
+        if len(views) != 1:
+            self.diagnostics.append(Diagnostic(
+                line, "bad_figure",
+                f"\\begin{{figure}} holds {len(views)} \\graph lines -- it needs "
+                f"exactly one, since a figure has one caption and one number",
+            ))
+            if not views:
+                return
+        self.blocks.append(Graph(
+            views[0], line, self._inline(line, self._caption), self._label,
+        ))
+
+
+
+    def _feed_command(self, number: int, line: str) -> None:
+        environment = _ENVIRONMENT_RE.match(line)
+        if environment is not None:
+            self._feed_environment_command(number, *environment.groups())
             return
         # Before _BLOCK_RE, whose greedy argument would swallow a calc
         # command's second brace into its first.
@@ -349,25 +643,59 @@ class _Parser:
             self._flush()
             self._feed_calc(number, calc)
             return
-        environment = _ENVIRONMENT_RE.match(line)
-        if environment is not None:
+        meta = _META_RE.match(line)
+        if meta is not None:
             self.diagnostics.append(Diagnostic(
-                number, "stray_environment",
-                f"\\{environment.group(1)}{{{environment.group(2)}}} outside any "
-                f"itemize or equation block",
+                number, "stray_meta",
+                f"\\{meta.group('cmd')}{{...}} belongs inside an environment -- "
+                f"put it between \\begin{{...}} and \\end{{...}}",
             ))
             return
         match = _BLOCK_RE.match(line)
-        if match is None or match.group("cmd") not in ("section", "subsection", "graph"):
+        if match is None or match.group("cmd") not in _BLOCK_HANDLERS:
             self._push(number, line)
             return
         self._flush()
         command, arg = match.group("cmd"), match.group("arg")
         if command == "graph":
             self._feed_graph(number, arg, match.group("ref"))
+        elif command == "rule":
+            self._feed_cited(number, arg)
+        elif command == "include":
+            self._feed_include(number, arg)
         else:
             level = 1 if command == "section" else 2
             self.blocks.append(Heading(level, self._inline(number, arg), number))
+
+    def _feed_environment_command(self, number: int, verb: str, name: str) -> None:
+        if verb == "begin" and name in ENVIRONMENTS:
+            self._open(number, name)
+            return
+        self.diagnostics.append(Diagnostic(
+            number, "stray_environment",
+            f"\\{verb}{{{name}}} outside any environment -- the ones this format "
+            f"knows are {', '.join(ENVIRONMENTS)}",
+        ))
+
+    def _feed_cited(self, number: int, arg: str) -> None:
+        rule = arg.strip()
+        if not rule:
+            self.diagnostics.append(Diagnostic(
+                number, "bad_rule",
+                "\\rule{} needs the name or id of a rule, e.g. \\rule{ΣFx}",
+            ))
+            return
+        self.blocks.append(Cited(rule, number))
+
+    def _feed_include(self, number: int, arg: str) -> None:
+        ref = arg.strip()
+        if not ref:
+            self.diagnostics.append(Diagnostic(
+                number, "bad_include",
+                "\\include{} needs the name or id of the note to include",
+            ))
+            return
+        self.blocks.append(Include(ref, number))
 
     def _feed_calc(self, number: int, match: re.Match) -> None:
         """`\\work` needs to know which value; the four section commands
@@ -432,25 +760,24 @@ class _Parser:
         self.blocks.append(Paragraph(content, self._para_line))
         self._para = []
 
-    def _close_itemize(self, number: int) -> None:
-        if self._items is None:
-            return
-        line = self._open_line or number
-        items = [self._inline(at, text) for at, text in self._items]
-        if items:
-            self.blocks.append(ItemList(items, line))
-        self._items = None
-
-    def _close_equation(self, number: int) -> None:
-        if self._equation is None:
-            return
-        self.blocks.append(Equation(" ".join(self._equation).strip(), self._open_line or number))
-        self._equation = None
-
     def _inline(self, number: int, text: str) -> list[Inline]:
         nodes, diagnostics = parse_inline(text, number)
         self.diagnostics.extend(diagnostics)
         return nodes
+
+
+def _row_cells(text: str) -> list[str]:
+    return text.rstrip().removesuffix("\\\\").split("&")
+
+
+_CLOSERS = {
+    "itemize": _Parser._close_list,
+    "enumerate": _Parser._close_list,
+    "equation": _Parser._close_equation,
+    "tabular": _Parser._close_tabular,
+    "figure": _Parser._close_figure,
+}
+ENVIRONMENTS = tuple(_CLOSERS)
 
 
 def parse_inline(text: str, line: int = 1) -> tuple[list[Inline], list[Diagnostic]]:
@@ -491,6 +818,8 @@ def _inline_node(match: re.Match, line: int) -> Inline:
     command, first, second = match.group("cmd"), match.group("first"), match.group("second")
     if command == "mote":
         return Link(first.strip(), second, line)
+    if command == "ref":
+        return Ref(first.strip(), line)
     if command == "val":
         ref = match.group("ref")
         return Value(
@@ -504,13 +833,25 @@ def _append_text(
 ) -> None:
     for stray in _STRAY_COMMAND_RE.finditer(text):
         name = stray.group(1)
-        known = name in INLINE_COMMANDS or name in BLOCK_COMMANDS
-        diagnostics.append(Diagnostic(
-            line, "unknown_command",
-            f"\\{name} takes an argument, e.g. \\{name}{{...}}" if known
-            else f"unknown command \\{name}",
-        ))
+        diagnostics.append(Diagnostic(line, "unknown_command", _stray_message(name)))
     nodes.append(Text(text))
+
+
+def _stray_message(name: str) -> str:
+    """Why a backslash-word is left over: an unknown command, a known one
+    missing its argument, or -- the confusing case worth naming -- a block
+    command used mid-sentence, where it cannot be seen at all.
+
+    `\\rule{ΣFx}` inside a paragraph reads as "takes an argument" otherwise,
+    which is the one thing it plainly does have."""
+    if name in BLOCK_COMMANDS and name not in INLINE_COMMANDS:
+        return (
+            f"\\{name} is a block command -- put it on a line of its own. To "
+            f"mention one inside a sentence, label it and use \\ref{{...}}"
+        )
+    if name in INLINE_COMMANDS:
+        return f"\\{name} takes an argument, e.g. \\{name}{{...}}"
+    return f"unknown command \\{name}"
 
 
 # --- reading a document back -----------------------------------------
@@ -529,6 +870,14 @@ def graphs(document: Document) -> list[Graph]:
 
 def works(document: Document) -> list[Work]:
     return [b for b in document.blocks if isinstance(b, Work)]
+
+
+def includes(document: Document) -> list[Include]:
+    return [b for b in document.blocks if isinstance(b, Include)]
+
+
+def cited(document: Document) -> list[Cited]:
+    return [b for b in document.blocks if isinstance(b, Cited)]
 
 
 def sections(document: Document) -> list[Section]:
@@ -565,7 +914,14 @@ def _format_key(spec: Format) -> str:
 
 def _inlines(document: Document):
     for block in document.blocks:
-        if isinstance(block, (Heading, Paragraph)):
+        if isinstance(block, Table):
+            for row in (block.header, *block.rows):
+                for cell in row:
+                    yield from cell
+            yield from block.caption
+        elif isinstance(block, Graph):
+            yield from block.caption
+        elif isinstance(block, (Heading, Paragraph)):
             yield from block.content
         elif isinstance(block, ItemList):
             for item in block.items:

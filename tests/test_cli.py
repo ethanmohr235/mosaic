@@ -858,3 +858,68 @@ def test_calc_rejects_an_unknown_action(conn, capsys):
     args.action = "frobnicate"
     _handle_calc(conn, args)
     assert "Specify a calc action" in capsys.readouterr().out
+
+
+# ---- rendering the LaTeX basics ----
+
+def render_note(conn, capsys, source: str, extra: dict | None = None) -> str:
+    note = create_mote(conn, {"modoc": source, **(extra or {})})
+    capsys.readouterr()
+    _handle_modoc(conn, parse(["modoc", "render", note]))
+    return capsys.readouterr().out
+
+
+def test_a_numbered_equation_prints_its_number_to_the_right(conn, capsys):
+    out = render_note(conn, capsys, "\\begin{equation}\nx = 1\n\\end{equation}")
+    assert out.strip().startswith("x = 1")
+    assert out.rstrip().endswith("(1)")
+
+
+def test_a_ref_prints_the_kind_and_the_number(conn, capsys):
+    out = render_note(
+        conn, capsys,
+        "\\begin{equation}\n\\label{eq:a}\nx\n\\end{equation}\n\nSee \\ref{eq:a}.")
+    assert "See Equation 1." in out
+
+
+def test_an_ordered_list_prints_numbers(conn, capsys):
+    out = render_note(
+        conn, capsys, "\\begin{enumerate}\n\\item one\n\\item two\n\\end{enumerate}")
+    assert "1. one" in out and "2. two" in out
+
+
+def test_a_table_prints_aligned_columns_with_a_rule_under_the_header(conn, capsys):
+    out = render_note(
+        conn, capsys,
+        "\\begin{tabular}\nName & Value\nlonger & 80\n\\caption{Inputs}\n\\end{tabular}")
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert lines[0].split() == ["Name", "Value"]
+    assert set(lines[1].strip()) == {"-", " "}
+    assert "Table 1: Inputs" in out
+
+
+def test_a_figure_prints_its_caption_under_it(conn, capsys):
+    out = render_note(
+        conn, capsys,
+        "\\begin{figure}\n\\graph{Nope}\n\\caption{The load}\n\\end{figure}")
+    assert "Figure 1: The load" in out
+
+
+def test_a_bare_graph_prints_no_caption_line(conn, capsys):
+    out = render_note(conn, capsys, "\\graph{Nope}")
+    assert "Figure" not in out
+
+
+def test_a_cited_rule_prints_its_equation_and_whose_it_is(conn, capsys):
+    from core import worksheet
+    worksheet.apply(conn, "bd.x = 80\n\nbd.l = bd.x * 2  ! Doubling")
+    out = render_note(conn, capsys, "\\rule{Doubling}")
+    assert "bd.l == bd.x * 2" in out
+    assert "-- Doubling" in out
+    assert "(1)" in out
+
+
+def test_an_included_note_renders_inline(conn, capsys):
+    create_mote(conn, {"name": "Method", "modoc": "How it was done."})
+    out = render_note(conn, capsys, "\\section{Top}\n\n\\include{Method}")
+    assert "Top" in out and "How it was done." in out

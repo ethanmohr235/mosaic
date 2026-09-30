@@ -82,7 +82,11 @@ Each one was a separate act of filing. That lesson became a rule in
   V&V table reads. See `modoc.md`.
 - **LaTeX basics:** numbered equations with `\label`/`\ref`, citable
   rules, figures with captions, `tabular`, `enumerate`, and `\include`
-  for multi-note documents.
+  for multi-note documents. **Decided:** `\caption`/`\label` go inside
+  the environment they describe; a bare `\graph` stays unnumbered and
+  only a `figure` environment numbers one; a table's first row is its
+  header; a cited rule's own name is its label; `\include` splices and
+  the whole assembled document is numbered as one. See `modoc.md`.
 - **Output:** export `.tex` with every value frozen and graphs written as
   figure files. **Bundle tectonic** so real PDFs work everywhere. This
   was approved in principle; confirm packaging in its phase.
@@ -124,7 +128,7 @@ alongside all of them.
 |---|---|---|
 | 1 | **Done.** Cleanup: remove Momentum; freeze Monarch; cut commit-tick and run history | Fewer surfaces, less code |
 | 2 | **Backend done.** Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
-| 3 | **Calc macros done; LaTeX basics next.** Mora calc macros and LaTeX basics | A gradeable homework document |
+| 3 | **Backend done.** Mora calc macros and LaTeX basics | A gradeable homework document |
 | 4 | Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
 | 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |

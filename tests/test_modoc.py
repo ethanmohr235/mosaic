@@ -13,11 +13,14 @@ from core.modoc import (
     Graph,
     Heading,
     ItemList,
+    Cited,
+    Include,
     Link,
     MODOC_KEY,
     Math,
     Paragraph,
     Styled,
+    Table,
     Text,
     Value,
     anchor,
@@ -81,7 +84,7 @@ def test_a_wrapped_item_continues_the_previous_one():
 
 def test_equation_keeps_its_source_for_the_math_reader():
     document = parse("\\begin{equation}\nC = \\alpha n\n\\end{equation}")
-    assert document.blocks == [Equation("C = \\alpha n", 1)]
+    assert document.blocks == [Equation("C = \\alpha n", 1, number=1)]
 
 
 def test_comments_are_dropped_but_escaped_percents_survive():
@@ -391,3 +394,196 @@ def test_two_vals_asking_for_different_units_do_not_share_a_key():
 def test_two_identical_vals_still_share_a_key():
     a, b = modoc.values(modoc.parse("\\val{l}{in} and \\val{l}{in}"))
     assert modoc.value_key(a) == modoc.value_key(b)
+
+
+# ---- LaTeX basics: numbering, cross-references, lists, tables ----
+
+def test_enumerate_is_an_ordered_list():
+    block = modoc.parse(
+        "\\begin{enumerate}\n\\item first\n\\item second\n\\end{enumerate}").blocks[0]
+    assert isinstance(block, ItemList)
+    assert block.ordered
+    assert len(block.items) == 2
+
+
+def test_itemize_is_still_unordered():
+    block = modoc.parse("\\begin{itemize}\n\\item one\n\\end{itemize}").blocks[0]
+    assert not block.ordered
+
+
+def test_a_wrapped_item_is_still_one_item():
+    block = modoc.parse(
+        "\\begin{enumerate}\n\\item first\nand more\n\\item second\n\\end{enumerate}"
+    ).blocks[0]
+    assert len(block.items) == 2
+    assert block.items[0][0].text == "first and more"
+
+
+def test_an_unclosed_environment_is_reported_and_still_yields_its_block():
+    document = modoc.parse("\\begin{enumerate}\n\\item one")
+    assert document.diagnostics[0].kind == "unterminated"
+    assert isinstance(document.blocks[0], ItemList)
+
+
+def test_an_unknown_environment_is_reported():
+    document = modoc.parse("\\begin{verbatim}\nx\n\\end{verbatim}")
+    assert document.diagnostics[0].kind == "stray_environment"
+    assert "itemize" in document.diagnostics[0].message
+
+
+def test_equations_are_numbered_in_document_order():
+    document = modoc.parse(
+        "\\begin{equation}\na\n\\end{equation}\n\n\\begin{equation}\nb\n\\end{equation}")
+    assert [b.number for b in document.blocks] == [1, 2]
+
+
+def test_a_label_inside_an_environment_is_not_part_of_its_body():
+    block = modoc.parse(
+        "\\begin{equation}\n\\label{eq:a}\nx = 1\n\\end{equation}").blocks[0]
+    assert block.text == "x = 1"
+    assert block.label == "eq:a"
+
+
+def test_a_ref_reads_as_the_kind_and_the_number():
+    document = modoc.parse(
+        "\\begin{equation}\n\\label{eq:a}\nx\n\\end{equation}\n\nSee \\ref{eq:a}.")
+    (ref,) = [n for n in modoc._inlines(document) if isinstance(n, modoc.Ref)]
+    assert modoc.reference_text(document, ref) == "Equation 1"
+
+
+def test_a_ref_to_nothing_is_visibly_broken_and_reported():
+    document = modoc.parse("See \\ref{nope}.")
+    (ref,) = [n for n in modoc._inlines(document) if isinstance(n, modoc.Ref)]
+    assert modoc.reference_text(document, ref) == "?nope"
+    assert document.diagnostics[0].kind == "unresolved_ref"
+
+
+def test_a_ref_may_point_forward():
+    document = modoc.parse(
+        "See \\ref{eq:a}.\n\n\\begin{equation}\n\\label{eq:a}\nx\n\\end{equation}")
+    assert document.diagnostics == []
+
+
+def test_a_duplicate_label_is_reported():
+    document = modoc.parse(
+        "\\begin{equation}\n\\label{a}\nx\n\\end{equation}\n\n"
+        "\\begin{equation}\n\\label{a}\ny\n\\end{equation}")
+    assert document.diagnostics[0].kind == "duplicate_label"
+
+
+def test_equations_figures_and_tables_are_counted_separately():
+    """A reader looking for "Figure 2" should not have to know how many
+    equations came before it."""
+    document = modoc.parse(
+        "\\begin{equation}\nx\n\\end{equation}\n\n"
+        "\\begin{figure}\n\\graph{V}\n\\caption{c}\n\\end{figure}\n\n"
+        "\\begin{tabular}\na & b\n\\end{tabular}\n\n"
+        "\\begin{figure}\n\\graph{W}\n\\caption{d}\n\\end{figure}")
+    assert [b.number for b in document.blocks] == [1, 1, 1, 2]
+
+
+def test_a_bare_graph_is_not_numbered():
+    """An illustration between two paragraphs, not a figure a reader is sent
+    to."""
+    document = modoc.parse("\\graph{Load curve}")
+    assert document.blocks[0].number == 0
+    assert document.blocks[0].caption == []
+
+
+def test_a_figure_is_a_graph_with_a_caption_and_a_number():
+    block = modoc.parse(
+        "\\begin{figure}\n\\graph{Load}\n\\caption{The load}\n\\label{fig:l}\n"
+        "\\end{figure}").blocks[0]
+    assert isinstance(block, Graph)
+    assert block.view == "Load"
+    assert block.number == 1
+    assert block.label == "fig:l"
+    assert block.caption[0].text == "The load"
+
+
+def test_a_figure_needs_exactly_one_graph():
+    document = modoc.parse("\\begin{figure}\n\\caption{nothing}\n\\end{figure}")
+    assert document.diagnostics[0].kind == "bad_figure"
+    assert not modoc.graphs(document)
+
+
+def test_a_table_reads_its_first_row_as_the_header():
+    block = modoc.parse(
+        "\\begin{tabular}\nName & Value\nx & 80\n\\end{tabular}").blocks[0]
+    assert isinstance(block, Table)
+    assert [c[0].text for c in block.header] == ["Name", "Value"]
+    assert [c[0].text for c in block.rows[0]] == ["x", "80"]
+
+
+def test_a_trailing_double_backslash_in_a_row_is_stripped():
+    """A LaTeX habit should not be a syntax error, and its absence should
+    not be one either."""
+    with_slashes = modoc.parse(
+        "\\begin{tabular}\nName & Value \\\\\nx & 80 \\\\\n\\end{tabular}").blocks[0]
+    without = modoc.parse(
+        "\\begin{tabular}\nName & Value\nx & 80\n\\end{tabular}").blocks[0]
+    assert with_slashes == without
+
+
+def test_a_table_cell_may_hold_an_inline_macro():
+    block = modoc.parse(
+        "\\begin{tabular}\nName & Value\nx & \\val{bd.x}\n\\end{tabular}").blocks[0]
+    assert isinstance(block.rows[0][1][0], modoc.Value)
+
+
+def test_an_empty_table_is_reported():
+    document = modoc.parse("\\begin{tabular}\n\\caption{c}\n\\end{tabular}")
+    assert document.diagnostics[0].kind == "empty_table"
+    assert document.blocks == []
+
+
+def test_rule_cites_by_name_and_is_its_own_label():
+    """A rule already has a name; asking for a `\\label` too would be asking
+    twice."""
+    document = modoc.parse("\\rule{ΣFx}\n\nBy \\ref{ΣFx}.")
+    block = document.blocks[0]
+    assert isinstance(block, Cited)
+    assert (block.rule, block.label, block.number) == ("ΣFx", "ΣFx", 1)
+    assert document.diagnostics == []
+
+
+def test_rule_shares_the_equation_counter():
+    document = modoc.parse(
+        "\\begin{equation}\nx\n\\end{equation}\n\n\\rule{ΣFx}")
+    assert [b.number for b in document.blocks] == [1, 2]
+
+
+def test_rule_with_no_argument_is_reported():
+    document = modoc.parse("\\rule{}")
+    assert document.diagnostics[0].kind == "bad_rule"
+
+
+def test_include_is_a_block_of_its_own():
+    block = modoc.parse("\\include{Method}").blocks[0]
+    assert isinstance(block, Include)
+    assert block.ref == "Method"
+
+
+def test_include_with_no_argument_is_reported():
+    assert modoc.parse("\\include{}").diagnostics[0].kind == "bad_include"
+
+
+def test_a_block_command_inside_a_sentence_says_to_move_it():
+    """Rather than "takes an argument", which is the one thing it plainly
+    does have."""
+    document = modoc.parse("It follows from \\rule{ΣFx} above.")
+    assert "block command" in document.diagnostics[0].message
+
+
+def test_caption_outside_an_environment_is_reported():
+    assert modoc.parse("\\caption{loose}").diagnostics[0].kind == "stray_meta"
+
+
+def test_numbered_is_safe_to_run_twice():
+    """Which is what lets an assembled document be numbered over the whole
+    of it after each piece was numbered on its own."""
+    once = modoc.parse("\\begin{equation}\n\\label{a}\nx\n\\end{equation}\n\nSee \\ref{a}.")
+    twice = modoc.numbered(once)
+    assert twice.blocks == once.blocks
+    assert twice.labels == once.labels
+    assert twice.diagnostics == once.diagnostics
