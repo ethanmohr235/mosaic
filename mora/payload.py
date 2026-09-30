@@ -135,37 +135,7 @@ def _graph_block(block: modoc.Graph, resolution: Resolution) -> dict:
 
 
 def _figure(figure: plotview.Figure) -> dict:
-    """A core/plotview.py Figure on the wire. Flat and already-reduced:
-    the frontend hands it to the shared plot renderer (frontend_shared/
-    plot.js) and decides nothing about it beyond colour and size."""
-    return {
-        "mode": figure.mode,
-        "name": figure.name,
-        "viewId": figure.view_id,
-        "xLabel": figure.x_label,
-        "yLabel": figure.y_label,
-        "yScale": figure.y_scale,
-        "xLo": figure.x_lo, "xHi": figure.x_hi,
-        "yLo": figure.y_lo, "yHi": figure.y_hi,
-        "bands": [
-            {"label": b.label, "unit": b.unit, "lo": b.lo, "hi": b.hi, "series": b.series}
-            for b in figure.bands
-        ],
-        "series": [
-            {"id": s.id, "label": s.label, "unit": s.unit, "band": s.band,
-             "points": s.points, "ghost": s.ghost}
-            for s in figure.series
-        ],
-        "failed": [{"x0": s.x0, "x1": s.x1, "message": s.message} for s in figure.failed],
-        "violated": [{"x0": s.x0, "x1": s.x1, "message": s.message} for s in figure.violated],
-        "broken": figure.broken,
-        "cells": figure.cells,
-        "rows": figure.rows, "cols": figure.cols,
-        "lo": figure.lo, "hi": figure.hi,
-        "dots": figure.dots,
-        "solves": figure.solves,
-        "error": figure.error,
-    }
+    return plotview.figure_json(figure)
 
 
 def _content(nodes, resolution: Resolution, directory: Directory) -> list[dict]:

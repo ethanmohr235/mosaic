@@ -23,6 +23,7 @@ BRIDGE = {
 }
 # api.monolith (U2). The walk collects bare method names.
 MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
+MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png"}  # U4
 
 
 @pytest.fixture
@@ -50,13 +51,15 @@ def test_boot_shape(api):
                          "active", "working", "history"}
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
+    assert boot["apps"][2] == {"suffix": "xie", "name": "Moxie",
+                               "defaultView": "moxie:plot", "legacy": None}
     assert boot["apps"][3] == {"suffix": "tion", "name": "Motion",
                                "defaultView": None, "legacy": "motion"}
     assert [a["suffix"] for a in boot["apps"]] == [
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None}
-    assert boot["verbs"][7] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][8] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"]) == (
         [], None, None, [])
@@ -85,10 +88,10 @@ def _reachable(obj, seen=None):
 
 def test_pywebview_walk_reaches_no_connection(api):
     seen = _reachable(api)
-    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE
+    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api, api.monolith, api.mote]
+    assert seen["objects"] == [api, api.monolith, api.mote, api.moxie]
 
 
 # ---- statements --------------------------------------------------------------
@@ -503,3 +506,97 @@ def test_mo_says_what_is_wrong(api, line, message):
 def test_a_bare_suffix_is_a_statement_now(api):
     effect = api.run("tion")
     assert effect["effect"] == "statement" and effect["moteName"] == "tion"
+
+
+# ---- plot (U4) ---------------------------------------------------------------
+
+@pytest.fixture
+def divider(api):
+    from core.relationships import create_relationship
+    from core.rules import APPLIES_TO, FREEDOMS_KEY
+    from core.species import set_species
+    conn = api._session.conn
+    species = motes_repo.create_mote(conn, {"name": "Divider", FREEDOMS_KEY: "current"})
+    rule = motes_repo.create_mote(conn, {"name": "series", "equation": "current * (r_a + r_b) == voltage"})
+    create_relationship(conn, rule, species, APPLIES_TO)
+    circuit = motes_repo.create_mote(conn, {"name": "C1", "voltage": 10, "r_a": 100, "r_b": 200})
+    set_species(conn, circuit, species)
+    return circuit
+
+
+LINE = "plot C1.current vs C1.voltage 0:300 --steps 30"
+
+
+def test_mo_xie_opens_the_plot_pane(api):
+    assert api.run("mo xie") == {"effect": "open_view", "view": "moxie:plot", "command": "plot"}
+    assert api.resolve(LINE) == {"view": "moxie:plot", "command": LINE}
+    assert "error" in api.resolve("plot export csv")
+
+
+def test_a_plot_line_opens_a_pane_with_the_literal_line(api):
+    assert api.run(LINE) == {"effect": "open_view", "view": "moxie:plot", "command": LINE}
+
+
+def test_the_plot_payload_coarse_then_full(api, divider):
+    coarse = api.moxie.plot(LINE, True)
+    full = api.moxie.plot(LINE)
+    assert coarse["coarse"] and not full["coarse"]
+    assert len(coarse["figure"]["series"][0]["points"]) < len(full["figure"]["series"][0]["points"]) == 31
+    assert full["series"] == [{"id": "s0", "ref": "C1.current", "hidden": False}]
+    assert full["mode"] == "sweep" and not full["xPinned"] and not full["saved"]
+    assert api.moxie.plot("plot")["empty"]
+    assert "no mote named" in api.moxie.plot("plot C9.x vs C1.voltage 0:1")["error"]
+
+
+def test_a_plot_writes_nothing(api, divider):
+    before = motes_repo.get_mote(api._session.conn, divider).properties
+    api.moxie.plot(LINE + " --set C1.r_a=5")
+    assert motes_repo.get_mote(api._session.conn, divider).properties == before
+
+
+def test_rewrite_moves_a_knob_and_writes_a_saved_plot_out(api, divider):
+    moved = api.moxie.rewrite(LINE, {"set": {"ref": "C1.r_a", "value": 50}})
+    assert moved == {"command": LINE + " --set C1.r_a=50"}
+    api.run('plot save Load ' + LINE)
+    assert api.moxie.rewrite("plot Load", {"log": True}) == {"command": LINE + " --log"}
+
+
+def test_plot_save_is_one_undoable_write(api, divider):
+    effect = api.run("plot save Load " + LINE)
+    assert effect["effect"] == "statement" and effect["wrote"]
+    assert effect["message"] == "saved plot 'Load'"
+    assert api.moxie.plot("plot Load")["name"] == "Load"
+    assert api.undo()["label"] == "save plot"
+    assert "error" in api.moxie.plot("plot Load")
+
+
+@pytest.mark.parametrize("line, action", [
+    ("plot save Load", {"action": "save", "name": "Load", "format": None, "path": None}),
+    ("plot export png", {"action": "export", "name": None, "format": "png", "path": None}),
+])
+def test_save_or_export_with_no_line_acts_on_the_focused_pane(api, line, action):
+    assert api.run(line) == {"effect": "pane_action", "view": "moxie:plot", **action}
+
+
+def test_export_csv_to_a_path(api, divider, tmp_path):
+    target = tmp_path / "out.csv"
+    assert api.moxie.export_csv(LINE, str(target)) == {"path": str(target)}
+    lines = target.read_text().splitlines()
+    assert lines[0] == "C1.voltage,C1.current" and len(lines) == 32
+    assert api.moxie.export_csv(LINE) == {"cancelled": True}  # no window, no dialog
+
+
+def test_export_png_decodes_the_data_url(api, tmp_path):
+    target = tmp_path / "p.png"
+    assert api.moxie.export_png("data:image/png;base64,iVBORw0K", "p", str(target)) == {"path": str(target)}
+    assert target.read_bytes().startswith(b"\x89PNG")
+
+
+def test_sensitivity_from_the_bridge(api, divider):
+    rows = api.moxie.sensitivity(LINE + " --set C1.r_a=100 --set C1.r_b=200", 150)["rows"]
+    assert [r["ref"] for r in rows] == ["C1.r_b", "C1.r_a"]
+
+
+def test_plot_completion(api, divider):
+    rows = [r["value"] for r in api.complete("plot C1.cu")["rows"]]
+    assert rows == ["C1.current"]

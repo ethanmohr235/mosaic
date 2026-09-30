@@ -1,23 +1,21 @@
 # core/plotview.py
-"""Drawing a saved Moxie view from somewhere that is not Moxie.
+"""Drawing a plot: a saved view, or a typed `plot …` line.
 
 A saved plot is an ordinary mote carrying a `plot` property
 (core/sweep.py::PLOT_KEY), and what that property holds is the
 *specification* -- which motes, which keys, which ranges, which
-scenarios -- never the points it drew. Moxie writes it; this reads it
-back and re-solves it, which is the whole reason a view is worth
+scenarios -- never the points it drew. `plot save` writes it
+(save_plot below); this reads it back and re-solves it, which is the whole reason a view is worth
 referencing at all: `\\graph{Load curve}` in a note shows what the garden
 says now, not what it said the afternoon the plot was saved.
 
-Moxie itself does not use this module. It has a frontend holding a live
-grid, a cursor, knobs and a coarse-then-fine refinement pass, and it
-builds its own model in JavaScript because every one of those things is
-interaction rather than data. What a *reader* needs is the opposite: one
-finished picture, computed once, with no state behind it. So this is the
-non-interactive half -- the specification, the sweep, and the reduction
-to lines, cells or dots -- and it lives in core/ rather than in mora/
-because the CLI prints the same figure that Mora draws, from the same
-answer.
+The console's `plot …` pane draws through here too: core/plotcmd.py
+turns the typed line into the same specification a saved view holds, and
+figure_from_spec() solves it. A pane asks twice -- a coarse pass, then the
+full one -- by passing a smaller `max_points`; interaction (a cursor,
+dragged knobs) stays in the pane and reaches here only as a rewritten
+command. The CLI prints the same figure a note or a pane draws, from the
+same answer.
 
 # Cheaper than the window it came from
 
@@ -172,7 +170,7 @@ def find_view(ref: str, motes: list[Mote]) -> tuple[Mote | None, str | None]:
         if mote.id == ref:
             if has_plot(mote.properties):
                 return mote, None
-            return None, f"{name_of(mote)!r} carries no saved view -- save one in Moxie first"
+            return None, f"{name_of(mote)!r} carries no saved view -- save one with `plot save`"
 
     exact = [m for m in views if m.properties.get(NAME_KEY) == ref]
     matches = exact or [
@@ -184,7 +182,7 @@ def find_view(ref: str, motes: list[Mote]) -> tuple[Mote | None, str | None]:
         return matches[0], None
     if matches:
         return None, f"{len(matches)} saved views are named {ref!r} -- reference one by id instead"
-    return None, f"no saved view named {ref!r} -- save one in Moxie first"
+    return None, f"no saved view named {ref!r} -- save one with `plot save`"
 
 
 def name_of(mote: Mote) -> str:
@@ -209,27 +207,49 @@ def figure(
         return Figure(name=(ref or "").strip(), error=error)
 
     spec = view.properties.get(PLOT_KEY)
+    name, view_id = name_of(view), view.id
+    if isinstance(spec, dict) and spec.get("mode") == "surface":
+        # A full grid is the square of a sweep, so a note samples it
+        # more coarsely still.
+        max_points = min(max_points, NOTE_SURFACE_POINTS)
     if not isinstance(spec, dict):
         return Figure(
-            name=name_of(view), view_id=view.id,
+            name=name, view_id=view_id,
             error="this view's saved specification is unreadable",
         )
 
+    return figure_from_spec(conn, spec, name=name, view_id=view_id,
+                            motes=motes, max_points=max_points)
+
+
+def figure_from_spec(
+    conn: sqlite3.Connection,
+    spec: dict,
+    *,
+    name: str = "",
+    view_id: str | None = None,
+    motes: list[Mote] | None = None,
+    max_points: int = NOTE_POINTS,
+) -> Figure:
+    """A plot specification -- the same shape a saved view holds -- drawn
+    against the garden as it stands. What figure() does once it has found
+    the view, and what the console's `plot …` pane asks for directly
+    (core/plotcmd.py builds the spec from the line). Writes nothing."""
+    motes = list_motes(conn) if motes is None else motes
     directory = _Directory(motes)
     mode = spec.get("mode") or "sweep"
     if mode not in _MODES:
-        return Figure(name=name_of(view), view_id=view.id,
-                      error=f"unknown plot mode {mode!r}")
+        return Figure(name=name, view_id=view_id, error=f"unknown plot mode {mode!r}")
     try:
         ground = read_garden(conn, _scenario_ids(spec))
         if mode == "surface":
-            return _surface(spec, view, directory, ground, max_points)
+            return _surface(spec, name, view_id, directory, ground, max_points)
         if mode == "correlate":
-            return _correlate(spec, view, directory, ground)
-        return _sweep(spec, view, directory, ground, max_points)
+            return _correlate(spec, name, view_id, directory, ground)
+        return _sweep(spec, name, view_id, directory, ground, max_points)
     except Exception as e:                      # noqa: BLE001 -- see the module docstring
-        logger.warning("saved view %r failed to draw: %s", ref, e)
-        return Figure(mode=mode, name=name_of(view), view_id=view.id, error=str(e))
+        logger.warning("plot %r failed to draw: %s", name or spec, e)
+        return Figure(mode=mode, name=name, view_id=view_id, error=str(e))
 
 
 class _Directory:
@@ -278,12 +298,13 @@ class _Directory:
 # --- the three shapes ------------------------------------------------
 
 def _sweep(
-    spec: dict, view: Mote, directory: _Directory, ground: Ground, max_points: int
+    spec: dict, name: str, view_id: str | None, directory: _Directory, ground: Ground,
+    max_points: int,
 ) -> Figure:
     axis = _axis(spec.get("x"), max_points)
     series_specs = [s for s in spec.get("series") or [] if _names_a_property(s)]
     if axis is None or not series_specs:
-        return Figure(name=name_of(view), view_id=view.id,
+        return Figure(name=name, view_id=view_id,
                       error="this view has no axis or no series saved on it")
 
     cases = _cases(spec, series_specs)
@@ -322,7 +343,7 @@ def _sweep(
         for r in rows
     ]
     return Figure(
-        mode="sweep", name=name_of(view), view_id=view.id,
+        mode="sweep", name=name, view_id=view_id,
         x_label=directory.axis_label(spec["x"]),
         y_label=bands[0].label if bands else "value",
         y_scale="log" if log else "linear",
@@ -344,13 +365,14 @@ def _sweep(
 
 
 def _surface(
-    spec: dict, view: Mote, directory: _Directory, ground: Ground, max_points: int
+    spec: dict, name: str, view_id: str | None, directory: _Directory, ground: Ground,
+    max_points: int,
 ) -> Figure:
-    x_axis = _axis(spec.get("x"), max(2, min(max_points, NOTE_SURFACE_POINTS)))
-    y_axis = _axis(spec.get("y"), max(2, min(max_points, NOTE_SURFACE_POINTS)))
+    x_axis = _axis(spec.get("x"), max(2, max_points))
+    y_axis = _axis(spec.get("y"), max(2, max_points))
     output = spec.get("output")
     if x_axis is None or y_axis is None or not _names_a_property(output):
-        return Figure(mode="surface", name=name_of(view), view_id=view.id,
+        return Figure(mode="surface", name=name, view_id=view_id,
                       error="this view has no two axes and an output saved on it")
 
     result = run_surface(
@@ -367,7 +389,7 @@ def _surface(
     col_at = {v: i for i, v in enumerate(cols)}
     row_at = {v: i for i, v in enumerate(rows)}
     return Figure(
-        mode="surface", name=name_of(view), view_id=view.id,
+        mode="surface", name=name, view_id=view_id,
         x_label=directory.axis_label(spec["x"]),
         y_label=directory.axis_label(spec["y"]),
         x_lo=x_axis.lo, x_hi=x_axis.hi, y_lo=y_axis.lo, y_hi=y_axis.hi,
@@ -383,10 +405,12 @@ def _surface(
     )
 
 
-def _correlate(spec: dict, view: Mote, directory: _Directory, ground: Ground) -> Figure:
+def _correlate(
+    spec: dict, name: str, view_id: str | None, directory: _Directory, ground: Ground
+) -> Figure:
     x_key, y_key = spec.get("xKey"), spec.get("yKey")
     if not x_key or not y_key:
-        return Figure(mode="correlate", name=name_of(view), view_id=view.id,
+        return Figure(mode="correlate", name=name, view_id=view_id,
                       error="this view has no two property names saved on it")
     dots = run_correlation(
         ground, x_key, y_key, _cases(spec, [])[0],
@@ -395,7 +419,7 @@ def _correlate(spec: dict, view: Mote, directory: _Directory, ground: Ground) ->
     xs = [d.x for d in dots]
     ys = [d.y for d in dots]
     return Figure(
-        mode="correlate", name=name_of(view), view_id=view.id,
+        mode="correlate", name=name, view_id=view_id,
         x_label=x_key, y_label=y_key,
         y_scale="log" if spec.get("yScale") == "log" else "linear",
         x_lo=min(xs) if xs else 0.0, x_hi=max(xs) if xs else 1.0,
@@ -474,13 +498,14 @@ def _cases(spec: dict, series_specs: list[dict]) -> list[Case]:
     if spec.get("ghost") and spec.get("baseline"):
         cases["ghost"] = Case("ghost", spec["baseline"], _overrides(spec))
     if not cases:
-        cases["base"] = Case("base", None, _overrides(spec))
+        cases["base"] = Case("base", spec.get("scenario") or None, _overrides(spec))
     return list(cases.values())
 
 
 def _scenario_ids(spec: dict) -> list[str]:
     ids = [s.get("scenario") for s in spec.get("series") or [] if isinstance(s, dict)]
     ids.append(spec.get("baseline") if spec.get("ghost") else None)
+    ids.append(spec.get("scenario"))
     return [i for i in ids if i]
 
 
@@ -568,3 +593,163 @@ def _spans(points, hit, message) -> list[Span]:
     if open_span is not None:
         spans.append(Span(**open_span))
     return spans
+
+
+# --- the rest of what a plot pane needs ------------------------------
+
+PLOT_SPECIES_NAME = "Saved Plot"
+SENSITIVITY_NUDGE = 0.05
+
+
+def figure_json(figure: Figure) -> dict:
+    """A Figure on the wire, flat and already reduced: a renderer
+    (console/frontend/js/plot.js, or Mora's) decides nothing about it
+    beyond colour and size."""
+    return {
+        "mode": figure.mode,
+        "name": figure.name,
+        "viewId": figure.view_id,
+        "xLabel": figure.x_label,
+        "yLabel": figure.y_label,
+        "yScale": figure.y_scale,
+        "xLo": figure.x_lo, "xHi": figure.x_hi,
+        "yLo": figure.y_lo, "yHi": figure.y_hi,
+        "bands": [
+            {"label": b.label, "unit": b.unit, "lo": b.lo, "hi": b.hi, "series": b.series}
+            for b in figure.bands
+        ],
+        "series": [
+            {"id": s.id, "label": s.label, "unit": s.unit, "band": s.band,
+             "points": s.points, "ghost": s.ghost}
+            for s in figure.series
+        ],
+        "failed": [{"x0": s.x0, "x1": s.x1, "message": s.message} for s in figure.failed],
+        "violated": [{"x0": s.x0, "x1": s.x1, "message": s.message} for s in figure.violated],
+        "broken": figure.broken,
+        "cells": figure.cells,
+        "rows": figure.rows, "cols": figure.cols,
+        "lo": figure.lo, "hi": figure.hi,
+        "dots": figure.dots,
+        "solves": figure.solves,
+        "error": figure.error,
+    }
+
+
+def csv_table(figure: Figure) -> tuple[list[str], list[list]]:
+    """The points a figure drew, as columns and rows: x then one column
+    per series for a sweep (blank where a point failed), x, y and the
+    value for a surface, and one row per mote for a correlation."""
+    if figure.mode == "surface":
+        return ([figure.x_label, figure.y_label, "value"],
+                [[c["x"], c["y"], c["v"]] for c in figure.cells])
+    if figure.mode == "correlate":
+        return (["mote", figure.x_label, figure.y_label],
+                [[d["name"], d["x"], d["y"]] for d in figure.dots])
+    xs: list[float] = []
+    for s in figure.series:
+        for point in s.points:
+            if point is not None and point[0] not in xs:
+                xs.append(point[0])
+    xs.sort()
+    by_x = [{p[0]: p[1] for p in s.points if p is not None} for s in figure.series]
+    return ([figure.x_label] + [s.label for s in figure.series],
+            [[x] + [values.get(x) for values in by_x] for x in xs])
+
+
+@dataclass(frozen=True)
+class Sensitivity:
+    """How much `output` moves at one x when one knob moves: the
+    fractional change in the output over the fractional change in the
+    knob, so knobs in different units rank against each other honestly."""
+    mote: str
+    key: str
+    label: str
+    value: float
+
+
+def sensitivity(
+    conn: sqlite3.Connection, spec: dict, x: float, nudge: float = SENSITIVITY_NUDGE
+) -> list[Sensitivity]:
+    """Each knob's pull on the first series at the axis point nearest
+    `x`, strongest first -- one extra solve per knob, not per point. Local
+    to that x: a curve's sensitivities at one end of a sweep need not
+    resemble the other's. Empty for anything but a sweep with knobs."""
+    axis = _axis(spec.get("x"), 10**9)
+    series = [s for s in spec.get("series") or [] if _names_a_property(s)]
+    knobs = [k for k in spec.get("knobs") or [] if _names_a_property(k)]
+    if (spec.get("mode") or "sweep") != "sweep" or axis is None or not series or not knobs:
+        return []
+    first = series[0]
+    output = (first["mote"], first["key"])
+    base = _cases(spec, [first])[0]
+    ground = read_garden(conn, _scenario_ids(spec))
+    fraction = (x - axis.lo) / (axis.hi - axis.lo)
+    at = [max(0, min(axis.steps, round(fraction * axis.steps)))]
+
+    def probe(case: Case) -> float | None:
+        result = run_sweep(ground, axis, [case], [output], indices=at)
+        return result.points[0].values.get((case.key, *output)) if result.points else None
+
+    reference = probe(base)
+    if reference is None:
+        return []
+    directory = _Directory(list_motes(conn))
+    rows = []
+    for knob in knobs:
+        value = float(knob["value"])
+        moved = value * (1 + nudge) if value else nudge
+        overrides = {m: dict(v) for m, v in base.overrides.items()}
+        overrides.setdefault(knob["mote"], {})[knob["key"]] = moved
+        answer = probe(Case(base.key, base.scenario_id, overrides))
+        if answer is None:
+            continue
+        rows.append(Sensitivity(
+            knob["mote"], knob["key"], directory.label(knob["mote"], knob["key"]),
+            ((answer - reference) / max(abs(reference), 1e-12)) / nudge,
+        ))
+    return sorted(rows, key=lambda r: abs(r.value), reverse=True)
+
+
+def save_plot(conn: sqlite3.Connection, name: str, spec: dict) -> tuple[str, bool, "undo.Command"]:
+    """Write `spec` as a saved view named `name`: (mote id, created, undo).
+
+    A saved plot is an ordinary mote with a `plot` property, declared an
+    instance of `Saved Plot`, so it syncs, shows in the graph and is what
+    `\\graph{name}` in a note draws. What is written is the specification,
+    never the points. A view already carrying that name is updated in
+    place rather than duplicated, which keeps `\\graph{name}` unambiguous."""
+    from core import species as species_repo
+    from core import undo
+    from core.motes import create_mote, get_mote, update_mote
+
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("a saved plot needs a name")
+    properties = {NAME_KEY: name, PLOT_KEY: spec}
+    existing = [m for m in list_views(list_motes(conn)) if m.properties.get(NAME_KEY) == name]
+    if len(existing) > 1:
+        raise ValueError(f"{len(existing)} saved plots are named {name!r} -- rename one first")
+    if existing:
+        mote_id = existing[0].id
+        old = get_mote(conn, mote_id).properties
+        before = {k: old[k] for k in properties if k in old}
+        update_mote(conn, mote_id, properties)
+        return mote_id, False, undo.for_update_mote(conn, mote_id, before, properties,
+                                                    label="save plot")
+    species_id = next(
+        (m.id for m in species_repo.list_species(conn)
+         if isinstance(m.properties.get(NAME_KEY), str)
+         and m.properties[NAME_KEY].casefold() == PLOT_SPECIES_NAME.casefold()),
+        None,
+    )
+    steps = []
+    if species_id is None:
+        species_props = {NAME_KEY: PLOT_SPECIES_NAME}
+        species_id = create_mote(conn, species_props)
+        steps.append(undo.for_create_mote(conn, species_id, species_props, label="save plot"))
+    mote_id = create_mote(conn, properties)
+    species_repo.set_species(conn, mote_id, species_id)
+    # Deleting the mote (this step's undo) cascades away the instance_of
+    # relationship set_species just made.
+    steps.append(undo.for_create_mote(conn, mote_id, properties, label="save plot"))
+    return mote_id, True, undo.combine("save plot", steps)

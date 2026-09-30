@@ -27,10 +27,12 @@ import api_common
 from console import state as state_repo
 from console.monolith import MonolithApi
 from console.mote import MoteApi
+from console.moxie import MoxieApi
 from console.session import Session, locked
 from core import commands
 from core import gardens as gardens_repo
 from core import motes as motes_repo
+from core import plotcmd
 from core.command_bar import CommandError
 from core.reserved import RESERVED_VERBS
 
@@ -53,6 +55,7 @@ class Api:
         # App namespaces over the same session (docs/console.md -> Architecture).
         self.monolith = MonolithApi(self._session)
         self.mote = MoteApi(self._session)
+        self.moxie = MoxieApi(self._session, lambda: self._window)
 
     # ---- boot and gardens ----
 
@@ -179,6 +182,8 @@ class Api:
         literal = commands.parse(text)
         if literal.kind == commands.VERB and literal.head in commands.WRITE_VERBS:
             return self._verb_write(literal.head, literal.args, selection)
+        if literal.kind == commands.VERB and literal.head == plotcmd.PLOT_VERB:
+            return self._verb_plot(literal)
         if literal.kind == commands.VERB and literal.head in commands.ARG_VIEWS:
             # The literal line is the pane's command: `open @sel` keeps
             # following the selection rather than freezing on today's.
@@ -268,6 +273,26 @@ class Api:
         return {"effect": "statement", "ok": True, "message": result.message,
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": result.count > 0}
+
+    def _verb_plot(self, parsed: commands.ParsedLine) -> dict:
+        """`plot …` opens (or re-points) a plot pane with the literal
+        line. `plot save ‹name› ‹line›` is the one write. `plot save
+        ‹name›` and `plot export …` act on the focused plot pane, which
+        only the shell knows, so they come back as a pane_action for it:
+        the pane then runs the full `plot save ‹name› ‹its line›` (so the
+        history holds the whole write) or exports what it shows."""
+        command = plotcmd.parse(parsed.args)
+        view = commands.ARG_VIEWS[plotcmd.PLOT_VERB]
+        if command.kind == plotcmd.PLOT:
+            return {"effect": "open_view", "view": view, "command": parsed.text}
+        if command.kind == plotcmd.SAVE and command.line is not None:
+            message, undo_command = plotcmd.run_save(self._session.conn, command)
+            self._session.undo.push(undo_command)
+            return {"effect": "statement", "ok": True, "message": message,
+                    "moteId": None, "moteName": None, "created": False,
+                    "needsConfirm": False, "choices": [], "wrote": True}
+        return {"effect": "pane_action", "view": view, "action": command.kind,
+                "name": command.name, "format": command.format, "path": command.path}
 
     def _verb_cd(self, args: tuple[str, ...]) -> dict:
         if len(args) != 1:
