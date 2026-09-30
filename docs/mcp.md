@@ -47,7 +47,7 @@ absolute path.
 ## Tools
 
 56 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `propagate_uncertainty`, `list_materials`, motes (`list_motes`, `search_motes`, `get_mote`,
+`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `propagate_uncertainty`, `fit_model`, `list_materials`, motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
@@ -187,6 +187,13 @@ external value. A rule marked `check: true` (with an optional relative
 budget. Derived on read, never stored; first order, root-sum-square. Row
 shapes from `calc_sections` carry `sigma` too. See `docs/simulation.md` ->
 *Uncertainty*.
+
+`fit_model` fits a garden's inputs to measured points: the console's `fit`
+line without the leading word (`C1.current vs C1.voltage --data I vs V
+[--from bench.csv] --free C1.r_a`). It returns each value with its σ
+(null when the data can't separate the inputs), RMS, R² and whether it
+converged, and writes nothing unless `apply` -- then each value, its σ in
+`uncertainty`, and `source: {kind: fitted, note: ‹line›}`, one undo step.
 
 `search_gardens` searches every garden at once, read-only, with the same
 query forms as `search_motes`; each hit names its garden and project.

@@ -54,6 +54,7 @@ from mcp_server.server import (
     start_project,
     import_csv,
     propagate_uncertainty,
+    fit_model,
     write_worksheet as _ww,
     search_gardens,
     archive_garden,
@@ -804,3 +805,16 @@ def test_search_gardens_and_archive_garden(garden):
 def test_list_materials_names_the_bundled_alloys():
     names = {m["name"] for m in list_materials()}
     assert {"6061-T6", "A36", "Ti-6Al-4V"} <= names
+
+
+def test_fit_model_fits_and_applies(garden):
+    """The worksheet makes s.y = s.k * s.x with s.k free; points on y = 3x
+    must fit k = 3, and only `apply` writes it."""
+    _ww("s.k = 1\ns.x = 1\ns.y = s.k * s.x\n", GARDEN)
+    for i, x in enumerate([1, 2, 4]):
+        create_mote({"name": f"p{i}", "X": x, "Y": 3 * x}, GARDEN)
+    report = fit_model("s.y vs s.x --data Y vs X --free s.k", garden=GARDEN)
+    (k,) = report["params"]
+    assert k["value"] == pytest.approx(3) and report["converged"] and report["applied"] is None
+    applied = fit_model("s.y vs s.x --data Y vs X --free s.k", apply=True, garden=GARDEN)
+    assert applied["applied"].startswith("fitted s.k = 3")

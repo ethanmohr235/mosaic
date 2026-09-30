@@ -1015,3 +1015,22 @@ def test_model_materials_lists_the_bundled_alloys(conn, capsys):
     _handle_model(conn, parse(["model", "materials"]))
     out = capsys.readouterr().out
     assert "6061-T6" in out and "E 68.9 GPa, nu 0.33, Sy 276 MPa, rho 2700 kg/m^3" in out
+
+
+
+def test_fit_prints_and_applies(conn, capsys):
+    from cli.main import _handle_fit
+    species = create_mote(conn, {"name": "Divider", "freedoms": "current"})
+    rule = create_mote(conn, {"name": "series", "equation": "current * (r_a + r_b) == voltage"})
+    create_relationship(conn, rule, species, APPLIES_TO)
+    circuit = create_mote(conn, {"name": "C1", "voltage": 10, "r_a": 100, "r_b": 200})
+    set_species(conn, circuit, species)
+    for i, v in enumerate([5, 10, 20]):
+        create_mote(conn, {"name": f"m{i}", "V": v, "I": v / 250})
+    words = ["fit", "C1.current", "vs", "C1.voltage", "--data", "I", "vs", "V", "--free", "C1.r_a"]
+    _handle_fit(conn, parse(words))
+    out = capsys.readouterr().out
+    assert "C1.r_a = 50" in out and "converged" in out
+    assert get_mote(conn, circuit).properties["r_a"] == 100
+    _handle_fit(conn, parse(words + ["--apply"]))
+    assert get_mote(conn, circuit).properties["r_a"] == pytest.approx(50)

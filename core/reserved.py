@@ -107,7 +107,9 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "...} where the value deserves a sentence. `assumed` is what a "
         "document's \\assumptions section lists; `external` marks a value "
         "that came from outside the garden (an FEA probe, a measurement), "
-        "which is what a verification table compares against a hand calc. "
+        "which is what a verification table compares against a hand calc; "
+        "`measured` is what a CSV import writes and `fitted` what `fit … "
+        "--apply` writes (its note is the fit line). "
         "Opt-in per property, and unread by the solver -- a value's "
         "provenance changes nothing about how it is used.",
     GARDEN_KEY: "The name of a garden this mote owns, making the mote that "
@@ -284,6 +286,9 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
                       "[--set ‹m.k›=‹v›] [--scenario ‹s›] [--log] | plot ‹saved› | "
                       "plot save ‹name› | plot export csv|png [path]",
              "describe": "plot a value against another, re-solving the garden (nothing is written)"},
+    "fit": {"usage": "fit ‹m.y› vs ‹m.x› --data ‹ykey› vs ‹xkey› [--from ‹import›] --free ‹m.k›… "
+                     "[--scenario ‹s›] [--apply]",
+            "describe": "fit inputs to measured points by least squares (--apply writes them)"},
     "cd": {"usage": "cd ‹garden›", "describe": "switch this workspace's garden"},
     "layout": {"usage": "layout save|load|list|rm ‹name›",
                "describe": "save or restore pane layouts"},

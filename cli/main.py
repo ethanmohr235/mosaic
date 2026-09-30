@@ -9,6 +9,7 @@ from core import calc
 from core import csv_import
 from core import materials_provider
 from core import uncertainty
+from core import fit as fit_repo
 from core import health
 from core import projects
 from core import search
@@ -307,6 +308,13 @@ def build_parser() -> argparse.ArgumentParser:
         "uncertainty", help="Each result's ±, propagated from the givens' ±, with its budget"
     )
     unc_parser.add_argument("--solver", default="linear", help="Solver backend (default linear)")
+
+    ### Fit
+    fit_parser = subparsers.add_parser(
+        "fit", help="Fit inputs to measured points: fit m.y vs m.x --data Y vs X --free m.k … [--apply]"
+    )
+    fit_parser.add_argument("words", nargs=argparse.REMAINDER,
+                            help="the console's fit line after `fit` (see docs/manual.md)")
 
     ### Search
     search_all = subparsers.add_parser(
@@ -822,6 +830,26 @@ def _handle_health(conn, args) -> None:
             print(f"  {inert.label} on {inert.anchor}")
 
 
+def _handle_fit(conn, args) -> None:
+    line = fit_repo.parse(args.words)
+    result = fit_repo.run(conn, line)
+    for param in result.params:
+        sigma = "" if param.sigma is None else f" ± {param.sigma:.3g}"
+        unit = f" {param.unit}" if param.unit else ""
+        print(f"{param.ref} = {param.value:.6g}{sigma}{unit}   (was {param.start:g})")
+    if result.rms is not None:
+        r2 = "" if result.r2 is None else f", R² {result.r2:.5f}"
+        state = "converged" if result.converged else "did not converge"
+        print(f"{len(result.points) - len(result.skipped)} points, RMS {result.rms:.4g}{r2}; "
+              f"{state} in {result.iterations} iteration(s), {result.solves} solves")
+    for name, why in result.skipped:
+        print(f"  left out {name}: {why}")
+    if result.message:
+        print(f"  {result.message}")
+    if line.apply:
+        print(fit_repo.apply(conn, result)[0])
+
+
 def _handle_uncertainty(conn, args) -> None:
     report = uncertainty.propagate(conn, args.solver)
     for problem in report.problems:
@@ -924,6 +952,8 @@ _WRITES = {
 
 def _writes(args) -> bool:
     action = getattr(args, "action", None)
+    if args.command == "fit":
+        return "--apply" in (args.words or [])
     if args.command == "simulate":
         return action in (None, "run") and not getattr(args, "scenario", None)
     return (args.command, action) in _WRITES
@@ -1031,6 +1061,8 @@ def main() -> None:
                 _handle_calc(conn, args)
             elif args.command == "uncertainty":
                 _handle_uncertainty(conn, args)
+            elif args.command == "fit":
+                _handle_fit(conn, args)
             elif args.command == "import":
                 _handle_import(conn, args)
             elif args.command == "why":

@@ -14,7 +14,9 @@ holding a connection open for the server's whole life would mean sitting
 on a SQLite lock while the user works in the GUI on the same file.
 """
 import dataclasses
+import shlex
 import sqlite3
+from dataclasses import replace
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -29,6 +31,7 @@ from core import garden_io
 from core import health as health_repo
 from core import csv_import as csv_import_repo
 from core import uncertainty as uncertainty_repo
+from core import fit as fit_repo
 from core import projects as projects_repo
 from core import search as search_repo
 from core import materials_provider
@@ -810,6 +813,32 @@ def propagate_uncertainty(solver: str = "linear", garden: str | None = None) -> 
     }
 
 
+def fit_model(line: str, apply: bool = False, garden: str | None = None) -> dict[str, Any]:
+    """Least-squares fit of a garden's inputs to measured points -- the
+    console's `fit` line without the leading `fit`:
+    `C1.current vs C1.voltage --data I vs V [--from bench.csv] --free C1.r_a [--scenario s]`.
+    The model value (`C1.current`) is solved at each point's x (`C1.voltage`
+    set to the point's V); the data is every mote carrying both keys (with
+    --from, one CSV import's rows), converted into the model's units. The
+    `--free` inputs start from their current values. Returns each value with
+    its sigma (null when the data can't separate the inputs), rms, r2 and
+    convergence. Writes nothing unless `apply` (or --apply): then each value,
+    its sigma into `uncertainty`, and `source: {kind: fitted, note: line}`."""
+    parsed = fit_repo.parse(shlex.split(line))
+    parsed = replace(parsed, apply=parsed.apply or apply)
+    with _connect(garden, write=parsed.apply) as conn:
+        result = fit_repo.run(conn, parsed)
+        message = fit_repo.apply(conn, result)[0] if parsed.apply else None
+    return {
+        "params": [{"ref": p.ref, "moteId": p.mote, "key": p.key, "start": p.start,
+                    "value": p.value, "sigma": p.sigma, "unit": p.unit} for p in result.params],
+        "points": len(result.points), "skipped": [{"name": n, "why": w} for n, w in result.skipped],
+        "rms": result.rms, "r2": result.r2, "iterations": result.iterations,
+        "converged": result.converged, "solves": result.solves,
+        "message": result.message, "applied": message,
+    }
+
+
 def import_csv(
     text: str,
     file: str,
@@ -1009,7 +1038,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
-    project_tree, start_project, import_csv, propagate_uncertainty,
+    project_tree, start_project, import_csv, propagate_uncertainty, fit_model,
     search_gardens, archive_garden, list_materials,
     calc_sections, shown_work,
     resolve_modoc,

@@ -66,7 +66,8 @@ SOURCE_KEY = "source"
 ASSUMED = "assumed"
 EXTERNAL = "external"
 MEASURED = "measured"
-SOURCES = (ASSUMED, EXTERNAL, MEASURED)
+FITTED = "fitted"  # written by `fit … --apply` (core/fit.py)
+SOURCES = (ASSUMED, EXTERNAL, MEASURED, FITTED)
 
 # The three lines of shown work.
 SYMBOLIC = "symbolic"

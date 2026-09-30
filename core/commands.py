@@ -68,7 +68,8 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
 VERB_VIEWS: dict[str, str] = {"log": "log"}
 # Verbs a view answers *with* their arguments: the whole line is the
 # pane's command (`find status:open --sort due`).
-ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "plot": "moxie:plot"}
+ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "plot": "moxie:plot",
+                             "fit": "moxie:fit"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
@@ -170,6 +171,8 @@ def resolve_view(command: str) -> tuple[str, str]:
     if parsed.kind == VERB and parsed.head in ARG_VIEWS:
         if parsed.head == "plot" and parsed.args[:1] in (("save",), ("export",)):
             raise CommandError(f"{parsed.text!r} is an action, not a pane")
+        if parsed.head == "fit" and "--apply" in parsed.args:
+            raise CommandError(f"{parsed.text!r} is a write, not a pane")
         return ARG_VIEWS[parsed.head], parsed.text
     if parsed.kind == APP and not parsed.args:
         app = find_app(parsed.head)
@@ -457,6 +460,10 @@ def complete(
     if word == "plot":
         from core import plotcmd
         rows = [CompletionRow(c.value, c.description) for c in plotcmd.choices(conn, rest)]
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word == "fit":
+        from core import fit
+        rows = [CompletionRow(c.value, c.description) for c in fit.choices(conn, rest)]
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
     if word in ("open", "rename", "unlink", "template"):
         return _complete_from(RESERVED_VERBS[word]["usage"], _u3_choices(conn, word, rest), rest, cursor)

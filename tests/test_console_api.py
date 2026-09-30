@@ -59,7 +59,7 @@ def test_boot_shape(api):
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None}
-    assert boot["verbs"][8] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][9] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"]) == (
         [], None, None, [])
@@ -615,3 +615,25 @@ def test_plot_save_replaces_its_short_line_in_history(api, divider):
     api.run("plot save Load")
     api.run("plot save Load " + LINE[len("plot "):], replace_history=True)
     assert [h["command"] for h in api.history()] == ["plot save Load " + LINE[len("plot "):]]
+
+
+# ---- fit ---------------------------------------------------------------------
+
+FIT = "fit C1.current vs C1.voltage --data I vs V --free C1.r_a"
+
+
+def test_a_fit_line_opens_a_fit_pane(api):
+    assert api.run(FIT) == {"effect": "open_view", "view": "moxie:fit", "command": FIT}
+    assert api.resolve(FIT) == {"view": "moxie:fit", "command": FIT}
+    assert "error" in api.resolve(FIT + " --apply")
+
+
+def test_fit_apply_writes_and_undoes(api, divider):
+    for i, v in enumerate([5, 10, 20]):
+        motes_repo.create_mote(api._session.conn, {"name": f"m{i}", "V": v, "I": v / 250})
+    effect = api.run(FIT + " --apply")
+    assert effect["effect"] == "statement" and effect["wrote"]
+    assert effect["message"].startswith("fitted C1.r_a = 50")
+    assert motes_repo.get_mote(api._session.conn, divider).properties["r_a"] == pytest.approx(50)
+    assert api.undo()["label"] == "fit"
+    assert motes_repo.get_mote(api._session.conn, divider).properties["r_a"] == 100

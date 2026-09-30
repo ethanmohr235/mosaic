@@ -32,6 +32,7 @@ from console.session import Session, locked
 from core import commands
 from core import gardens as gardens_repo
 from core import motes as motes_repo
+from core import fit as fit_repo
 from core import plotcmd
 from core.command_bar import CommandError
 from core.reserved import RESERVED_VERBS
@@ -185,6 +186,8 @@ class Api:
             return self._verb_write(literal.head, literal.args, selection)
         if literal.kind == commands.VERB and literal.head == plotcmd.PLOT_VERB:
             return self._verb_plot(literal)
+        if literal.kind == commands.VERB and literal.head == fit_repo.FIT_VERB:
+            return self._verb_fit(literal)
         if literal.kind == commands.VERB and literal.head in commands.ARG_VIEWS:
             # The literal line is the pane's command: `open @sel` keeps
             # following the selection rather than freezing on today's.
@@ -294,6 +297,20 @@ class Api:
                     "needsConfirm": False, "choices": [], "wrote": True}
         return {"effect": "pane_action", "view": view, "action": command.kind,
                 "name": command.name, "format": command.format, "path": command.path}
+
+    def _verb_fit(self, parsed: commands.ParsedLine) -> dict:
+        """`fit …` opens (or re-points) a fit pane with the literal line;
+        `fit … --apply` runs the fit and writes it, one undo step."""
+        line = fit_repo.parse(parsed.args)
+        if not line.apply:
+            return {"effect": "open_view", "view": commands.ARG_VIEWS[fit_repo.FIT_VERB],
+                    "command": parsed.text}
+        result = fit_repo.run(self._session.conn, line)
+        message, undo_command = fit_repo.apply(self._session.conn, result)
+        self._session.undo.push(undo_command)
+        return {"effect": "statement", "ok": True, "message": message,
+                "moteId": None, "moteName": None, "created": False,
+                "needsConfirm": False, "choices": [], "wrote": True}
 
     def _verb_cd(self, args: tuple[str, ...]) -> dict:
         if len(args) != 1:

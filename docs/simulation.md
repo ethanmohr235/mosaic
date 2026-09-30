@@ -817,6 +817,35 @@ is the same specification typed out (`core/plotcmd.py`):
 | `y vs x --across` | `mode: correlate`, `xKey`, `yKey` |
 | `--set A.k=5`, `--scenario s`, `--log` | `knobs: [{mote, key, value}]`, `scenario` (each series', and a surface's or correlation's own), `yScale` |
 
+## Fitting
+
+`core/fit.py` runs the other way from a sweep: given measured points, it
+finds the inputs that make the garden's answer pass through them.
+
+    fit C1.current vs C1.voltage --data I vs V [--from bench.csv] --free C1.r_a [--scenario hot] [--apply]
+
+- **The model** is `C1.current` as the garden solves it with `C1.voltage`
+  set to a point's x (the same perturbed solve a sweep makes).
+- **The data** is every mote carrying both data keys as numbers (`I`,
+  `V`), the model's own motes excepted; `--from` narrows it to one CSV
+  import's rows (`imported_from`). A data unit converts into the model's
+  where both declare one.
+- **The fit** moves the `--free` inputs from their current values by
+  Levenberg–Marquardt (numpy): a forward-difference Jacobian, one extra
+  solve per input per iteration, until the sum of squares stops falling.
+  About (inputs + 1) × points × iterations solves.
+- **The answer** is each value with its σ from s²(JᵀJ)⁻¹, RMS, R², the
+  iteration count and whether it converged. A point that fails to solve
+  at the start is reported and left out. Inputs the data can't tell apart
+  (a singular JᵀJ -- `r_a` and `r_b` when only their sum shows) come back
+  with no σ and a message saying so.
+- **`--apply`** is the only write: each value, its σ into `uncertainty`,
+  and `source: {kind: fitted, note: ‹the line›}`, one undo step. So
+  `\given` and the V&V table say where the number came from.
+
+Surfaces: the console's `fit` pane (`docs/ui-setup.md`), `monoss fit …`,
+and MCP `fit_model`.
+
 ## The worksheet
 
 `core/worksheet.py` is a garden's calculation as lines of text, top to
