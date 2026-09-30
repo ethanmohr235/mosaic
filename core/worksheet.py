@@ -451,6 +451,25 @@ def read(conn: sqlite3.Connection) -> str:
     return "\n".join([*inputs, *([""] if inputs and equations else []), *equations])
 
 
+def calculation_mote_ids(conn: sqlite3.Connection) -> set[str]:
+    """Every mote the garden's own equations mention -- which is what makes
+    a *calculation's* givens different from a dump of the garden. A homework
+    mote's `estimate: 3` is a real property and not an input to anything.
+
+    Public because `core/calc.py` scopes `\\given` and `\\answers` the same
+    way this scopes its given lines, and two answers to "which motes is
+    this calculation about" would be one too many."""
+    motes = {m.id: m for m in motes_repo.list_motes(conn)}
+    free = simulation.garden_freedoms(conn)
+    rendered = [_render(rule, motes, free) for rule in _existing_rules(conn)[0]]
+    referenced = {name for _line, relation in rendered for name in _bases(relation)}
+    return {
+        mote.id for mote in motes.values()
+        if isinstance(mote.properties.get("name"), str)
+        and mote.properties["name"] in referenced
+    }
+
+
 def _render(
     rule: rules_repo.Rule, motes: dict[str, Mote], free: dict[str, set[str]]
 ) -> tuple[str, str]:

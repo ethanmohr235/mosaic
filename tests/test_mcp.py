@@ -6,6 +6,7 @@ from core.rules import APPLIES_TO
 from core.simulation import run_simulation as core_run_simulation
 from core.species import INSTANCE_OF, TEMPLATE_OF
 from mcp_server.server import (
+    calc_sections,
     check_roles,
     consumers,
     create_garden,
@@ -35,6 +36,7 @@ from mcp_server.server import (
     search_motes,
     set_species,
     set_template,
+    shown_work,
     solve_health,
     species_of,
     sync_init,
@@ -663,3 +665,61 @@ def test_solve_health_reports_a_dimensional_mismatch(garden):
     problems = solve_health(garden=GARDEN)["unitProblems"]
     assert len(problems) == 1
     assert "different dimensions" in problems[0]
+
+
+# ---- the calc sections and shown work ----
+
+def test_calc_sections_split_givens_from_answers(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    sections = calc_sections(garden=GARDEN)
+    assert [r["label"] for r in sections["given"]] == ["bd.x", "bd.y"]
+    assert [r["label"] for r in sections["answers"]] == ["bd.l"]
+
+
+def test_calc_sections_convert_and_quote_for_display(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    core_run_simulation(get_connection(GARDEN))
+    (answer,) = calc_sections(unit="in", figures=4, garden=GARDEN)["answers"]
+    assert answer["text"] == "100.0 in"
+    assert answer["unit"] == "in"
+    assert answer["value"] == pytest.approx(2.54)   # nothing stored changed
+
+
+def test_calc_sections_read_the_source_convention(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    bd = next(m for m in list_motes(garden=GARDEN)
+              if m["properties"].get("name") == "bd")
+    update_mote(bd["id"], {"source": {"y": {"kind": "assumed", "note": "neglected"}}}, GARDEN)
+
+    (assumption,) = calc_sections(garden=GARDEN)["assumptions"]
+    assert (assumption["label"], assumption["source"], assumption["note"]) == (
+        "bd.y", "assumed", "neglected")
+
+
+def test_calc_sections_list_the_checks_with_their_status(garden):
+    write_worksheet("bd.x = 80\nbd.l = bd.x * 2\nbd.l <= 300", garden=GARDEN)
+    core_run_simulation(get_connection(GARDEN))
+    (check,) = calc_sections(garden=GARDEN)["checks"]
+    assert (check["equation"], check["status"]) == ("bd.l <= 300", "pass")
+
+
+def test_shown_work_returns_the_three_steps(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    core_run_simulation(get_connection(GARDEN))
+    bd = next(m for m in list_motes(garden=GARDEN)
+              if m["properties"].get("name") == "bd")
+
+    shown = shown_work(bd["id"], "l", unit="in", figures=4, garden=GARDEN)
+    assert [s["kind"] for s in shown["steps"]] == ["symbolic", "substituted", "result"]
+    assert shown["steps"][1]["text"] == "bd.l == sqrt((80 in)^2 + (60 in)^2)"
+    assert shown["text"] == "100.0 in"
+    assert shown["error"] is None
+
+
+def test_shown_work_on_an_unsolved_garden_says_so_rather_than_failing(garden):
+    write_worksheet(FEA, garden=GARDEN)
+    bd = next(m for m in list_motes(garden=GARDEN)
+              if m["properties"].get("name") == "bd")
+    shown = shown_work(bd["id"], "l", garden=GARDEN)
+    assert shown["steps"] == []
+    assert shown["note"]

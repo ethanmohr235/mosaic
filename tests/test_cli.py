@@ -3,6 +3,7 @@ import io
 import pytest
 
 from cli.main import (
+    _handle_calc,
     _handle_garden,
     _handle_health,
     _handle_incidence,
@@ -19,7 +20,7 @@ from cli.main import (
     build_parser,
 )
 from core.gardens import garden_exists
-from core.motes import create_mote, get_mote
+from core.motes import create_mote, get_mote, list_motes
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
 from core.species import set_species
@@ -788,3 +789,72 @@ def test_health_reports_a_dimensional_mismatch_against_its_line(conn, capsys, tm
 def test_health_on_an_empty_garden_says_nothing_is_wrong(conn, capsys):
     _handle_health(conn, parse(["health"]))
     assert capsys.readouterr().out.strip() == "0 equations, 0 unknowns -- balanced"
+
+
+# ---- calc ----
+
+def apply_sheet(conn, tmp_path, text=FEA):
+    sheet = tmp_path / "sheet.txt"
+    sheet.write_text(text)
+    _handle_worksheet(conn, parse(["worksheet", "apply", "--file", str(sheet)]))
+
+
+def test_calc_given_prints_the_inputs_with_their_units(conn, capsys, tmp_path):
+    apply_sheet(conn, tmp_path)
+    capsys.readouterr()
+    _handle_calc(conn, parse(["calc", "given"]))
+    out = capsys.readouterr().out
+    assert "bd.x" in out and "80 in" in out
+
+
+def test_calc_given_converts_for_display(conn, capsys, tmp_path):
+    apply_sheet(conn, tmp_path)
+    capsys.readouterr()
+    _handle_calc(conn, parse(["calc", "given", "--unit", "mm", "--figures", "3"]))
+    assert "2030 mm" in capsys.readouterr().out
+
+
+def test_calc_answers_quotes_to_the_figures_asked_for(conn, capsys, tmp_path):
+    apply_sheet(conn, tmp_path)
+    _handle_simulate(conn, parse(["simulate", "run"]))
+    capsys.readouterr()
+    _handle_calc(conn, parse(["calc", "answers", "--unit", "in", "--figures", "4"]))
+    assert "100.0 in" in capsys.readouterr().out
+
+
+def test_calc_work_prints_the_three_lines(conn, capsys, tmp_path):
+    apply_sheet(conn, tmp_path)
+    _handle_simulate(conn, parse(["simulate", "run"]))
+    bd = next(m for m in list_motes(conn) if m.properties.get("name") == "bd")
+    capsys.readouterr()
+
+    _handle_calc(conn, parse(["calc", "work", bd.id, "l", "--unit", "in"]))
+    out = capsys.readouterr().out
+    assert "bd.l == sqrt(bd.x^2 + bd.y^2)" in out
+    assert "sqrt((80 in)^2 + (60 in)^2)" in out
+    assert "bd.l = 100 in" in out
+
+
+def test_calc_checks_marks_each_limit(conn, capsys, tmp_path):
+    apply_sheet(conn, tmp_path, "bd.x = 80\nbd.l = bd.x * 2\nbd.l <= 300\nbd.l >= 200")
+    _handle_simulate(conn, parse(["simulate", "run"]))
+    capsys.readouterr()
+
+    _handle_calc(conn, parse(["calc", "checks"]))
+    out = capsys.readouterr().out
+    assert "ok   bd.l <= 300" in out
+    assert "FAIL bd.l >= 200" in out
+
+
+def test_calc_says_when_a_section_is_empty(conn, capsys, tmp_path):
+    apply_sheet(conn, tmp_path)
+    capsys.readouterr()
+    _handle_calc(conn, parse(["calc", "assumptions"]))
+    assert "(none)" in capsys.readouterr().out
+
+
+def test_calc_rejects_an_unknown_action(conn, capsys):
+    args = parse(["calc", "given"])
+    args.action = "frobnicate"
+    _handle_calc(conn, args)
+    assert "Specify a calc action" in capsys.readouterr().out

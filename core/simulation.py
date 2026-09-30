@@ -172,6 +172,38 @@ class TimeSeriesResult:
         ]
 
 
+# How a constraint came out. `NOT_CHECKED` is deliberately not a third
+# flavour of failure: a limit nobody could evaluate is a gap in the model,
+# and reporting it as passing would make silence and success look alike.
+PASS = "pass"
+FAIL = "fail"
+NOT_CHECKED = "not checked"
+
+
+@dataclass(frozen=True)
+class ConstraintResult:
+    """One comparison relation, and whether the values satisfy it.
+
+    `off_by` is the magnitude of the residual -- how far the answer is from
+    the limit, on the side it landed. Carried for a passing constraint too,
+    since "within limits by 0.02" and "within limits by 400" are different
+    things to report."""
+    rule_mote_id: str
+    label: str
+    equation: str
+    status: str
+    detail: str = ""
+    off_by: float | None = None
+    # Set when the relation could not be evaluated at all, which is a
+    # broken model rather than an unchecked limit. A run raises on it; a
+    # caller that must not raise reports it.
+    error: str | None = None
+
+    @property
+    def passed(self) -> bool:
+        return self.status == PASS
+
+
 @dataclass(frozen=True)
 class _GardenView:
     """The whole garden read once, so evaluating N equations doesn't mean
@@ -769,6 +801,72 @@ def _split_relations(
     return equations, constraints
 
 
+def constraint_results(
+    view: _GardenView,
+    pairs: list[tuple[rules_repo.Rule, str]],
+    solved: dict[Unknown, float],
+    tick: float = 0.0,
+    previous: dict[str, dict] | None = None,
+    *,
+    model_cache: dict[str, PropertyProvider],
+) -> list[ConstraintResult]:
+    """Every constraint, with whether the answer satisfies it.
+
+    Checked against the values that were actually found -- a constraint is
+    a statement about an answer, so checking it before there is one would
+    be meaningless.
+
+    A constraint still referring to something unsolved is reported as
+    *not checked* rather than assumed satisfied. Silence would be
+    indistinguishable from passing, and a limit nobody could evaluate is
+    exactly the one worth mentioning.
+
+    Structured rather than prose because two callers want different
+    things out of it: a run wants the lines that are worth warning about
+    (_check_constraints below), and a checklist wants every constraint
+    including the passing ones, in a shape it can draw green or red
+    (core/calc.py's `\\checks`). One evaluation answers both -- a second
+    walk would be a second opinion about the same limit.
+    """
+    results = []
+    for rule, mote_id in pairs:
+        label = f"{rule.name} on {_mote_label(view, mote_id)}"
+        try:
+            ctx = _context(view, mote_id, solved, tick, previous, model_cache=model_cache)
+            evaluated = evaluate_equation(rule.equation, ctx)
+        except NonlinearError as e:
+            results.append(ConstraintResult(
+                rule.mote.id, label, rule.equation, NOT_CHECKED, str(e)))
+            continue
+        except FormulaError as e:
+            # Fatal to a *run* -- a rule that cannot be evaluated at all is
+            # a broken model, not an unchecked limit. Carried rather than
+            # raised so a caller that must not raise (a note) can report it
+            # instead; _check_constraints below raises on it.
+            results.append(ConstraintResult(
+                rule.mote.id, label, rule.equation, NOT_CHECKED, str(e), error=str(e)))
+            continue
+
+        if evaluated.terms:
+            results.append(ConstraintResult(
+                rule.mote.id, label, rule.equation, NOT_CHECKED,
+                f"depends on values this run did not determine "
+                f"({describe_unknowns(evaluated.terms)})",
+            ))
+        elif _satisfied(evaluated.operator, evaluated.constant):
+            results.append(ConstraintResult(
+                rule.mote.id, label, rule.equation, PASS,
+                off_by=abs(evaluated.constant),
+            ))
+        else:
+            results.append(ConstraintResult(
+                rule.mote.id, label, rule.equation, FAIL,
+                f"off by {abs(evaluated.constant):g}",
+                off_by=abs(evaluated.constant),
+            ))
+    return results
+
+
 def _check_constraints(
     view: _GardenView,
     pairs: list[tuple[rules_repo.Rule, str]],
@@ -778,40 +876,79 @@ def _check_constraints(
     *,
     model_cache: dict[str, PropertyProvider],
 ) -> list[str]:
-    """Which constraints the answer does not satisfy, as readable lines.
-
-    Checked once, after solving, against the values that were actually
-    found -- a constraint is a statement about an answer, so checking it
-    before there is one would be meaningless.
-
-    A constraint still referring to something unsolved is reported as
-    *unchecked* rather than assumed satisfied. Silence would be
-    indistinguishable from passing, and a limit nobody could evaluate is
-    exactly the one worth mentioning.
-    """
+    """Which constraints the answer does not satisfy, as readable lines --
+    `constraint_results()` above kept for the run's own reporting."""
     problems = []
-    for rule, mote_id in pairs:
-        label = f"{rule.name} on {_mote_label(view, mote_id)}"
-        try:
-            ctx = _context(view, mote_id, solved, tick, previous, model_cache=model_cache)
-            result = evaluate_equation(rule.equation, ctx)
-        except NonlinearError as e:
-            problems.append(f"{label}: not checked -- {e}")
-            continue
-        except FormulaError as e:
-            raise SimulationError(f"rule {rule.name!r} on mote {mote_id[:8]}: {e}") from e
-
-        if result.terms:
+    for result in constraint_results(
+        view, pairs, solved, tick, previous, model_cache=model_cache
+    ):
+        if result.error:
+            raise SimulationError(f"rule {result.label!r}: {result.error}")
+        if result.status == NOT_CHECKED:
+            problems.append(f"{result.label}: not checked -- {result.detail}")
+        elif result.status == FAIL:
             problems.append(
-                f"{label}: not checked -- depends on values this run did not determine "
-                f"({describe_unknowns(result.terms)})"
-            )
-        elif not _satisfied(result.operator, result.constant):
-            problems.append(
-                f"{label}: {rule.equation} is not satisfied "
-                f"(off by {abs(result.constant):g})"
+                f"{result.label}: {result.equation} is not satisfied ({result.detail})"
             )
     return problems
+
+
+def check_constraints(
+    conn: sqlite3.Connection, scenario: str | None = None
+) -> list[ConstraintResult]:
+    """Every comparison relation in the garden, checked against the values
+    the motes hold right now -- solving nothing and writing nothing.
+
+    The same check a run performs, available on its own, which is what a
+    green/red checklist needs: a document reporting on a finished
+    calculation should read the answers that are on the motes, not have to
+    re-run the solve to find out whether they are within limits.
+
+    The view's freedoms are cleared for exactly the reason
+    `expression_context()` clears them -- a property declared free
+    evaluates to a free variable, which is right when a solver is waiting
+    for it and useless here. Cleared, `sigma <= 250` is checked against the
+    sigma the last solve actually wrote, which is the answer the document
+    is reporting on. A freedom nothing has determined yet has no value and
+    comes back *not checked*, which is correct and is the one thing a
+    checklist must not call a pass."""
+    properties = {m.id: m.properties for m in list_motes(conn)}
+    view = dataclasses.replace(
+        _build_view(
+            scenarios_repo.apply(properties, _resolve_scenario(conn, scenario)),
+            list_relationships(conn),
+        ),
+        freedoms={},
+    )
+    pairs = _rule_instances(rules_repo.list_rules(conn), view)
+    constraints = [(rule, mote_id) for rule, mote_id in pairs
+                   if _operator_of(rule) != "=="]
+    return [_unchecked(r) for r in constraint_results(view, constraints, {}, model_cache={})]
+
+
+def _unchecked(result: ConstraintResult) -> ConstraintResult:
+    """A constraint that could not be evaluated here is *not checked*, not
+    a broken model. With freedoms cleared, "no property `sigma`" means the
+    solve has not written one yet -- which is a gap in the calculation, and
+    reads better said that way than as the evaluator's own words about a
+    species that declares no unknown."""
+    if not result.error:
+        return result
+    return dataclasses.replace(
+        result,
+        detail=f"cannot be evaluated yet -- {result.error}",
+        error=None,
+    )
+
+
+def _operator_of(rule: rules_repo.Rule) -> str:
+    """A rule's comparison, or `==` for one that doesn't parse -- which
+    keeps an unparseable rule out of the constraint list rather than
+    reporting it there as an unchecked limit."""
+    try:
+        return relation_operator(rule.equation)
+    except FormulaError:
+        return "=="
 
 
 def _constraint_report(

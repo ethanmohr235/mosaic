@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
+from core import calc
 from core import health
 from core import modoc
 from core import worksheet
@@ -292,6 +293,28 @@ def build_parser() -> argparse.ArgumentParser:
         "health", help="Whether the model is solvable, and which values are not"
     )
     health_parser.add_argument("--scenario", help="Ask the same question of a scenario")
+
+    ### Calc
+    calc_parser = subparsers.add_parser(
+        "calc", help="A calculation's givens, answers, assumptions, checks and shown work"
+    )
+    calc_sub = calc_parser.add_subparsers(dest="action")
+    for name, help_text in (
+        ("given", "Every number the equations read and cannot determine"),
+        ("answers", "Every value the solver is free to determine"),
+        ("assumptions", "Every value marked `source: assumed`"),
+        ("external", "Every value marked `source: external`"),
+        ("checks", "Every comparison relation, and whether it holds"),
+    ):
+        section = calc_sub.add_parser(name, help=help_text)
+        if name != "checks":
+            _add_format_arguments(section)
+    calc_work = calc_sub.add_parser(
+        "work", help="The equation, the equation with values in it, and the result"
+    )
+    calc_work.add_argument("mote_id", help="Mote whose property to show the work for")
+    calc_work.add_argument("key", help="Property key to show the work for")
+    _add_format_arguments(calc_work)
 
     ### Why
     why_parser = subparsers.add_parser(
@@ -638,6 +661,44 @@ def _handle_roles(conn, args) -> None:
             print(f"  {line}")
 
 
+def _add_format_arguments(parser) -> None:
+    """`--unit` and `--figures`, which are `\\val{x}{in, 3}`'s two halves
+    spelled out -- a flag reads better than a comma list on a command
+    line, and both reach the same core/calc.py formatting."""
+    parser.add_argument("--unit", help="Convert into this unit for display")
+    parser.add_argument(
+        "--figures", type=int, help="Quote to this many significant figures"
+    )
+
+
+_CALC_SECTIONS = {
+    "given": calc.givens,
+    "answers": calc.answers,
+    "assumptions": calc.assumptions,
+    "external": calc.external,
+}
+
+
+def _handle_calc(conn, args) -> None:
+    action = args.action
+    if action == "work":
+        render.print_work(calc.work(
+            conn, args.mote_id, args.key,
+            getattr(args, "unit", None), getattr(args, "figures", None),
+        ))
+        return
+    if action == "checks":
+        render.print_checks(calc.checks(conn))
+        return
+    reader = _CALC_SECTIONS.get(action)
+    if reader is None:
+        print(f"Specify a calc action: {', '.join([*_CALC_SECTIONS, 'checks', 'work'])}")
+        return
+    render.print_calc_rows(
+        reader(conn), getattr(args, "unit", None), getattr(args, "figures", None)
+    )
+
+
 def _handle_worksheet(conn, args) -> None:
     action = args.action or "read"
     if action == "read":
@@ -757,6 +818,8 @@ def main() -> None:
                 _handle_worksheet(conn, args)
             elif args.command == "health":
                 _handle_health(conn, args)
+            elif args.command == "calc":
+                _handle_calc(conn, args)
             elif args.command == "why":
                 _handle_why(conn, args)
             elif args.command in ("impact", "requires", "producers", "consumers"):

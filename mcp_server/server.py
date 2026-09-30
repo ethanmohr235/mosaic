@@ -23,6 +23,7 @@ from mcp.server import MCPServer
 from mcp.server.auth.provider import OAuthAuthorizationServerProvider
 from mcp.server.auth.settings import AuthSettings
 
+from core import calc as calc_repo
 from core import derivations as derivations_repo
 from core import garden_io
 from core import health as health_repo
@@ -718,6 +719,87 @@ def write_worksheet(text: str, garden: str | None = None) -> dict[str, Any]:
         }
 
 
+def calc_sections(
+    unit: str | None = None, figures: int | None = None, garden: str | None = None
+) -> dict[str, Any]:
+    """A calculation's five standing sections: what was **given**, what was
+    **assumed**, what came from **outside** the garden, the **answers**, and
+    the **checks**.
+
+    The same five a `.modoc` note's `\\given` / `\\assumptions` / `\\answers`
+    / `\\checks` macros print, so a client can read a finished calculation
+    without rendering a document. Givens and answers are scoped to the motes
+    the equations actually mention; assumptions are not, since an assumption
+    may be about something no equation touches. `unit` converts every
+    quantity for display and `figures` quotes it to that many significant
+    figures -- neither changes anything stored."""
+    with _connect(garden) as conn:
+        return {
+            "given": [_calc_row(r, unit, figures) for r in calc_repo.givens(conn)],
+            "answers": [_calc_row(r, unit, figures) for r in calc_repo.answers(conn)],
+            "assumptions": [
+                _calc_row(r, unit, figures) for r in calc_repo.assumptions(conn)
+            ],
+            "external": [_calc_row(r, unit, figures) for r in calc_repo.external(conn)],
+            "checks": [
+                {"equation": c.equation, "label": c.label, "status": c.status,
+                 "detail": c.detail, "offBy": c.off_by}
+                for c in calc_repo.checks(conn)
+            ],
+        }
+
+
+def _calc_row(row, unit: str | None, figures: int | None) -> dict[str, Any]:
+    shown = row.quantity.converted(unit)
+    return {
+        "label": row.label,
+        "moteId": row.mote_id,
+        "mote": row.mote,
+        "key": row.key,
+        "value": row.quantity.value,
+        "unit": shown.unit,
+        "text": shown.text(figures),
+        "source": row.source.kind if row.source else None,
+        "note": row.source.note if row.source else None,
+    }
+
+
+def shown_work(
+    mote_id: str,
+    key: str,
+    unit: str | None = None,
+    figures: int | None = None,
+    garden: str | None = None,
+) -> dict[str, Any]:
+    """How one value came out: the equation, the equation with the values
+    written into it, and the result.
+
+    Read from the last solve's record -- the same record `why` reads, so
+    this and `why` explain one value one way. The substituted values are in
+    the unit each mote declares rather than base SI (somebody who wrote
+    `80 in` has to see 80), and where one line mixes two units of a
+    dimension they are converted to one and the step's `note` says so.
+
+    A value the last solve did not determine has no work to show and says
+    so in `note` -- which is an answer, not a failure. Solve first
+    (`preview_simulation` never writes, so it leaves no record; the app or
+    the CLI has to do the writing solve)."""
+    with _connect(garden) as conn:
+        shown = calc_repo.work(conn, mote_id, key, unit, figures)
+        return {
+            "label": shown.label,
+            "text": shown.quantity.text(figures),
+            "value": shown.quantity.value,
+            "unit": shown.quantity.unit,
+            "steps": [
+                {"kind": s.kind, "text": s.text, "note": s.note} for s in shown.steps
+            ],
+            "alsoDetermined": list(shown.also_determined),
+            "note": shown.note,
+            "error": shown.error,
+        }
+
+
 # ---- conventions ----
 
 
@@ -760,6 +842,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
+    calc_sections, shown_work,
     resolve_modoc,
     reserved_names,
 )

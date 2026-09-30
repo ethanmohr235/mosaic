@@ -46,7 +46,7 @@ absolute path.
 
 ## Tools
 
-47 tools, grouped: gardens (`list_gardens`, `create_garden`,
+49 tools, grouped: gardens (`list_gardens`, `create_garden`,
 `export_garden`), motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
@@ -56,6 +56,7 @@ absolute path.
 `whole_garden`), simulation (`preview_simulation`, `why`),
 dependencies (`impact`, `requires`, `producers`, `consumers`),
 the worksheet (`read_worksheet`, `write_worksheet`), `solve_health`,
+the calc sections (`calc_sections`, `shown_work`),
 `check_roles`, `list_scenarios`, notes (`resolve_modoc`), and
 `reserved_names`.
 
@@ -138,6 +139,25 @@ back, rather than sending lines composed against a garden you have not
 read. Rules about a *species* are never rendered or touched — those are
 reusable models, and `untouched` counts them. Nothing is deleted while any
 line fails to parse.
+
+`calc_sections()` returns a calculation's five standing sections -- what
+was **given**, what was **assumed**, what came from **outside** the
+garden, the **answers**, and the **checks** -- which is what the
+`\given`/`\assumptions`/`\answers`/`\checks` macros print, without
+needing a note to render. `unit` and `figures` convert and quote every
+quantity for display and change nothing stored.
+
+`shown_work(mote, key)` is `\work`: the equation, the equation with the
+values written into it, and the result. Read from the last solve's record,
+so it needs such a solve to have happened -- `preview_simulation` writes
+nothing and so leaves no record. Substituted values are in the unit each
+mote declares rather than base SI, and where one line mixes two units of a
+dimension the step's `note` says which one they were converted to.
+
+A given's provenance is the reserved `source` property, a per-property map
+shaped exactly like `units`: `{"x": "assumed"}` or `{"x": {"kind":
+"external", "note": "FEA probe"}}`. Write it with `update_mote` like any
+other property; `reserved_names()` describes it.
 
 `solve_health` answers "can this be solved, and if not, which line is
 wrong" *before* anything runs. A failed solve says "underdetermined",

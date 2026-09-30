@@ -7,8 +7,11 @@ values a step produces, and that a preview never writes.
 import pytest
 
 from core import modoc
+from core import worksheet
+from core.modoc import MODOC_KEY
 from core.modoc_bind import format_value, problems, resolve
-from core.motes import create_mote, get_mote, update_mote
+from core.motes import create_mote, get_mote, list_motes, update_mote
+from core.simulation import run_simulation
 from core.relationships import create_relationship
 from core.sweep import PLOT_KEY
 
@@ -291,3 +294,101 @@ def test_problems_is_empty_for_a_note_that_fully_resolves(conn, garden):
 def test_a_reference_that_fails_twice_is_reported_at_both_lines(conn, garden):
     document = modoc.parse("\\mote{Nowhere}\n\n\\mote{Nowhere}")
     assert [d.line for d in problems(document, resolve(conn, garden, document))] == [1, 3]
+
+
+# ---- the calc macros, resolved ----
+
+PYTHAGORAS = "bd.x = 80 in\nbd.y = 60 in\n\nbd.l = sqrt(bd.x^2 + bd.y^2)"
+
+
+def on_a_new_note(conn, source: str):
+    note = create_mote(conn, {MODOC_KEY: source})
+    document = modoc.parse(source)
+    return document, resolve(conn, note, document)
+
+
+@pytest.fixture
+def solved(conn):
+    """A solved bar, the FEA-Homework-4 shape in three lines."""
+    worksheet.apply(conn, PYTHAGORAS)
+    run_simulation(conn)
+    return next(m for m in list_motes(conn) if m.properties.get("name") == "bd")
+
+
+def test_work_resolves_a_dotted_reference(conn, solved):
+    document, resolution = on_a_new_note(conn, "\\work{bd.l}")
+    shown = resolution.works[modoc.work_key(modoc.works(document)[0])]
+    assert shown.label == "bd.l"
+    assert shown.shown
+    assert problems(document, resolution) == []
+
+
+def test_work_reads_a_bare_property_off_the_notes_anchor(conn):
+    """The same default `\\val{due}` takes."""
+    worksheet.apply(conn, PYTHAGORAS)
+    run_simulation(conn)
+    bd = next(m for m in list_motes(conn) if m.properties.get("name") == "bd")
+    update_mote(conn, bd.id, {MODOC_KEY: "\\work{l}"})
+    document = modoc.parse("\\work{l}")
+    resolution = resolve(conn, bd.id, document)
+    assert resolution.works[modoc.work_key(modoc.works(document)[0])].shown
+
+
+def test_work_naming_a_mote_nobody_has_is_a_problem(conn, solved):
+    document, resolution = on_a_new_note(conn, "\\work{nope.l}")
+    assert "nope" in problems(document, resolution)[0].message
+
+
+def test_work_with_an_unusable_target_says_what_to_write(conn, solved):
+    document, resolution = on_a_new_note(conn, "\\work{a.b.c}")
+    assert "\\work{bd.l}" in problems(document, resolution)[0].message
+
+
+def test_a_sections_format_reaches_its_rows(conn, solved):
+    document, resolution = on_a_new_note(conn, "\\answers{in, 4}")
+    section = resolution.sections[modoc.section_key(modoc.sections(document)[0])]
+    assert [row.text(section.figures) for row in section.rows] == ["100.0 in"]
+
+
+def test_each_section_comes_back_with_a_heading(conn, solved):
+    document, resolution = on_a_new_note(
+        conn, "\\given\n\n\\answers\n\n\\assumptions\n\n\\checks")
+    assert sorted(s.heading for s in resolution.sections.values()) == [
+        "Answers", "Assumptions", "Checks", "Given",
+    ]
+
+
+def test_an_empty_section_says_it_is_empty_rather_than_failing(conn, solved):
+    document, resolution = on_a_new_note(conn, "\\assumptions")
+    section = next(iter(resolution.sections.values()))
+    assert section.empty
+    assert section.error is None
+    assert problems(document, resolution) == []
+
+
+def test_a_unit_on_checks_is_a_problem(conn, solved):
+    """A check is a relation, not a quantity."""
+    document, resolution = on_a_new_note(conn, "\\checks{in}")
+    assert "not a quantity" in problems(document, resolution)[0].message
+
+
+def test_val_converts_a_stored_value_into_the_unit_it_asks_for(conn, solved):
+    _document, resolution = on_a_new_note(conn, "\\val{bd.l}{in, 4}")
+    assert list(resolution.values.values())[0].text == "100.0 in"
+
+
+def test_val_without_a_format_still_reads_the_stored_unit(conn, solved):
+    _document, resolution = on_a_new_note(conn, "\\val{bd.l}")
+    assert list(resolution.values.values())[0].text == "2.54 m"
+
+
+def test_val_on_an_expression_can_still_ask_for_figures(conn, solved):
+    """An expression is evaluated in base SI, so there is nothing to convert
+    from -- but the precision it is quoted to is still the author's."""
+    _document, resolution = on_a_new_note(conn, "\\val{bd.x * 2}{3}")
+    assert list(resolution.values.values())[0].text == "4.06"
+
+
+def test_two_vals_asking_for_different_units_both_resolve(conn, solved):
+    _document, resolution = on_a_new_note(conn, "\\val{bd.l}{in} and \\val{bd.l}{mm}")
+    assert sorted(v.text for v in resolution.values.values()) == ["100 in", "2540 mm"]

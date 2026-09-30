@@ -22,7 +22,9 @@ import sqlite3
 import textwrap
 from collections.abc import Iterable
 
+from core import calc
 from core import model_resolver
+from core import simulation
 from core import modoc
 from core import modoc_bind
 from core.derivations import Explanation
@@ -322,6 +324,78 @@ def _print_block(block, resolution) -> None:
         print(f"    {_math_text(block.text)}")
     elif isinstance(block, modoc.Graph):
         _print_figure(resolution.graphs.get(modoc.graph_key(block)))
+    elif isinstance(block, modoc.Work):
+        print_work(resolution.works.get(modoc.work_key(block)))
+    elif isinstance(block, modoc.Section):
+        _print_section(resolution.sections.get(modoc.section_key(block)))
+
+
+def print_work(shown, indent: str = "    ") -> None:
+    """The three lines, indented as display maths -- the same indent
+    `\\begin{equation}` gets, because that is what they are."""
+    if shown is None:
+        return
+    if shown.error:
+        print(f"{indent}[{shown.error}]")
+        return
+    if not shown.shown:
+        print(f"{indent}{shown.label} = {shown.quantity.text()}  [{shown.note}]")
+        return
+    for step in shown.steps:
+        line = f"{indent}{_math_text(step.text)}"
+        if step.kind == calc.RESULT:
+            line = f"{indent}{shown.label} = {step.text}"
+        print(f"{line}  [{step.note}]" if step.note else line)
+    if shown.also_determined:
+        print(f"{indent}found together with: {', '.join(shown.also_determined)}")
+
+
+def print_calc_rows(rows, unit: str | None = None, figures: int | None = None) -> None:
+    """A given/answer/assumption table as two aligned columns.
+
+    Aligned here rather than in core/calc.py, because how wide a column is
+    depends on the terminal and a rendered document has no columns at
+    all."""
+    if not rows:
+        print("(none)")
+        return
+    width = max(len(row.label) for row in rows)
+    for row in rows:
+        text = row.quantity.converted(unit).text(figures) or "-"
+        note = f"  ({row.source.note})" if row.source and row.source.note else ""
+        print(f"  {row.label.ljust(width)}  {text}{note}")
+
+
+def print_checks(results) -> None:
+    """A green/red checklist, in a terminal's only two colours: a mark that
+    lines up, and the word FAIL where it does not."""
+    if not results:
+        print("(no checks)")
+        return
+    for check in results:
+        print(f"  {_check_mark(check)} {check.equation}"
+              + (f"  -- {check.detail}" if check.detail else ""))
+
+
+def _check_mark(check) -> str:
+    if check.passed:
+        return "ok  "
+    return "FAIL" if check.status == simulation.FAIL else "??  "
+
+
+def _print_section(section) -> None:
+    if section is None:
+        return
+    print(section.heading.upper())
+    if section.error:
+        print(f"  [{section.error}]")
+    if section.empty:
+        print("  (none)")
+        return
+    if section.checks:
+        print_checks(section.checks)
+    if section.rows:
+        print_calc_rows(section.rows, figures=section.figures)
 
 
 def _inline_text(nodes, resolution) -> str:

@@ -56,6 +56,8 @@ Each on its own line.
 | `\begin{itemize}` / `\item ...` / `\end{itemize}` | bulleted list |
 | `\begin{equation}` ... `\end{equation}` | display math |
 | `\graph{...}` | a saved Moxie view, drawn here -- see below |
+| `\work{bd.l}` | the shown work for one value -- see below |
+| `\given` `\answers` `\assumptions` `\checks` | a calc section -- see below |
 | blank line | paragraph break |
 
 A wrapped `\item` continues on the next line. A block command's argument
@@ -116,8 +118,28 @@ it is never silently blank.
 
     \val{expression}
     \val[ref]{expression}
+    \val{expression}{unit, figures}
 
-`[ref]` reads from another mote instead of the anchor.
+`[ref]` reads from another mote instead of the anchor. The second brace
+says how to *write* the value: a unit to convert into, a count of
+significant figures, or both in either order.
+
+    \val{bd.l}                  2.54 m      -- the unit it is stored in
+    \val{bd.l}{in}              100 in
+    \val{bd.l}{in, 4}           100.0 in
+    \val{bd.l}{3}               2.54 m
+
+Neither half has to be labelled: there is no unit named `3` and no figure
+count spelled `in`. The unit is a **display** unit -- nothing about the
+value or its `units` entry changes, which is the whole reason a stored unit
+and a shown one are separate things (`docs/simulation.md` → *Display units
+versus stored units*).
+
+Significant figures keep their trailing zeros, because that is the claim:
+`2.50` says the hundredths place was determined and `2.5` says it was not.
+An expression rather than a plain property is evaluated in base SI, so a
+unit asked for there is the unit to present it in and there is nothing to
+convert from; the figure count still applies.
 
 An expression that is a bare property name the mote actually has is
 returned as-is, whatever its type -- this is what makes `\val{due}` a
@@ -171,6 +193,90 @@ A name that matches no saved view, a view whose specification is
 unreadable, and a range nothing solves across are each a diagnostic and
 a visibly empty figure, never a blank page.
 
+### `\work` -- how a value came out
+
+Block-level. It takes the value to show, and optionally the same
+`{unit, figures}` `\val` takes.
+
+    \work{bd.l}
+    \work{bd.l}{in, 4}
+    \work{l}                   -- a bare name reads off the note's anchor
+
+Three lines: the equation, the equation with the values written into it,
+and the result.
+
+    bd.l == sqrt(bd.x^2 + bd.y^2)
+    bd.l == sqrt((80 in)^2 + (60 in)^2)
+    bd.l = 100.0 in
+
+Read from **the last solve's record** (`core/derivations.py`) -- the same
+record `why` reads, so a document and a debugger explain one value one way.
+It follows that a garden nobody has solved has no work to show: the macro
+says so where it stands rather than inventing a derivation.
+
+Three things about the middle line are worth knowing:
+
+- **Values are in the unit each mote declares**, not the base SI the solver
+  worked in. Somebody who wrote `80 in` has to see 80.
+- **Where one line mixes two units of a dimension they are converted to
+  one, and the line says which.** `4.7 kohm + 300 ohm` is shown as
+  `(4700 ohm) + (300 ohm)`, noted *converted to ohm*, because declared units
+  read well but do not multiply out and a line nobody can check by eye is
+  worse than a labelled one.
+- **A quantity is bracketed** where it needs to be: `sqrt(80 in^2)` would
+  read as eighty square inches, so it is written `(80 in)^2`.
+
+The figure count applies to the **result**, not to the givens. Padding
+`80 in` to `80.00 in` would claim precision the given never stated.
+
+A value several equations determined **together** gets one symbolic line
+per equation and no substituted line -- there is no single expression to
+put numbers into, and inventing one would imply an attribution the solve
+never made. The values found with it are named instead.
+
+### The calc sections
+
+Four block macros, each taking nothing but an optional `{unit, figures}`:
+
+| | |
+| --- | --- |
+| `\given` | every number the equations read and are not free to determine |
+| `\answers` | every value the solver is free to determine, and what it holds |
+| `\assumptions` | every value marked `source: assumed` |
+| `\checks` | every comparison relation, and whether the values satisfy it |
+
+**They take no argument, and that is the design.** What belongs in a given
+list is a property of the garden, not something the note restates -- a note
+that had to list them would be the copy this format exists to avoid. The
+contents come from `core/calc.py`.
+
+Givens and answers are scoped to the motes the equations actually mention,
+so a homework mote's `estimate: 3` is not an input to anything.
+Assumptions are not scoped that way: an assumption may be about something
+no equation touches ("neglect self-weight"), and leaving it out because
+nothing computed with it would defeat the point of writing it down.
+
+An answer nobody has computed yet appears with an empty value rather than
+being hidden. A check whose value has not been determined reads *not
+checked*, never as a pass.
+
+`\checks` takes no unit or figures -- a relation is not a quantity -- and
+says so if handed one.
+
+### `source` -- where a value came from
+
+A given may carry its provenance in the reserved `source` property, a
+per-property map in exactly the shape `units` has:
+
+    source:  {"x": "assumed", "sigma_fea": "external"}
+    source:  {"x": {"kind": "assumed", "note": "neglect self-weight"}}
+
+`assumed` is what `\assumptions` lists, and the note is the sentence it
+prints beside the value. `external` marks a value that came from outside
+the garden -- an FEA probe, a measurement -- which is what a verification
+table compares against a hand calc. The solver never reads it: where a
+value came from changes nothing about how it is used.
+
 ## No clock
 
 Everything above resolves against **the garden as it stands**, and that
@@ -218,9 +324,20 @@ and Rendered panes, a mode switcher, and `@` to insert a link. See
 
 The same five exist in the REPL as `modoc <action> id=<mote>`.
 
+The calc sections are readable on their own, without a note around
+them -- the same content the macros print:
+
+    monoss calc given [--unit U] [--figures N]
+    monoss calc answers | assumptions | external
+    monoss calc checks
+    monoss calc work <mote> <property> [--unit U] [--figures N]
+
 ### MCP
 
-`resolve_modoc(mote)` returns the source and everything it resolves to.
+`resolve_modoc(mote)` returns the source and everything it resolves to,
+the calc sections and shown work included. `calc_sections()` and
+`shown_work(mote, key)` answer the same questions without a note to
+render, which is what a client building a calculation wants.
 Writing a note is ordinary `update_mote` on the `modoc` property; there
 is no separate write tool. For what the garden will be rather than what
 it is, ask `preview_simulation`.
@@ -231,6 +348,7 @@ it is, ask `preview_simulation`.
 | --- | --- |
 | `core/modoc.py` | the grammar. Pure -- no connection, no resolution |
 | `core/modoc_bind.py` | what the macros mean, against a garden |
+| `core/calc.py` | what goes in the five calc sections, and the shown work |
 | `core/plotview.py` | a saved Moxie view, re-solved for a `\graph` |
 | `core/simulation.py::expression_context` | the evaluation context a `\val` gets |
 | `cli/render.py::print_modoc` | the terminal's renderer |

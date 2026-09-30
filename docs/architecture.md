@@ -61,7 +61,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query` and `plot` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot` and `source` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 
@@ -666,6 +666,68 @@ the graph, in a small LaTeX subset whose three MonOSS macros --
 every time the note is read. A due date or a task count in a note is a
 lookup, not a copy, so a note cannot go stale the way a typed-in number
 does. See `docs/modoc.md` for the language.
+
+The **calc sections** are the same idea one size up. `\given`,
+`\answers`, `\assumptions` and `\checks` take no argument at all: what
+belongs in a document's given list is a property of the *garden* -- the
+numbers its equations read and are not free to determine -- and a note
+that had to list them would be the copy this format exists to avoid.
+`core/calc.py` answers all four, plus `\work`, which renders
+`core/derivations.py`'s record of the last solve as three lines: the
+equation, the equation with values in it, the result. It is the same
+record `why` reads, so a document and a debugger cannot come to disagree
+about how a value came out -- and a garden nobody has solved has no work
+to show, which the macro says rather than deriving one of its own.
+
+Two decisions inside `\work` are worth naming. Substituted values are in
+each mote's **declared** unit, not the base SI the solve worked in: the
+person who wrote `80 in` has to see 80, and the unit written beside the
+number is what makes the line correct. That does not multiply out when a
+line mixes `kohm` and `mA`, so where one line mixes units of a single
+dimension they are converted to one and the line says which -- every line
+is then either checkable by eye or explicitly labelled. And a value
+several equations determined *together* gets one symbolic line each and
+no substituted line at all, for the same reason `why` stops at a solver
+block: there is no one expression to put numbers into, and inventing one
+would imply an attribution the solve never made.
+
+Where a value came from is the reserved `source` property, a per-property
+map in exactly the shape `units` has (`{"x": "assumed"}`). One key covers
+`assumed`, which `\assumptions` lists, and `external`, which a
+verification table compares against a hand calc -- so the V&V work falls
+out of the same convention rather than needing its own. The solver never
+reads it: where a value came from changes nothing about how it is used.
+
+The **calc sections** are the same idea one size up. `\given`, `\answers`,
+`\assumptions` and `\checks` take no argument at all: what belongs in a
+document's given list is a property of the *garden* -- the numbers its
+equations read and are not free to determine -- and a note that had to list
+them would be the copy this format exists to avoid. `core/calc.py` answers
+all four, plus `\work`, which renders `core/derivations.py`'s record of the
+last solve as three lines: the equation, the equation with values in it, the
+result. It is the same record `why` reads, so a document and a debugger
+cannot come to disagree about how a value came out -- and a garden nobody
+has solved has no work to show, which the macro says rather than deriving
+one of its own.
+
+Two decisions inside `\work` are worth naming. Substituted values are in
+each mote's **declared** unit, not the base SI the solve worked in: the
+person who wrote `80 in` has to see 80, and the unit written beside the
+number is what makes the line correct. That does not multiply out when a
+line mixes `kohm` and `mA`, so where one line mixes units of a single
+dimension they are converted to one and the line says which -- every line is
+then either checkable by eye or explicitly labelled. And a value several
+equations determined *together* gets one symbolic line each and no
+substituted line at all, for the same reason `why` stops at a solver block:
+there is no one expression to put numbers into, and inventing one would
+imply an attribution the solve never made.
+
+Where a value came from is the reserved `source` property, a per-property
+map in exactly the shape `units` has (`{"x": "assumed"}`). One key covers
+`assumed`, which `\assumptions` lists, and `external`, which a verification
+table compares against a hand calc -- so the V&V work falls out of the same
+convention rather than needing its own. The solver never reads it: where a
+value came from changes nothing about how it is used.
 
 `\graph{...}` is the same idea for a figure, and is the one macro that
 resolves to something another *window* made: it names a view saved in

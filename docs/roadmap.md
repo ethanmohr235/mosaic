@@ -73,7 +73,13 @@ Each one was a separate act of filing. That lesson became a rule in
 ### Documents (Mora)
 - **Calc macros:** `\work` (symbolic equation → substituted values with
   units → result), `\given`, `\answers`, `\assumptions`, and `\checks`.
-  `\val` gets unit conversion and significant figures.
+  `\val` gets unit conversion and significant figures. **Decided:**
+  substituted values are in each mote's declared unit, converted to one
+  where a line mixes two of a dimension; the four sections take no
+  argument and cover the whole garden; a format goes in a second brace
+  (`\val{bd.l}{in, 4}`); and a value's provenance is the reserved
+  `source` property (`assumed`, `external`), which is also what phase 7's
+  V&V table reads. See `modoc.md`.
 - **LaTeX basics:** numbered equations with `\label`/`\ref`, citable
   rules, figures with captions, `tabular`, `enumerate`, and `\include`
   for multi-note documents.
@@ -118,7 +124,7 @@ alongside all of them.
 |---|---|---|
 | 1 | **Done.** Cleanup: remove Momentum; freeze Monarch; cut commit-tick and run history | Fewer surfaces, less code |
 | 2 | **Backend done.** Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
-| 3 | Mora calc macros and LaTeX basics | A gradeable homework document |
+| 3 | **Calc macros done; LaTeX basics next.** Mora calc macros and LaTeX basics | A gradeable homework document |
 | 4 | Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
 | 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |

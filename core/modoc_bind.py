@@ -22,11 +22,13 @@ note reads the state those produce. And it never raises: every failure
 lands in the returned diagnostics, because a note with one bad
 expression in it must still render the other nineteen.
 """
-import json
+import dataclasses
 import re
 import sqlite3
 from dataclasses import dataclass, field
 
+from core import calc
+from core.calc import format_value  # noqa: F401 -- re-exported
 from core import modoc
 from core import kinds as kinds_repo
 from core import plotview
@@ -73,11 +75,38 @@ class ValueResult:
 
 
 @dataclass(frozen=True)
+class SectionResult:
+    """What one of the four calc sections came to: its rows (or, for
+    `\\checks`, its constraint results) and a heading for it.
+
+    Rows come through as `core/calc.py` shapes rather than as text, so a
+    renderer can draw a real table and the terminal can draw columns --
+    formatting a table into a string here would leave both with the same
+    string and neither able to align it."""
+    kind: str
+    heading: str
+    rows: tuple = ()
+    checks: tuple = ()
+    # The section's `{unit, figures}`, already applied to each row's unit
+    # and carried here for the figures a renderer passes to `row.text()`.
+    # Converting once here rather than in each renderer is what keeps the
+    # terminal and the window quoting a table to the same precision.
+    figures: int | None = None
+    error: str | None = None
+
+    @property
+    def empty(self) -> bool:
+        return not self.rows and not self.checks
+
+
+@dataclass(frozen=True)
 class Resolution:
     anchor_id: str
     links: dict[str, LinkTarget] = field(default_factory=dict)
     values: dict[str, ValueResult] = field(default_factory=dict)
     graphs: dict[str, plotview.Figure] = field(default_factory=dict)
+    works: dict[str, calc.Work] = field(default_factory=dict)
+    sections: dict[str, SectionResult] = field(default_factory=dict)
     diagnostics: list[modoc.Diagnostic] = field(default_factory=list)
 
 
@@ -139,7 +168,81 @@ def resolve(
         key: drawing(conn, key, motes=motes)
         for key in dict.fromkeys(modoc.graph_key(n) for n in modoc.graphs(document))
     }
-    return Resolution(anchor_id, links, values, graphs, diagnostics)
+    works = {
+        modoc.work_key(node): _work(conn, node, anchor_id, motes)
+        for node in modoc.works(document)
+    }
+    # One read of the garden per *kind* of section, however many times the
+    # note asks for one -- the same reason `graphs` is keyed by its view.
+    sections = {
+        modoc.section_key(node): _section(conn, node)
+        for node in modoc.sections(document)
+    }
+    return Resolution(anchor_id, links, values, graphs, works, sections, diagnostics)
+
+
+# --- the calc sections -----------------------------------------------
+
+SECTION_HEADINGS = {
+    "given": "Given",
+    "answers": "Answers",
+    "assumptions": "Assumptions",
+    "checks": "Checks",
+}
+
+
+def _work(
+    conn: sqlite3.Connection, node: modoc.Work, anchor_id: str, motes: list[Mote]
+) -> calc.Work:
+    """`\\work{bd.l}` or `\\work{l}` -- the second read off the note's
+    anchor, the same default `\\val` takes."""
+    mote_id, key, error = _work_target(node.target, anchor_id, motes)
+    if mote_id is None:
+        return calc.Work(node.target, calc.Quantity(), error=error)
+    return calc.work(conn, mote_id, key, node.format.unit, node.format.figures)
+
+
+def _work_target(
+    target: str, anchor_id: str, motes: list[Mote]
+) -> tuple[str | None, str, str | None]:
+    dotted = _DOTTED_REF_RE.match(target)
+    if dotted:
+        ref, key = dotted.groups()
+        mote, error = _find(ref, motes)
+        return (mote.id if mote else None), key, error
+    if _PLAIN_PROPERTY_RE.match(target):
+        return anchor_id, target, None
+    return None, target, (
+        f"{target!r} is not a value to show -- write \\work{{bd.l}} or, for the "
+        f"note's own mote, \\work{{l}}"
+    )
+
+
+_SECTION_READERS = {
+    "given": calc.givens,
+    "answers": calc.answers,
+    "assumptions": calc.assumptions,
+}
+
+
+def _section(conn: sqlite3.Connection, node: modoc.Section) -> SectionResult:
+    heading = SECTION_HEADINGS.get(node.kind, node.kind)
+    if node.kind == "checks":
+        # A check is a relation, not a quantity, so a unit and a figure
+        # count have nothing to apply to. Reported rather than ignored.
+        error = None if node.format.empty else (
+            "a check is a relation, not a quantity -- \\checks takes no unit or figures"
+        )
+        return SectionResult(node.kind, heading, checks=calc.checks(conn), error=error)
+
+    reader = _SECTION_READERS.get(node.kind)
+    if reader is None:
+        return SectionResult(node.kind, heading, error=f"no {node.kind!r} section")
+    rows = tuple(
+        dataclasses.replace(row, quantity=row.quantity.converted(node.format.unit))
+        for row in reader(conn)
+    )
+    return SectionResult(node.kind, heading, rows=rows, figures=node.format.figures)
 
 
 def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Diagnostic]:
@@ -171,6 +274,18 @@ def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Dia
         if drawn is not None and drawn.error:
             found.append(modoc.Diagnostic(
                 node.line, "unresolved_graph", f"\\graph{{{node.view}}}: {drawn.error}"
+            ))
+    for node in modoc.works(document):
+        shown = resolution.works.get(modoc.work_key(node))
+        if shown is not None and shown.error:
+            found.append(modoc.Diagnostic(
+                node.line, "unresolved_work", f"\\work{{{node.target}}}: {shown.error}"
+            ))
+    for node in modoc.sections(document):
+        section = resolution.sections.get(modoc.section_key(node))
+        if section is not None and section.error:
+            found.append(modoc.Diagnostic(
+                node.line, "unresolved_section", f"\\{node.kind}: {section.error}"
             ))
     return sorted(found, key=lambda d: d.line)
 
@@ -242,7 +357,7 @@ def _value(
         # The fast path, and the reason \val{due} can be a date at all:
         # core/formula.py is numeric by construction, so a plain property
         # read has to happen before the expression evaluator sees it.
-        return _property_result(properties, node.expression)
+        return _property_result(properties, node.expression, node.format)
 
     dotted = _DOTTED_REF_RE.match(node.expression)
     if dotted:
@@ -251,7 +366,7 @@ def _value(
         if other is not None:
             other_properties = garden.at(other.id)
             if other_key in other_properties:
-                return _property_result(other_properties, other_key)
+                return _property_result(other_properties, other_key, node.format)
         # No mote named `other_ref` (or it doesn't carry `other_key`) --
         # fall through to the formula evaluator, which also resolves
         # `role.property` and a name-matched relationship neighbor.
@@ -260,47 +375,33 @@ def _value(
         number = evaluate_expression(node.expression, garden.context(mote_id)).value()
     except (FormulaError, ZeroDivisionError) as e:
         return ValueResult(f"?{node.expression}", None, str(e))
-    return ValueResult(format_value(number), number)
+    # An evaluated expression is in base SI (core/formula.py normalizes
+    # every read), so a unit asked for here is the unit to *present* it in
+    # and there is nothing to convert from. Significant figures still
+    # apply, which is the half of a format an expression can honour.
+    return ValueResult(
+        calc.Quantity(number, node.format.unit).text(node.format.figures), number
+    )
 
 
-def _property_result(properties: dict, key: str) -> ValueResult:
-    """A plain property read off some mote's properties, formatted with
-    its declared unit suffix if it has one. Shared by the anchor-property
-    fast path and the cross-mote `mote.property` fast path -- both read a
-    value straight off a mote without going through the formula
-    evaluator, so both display it in its own declared unit rather than
-    the solver's base SI."""
+def _property_result(
+    properties: dict, key: str, spec: modoc.Format | None = None
+) -> ValueResult:
+    """A plain property read off some mote's properties, written in its own
+    declared unit. Shared by the anchor-property fast path and the
+    cross-mote `mote.property` fast path -- both read a value straight off
+    a mote without going through the formula evaluator, so both display it
+    in the unit it is recorded in rather than the solver's base SI.
+
+    A `{unit, figures}` format converts it from there, which is the whole
+    point of asking for one: the *stored* unit is the garden's, and what a
+    document shows is the reader's (docs/simulation.md, *Display units
+    versus stored units*)."""
+    spec = spec or modoc.Format()
     raw = properties[key]
     unit_name = parse_units_property(properties.get(UNITS_KEY)).get(key)
-    text = format_value(raw)
     # "1" means truly unitless (core/units.py: DIMENSIONLESS with scale 1),
     # not a unit with the symbol "1" -- nothing to show after the number.
-    if unit_name and unit_name != "1" and isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        text = f"{text} {format_unit(unit_name)}"
-    return ValueResult(text, raw)
-
-
-def format_value(value: object) -> str:
-    """One reading of a property for every surface. Numbers are rounded
-    to six significant figures and switch to scientific notation outside
-    a plain range -- `%g`'s own rule, which also strips a solved integral
-    float's trailing `.0` for free ("12.0 tasks are closed" reads like a
-    bug) -- so a unit conversion or a solved value doesn't render as
-    fifteen digits of float noise."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return _format_number(value)
-    if isinstance(value, (list, dict)):
-        return json.dumps(value, separators=(", ", ": "))
-    return str(value)
-
-
-def _format_number(value: float) -> str:
-    if value == 0:
-        return "0"
-    text = f"{value:.6g}"
-    if "e" in text:
-        mantissa, exponent = text.split("e")
-        text = f"{mantissa}e{int(exponent)}"
-    return text
+    quantity = calc.Quantity(raw, unit_name if unit_name != "1" else None)
+    converted = quantity.converted(spec.unit)
+    return ValueResult(converted.text(spec.figures), raw)

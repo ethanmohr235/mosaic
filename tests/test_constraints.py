@@ -12,8 +12,10 @@ from core.formula import EQUALS, FormulaError, parse_equation, relation_operator
 from core.motes import create_mote, get_mote
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
+from core import simulation
 from core.simulation import (
     SimulationError,
+    check_constraints,
     incidence_index,
     run_simulation,
     run_time_series,
@@ -214,3 +216,75 @@ def test_a_constraint_is_dimension_checked_like_any_relation(conn):
     set_species(conn, mote, species)
 
     assert check_garden(conn).problems
+
+
+# ---- check_constraints: the same limits, read off the garden ----
+#
+# A checklist needs every constraint including the passing ones, in a shape
+# it can draw green or red -- and it must read the answers the last solve
+# wrote rather than re-running it.
+
+def test_check_constraints_reports_every_constraint_not_just_the_broken_ones(conn):
+    species = create_mote(conn, {"name": "T", "freedoms": "efficiency"})
+    add_rule(conn, species, "Physical", "efficiency <= 1")
+    add_rule(conn, species, "Worthwhile", "efficiency >= 0.9")
+    add_rule(conn, species, "Value", "efficiency == 0.95")
+    instance = create_mote(conn, {"name": "T1"})
+    set_species(conn, instance, species)
+    run_simulation(conn)
+
+    results = {r.equation: r for r in check_constraints(conn)}
+    assert set(results) == {"efficiency <= 1", "efficiency >= 0.9"}
+    assert all(r.status == simulation.PASS for r in results.values())
+    assert all(r.passed for r in results.values())
+
+
+def test_an_equation_is_never_in_the_constraint_list(conn):
+    species = create_mote(conn, {"name": "T", "freedoms": "x"})
+    add_rule(conn, species, "Value", "x == 4")
+    set_species(conn, create_mote(conn, {"name": "T1"}), species)
+    assert check_constraints(conn) == []
+
+
+def test_a_broken_constraint_carries_how_far_off_it_is(conn):
+    species = create_mote(conn, {"name": "T", "freedoms": "x"})
+    add_rule(conn, species, "Value", "x == 5")
+    add_rule(conn, species, "Limit", "x <= 3")
+    set_species(conn, create_mote(conn, {"name": "T1"}), species)
+    run_simulation(conn)
+
+    (result,) = check_constraints(conn)
+    assert result.status == simulation.FAIL
+    assert result.off_by == pytest.approx(2)
+
+
+def test_a_constraint_is_checked_against_the_value_the_solve_wrote(conn):
+    """Freedoms are cleared here, so `x <= 3` reads the 5 on the mote rather
+    than treating x as an unknown the way a solve would."""
+    species = create_mote(conn, {"name": "T", "freedoms": "x"})
+    add_rule(conn, species, "Value", "x == 5")
+    add_rule(conn, species, "Limit", "x <= 3")
+    set_species(conn, create_mote(conn, {"name": "T1"}), species)
+
+    assert check_constraints(conn)[0].status == simulation.NOT_CHECKED
+    run_simulation(conn)
+    assert check_constraints(conn)[0].status == simulation.FAIL
+
+
+def test_a_constraint_that_cannot_be_evaluated_is_not_checked_rather_than_raising(conn):
+    """A note must render, so this path reports where a run would raise."""
+    mote = create_mote(conn, {"name": "M"})
+    rule = create_mote(conn, {"name": "Limit", "equation": "missing <= 3"})
+    create_relationship(conn, rule, mote, APPLIES_TO)
+
+    (result,) = check_constraints(conn)
+    assert result.status == simulation.NOT_CHECKED
+    assert result.error is None       # not a broken model to this caller
+    assert "cannot be evaluated yet" in result.detail
+
+
+def test_a_rule_that_does_not_parse_is_not_a_constraint(conn):
+    mote = create_mote(conn, {"name": "M"})
+    rule = create_mote(conn, {"name": "Broken", "equation": "this is not a relation"})
+    create_relationship(conn, rule, mote, APPLIES_TO)
+    assert check_constraints(conn) == []

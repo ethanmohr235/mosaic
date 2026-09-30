@@ -19,6 +19,7 @@ provider-specific configuration this module has no business knowing;
 declaring DESCRIPTION/CONFIGURATION/CAPABILITIES on the provider class
 removed that reason, and with it the third place the same facts were
 written down."""
+from core.calc import SOURCE_KEY
 from core.links import URL_PROPERTY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
@@ -34,7 +35,7 @@ from core.units import UNITS_KEY
 RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
-    ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY,
+    ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -88,6 +89,15 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "compute, so reopening it re-solves the garden as it stands rather "
         "than showing what it looked like when saved. Written and read in "
         "Moxie (run_moxie.py); the solving itself is core/sweep.py.",
+    SOURCE_KEY: "Where each of a mote's values came from, as a per-property "
+        "map in exactly the shape `units` has: {'x': 'assumed', 'sigma': "
+        "'external'}. An entry may be the bare word or {'kind': ..., 'note': "
+        "...} where the value deserves a sentence. `assumed` is what a "
+        "document's \\assumptions section lists; `external` marks a value "
+        "that came from outside the garden (an FEA probe, a measurement), "
+        "which is what a verification table compares against a hand calc. "
+        "Opt-in per property, and unread by the solver -- a value's "
+        "provenance changes nothing about how it is used.",
     "url": "A web address or local file path. core/links.py classifies it "
         "as a URL (has a scheme, or looks like a bare domain) or an "
         "explicit local path ('/', '~', './', '../', or a drive letter) "

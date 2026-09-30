@@ -6,6 +6,7 @@ garden. What the macros *mean* is tests/test_modoc_bind.py's job.
 """
 import pytest
 
+from core import modoc
 from core.modoc import (
     ABOUT,
     Equation,
@@ -297,3 +298,96 @@ def test_export_refuses_a_mote_that_does_not_exist(conn, tmp_path):
 def test_a_diagnostic_inside_a_list_points_at_its_own_item(conn):
     document = parse("\\begin{itemize}\n\\item fine\n\\item \\bogus\n\\end{itemize}")
     assert [d.line for d in document.diagnostics] == [3]
+
+
+# ---- the calc macros ----
+#
+# Grammar only: which block each line makes and how its argument reads.
+# What goes *in* a section is core/calc.py's, tested there.
+
+def test_work_takes_the_value_to_show():
+    block = modoc.parse("\\work{bd.l}").blocks[0]
+    assert isinstance(block, modoc.Work)
+    assert block.target == "bd.l"
+    assert block.format.empty
+
+
+def test_work_takes_a_unit_and_figures_in_a_second_brace():
+    block = modoc.parse("\\work{bd.l}{in, 4}").blocks[0]
+    assert block.target == "bd.l"
+    assert block.format == modoc.Format("in", 4)
+
+
+def test_work_with_no_argument_is_a_diagnostic():
+    document = modoc.parse("\\work{}")
+    assert not document.blocks
+    assert document.diagnostics[0].kind == "bad_work"
+
+
+@pytest.mark.parametrize("kind", modoc.SECTION_COMMANDS)
+def test_a_section_command_takes_nothing(kind):
+    block = modoc.parse(f"\\{kind}").blocks[0]
+    assert isinstance(block, modoc.Section)
+    assert block.kind == kind
+    assert block.format.empty
+
+
+def test_a_sections_only_brace_is_its_format():
+    """There is no other argument it could be -- what goes in a given list
+    comes from the garden, not from the note."""
+    block = modoc.parse("\\answers{in, 3}").blocks[0]
+    assert block.format == modoc.Format("in", 3)
+
+
+def test_a_second_brace_on_a_section_is_a_diagnostic():
+    document = modoc.parse("\\answers{in}{3}")
+    assert document.diagnostics[0].kind == "unexpected_argument"
+
+
+def test_a_calc_block_breaks_the_paragraph_around_it():
+    blocks = modoc.parse("before\n\\given\nafter").blocks
+    assert [type(b).__name__ for b in blocks] == ["Paragraph", "Section", "Paragraph"]
+
+
+def test_a_calc_command_is_not_reported_as_unknown():
+    assert modoc.parse("\\given\n\\work{bd.l}").diagnostics == []
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("in, 3", modoc.Format("in", 3)),
+    ("3, in", modoc.Format("in", 3)),
+    ("3", modoc.Format(None, 3)),
+    ("in", modoc.Format("in", None)),
+    ("m/s", modoc.Format("m/s", None)),
+    ("", modoc.Format()),
+    (None, modoc.Format()),
+    ("  in ,  4 ", modoc.Format("in", 4)),
+])
+def test_parse_format_tells_a_unit_from_a_figure_count(text, expected):
+    """Neither has to be labelled: there is no unit named `3` and no figure
+    count spelled `in`."""
+    assert modoc.parse_format(text) == expected
+
+
+def test_val_takes_a_format_in_its_second_brace():
+    node = modoc.parse("The bar is \\val{bd.l}{in, 4} long.").blocks[0].content[1]
+    assert isinstance(node, modoc.Value)
+    assert node.expression == "bd.l"
+    assert node.format == modoc.Format("in", 4)
+
+
+def test_val_keeps_its_ref_and_its_format_apart():
+    node = modoc.parse("\\val[other]{l}{in}").blocks[0].content[0]
+    assert (node.ref, node.expression, node.format) == ("other", "l", modoc.Format("in"))
+
+
+def test_two_vals_asking_for_different_units_do_not_share_a_key():
+    """The format is part of what a macro asks, so they must resolve
+    separately."""
+    a, b = modoc.values(modoc.parse("\\val{l}{in} \\val{l}{m}"))
+    assert modoc.value_key(a) != modoc.value_key(b)
+
+
+def test_two_identical_vals_still_share_a_key():
+    a, b = modoc.values(modoc.parse("\\val{l}{in} and \\val{l}{in}"))
+    assert modoc.value_key(a) == modoc.value_key(b)

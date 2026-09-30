@@ -36,9 +36,21 @@ ABOUT = "about"
 
 # Inline macros. `graph` is deliberately absent: it produces a figure, and
 # a figure inside a sentence is a different feature from a figure between
-# two paragraphs. It is recognized at block level only.
+# two paragraphs. It is recognized at block level only. So are the calc
+# sections and `\work`, for the same reason -- each is a table or a run of
+# display maths, not something that belongs mid-sentence.
 INLINE_COMMANDS = ("mote", "val", "textbf", "emph", "texttt")
-BLOCK_COMMANDS = ("section", "subsection", "graph", "item", "begin", "end")
+
+# The five calc sections. `\work` takes the value to show; the other four
+# take nothing, because what goes in them is a property of the garden
+# rather than of the note (docs/modoc.md, "The calc sections").
+WORK_COMMAND = "work"
+SECTION_COMMANDS = ("given", "answers", "assumptions", "checks")
+CALC_COMMANDS = (WORK_COMMAND, *SECTION_COMMANDS)
+
+BLOCK_COMMANDS = (
+    "section", "subsection", "graph", "item", "begin", "end", *CALC_COMMANDS,
+)
 
 _ESCAPABLE = "\\{}%$"
 
@@ -60,6 +72,15 @@ _COMMENT_RE = re.compile(r"(?<!\\)%")
 # `\section{Status of \mote{x}{Atlas}}` has to reach the outer close.
 _BLOCK_RE = re.compile(r"^\\(?P<cmd>[a-zA-Z]+)(?:\[(?P<ref>[^\[\]]*)\])?\{(?P<arg>.*)\}$")
 _ENVIRONMENT_RE = re.compile(r"^\\(begin|end)\{([a-zA-Z]*)\}$")
+# A calc block: `\work{bd.l}`, `\work{bd.l}{in, 3}`, `\given`, `\checks{3}`.
+# Braces are non-greedy here, unlike _BLOCK_RE's, because a calc argument
+# holds a reference or a format spec rather than inline macros -- so the
+# second brace is a second argument and not part of the first.
+_CALC_RE = re.compile(
+    r"^\\(?P<cmd>" + "|".join(CALC_COMMANDS) + r")"
+    r"(?:\{(?P<arg>[^{}]*)\})?"
+    r"(?:\{(?P<fmt>[^{}]*)\})?$"
+)
 
 
 # --- diagnostics -----------------------------------------------------
@@ -107,11 +128,49 @@ class Link:
 
 
 @dataclass(frozen=True)
+class Format:
+    """How a quantity should be written: a unit to convert into, and how
+    many significant figures to quote.
+
+    Both optional, and both read from one comma-separated argument --
+    `{in}`, `{3}`, `{in, 3}`. Grammar rather than meaning, which is why it
+    lives here: whether `in` is a unit this garden can convert to is
+    core/units.py's answer, and this only says which half of the argument
+    was asking."""
+    unit: str | None = None
+    figures: int | None = None
+
+    @property
+    def empty(self) -> bool:
+        return self.unit is None and self.figures is None
+
+
+def parse_format(text: str | None) -> Format:
+    """`"in, 3"` -> Format("in", 3). A bare integer is significant figures
+    and anything else is a unit name, so neither has to be labelled --
+    there is no unit named `3`, and no figure count spelled `in`."""
+    if not text:
+        return Format()
+    unit: str | None = None
+    figures: int | None = None
+    for part in (p.strip() for p in text.split(",")):
+        if not part:
+            continue
+        if part.isdigit():
+            figures = int(part)
+        elif unit is None:
+            unit = part
+    return Format(unit, figures)
+
+
+@dataclass(frozen=True)
 class Value:
-    """`\\val{expr}`, or `\\val[ref]{expr}` to read it off another mote."""
+    """`\\val{expr}`, `\\val[ref]{expr}` to read it off another mote, or
+    `\\val{expr}{in, 3}` to say how to write it."""
     expression: str
     ref: str | None
     line: int
+    format: Format = field(default_factory=Format)
 
 
 Inline = Text | Styled | Math | Link | Value
@@ -158,7 +217,36 @@ class Graph:
     line: int
 
 
-Block = Heading | Paragraph | ItemList | Equation | Graph
+@dataclass(frozen=True)
+class Work:
+    """`\\work{bd.l}`, or `\\work{bd.l}{in, 4}`: the shown work for one
+    value -- the equation, the equation with numbers in it, the result.
+
+    `target` is a `mote.property` reference, or a bare property read off the
+    note's anchor. Which mote that names and where the three lines come from
+    are core/calc.py's business, for the same reason `\\graph{...}` leaves
+    its view to core/plotview.py."""
+    target: str
+    line: int
+    format: Format = field(default_factory=Format)
+
+
+@dataclass(frozen=True)
+class Section:
+    """`\\given`, `\\answers`, `\\assumptions` or `\\checks`: one of a calc
+    package's standing sections, as a table.
+
+    It takes no argument, and that is the design. What belongs in a
+    document's given list is a property of the *garden* -- the numbers its
+    equations read and are not free to determine -- not something the note
+    restates. A note that had to list them would be the copy this format
+    exists to avoid."""
+    kind: str
+    line: int
+    format: Format = field(default_factory=Format)
+
+
+Block = Heading | Paragraph | ItemList | Equation | Graph | Work | Section
 
 
 @dataclass(frozen=True)
@@ -254,6 +342,13 @@ class _Parser:
             self._flush()
             self._equation, self._open_line = [], number
             return
+        # Before _BLOCK_RE, whose greedy argument would swallow a calc
+        # command's second brace into its first.
+        calc = _CALC_RE.match(line)
+        if calc is not None:
+            self._flush()
+            self._feed_calc(number, calc)
+            return
         environment = _ENVIRONMENT_RE.match(line)
         if environment is not None:
             self.diagnostics.append(Diagnostic(
@@ -273,6 +368,32 @@ class _Parser:
         else:
             level = 1 if command == "section" else 2
             self.blocks.append(Heading(level, self._inline(number, arg), number))
+
+    def _feed_calc(self, number: int, match: re.Match) -> None:
+        """`\\work` needs to know which value; the four section commands
+        need nothing, and are reported if handed something anyway rather
+        than having the argument quietly ignored."""
+        command, arg = match.group("cmd"), (match.group("arg") or "").strip()
+        if command == WORK_COMMAND:
+            if not arg:
+                self.diagnostics.append(Diagnostic(
+                    number, "bad_work",
+                    "\\work{} needs the value to show, e.g. \\work{bd.l}",
+                ))
+                return
+            self.blocks.append(Work(arg, number, parse_format(match.group("fmt"))))
+            return
+
+        # A section command has no argument but its format, so its *first*
+        # brace is the format -- `\answers{3}`, not `\answers{}{3}`. A
+        # second brace has nothing left to mean.
+        if match.group("fmt") is not None:
+            self.diagnostics.append(Diagnostic(
+                number, "unexpected_argument",
+                f"\\{command} takes only a unit and figures -- write "
+                f"\\{command}{{{arg}}}, not two braces",
+            ))
+        self.blocks.append(Section(command, number, parse_format(arg)))
 
     def _feed_graph(self, number: int, arg: str, ref: str | None) -> None:
         """`\\graph` takes one thing: the saved view to draw.
@@ -372,7 +493,9 @@ def _inline_node(match: re.Match, line: int) -> Inline:
         return Link(first.strip(), second, line)
     if command == "val":
         ref = match.group("ref")
-        return Value(first.strip(), ref.strip() if ref else None, line)
+        return Value(
+            first.strip(), ref.strip() if ref else None, line, parse_format(second)
+        )
     return Styled({"textbf": "bold", "emph": "emph", "texttt": "code"}[command], first)
 
 
@@ -404,17 +527,40 @@ def graphs(document: Document) -> list[Graph]:
     return [b for b in document.blocks if isinstance(b, Graph)]
 
 
+def works(document: Document) -> list[Work]:
+    return [b for b in document.blocks if isinstance(b, Work)]
+
+
+def sections(document: Document) -> list[Section]:
+    return [b for b in document.blocks if isinstance(b, Section)]
+
+
 # Two macros that say the same thing resolve to the same thing, so
 # resolution is keyed by what a macro *asks*, not by where it sits. That
 # lets core/modoc_bind.py evaluate `\val{due}` once however often it
 # appears, and lets a renderer look a node's answer up without the two
 # sides having to agree on a traversal order.
 def value_key(node: Value) -> str:
-    return f"{node.ref or ''}\u241f{node.expression}"
+    return f"{node.ref or ''}\u241f{node.expression}\u241f{_format_key(node.format)}"
 
 
 def graph_key(node: Graph) -> str:
     return node.view
+
+
+def work_key(node: Work) -> str:
+    return f"{node.target}\u241f{_format_key(node.format)}"
+
+
+def section_key(node: Section) -> str:
+    return f"{node.kind}\u241f{_format_key(node.format)}"
+
+
+def _format_key(spec: Format) -> str:
+    """The format is part of what a macro asks, not decoration on top of
+    it: `\\val{bd.l}{in}` and `\\val{bd.l}{m}` want different answers, so
+    they must not share a key."""
+    return f"{spec.unit or ''}\u241f{spec.figures or ''}"
 
 
 def _inlines(document: Document):
