@@ -2,11 +2,9 @@
 the shell is built on (effects, layouts, history, garden switching)."""
 import inspect
 import sqlite3
-import sys
 
 import pytest
 
-import api_common
 from console import state as state_repo
 from console.api import Api
 from console.session import Session
@@ -39,15 +37,6 @@ def api():
     instance.shutdown()
 
 
-@pytest.fixture
-def launched(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        api_common, "popen_detached", lambda args, **kwargs: calls.append(args)
-    )
-    return calls
-
-
 # ---- boot ----------------------------------------------------------------
 
 def test_boot_shape(api):
@@ -57,14 +46,14 @@ def test_boot_shape(api):
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
     assert boot["apps"][2] == {"suffix": "xie", "name": "Moxie",
-                               "defaultView": "moxie:plot", "legacy": None, "layout": None}
+                               "defaultView": "moxie:plot", "layout": None}
     tion = boot["apps"][3]
-    assert (tion["defaultView"], tion["legacy"]) == ("motion:state", None)
+    assert tion["defaultView"] == "motion:state"
     assert [c["command"] for c in tion["layout"]["children"]] == ["scenarios", "sim", "rule @sel"]
     assert [a["suffix"] for a in boot["apps"]] == [
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
-                               "defaultView": "monolith:table", "legacy": None, "layout": None}
+                               "defaultView": "monolith:table", "layout": None}
     assert boot["crumbs"] == ["test"]
     assert boot["verbs"][29] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
@@ -153,9 +142,8 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
     assert effect["effect"] == "error" and '"log"' in effect["message"]
 
 
-def test_te_opens_the_props_pane_on_the_selection(api, launched):
+def test_te_opens_the_props_pane_on_the_selection(api):
     assert api.run("mo te") == {"effect": "open_view", "view": "mote:props", "command": "open @sel"}
-    assert launched == []
 
 
 def test_resolve(api):
@@ -901,3 +889,23 @@ def test_project_start_and_stop_are_one_undo_each(api):
     assert "no longer owns" in api.run("project stop HW5")["message"]
     assert "owns no garden" in api.run("project stop HW5")["message"]
     assert api.boot()["crumbs"] == ["test"]
+
+
+def test_lifecycle_sync_respects_auto_sync_and_refresh_does_not(monkeypatch):
+    from console import session as session_module
+    from core import gardens as gardens_repo
+    ran = []
+    monkeypatch.setattr(session_module.threading, "Thread",
+                        lambda target, daemon: type("T", (), {"start": lambda self: ran.append(target)})())
+    create_garden("synced")
+    gardens_repo.set_sync_dir("synced", "http://example.invalid/")
+    gardens_repo.set_auto_sync_enabled("synced", False)
+    session_module.best_effort_sync("synced")
+    assert ran == []
+    session_module.best_effort_sync("synced", manual=True)
+    assert len(ran) == 1
+    gardens_repo.set_auto_sync_enabled("synced", True)
+    session_module.best_effort_sync("synced")
+    assert len(ran) == 2
+    session_module.best_effort_sync("test")  # no sync dir: nothing to do
+    assert len(ran) == 2

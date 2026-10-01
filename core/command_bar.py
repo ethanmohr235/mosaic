@@ -616,8 +616,8 @@ def _choice(conn, mote: Mote) -> dict:
 def parse_value(text: str):
     """`"500 ohms"` -> (500, "ohm"); `"500"` -> (500, None); anything else
     tries JSON (`"true"` -> True, `"[1, 2]"` -> [1, 2]) and falls back to
-    the literal string, same tolerance api_common.coerce() gives typed
-    property boxes elsewhere.
+    the literal string -- the tolerance the old windows' property boxes
+    gave typed values too.
 
     Public because it is the one answer to "what did that typed value
     mean": core/batch.py's bulk write reads a value exactly as `R1.x = 5

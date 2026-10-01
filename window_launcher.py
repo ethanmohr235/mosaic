@@ -1,9 +1,8 @@
 # window_launcher.py
-"""Shared pywebview window-launching boilerplate for the desktop
-apps (the console and the Gardens window). Before this, each app's
-app.py carried its own byte-for-byte copy of port picking and the
-WebKit HTTP-cache-clearing workaround -- see api_common.py for the
-other half of the boilerplate that used to get re-copied per app.
+"""The pywebview boilerplate the console's window launches with: port
+picking and the WebKit HTTP-cache-clearing workaround. It was shared by
+seven windows once; the console is the only one now (docs/console.md,
+U9), and console/app.py its only caller.
 """
 import logging
 import shutil
@@ -21,11 +20,11 @@ def choose_port(name: str, preferred: int) -> int:
     A fixed port by preference because the page origin is what scopes
     WebKit's localStorage: a port that moved every launch would mean a
     window that forgets what it saved between sessions. A fallback
-    because a second window of the same app is a thing a person may
-    reasonably open, and losing that argument should cost the port, not
-    the window -- the alternative is what shipped once already, a
-    window titled Mora showing the Monarch graph because the loser of
-    the bind pointed itself at the winner's address instead."""
+    because a second console is a thing a person may reasonably open,
+    and losing that argument should cost the port, not the window -- the
+    alternative is what shipped once already, a window showing another
+    window's page because the loser of the bind pointed itself at the
+    winner's address instead."""
     if _is_free(preferred):
         return preferred
     port = _ephemeral_port()
@@ -71,14 +70,12 @@ def launch_window(
     height: int,
     min_size: tuple[int, int],
 ) -> None:
-    """Opens one app's window and blocks until it closes.
+    """Opens the window and blocks until it closes.
 
     `api` becomes the window's js_api and gets `_window` set on it once
-    the window exists (needed for native file dialogs), the same as
-    every app.py did by hand before this. `storage_dir` must already be
-    this app's own directory, never shared with another window: all six
-    apps run at once by design, and clear_http_cache() deletes what is
-    under it on startup."""
+    the window exists (needed for native file dialogs). `storage_dir`
+    must be the window's own directory: clear_http_cache() deletes what
+    is under it on startup."""
     clear_http_cache(storage_dir)
     window = webview.create_window(
         name,
@@ -93,7 +90,7 @@ def launch_window(
     # http_server=True: serve the frontend over http://127.0.0.1 instead
     # of file://. WebKit disables localStorage for file:// pages (no
     # origin to partition storage by), which every frontend here relies
-    # on to remember per-garden state between launches.
+    # on to remember state between launches.
     #
     # private_mode=False so storage survives across app restarts.
     # Without an explicit storage_path, pywebview falls back to WebKit's

@@ -34,7 +34,9 @@ _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 def species_ids(conn: sqlite3.Connection) -> list[str]:
     """Every species in the garden, sorted -- the universe a colour palette
-    claims its entries from (see api_common.species_ids)."""
+    claims its entries from; every pane's payload carries it, so a
+    species is one colour everywhere (docs/architecture.md -> Species
+    colour)."""
     return sorted(mote.id for mote in species_repo.list_species(conn))
 
 

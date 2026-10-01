@@ -89,7 +89,7 @@ class FigureSeries:
     The hole is kept rather than closed up, and that is not fussiness: a
     renderer handed a dense list would draw a straight segment across a
     range where the model has no answer at all, which is a lie the eye
-    believes completely (frontend_shared/plot.js::segmentsOf)."""
+    believes completely (console/frontend/js/plot.js::segmentsOf)."""
     id: str
     label: str
     unit: str | None

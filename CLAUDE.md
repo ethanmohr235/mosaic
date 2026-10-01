@@ -125,8 +125,13 @@ updates it in the same commit. Keep it compact: tables, no prose.
   `api.monarch` (pins in the console sidecar); `js/graph.js` is the
   restyled canvas. Annotations are removed and `core/db.py` drops their
   table. Monarch's window, `api_common`'s old-window mixins and every
-  `frontend_shared/` file but `focus.js` are deleted. The next UI step
-  is U9 (Home).
+  `frontend_shared/` file but `focus.js` are deleted.
+- Console **U9 is done**, and with it every UI step: Home is `mo saic`
+  (`gardens | garden`) over `core/home.py` (the tree, a garden's
+  details, the ownership path, the `garden` subverbs); `console/home.py`
+  is `api.home`; `project start|stop` is a write verb; the top bar shows
+  the ownership path. `gardens_app/`, `run_gardens.py`, `api_common.py`
+  and `frontend_shared/` are deleted: the console is the only window.
 
 ## Split of work: cloud backend, local frontend
 

@@ -41,7 +41,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 
 | Command | Does |
 |---|---|
-| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`), `mo nastery` (`agenda \| week`), `mo narch` (`find \| graph @sel --depth 2 \| open @sel`); `mo saic` still opens the Gardens window |
+| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`), `mo nastery` (`agenda \| week`), `mo narch` (`find \| graph @sel --depth 2 \| open @sel`), `mo saic` (`gardens \| garden`) |
 | `find ‹conditions› [--sort k] [--group k] [--cols a,b] [--view name]` | Table of motes |
 | `open @sel\|#id\|name` | A mote's properties and links (`@sel` follows the selection) |
 | `set ‹target› ‹key› ‹value›` / `… --clear` | Set / remove a property (`5 mm` records the unit); `set C1.voltage 30` also works |
@@ -73,7 +73,15 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `graph [@sel\|#id\|‹name›] [--depth N]` | A mote's neighbourhood (default depth 2; `@sel` re-roots with the selection); no root: the whole garden |
 | `graph … --hide-rel a,b`, `--view ‹saved›`, `‹conditions›` | Leave out relationship types (not hopped either); keep what a saved view / conditions match |
 | `detach #id ‹key› ‹occurrence› ‹start› ‹end›` | Move one occurrence out of its series (what `t` runs) |
-| `cd ‹garden›` | Switch garden |
+| `cd ‹garden›` | Switch garden (or click a crumb in the top bar's path) |
+| `gardens [--archived]` | Every garden: the ownership tree, loose, archived (folded) |
+| `garden [‹name›]` | A garden's details (none: the open one) |
+| `garden new ‹name›`, `garden rename ‹old› ‹new›` | Make / rename a garden (renaming the open one follows it) |
+| `garden rm ‹name›` / `garden restore ‹name›` | Move aside (second ⏎ confirms; not the open one) / bring back |
+| `garden archive\|unarchive ‹name›` | Archive with everything it owns / undo that |
+| `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
+| `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
+| `project start @sel [‹garden›]`, `project stop @sel` | Give a mote its own garden / drop its claim (undoable) |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |
 | `undo`, `redo` | Undo / redo the last write |
@@ -208,6 +216,20 @@ for `n`, double-click to create. Month: `+N more` opens that week.
 
 Mouse: drag a node to move and pin it · drag empty space to pan · wheel
 zooms · ctrl+drag node → node prefills `A ->  -> B`.
+
+**Home** (`gardens`, `mo saic`)
+
+| Key | Does |
+|---|---|
+| `j` `k` / click | Move; the `garden` pane follows |
+| `⏎` | `cd` there |
+| `n`, `r` | New, rename (prefills `garden …`) |
+| `d` `d` | Remove (prefills `garden rm`) |
+| `a` | Archive / unarchive |
+| `s`, `e`, `i` | Sync (prefills), export (file dialog), import (prefills) |
+| `z` | Show / fold archived |
+
+`garden` pane: `⏎` or a click on a garden named there `cd`s.
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.
 **New pane** (`view>`): `↑` `↓` choose, `⏎` place, `esc` cancel.

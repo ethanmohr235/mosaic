@@ -18,8 +18,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, TypeVar
 
-from api_common import best_effort_sync
 from core import gardens as gardens_repo
+from core import sync as sync_repo
 from core.db import get_connection, initialize_database
 from core.undo import UndoManager
 
@@ -30,6 +30,31 @@ logger = logging.getLogger(__name__)
 BUSY_TIMEOUT_MS = 5000
 
 F = TypeVar("F", bound=Callable)
+
+
+def best_effort_sync(garden: str, *, manual: bool = False) -> None:
+    """Push and pull `garden` on a background thread when it syncs: on the
+    console's lifecycle points (open, garden switch, close) only while its
+    auto-sync flag is on, and on `refresh` (`manual`) whatever the flag. Its own short-lived connection, so a slow
+    or offline sync server never blocks opening, switching or closing,
+    and the caller's connection may already be gone when it runs. Errors
+    are logged, not raised: this path is opportunistic, unlike `garden
+    sync ‹name› now`, which waits and reports a real failure."""
+    if gardens_repo.get_sync_dir(garden) is None:
+        return
+    if not manual and not gardens_repo.get_auto_sync_enabled(garden):
+        return
+
+    def _run() -> None:
+        conn = get_connection(garden)
+        try:
+            sync_repo.run(conn, garden)
+        except Exception:
+            logger.exception("garden sync failed for %r", garden)
+        finally:
+            conn.close()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def open_connection(garden: str) -> sqlite3.Connection:
@@ -106,8 +131,7 @@ class Session:
 
 def locked(method: F) -> F:
     """Serialize a bridge method on its namespace's Session lock -- the
-    console's `api_common.synchronized`, over `self._session` instead of
-    a lock per Api. Reentrant, so a locked method may call another."""
+    console's equivalent of a per-Api lock, over `self._session`. Reentrant, so a locked method may call another."""
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         with self._session.lock:

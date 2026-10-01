@@ -1,7 +1,7 @@
 # console/app.py
-"""The Mosaic window: the console (docs/console.md). Same pywebview
-settings and cache workaround as every other window -- window_launcher.py
-carries them -- over the console's root Api and its own frontend.
+"""The Mosaic window: the console (docs/console.md), the one window
+(window_launcher.py carries its pywebview settings and cache workaround),
+over the console's root Api and its own frontend.
 
 User-facing name only: the window says Mosaic, while the package, the
 entry point (run_console.py) and the storage directory keep the repo's
@@ -18,9 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # launch_window()'s cache-clearing deletes what is under it on startup.
 WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_console"
 
-# 42001-42003 and 42005-42008 belong to the old windows (Monarch, Mora,
-# Monastery, Motion, Gardens; Monolith's and Moxie's are deleted), which
-# keep running beside this one until each is ported -- see window_launcher.choose_port.
+# 42001-42008 were the old windows'; they are all deleted. See
+# window_launcher.choose_port for a second console.
 DEFAULT_HTTP_PORT = 42009
 
 

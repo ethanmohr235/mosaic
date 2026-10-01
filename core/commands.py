@@ -42,14 +42,12 @@ from core.reserved import RESERVED_VERBS, reserved_words
 class ConsoleApp:
     """One app the console can open by suffix (`mo tion`).
 
-    `default_view` is None until the app's port step lands; while it is,
-    `legacy` names the old window to launch instead (an api_common.APPS
-    id, or "gardens" for the Gardens window). This table is the single
-    source of truth for which apps are ported."""
+    Every app is ported (console steps U2-U9), so each has a default
+    view; an entry without one would be offered dimmed, as not available
+    yet. This table is the single source of truth for the apps."""
     suffix: str
     name: str
     default_view: str | None = None
-    legacy: str | None = None
     default_command: str | None = None  # canonical command for default_view
     # An app that opens several panes at once (`mo tion`): a layout tree
     # in the shell's JSON shape (console/frontend/js/tree.js) that takes
@@ -118,8 +116,6 @@ def find_app(suffix: str) -> ConsoleApp | None:
 def app_description(app: ConsoleApp) -> str:
     if app.default_view:
         return f"{app.name} — {app.default_view}"
-    if app.legacy:
-        return f"{app.name} — old window"
     return f"{app.name} — not available yet"
 
 
@@ -661,7 +657,7 @@ def _complete_app(partial: str, cursor: int) -> Completion:
 
 
 def _unavailable(app: ConsoleApp) -> bool:
-    return not (app.default_view or app.legacy)
+    return not app.default_view
 
 
 def _app_row(app: ConsoleApp, dim: bool = False) -> CompletionRow:

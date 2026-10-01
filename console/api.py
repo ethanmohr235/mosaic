@@ -23,7 +23,6 @@ import logging
 import sqlite3
 from typing import Any
 
-import api_common
 from console import state as state_repo
 from console.home import HomeApi
 from console.monarch import MonarchApi
@@ -33,7 +32,7 @@ from console.mora import MoraApi
 from console.motion import MotionApi
 from console.mote import MoteApi
 from console.moxie import MoxieApi
-from console.session import Session, locked
+from console.session import Session, best_effort_sync, locked
 from core import commands
 from core import gardens as gardens_repo
 from core import home as home_repo
@@ -94,7 +93,7 @@ class Api:
     def run(self, line: str, selection: list[str] | None = None, confirm: bool = False,
             replace_history: bool = False) -> dict:
         """Run one command-line line and return exactly one effect:
-        statement, open_view, legacy, layout, garden, undo/redo, refresh
+        statement, open_view, layout, garden, undo/redo, refresh
         or error. The raw line enters this garden's history first, so
         even a failed line can be recalled -- except a confirm=True
         resubmission, which is the same line answering "press Enter
@@ -280,15 +279,7 @@ class Api:
         if app.default_view:
             return {"effect": "open_view", "view": app.default_view,
                     "command": app.default_command or app.suffix}
-        if not app.legacy:
-            return _error(f"{app.name} isn't available yet")
-        garden = self._session.garden
-        if app.legacy == "gardens":
-            api_common.open_gardens(garden)
-        else:
-            api_common.open_app(app.legacy, garden)
-        return {"effect": "legacy", "app": app.legacy,
-                "message": f"opened {app.name} (old window)"}
+        return _error(f"{app.name} isn't available yet")
 
     def _verb_write(self, verb: str, args: tuple[str, ...], selection: list[str]) -> dict:
         result = commands.WRITE_VERBS[verb](self._session.conn, args, selection)
@@ -449,7 +440,7 @@ class Api:
         """Kick a best-effort sync; the shell re-runs every pane, which is
         the "re-read the garden" half -- every read already goes to disk."""
         garden = self._session.garden
-        api_common.best_effort_sync(garden)
+        best_effort_sync(garden, manual=True)
         if gardens_repo.get_sync_dir(garden) is None:
             return f"refreshed {garden}"
         return f"refreshed {garden}; syncing in the background"
@@ -466,8 +457,7 @@ class Api:
             "gardens": gardens_repo.list_gardens(),
             "apps": [
                 {"suffix": app.suffix, "name": app.name,
-                 "defaultView": app.default_view, "legacy": app.legacy,
-                 "layout": app.layout}
+                 "defaultView": app.default_view, "layout": app.layout}
                 for app in commands.CONSOLE_APPS
             ],
             "verbs": [{"verb": verb, **meta} for verb, meta in RESERVED_VERBS.items()],

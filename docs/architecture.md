@@ -581,8 +581,8 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `gardens_app/`, `console/` and
-`mcp_server/` are four adapters over it, and each one's job is a
+`core/` is the whole system. `cli/`, `console/` and `mcp_server/` are
+three adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -617,17 +617,14 @@ The charter:
   Simulation below, and `docs/simulation.md`): scenarios, a tick-by-tick
   run and a rule's own bindings. It is the console's `sim`, `rule` and
   `scenarios` panes now, not a window.
-* **Gardens** -- the gardens themselves, rather than anything inside
-  one: create, rename, delete (with undo), import, export, and the
-  per-garden sync folder. A seventh window, and the only one that opens
-  on no garden at all -- which is exactly why it is separate. All six of
-  the others open it ("Manage gardens…" in each garden dropdown) instead
-  of carrying a copy, and it holds no garden connection, so renaming or
-  deleting the garden the window that opened it is looking at is an
-  ordinary operation rather than a case to refuse. Its own process, so
-  it cannot switch that window's garden; each row offers **Open in**
-  instead. Deliberately not: anything inside a garden -- it never reads
-  or writes a mote.
+* **Home** -- the gardens themselves, rather than anything inside one:
+  the ownership tree, and making, renaming, removing (restorable),
+  archiving, importing, exporting and syncing a garden. It was its own
+  window, Gardens, because it was the only one that opened on no garden
+  at all; it is the console's `gardens` and `garden` panes now
+  (`core/home.py`, see Home below). A garden-level act is a `garden …`
+  command outside any garden's undo, and the garden that is open is the
+  one thing it refuses to remove.
 * **Console** -- the one tiled Mosaic window the windows above are being
   ported into (`docs/console.md`; `run_console.py`, `console/`). Its
   root bridge (`console/api.py`) owns the single garden connection,
@@ -1310,12 +1307,41 @@ strokes were commentary layered over its canvas, stored in their own
 `core/db.py` drops the table when a garden is opened. Commentary about
 a model is a note (see Notes).
 
+# Home
+
+The console's Home (`mo saic`: `gardens | garden`, docs/console.md ->
+*Settled for U9*) is the ownership tree of `core/projects.py` drawn as a
+pane, and the garden manager the Gardens window used to be.
+
+`core/home.py` answers both panes and the `garden` subverbs. `gardens`
+lists owned gardens under their owner's garden with the cover's name,
+`due` and `status`, then loose gardens, then archived ones folded until
+`--archived`. Reading it opens every garden, so it runs on a pane's run,
+never per keystroke. A `.db` that isn't a garden still lists, uncounted:
+the ownership and archive scans skip what they cannot read.
+
+**Garden acts are commands outside undo.** `garden new|rename|rm|restore|
+archive|unarchive|export|import|sync` act on gardens, not on the open
+garden's motes, so none is on its undo stack; `rm` moves the file aside
+(a second ⏎ confirms it) and `garden restore` brings it back. Removing
+the open garden is refused; renaming it reopens the session under the
+new name (`console/session.py::Session.rename`). Import always lands in
+a new garden and removes it again if the file fails. Without a path,
+export and import ask with a native file dialog.
+
+**`project start|stop`** is the UI of phase 4's *Start project*: a write
+verb on the open garden, one undo step, which never deletes a garden.
+
+**The breadcrumb** is the open garden's ownership path
+(`core/home.py::path_of`), carried in the boot payload; a crumb above
+the open garden `cd`s there.
+
 # Focus and the clipboard
 
-`frontend_shared/focus.js` is loaded first by every window and installs
+`console/frontend/focus.js` is loaded first and installs
 itself -- there is nothing to configure. It owns two window-wide rules
-that used to be re-implemented per app and per shared widget, each over
-its own subtree, with gaps between them:
+that the old windows used to re-implement per app and per shared widget,
+each over its own subtree, with gaps between them:
 
 - **Middle-click never pastes.** WebKitGTK runs X11's primary-selection
   paste on the middle button's *mouseup*, into whatever element has
@@ -1333,6 +1359,4 @@ its own subtree, with gaps between them:
   element marked `data-keep-focus` -- the explicit opt-out for a popup
   that must leave focus where it is.
 
-A new window gets both by symlinking `focus.js` into its `frontend/` and
-loading it before its other scripts; no app should add its own
-middle-click or click-away handlers.
+No view should add its own middle-click or click-away handlers.

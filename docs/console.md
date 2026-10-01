@@ -27,7 +27,7 @@ through plan mode, questions and approval before any code. Anything under
 
 | Handoff says | Actually |
 |---|---|
-| Frontend in `ui/frontend/`, API in `ui/api.py` | Neither exists. Each app has `<app>/api.py` + `<app>/frontend/`, with shared widgets in `frontend_shared/` (symlinked). See *Architecture*. |
+| Frontend in `ui/frontend/`, API in `ui/api.py` | Neither exists. The console is `console/` (`api.py` and a namespace module per app) with `console/frontend/`. See *Architecture*. |
 | Graph drawn with Cytoscape | Monarch's graph is a hand-written canvas, kept and restyled to the graph styling rules (`console/frontend/js/graph.js`, U8). |
 | Apps: Observatory (`mo rph`), Motion, Moxie, Monastery, Mote Inspector, Launcher | See *App names* below. Observatory is Monarch (`mo narch`), and there is no `mo rph`. Mora, Monolith and Home are missing from the handoff. Momentum is being removed and is never ported. |
 | Fixed mote-type colors: task, note, event, source | Mosaic privileges no type. Motes are colored by **species**, using the existing probed palette retuned into the design's band. See *Color*. |
@@ -64,8 +64,8 @@ through plan mode, questions and approval before any code. Anything under
   shared garden session (`session.py`), layouts and history
   (`state.py`) and the launcher (`app.py`, run by `run_console.py`).
   `console/frontend/` holds the shell, the store, the components and
-  one ES module per view under `js/views/`. There is no build step. `frontend_shared/`'s symlink scheme goes away once every window
-  is gone, because one window needs no symlinks.
+  one ES module per view under `js/views/`. There is no build step, and
+  since U9 there are no other windows and no `frontend_shared/`.
 - **Strangler migration.** Build the shell first, then port the apps
   one at a time. An app's old window (`run_<app>.py`, `<app>/app.py`,
   `<app>/frontend/`) keeps working until its app is ported. After that
@@ -116,9 +116,9 @@ else.
   is still reachable as `"find"` (quoted) or `#id`, and creating one
   from the command line warns about exactly that. Each port step adds
   its own verbs to `RESERVED_VERBS`.
-- **An unported app** opens its old window (`api_common.open_app`)
-  until its port step gives it a default view (`CONSOLE_APPS` in
-  `core/commands.py` is the single record of what's ported).
+- **Every app is ported** (U2-U9): each has a default view in
+  `CONSOLE_APPS` (`core/commands.py`). The old windows, and the
+  console's way of launching them, are gone.
 - **`cd <garden>`** switches the workspace's garden.
 - `find` query syntax (`type:task due:<7d`) builds on `core/query.py`,
   which Monolith already uses. Don't write a second query language.
@@ -145,7 +145,7 @@ These are user-facing names. Python packages keep their current names
 | `mo ra` | Mora | `mora:notes`, `mora:edit`, `mora:read`, `mora:worksheet` | `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
 | `mo nastery` | Monastery | `monastery:agenda`, `monastery:week`, `monastery:month` | Table and grid panes on the `--line` grid. |
 | `mo narch` | Monarch | `monarch:graph` (`graph …`) | Graph only, a structure debugger. Opens `find \| graph @sel --depth 2 \| open @sel`. |
-| `mo saic` | Home + settings | `mosaic:home`, `mosaic:gardens` | Ownership tree, loose gardens, garden management. Replaces the Gardens window and the launcher. |
+| `mo saic` | Home | `mosaic:gardens` (`gardens`), `mosaic:garden` (`garden`) | Ownership tree, loose gardens, garden management. Replaced the Gardens window. |
 | — | shell | `log` | Command and error log. |
 
 Worksheet, checks and V&V views are added to this table by the roadmap
@@ -552,6 +552,51 @@ What the build decided within the settled plan above.
 - **Lost with the old inspector:** the `url` property's *Open* button.
   The props pane has no way to open a link yet (open question below).
 
+### Settled for U9, Home (2026-10-01)
+
+- **Two panes:** `mo saic` opens `gardens | garden`. `gardens` is the
+  ownership tree with loose gardens and archived ones folded at the
+  bottom, each row showing the cover (name, due, status) and counts;
+  `garden` follows the tree's cursor with path, counts, size, last
+  changed, sync, archive reason and ownership problems.
+- **`garden` subverbs:** `garden new|rename|rm|restore|export|import|
+  archive|unarchive ‹name›…` and `garden sync ‹name› ‹url›|off|now|auto
+  on|off`, beside `cd`. Import and export take a path, or ask with a
+  native file dialog. *Start project* is `project start @sel [name]` /
+  `project stop @sel`.
+- **Removing:** `garden rm` asks for a second ⏎; `garden restore` brings
+  it back. Not on `undo`, which belongs to the open garden.
+- **Also in:** the top bar's breadcrumb is the ownership path, and a
+  crumb `cd`s there.
+- **Not in:** cross-garden search, health indicators, a default-garden
+  setting.
+
+### Built for U9 (2026-10-01)
+
+What the build decided within the settled plan above.
+
+- **The detail pane follows by rewriting its line:** the tree's cursor
+  hands its garden over (`ctx.paneAction`), and the pane sets its own
+  line to `garden ‹name›`, so a layout reopens on it. `garden` alone is
+  the open garden; a garden named like a subverb is `garden show ‹name›`.
+- **Tree keys:** `j k` move, `⏎` `cd`, `n` new, `r` rename, `d d` remove
+  (prefills `garden rm`, which asks again), `a` archive/unarchive (runs),
+  `s` sync, `e` export (runs, with a dialog), `i` import, `z` folds the
+  archived by rewriting the line to `gardens --archived`.
+- **The open garden** can't be removed (`cd` elsewhere first); renaming
+  it reopens the console on the new name with a fresh undo stack.
+- **Lifecycle sync now honours auto-sync.** The console's open, switch
+  and close syncs used to run whenever a garden had a sync server,
+  ignoring the per-garden auto flag; they now skip when it is off.
+  `refresh` still syncs either way.
+- **A file that isn't a garden** lists uncounted instead of breaking the
+  tree (the ownership and archive scans in `core/projects.py` skip it).
+- **Deleted:** `gardens_app/`, `run_gardens.py`, `api_common.py` (its
+  last live piece, the background sync, is `console/session.py`'s now),
+  the console's `legacy` app mechanism, and `frontend_shared/`
+  (`focus.js` is a file of the console's own). `window_launcher.py`
+  stays as the one window's launch boilerplate.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
@@ -575,7 +620,7 @@ What the build decided within the settled plan above.
 - **Dark only.** No light theme is planned.
 - **Graph styling** (square nodes, dashed unselected edges, labels to
   the right) is applied to `graph.js`'s canvas renderer, and **plot
-  styling** to `frontend_shared/plot.js`.
+  styling** to `console/frontend/js/plot.js`.
 
 ### Persistence
 
@@ -633,7 +678,7 @@ own plan-mode phase and ships something usable.
 | U6 | **Done.** **Mora → `mo ra`.** Document pane as a text-editing pane, plus the worksheet (see *Settled for U6*, *Built for U6*). | Keyboard capture and `esc` work for editors. |
 | U7 | **Done.** **Monastery → `mo nastery`.** Agenda, week and month panes with bars (see *Settled for U7*, *Built for U7*); plan-my-week and planned vs. actual wait. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
 | U8 | **Done.** **Monarch → `mo narch`.** Canvas graph only, restyled (see *Settled for U8*, *Built for U8*). Remove annotations (`core/annotations.py`, the annotation frontends, their docs) and ship a migration that drops their stored data. | The frozen debugger costs no more upkeep. |
-| U9 | **Home → `mo saic`.** Ownership tree, loose gardens, garden management and settings. Delete `gardens_app/`, `window_launcher.py`'s multi-window pieces and the `frontend_shared/` symlinks. | The window is the only surface. |
+| U9 | **Done.** **Home → `mo saic`** (see *Settled for U9*, *Built for U9*). Ownership tree, loose gardens, garden management and settings. Delete `gardens_app/`, `window_launcher.py`'s multi-window pieces and the `frontend_shared/` symlinks. | The window is the only surface. |
 
 Momentum is removed by roadmap phase 1 and is never ported. A roadmap
 phase that needs a new surface (worksheet, checks, V&V table) adds a
@@ -701,6 +746,10 @@ Each step's done-check is the same:
   `$ command` bar, not 2b's quieter 22px tiled header. Is that right?
 - **Result colours in `log`.** Successful results are `--fg`; only
   warn and fault use their colours. Should success be `--ok`?
+- **Archived gardens in the console** (U9). Home shows why a garden is
+  archived, but the console still writes to an archived garden when it
+  is open; the CLI and MCP refuse (`projects.ensure_writable`). Should
+  the console refuse writes there too, or say so in the top bar only?
 - **Opening a `url`** (U8). The old shared inspector's *Open* button
   (`core/links.py::classify_link`, then the OS's opener) went with
   Monarch, and the props pane has no equivalent. Should `⏎` on a `url`

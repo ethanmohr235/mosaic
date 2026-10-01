@@ -119,10 +119,10 @@ def sync_dir():
 
 def wait_until(predicate, timeout: float = 2.0, interval: float = 0.02) -> bool:
     """Polls `predicate` (a zero-arg callable) until it's truthy or
-    `timeout` elapses, returning the last value seen. api_common.py's
-    best_effort_sync() runs each app's open/switch/close sync on a
+    `timeout` elapses, returning the last value seen. console/session.py's
+    best_effort_sync() runs the console's open/switch/close sync on a
     background thread (so a slow or offline sync server never blocks
-    the app), so a test asserting it fired has to give that thread a
+    the window), so a test asserting it fired has to give that thread a
     moment rather than checking right after the call that started it
     returns."""
     deadline = time.monotonic() + timeout

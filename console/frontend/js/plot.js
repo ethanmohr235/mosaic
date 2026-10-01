@@ -4,8 +4,7 @@
  * business (views/moxie-plot.js); the figure itself comes from
  * core/plotview.py.
  *
- * Ported from frontend_shared/plot.js (which Mora's old window keeps until
- * U6) and restyled to the handoff (docs/design/mosaic-console/README.md →
+ * Ported from the old windows' shared plot.js (since deleted) and restyled to the handoff (docs/design/mosaic-console/README.md →
  * Plot): a 1px --line left and bottom axis, a --track grid, 1.5px series in
  * --s1…--s6, --dim tick labels with the y labels right-aligned, and a
  * dashed --fault edge where the answer breaks one of the garden's own

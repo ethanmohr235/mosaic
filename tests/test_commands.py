@@ -146,8 +146,8 @@ def test_an_empty_line_lists_every_verb_and_mo_lists_every_app(conn):
     result = complete(conn, "")
     assert _values(result) == list(RESERVED_VERBS)
     assert result.ghost == ""
-    apps = [a.suffix for a in commands.CONSOLE_APPS if a.default_view or a.legacy]
-    apps += [a.suffix for a in commands.CONSOLE_APPS if not (a.default_view or a.legacy)]
+    apps = [a.suffix for a in commands.CONSOLE_APPS if a.default_view]
+    apps += [a.suffix for a in commands.CONSOLE_APPS if not a.default_view]
     assert _values(complete(conn, "mo ")) == apps
 
 

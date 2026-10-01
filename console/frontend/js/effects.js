@@ -4,9 +4,9 @@
  *
  *   statement  log it; select the mote it named; a write re-runs every pane
  *   open_view  the focused pane gets the command (⌥⏎: a new split does)
- *   legacy     an unported app opened its old window
  *   layout     save / load / rm / list
- *   garden     `cd`: the whole workspace is re-booted on the new garden
+ *   garden     `cd` (or renaming the open garden): the workspace is
+ *              re-booted on the new garden
  *   undo/redo  log what was undone; every pane re-runs
  *   refresh    every pane re-runs
  *   open_layout  an app that opens several panes (`mo tion`): they take
@@ -66,7 +66,7 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
 
   function garden(e) {
     bootWorkspace(e.boot);
-    const text = `garden ${e.boot.garden}`;
+    const text = e.message || `garden ${e.boot.garden}`;
     store.log("result", text, { level: "ok" });
     return { message: text, level: "ok" };
   }
@@ -139,7 +139,6 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
     undo: (e) => undone("undo", e.label),
     redo: (e) => undone("redo", e.label),
     refresh,
-    legacy: simple,
     error: simple,
   };
 

@@ -202,9 +202,8 @@ def _auto_sync_path(name: str) -> Path:
 
 
 def get_auto_sync_enabled(name: str) -> bool:
-    """Whether the lifecycle sync points (console/session.py, via
-    api_common.best_effort_sync)
-    should fire automatically. Defaults to True when absent, so a garden
+    """Whether the lifecycle sync points (console/session.py::
+    best_effort_sync) should fire automatically. Defaults to True when absent, so a garden
     that already had a sync dir configured keeps today's always-on
     behavior. False doesn't touch the sync dir itself -- "Sync now"
     still works either way."""

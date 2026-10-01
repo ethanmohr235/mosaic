@@ -4,13 +4,10 @@ One tiled window, **the console** (`run_console.py`, window title
 *Mosaic*, via `pywebview`: a local HTML/CSS/JS frontend, no browser tab,
 no local web server). Every app has moved into it -- Monolith, the
 table; Moxie, the plots; Motion, the simulator; Mora, the notes;
-Monastery, the calendar; and Monarch, the graph -- and their old windows
-are deleted (`docs/console.md`, steps U1–U8).
-
-One other window remains until console step U9: **Gardens**
-(`run_gardens.py`), where the gardens themselves are made, renamed,
-deleted, imported, exported and synced. The console's `mo saic` opens it;
-see below.
+Monastery, the calendar; Monarch, the graph; and Home, where the
+gardens themselves are made, renamed, removed, imported, exported and
+synced -- and their old windows are deleted (`docs/console.md`, steps
+U1–U9).
 
 ---
 
@@ -497,6 +494,41 @@ Monarch's sticky notes, group boxes and pen strokes are gone, and the
 first open of a garden drops their stored data (`docs/architecture.md`
 -> *The graph*).
 
+### Home (`gardens`, `garden`, `mo saic`)
+
+`mo saic` puts `gardens | garden` where the focused pane was. The top
+bar's breadcrumb is the open garden's ownership path
+(`/ college-fall-2026 / hw4`); click a crumb to `cd` there.
+
+| Line | Pane |
+|---|---|
+| `gardens [--archived]` | every garden: owned ones under their owner's garden, with the cover's name, due and status and the mote count; then loose gardens; then archived ones, folded unless `--archived`. `●` is the open garden, `⇅` syncs, `!` has an ownership problem (listed under the tree) |
+| `garden [‹name›]` | one garden (none: the open one): its path, owner and cover, what it owns, counts, size and file, last change, sync, why it is archived, and its problems. It follows the tree's cursor |
+
+| Key | Does |
+|---|---|
+| `j` `k` / click | Move (the `garden` pane follows) |
+| `⏎` | `cd` there |
+| `n`, `r` | `garden new …`, `garden rename ‹garden› …` on the command line |
+| `d` `d` | `garden rm ‹garden›` on the command line (⏎, then ⏎ again) |
+| `a` | Archive / unarchive |
+| `s` | `garden sync ‹garden› …` on the command line |
+| `e`, `i` | Export (asks where), `garden import …` |
+| `z` | Show / fold the archived gardens |
+
+**Garden commands.** None is on `undo` -- they act on gardens, not on
+the open garden's motes.
+
+| Command | Notes |
+|---|---|
+| `garden new ‹name›` | Name checked against the rule `core/db.py` enforces |
+| `garden rename ‹old› ‹new›` | Moves the `.db` and its sidecars (layouts and history too). Refused while the garden syncs -- the sync server keys its history by name. Renaming the open garden reopens the console on the new name |
+| `garden rm ‹name›` | Asks for a second ⏎, then moves the file aside; `garden restore ‹name›` brings it back. The open garden can't be removed |
+| `garden archive\|unarchive ‹name›` | Archives it and everything it owns (`archived: true` on its owner, or a marker mote in a loose garden) |
+| `garden export ‹name› [path]`, `garden import [path] ‹new name›` | JSON, `core/garden_io.py`'s format; without a path, a file dialog. Import always makes a new garden, and removes it again if the file fails |
+| `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Point it at a sync server, stop (the oplog stays), sync once (errors shown), or gate the automatic syncs on open, `cd` and close |
+| `project start @sel [‹garden›]`, `project stop @sel` | Give a mote a garden of its own (made, or a loose one adopted) / drop its claim. One undo each; neither deletes a garden |
+
 ### Tiling
 
 `^w` is the prefix: `v`/`s` split side by side or stacked, `h j k l`
@@ -513,8 +545,9 @@ they follow the garden through rename, delete and restore.
 ### Ports
 
 The console asks for port **42009**, with WebKit storage in
-`.webview_data_console/` (see *Ports* under the other windows for
-why each app pins its own).
+`.webview_data_console/`. A fixed port keeps the page's origin, and so
+its browser storage, the same between launches; a second console falls
+back to a free port (`window_launcher.choose_port`).
 
 ### Smoke test
 
@@ -551,6 +584,9 @@ Boots on a seeded temp garden and checks the following:
   selection's neighbourhood; a walk, `⏎`, and `[` `]` rewriting the
   depth; ctrl+drag prefills a link and `d d` a delete; dragging pins a
   node beside the garden, `U` unpins and `o` opens
+- `mo saic` opens gardens | garden and the detail follows the cursor;
+  `garden new`, `garden rm` (a second ⏎) and `garden restore`; `project
+  start @sel` makes a garden, and the breadcrumb shows and climbs its path
 
 ---
 
@@ -637,78 +673,3 @@ real console (see *Smoke test* under the console above) against a
 throwaway temp `GARDENS_DIR` and webview storage dir -- never touching
 real data. Run it by hand after UI changes. It prints PASS/FAIL per
 check and exits non-zero if anything failed.
-
----
-
-# Gardens -- the garden manager
-
-`./run_gardens.py`, or `.venv/bin/python run_gardens.py`. Also opened by
-the console's `mo saic`, until console step U9 brings it into the
-console.
-
-```
-./run_gardens.py                        # the list, nothing selected
-./run_gardens.py --garden reactor       # opens with that row selected
-./run_gardens.py --garden reactor --sync
-```
-
-Garden management used to be Monarch's alone — a modal that only that
-window had — so making a garden from Motion meant opening Monarch first.
-This is that modal pulled out into a window of its own; Monarch's copy
-went first, and Monarch itself with console step U8.
-
-### Why a separate window, and a separate process
-
-A manager living inside an app would be managing, among others, the
-garden that app is holding open. That is why Monarch's modal had to
-refuse to delete the current garden, and refuse to delete the last one:
-it *was* a garden window, and both cases would have left it standing in
-nothing. This window holds no garden connection at all (every read opens
-a short-lived one and closes it), so both are ordinary operations here.
-
-The cost of being its own process is that it cannot switch the garden of
-the app that opened it. It doesn't try: each row's **Open in** launches
-the console already on that garden, and a console that is already
-running finds a newly created garden with `cd`, which reads the
-directory every time.
-
-### What it does
-
-| Action | Notes |
-|---|---|
-| New garden | Name validated in the field against the same rule `core/db.py` enforces |
-| Rename | Moves the `.db` and its sidecars, and follows the default-garden pointer. Refused while the garden syncs — `core/sync.py` keys the shared folder by garden name, so renaming would point this device at an empty op stream while other devices kept writing to the old one. Stop syncing, rename, set it up again |
-| Delete | The file is moved aside, not erased, so the toast's **Undo** is real (`restore_garden`). A window already open on that garden keeps working off its own file handle until it closes |
-| Export as JSON | `core/garden_io.py`'s export document, through a native save dialog |
-| Import | Always lands in a *new* garden — `garden_io` refuses to merge into one already holding any of the incoming mote ids — so the name is asked for before the file. A failed import removes the garden it just made, rather than leaving an empty one under the name you wanted |
-| Sync | The folder-sync controls that used to be Monarch's Tools → Sync…, now per garden: choose the shared folder, the auto-sync flag that gates each app's lifecycle sync points (open, garden switch, close), a manual **Sync now**, and **Stop syncing**, which keeps the oplog so turning it back on resumes |
-
-### Ports
-
-42007 (42001-42006 and 42008 were the old app windows', before they
-moved into the console, which has 42009),
-falling back to an ephemeral one if taken.
-`.webview_data_gardens/` is its own WebKit storage. Opening it twice is
-allowed rather than guarded: pywebview cannot raise and focus
-a window belonging to another process, so a menu item that silently did
-nothing because the first one was buried would be the worse failure.
-
-### Smoke test
-
-`scripts/gardens_smoke_test.py`, the same instrument as the others. It
-drives a real window against a throwaway gardens directory and checks
-that the list renders every garden with its counts, that selecting one
-fills the detail pane, that the name modal catches an invalid or
-duplicate name before Python sees it, that rename really moves the
-garden, that delete offers a working Undo, and that sync can be turned
-on and off per garden. Opening an app and opening a native file dialog
-are stubbed in the page — one would spawn a process the run can't reap,
-the other would block on a dialog nobody will answer.
-
-```
-.venv/bin/python scripts/gardens_smoke_test.py
-```
-
-Run it alone — the pywebview window suites interfere with each other,
-and two at once produce failures that are about the display rather than
-the code.
