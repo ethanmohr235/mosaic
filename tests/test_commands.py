@@ -58,7 +58,7 @@ def test_reserved_words_are_the_verbs_and_mo():
     assert list(RESERVED_VERBS) == [
         "mo", "find", "set", "open", "rename", "unlink", "template",
         "plot", "fit", "sim", "rule", "scenarios", "solve", "why", "step", "play", "pause",
-        "edit", "read", "notes", "worksheet", "agenda", "week", "month", "detach", "graph", "cd", "layout", "refresh", "undo", "redo", "log"]
+        "edit", "read", "notes", "worksheet", "agenda", "week", "month", "detach", "graph", "gardens", "garden", "project", "cd", "layout", "refresh", "undo", "redo", "log"]
 
 
 def test_resolve_view():

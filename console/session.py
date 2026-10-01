@@ -74,6 +74,23 @@ class Session:
         best_effort_sync(previous)
         best_effort_sync(resolved)
 
+    def rename(self, new: str) -> None:
+        """Rename the garden this session has open, and reopen it under
+        the new name (core/gardens.py::rename_garden moves the file and its
+        sidecars). The undo stack starts fresh, as on a switch. A refused
+        rename (a bad or taken name, a garden that syncs) reopens the old
+        one and raises."""
+        with self.lock:
+            old = self.garden
+            self._close_conn()
+            try:
+                gardens_repo.rename_garden(old, new)
+            except Exception:
+                self.conn = open_connection(old)
+                raise
+            self.garden, self.conn = new, open_connection(new)
+            self.undo = UndoManager()
+
     def close(self) -> None:
         with self.lock:
             if self.conn is None:

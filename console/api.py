@@ -25,6 +25,7 @@ from typing import Any
 
 import api_common
 from console import state as state_repo
+from console.home import HomeApi
 from console.monarch import MonarchApi
 from console.monastery import MonasteryApi
 from console.monolith import MonolithApi
@@ -35,6 +36,7 @@ from console.moxie import MoxieApi
 from console.session import Session, locked
 from core import commands
 from core import gardens as gardens_repo
+from core import home as home_repo
 from core import motes as motes_repo
 from core import fit as fit_repo
 from core import motion as motion_repo
@@ -66,6 +68,7 @@ class Api:
         self.mora = MoraApi(self._session, lambda: self._state.live)
         self.monastery = MonasteryApi(self._session)
         self.monarch = MonarchApi(self._session, lambda: self._state, self._save_state)
+        self.home = HomeApi(self._session)
 
     # ---- boot and gardens ----
 
@@ -197,6 +200,8 @@ class Api:
             return self._verb_plot(literal)
         if literal.kind == commands.VERB and literal.head == fit_repo.FIT_VERB:
             return self._verb_fit(literal)
+        if literal.kind == commands.VERB and literal.head == home_repo.GARDEN_VERB:
+            return self._verb_garden(literal, confirm)
         if literal.kind == commands.VERB and literal.head in commands.ARG_VIEWS:
             # The literal line is the pane's command: `open @sel` keeps
             # following the selection rather than freezing on today's.
@@ -326,6 +331,51 @@ class Api:
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": True}
 
+    def _verb_garden(self, parsed: commands.ParsedLine, confirm: bool) -> dict:
+        """`garden [‹name›]` opens (or re-points) the detail pane with the
+        literal line. Every other form acts on gardens, outside any one
+        garden's undo: `rm` asks for a second ⏎ first; `export`/`import`
+        without a path ask for one with a file dialog; renaming the open
+        garden reopens the workspace on the new name."""
+        line = home_repo.parse(parsed.args)
+        if line.shows:
+            return {"effect": "open_view", "view": "mosaic:garden", "command": parsed.text}
+        if line.action == "rm" and not confirm:
+            return {"effect": "statement", "ok": False, "needsConfirm": True,
+                    "message": f"⏎ again to move {line.args[0]!r} aside (garden restore brings it back)",
+                    "moteId": None, "moteName": None, "created": False, "choices": [], "wrote": False}
+        if home_repo.needs_path(line):
+            path = self._ask_path(line)
+            if path is None:
+                return _error("cancelled")
+            line = home_repo.GardenLine(line.action, (line.args[0], path) if line.action == "export"
+                                        else (path, line.args[0]))
+        current = self._session.garden
+        if line.action == "rename" and line.args[0] == current:
+            self._session.rename(line.args[1])
+            self._state = state_repo.load(self._session.garden)
+            return {"effect": "garden", "boot": self._boot_payload(),
+                    "message": f"renamed {current!r} to {line.args[1]!r}"}
+        done = home_repo.run(line, current)
+        return {"effect": "statement", "ok": True, "message": done.message,
+                "moteId": None, "moteName": None, "created": False,
+                "needsConfirm": False, "choices": [], "wrote": True}
+
+    def _ask_path(self, line) -> str | None:
+        """A native file dialog for `garden export ‹name›` (where to write)
+        or `garden import ‹new name›` (what to read). None if cancelled or
+        there is no window (tests)."""
+        if self._window is None:
+            return None
+        import webview
+        if line.action == "export":
+            picked = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=f"{line.args[0]}.json")
+        else:
+            picked = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=("JSON (*.json)",))
+        if not picked:
+            return None
+        return picked if isinstance(picked, str) else picked[0]
+
     def _verb_solve(self, args: tuple[str, ...]) -> dict:
         """`solve` writes one static solve, one undo step; `solve --live
         on|off` is the workspace toggle, kept in the console sidecar."""
@@ -426,6 +476,7 @@ class Api:
             "working": self._state.working,
             "history": list(self._state.history),
             "live": self._state.live,
+            "crumbs": home_repo.path_of(self._session.garden),
         }
 
 

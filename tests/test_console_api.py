@@ -12,7 +12,7 @@ from console.api import Api
 from console.session import Session
 from core import motes as motes_repo
 from core import undo
-from core.gardens import create_garden
+from core.gardens import create_garden, garden_exists
 
 TREE = {"split": "row", "sizes": [0.5, 0.5], "children": [{"command": "log"}, {"command": ""}]}
 
@@ -28,6 +28,7 @@ MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
 MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply"}  # U6
 MONASTERY_BRIDGE = {"view", "rewrite", "edit", "skip", "slot", "follow"}  # U7
 MONARCH_BRIDGE = {"view", "rewrite", "pins", "pin", "unpin"}  # U8
+HOME_BRIDGE = {"gardens", "garden"}  # U9
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def launched(monkeypatch):
 def test_boot_shape(api):
     boot = api.boot()
     assert set(boot) == {"garden", "gardens", "apps", "verbs", "layouts",
-                         "active", "working", "history", "live"}
+                         "active", "working", "history", "live", "crumbs"}
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
     assert boot["apps"][2] == {"suffix": "xie", "name": "Moxie",
@@ -64,7 +65,8 @@ def test_boot_shape(api):
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None, "layout": None}
-    assert boot["verbs"][26] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["crumbs"] == ["test"]
+    assert boot["verbs"][29] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -93,10 +95,10 @@ def _reachable(obj, seen=None):
 
 def test_pywebview_walk_reaches_no_connection(api):
     seen = _reachable(api)
-    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE | MORA_BRIDGE | MONASTERY_BRIDGE | MONARCH_BRIDGE
+    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE | MORA_BRIDGE | MONASTERY_BRIDGE | MONARCH_BRIDGE | HOME_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api, api.monarch, api.monastery, api.monolith, api.mora, api.mote, api.motion, api.moxie]
+    assert seen["objects"] == [api, api.home, api.monarch, api.monastery, api.monolith, api.mora, api.mote, api.motion, api.moxie]
 
 
 # ---- statements --------------------------------------------------------------
@@ -149,15 +151,6 @@ def test_log_opens_its_view(api):
 def test_an_argumentless_verb_with_arguments_says_to_quote(api):
     effect = api.run("log -> R1")
     assert effect["effect"] == "error" and '"log"' in effect["message"]
-
-
-def test_an_unported_app_opens_its_old_window(api, launched):
-    effect = api.run("mo saic")
-    assert effect == {"effect": "legacy", "app": "gardens",
-                      "message": "opened Home (old window)"}
-    assert launched[-1][0] == sys.executable
-    assert launched[-1][1].endswith("run_gardens.py")
-    assert launched[-1][2:] == ["--garden", "test"]
 
 
 def test_te_opens_the_props_pane_on_the_selection(api, launched):
@@ -849,3 +842,62 @@ def test_pins_live_in_the_console_state_not_the_garden(api):
     assert "a pin is" in api.monarch.pin({"m3": "far"})["error"]
     api.monarch.unpin(None)
     assert state_repo.load("test").pins == {}
+
+
+# ---- Home (U9) ---------------------------------------------------------------
+
+def test_mo_saic_opens_gardens_and_garden(api):
+    effect = api.run("mo saic")
+    assert effect["effect"] == "open_layout"
+    assert [c["command"] for c in effect["tree"]["children"]] == ["gardens", "garden"]
+    assert api.run("gardens --archived") == {"effect": "open_view", "view": "mosaic:gardens",
+                                             "command": "gardens --archived"}
+    assert api.run("garden test")["view"] == "mosaic:garden"
+
+
+def test_the_home_panes_answer(api):
+    create_garden("other")
+    view = api.home.gardens("gardens")
+    names = [r["garden"] for g in view["groups"] for r in g["rows"]]
+    assert sorted(names) == ["other", "test"] and view["current"] == "test"
+    assert api.home.garden("garden")["garden"] == "test" and api.home.garden("garden")["current"]
+    assert api.home.garden("garden other")["current"] is False
+    assert "a command" in api.home.garden("garden rm other")["error"]
+    assert api.home.gardens("gardens --wat")["error"]
+
+
+def test_garden_actions_run_outside_undo(api):
+    assert api.run("garden new lab")["wrote"]
+    first = api.run("garden rm lab")
+    assert first["needsConfirm"] and garden_exists("lab")
+    assert api.run("garden rm lab", confirm=True)["ok"] and not garden_exists("lab")
+    api.run("garden restore lab")
+    assert garden_exists("lab")
+    assert "open here" in api.run("garden rm test", confirm=True)["message"]
+    assert api.run("garden export lab")["message"] == "cancelled"  # no window, no dialog
+
+
+def test_renaming_the_open_garden_follows_it(api):
+    motes_repo.create_mote(api._session.conn, {"name": "Alice"})
+    api.run("layout save one")
+    effect = api.run("garden rename test renamed")
+    assert effect["effect"] == "garden" and effect["boot"]["garden"] == "renamed"
+    assert not garden_exists("test") and api._session.garden == "renamed"
+    assert [m.properties["name"] for m in motes_repo.list_motes(api._session.conn)] == ["Alice"]
+    bad = api.run("garden rename renamed 'no spaces'")
+    assert bad["effect"] == "error" and api._session.garden == "renamed"
+    assert motes_repo.list_motes(api._session.conn)
+
+
+def test_project_start_and_stop_are_one_undo_each(api):
+    conn = api._session.conn
+    hw = motes_repo.create_mote(conn, {"name": "HW5"})
+    effect = api.run("project start @sel", [hw])
+    assert effect["wrote"] and garden_exists("hw5")
+    assert motes_repo.get_mote(conn, hw).properties["garden"] == "hw5"
+    api.run("undo")
+    assert "garden" not in motes_repo.get_mote(conn, hw).properties
+    api.run("project start HW5 lab5")
+    assert "no longer owns" in api.run("project stop HW5")["message"]
+    assert "owns no garden" in api.run("project stop HW5")["message"]
+    assert api.boot()["crumbs"] == ["test"]

@@ -73,7 +73,9 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
     ConsoleApp("narch", "Monarch", default_view="monarch:graph", default_command="graph @sel --depth 2",
                layout={"split": "row", "sizes": [0.26, 0.48, 0.26], "children": [
                    {"command": "find"}, {"command": "graph @sel --depth 2"}, {"command": "open @sel"}]}),
-    ConsoleApp("saic", "Home", legacy="gardens"),
+    ConsoleApp("saic", "Home", default_view="mosaic:gardens", default_command="gardens",
+               layout={"split": "row", "sizes": [0.55, 0.45], "children": [
+                   {"command": "gardens"}, {"command": "garden"}]}),
 )
 
 # Verbs a view answers directly, rather than the root API acting on them.
@@ -86,7 +88,7 @@ ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "pl
                              "why": "motion:rule", "edit": "mora:edit", "read": "mora:read",
                              "notes": "mora:notes", "agenda": "monastery:agenda",
                              "week": "monastery:week", "month": "monastery:month",
-                             "graph": "monarch:graph"}
+                             "graph": "monarch:graph", "gardens": "mosaic:gardens"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
@@ -441,8 +443,28 @@ def run_detach(conn: sqlite3.Connection, args: Sequence[str], selection: Sequenc
     return SetResult(message, 1, command)
 
 
+def run_project(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
+    """`project start @sel|#id|‹name› [garden]` gives the mote a garden of
+    its own, made or adopted (core/projects.py::start_project);
+    `project stop …` drops its claim, leaving the garden loose. One undo
+    step each; neither deletes a garden."""
+    from core import projects
+    if len(args) < 2 or args[0] not in ("start", "stop") or (args[0] == "stop" and len(args) != 2) \
+            or len(args) > 3:
+        raise CommandError(f"usage: {RESERVED_VERBS['project']['usage']}")
+    (mote_id,) = one_target(conn, args[1], selection)
+    name = _name_of(motes_repo.get_mote(conn, mote_id).properties, mote_id)
+    if args[0] == "start":
+        garden, command = projects.start_project(conn, mote_id, args[2] if len(args) == 3 else None)
+        return SetResult(f"{name} owns the garden {garden!r} -- `cd {garden}` opens it", 1, command)
+    garden, command = projects.stop_owning(conn, mote_id)
+    if command is None:
+        raise CommandError(f"{name} owns no garden")
+    return SetResult(f"{name} no longer owns {garden!r}; the garden stays, loose", 1, command)
+
+
 WRITE_VERBS = {"set": run_set, "rename": run_rename, "unlink": run_unlink, "template": run_template,
-               "detach": run_detach}
+               "detach": run_detach, "project": run_project}
 
 
 def one_target(conn, target: str, selection: Sequence[str]) -> list[str]:
@@ -581,6 +603,18 @@ def complete(
     if word in ("agenda", "week", "month"):
         from core import agenda
         rows = [CompletionRow(v, d) for v, d in agenda.choices(conn, word, rest)]
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word == "garden":
+        from core import home
+        rows = [CompletionRow(v, d) for v, d in home.choices(rest)]
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word == "project":
+        names = sorted({m.properties["name"] for m in motes_repo.list_motes(conn)
+                        if isinstance(m.properties.get("name"), str)})
+        done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
+        rows = ([CompletionRow("start", "give a mote its own garden"), CompletionRow("stop", "drop its claim")]
+                if not done else [CompletionRow(_SEL, "the selection")] + [CompletionRow(n) for n in names]
+                if len(done) == 1 else [])
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
     if word == "graph":
         from core import graphview
