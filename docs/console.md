@@ -341,8 +341,8 @@ phase that builds them.
 
 ### Built for U5 (2026-09-30)
 
-What the build decided within the settled plan above. Anything here the
-user wants otherwise is an open question (below).
+What the build decided within the settled plan above. The user
+confirmed these defaults on 2026-10-01.
 
 - **Ticks.** `sim` runs 50 ticks unless `--ticks N` (1–2000). Tick `t`
   is the state after the solve whose `tick` variable read `t`, so ticks
@@ -526,11 +526,6 @@ Each step's done-check is the same:
   to show/hide a series, `z`/`Z` to zoom, `y` for log y, `[ ]` to pick
   a series, `j k` / `- +` for knobs. `f` waits for `fit`; export is
   `plot export`. Confirm.
-- **Motion keys and defaults.** The build chose (see *Built for U5*):
-  50 ticks by default, 12 ticks a second when playing, `[ ]` stepping
-  10 ticks, `pinned` meaning a freedom nothing solved, and `mo tion`
-  replacing the focused pane rather than the whole workspace. Confirm,
-  and confirm `--timeline-h` 72px.
 - **Pane header style.** Every header uses 2a's filled 24px
   `$ command` bar, not 2b's quieter 22px tiled header. Is that right?
 - **Result colours in `log`.** Successful results are `--fg`; only
