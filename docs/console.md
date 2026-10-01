@@ -438,6 +438,34 @@ What the build decided within the settled plan above.
 - **New tokens:** `--paper-*` (the read pane), `--bp-*` (the worksheet),
   `--doc-measure` 72ch (the read pane's line length).
 
+### Settled for U7, Monastery (2026-10-01)
+
+- **Scope:** port the calendar (every binding, recurrence, move/resize
+  with "this one or the series", new events) and add **project bars**.
+  Plan-my-week and planned vs. actual (roadmap phase 5) are **not in
+  this pass**.
+- **Three panes, each its own command:** `agenda [from] [to]`, a dense
+  table with a row per occurrence grouped by day (the keyboard home);
+  `week [date]`, the hour grid; `month [date]`, the six-week grid.
+  `mo nastery` opens `agenda | week`.
+- **Bars** (start → due across the days, above the hour grid and in the
+  agenda): any multi-day value (`2026-10-01/2026-10-09`), and any mote
+  with both a start and a `due` (a `start`/`starts` value, else the day
+  its `garden` project was started). Project owners (phase 4) appear on
+  their own because they carry `due`.
+- **⏎ selects, `o` follows:** a mote with a note opens `read` on it, a
+  project owner `cd`s to its garden, anything else opens `open #id` in a
+  new pane.
+- **Editing is keys plus drag, and every write is a `set`:** `J`/`K`
+  move the occurrence by an hour (a day when all-day), `H`/`L` by a day,
+  `<`/`>` shorten or lengthen it; drag moves and edge-drag resizes in
+  the week grid. A recurring event asks first: `t` this one, `s` the
+  series. `n` on an empty slot prefills `‹name›.date = ‹the slot›` on the
+  command line.
+- **Filters live in the command:** `agenda --keys due,date --type task`,
+  and find conditions (`agenda status!:done`). The default is every
+  binding found; `b` cycles a key by rewriting the line.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
