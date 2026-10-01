@@ -339,6 +339,44 @@ phase that builds them.
   pane. **Not ported:** value traces (lanes), the pre-flight role check
   and the impact view (both stay in the CLI/MCP).
 
+### Built for U5 (2026-09-30)
+
+What the build decided within the settled plan above. Anything here the
+user wants otherwise is an open question (below).
+
+- **Ticks.** `sim` runs 50 ticks unless `--ticks N` (1–2000). Tick `t`
+  is the state after the solve whose `tick` variable read `t`, so ticks
+  run 0 to N-1 and the top bar reads `tick 12/49`; a row's `start` (the
+  garden, under the scenario) is what tick 0's Δ is measured from.
+- **States.** `solved` (the solver determined it at some tick), `varied`
+  (the scenario overrides it), `pinned` (a declared freedom nothing
+  solved, so it keeps its value -- drawn `--warn`), `given`.
+- **Rows** are ordered by name and capped at 200; the rest are counted.
+- **`--vs garden`** names the garden as it stands; a scenario called
+  "garden" is reached as `#id`. `d` toggles `--vs garden`.
+- **`why ‹m.k›` is a pane**, the rule pane's second verb: `w` on a
+  binding opens it there and `esc` goes back.
+- **Playhead keys** in every Motion pane: `space` play/pause, `, .` one
+  tick, `[ ]` ten. It plays at 12 ticks a second and stops at the last.
+  `step` alone is `step +1`. With no sim pane open, `step`/`play` say so.
+- **The owner** of the playhead is the sim pane that last ran (unless
+  another holds it) or was focused; its run (`ticks`, `scenario`,
+  `solver`) is what the rule pane asks its bindings' series under.
+- **`mo tion` replaces the focused pane** with its three (⌥⏎: a new
+  split's), focused on `sim` -- an app may now open a layout
+  (`ConsoleApp.layout`, the `open_layout` effect).
+- **Scenarios pane:** `⏎` runs the sim pane under the scenario (or opens
+  a sim pane), `v` compares against it, `a`/`n` put `set --scenario …`
+  on the command line (`ctx.prefill`), `d d` clears an override.
+- **`set --scenario ‹s›`** makes the scenario mote when no mote has that
+  name, and refuses a name that is a mote but not a scenario. `set` also
+  takes `‹m.k› ‹value›` everywhere (`set C1.voltage 30`), unless `m.k`
+  is itself a mote's whole name.
+- **`solve`** refuses a garden whose rules use `prev()`, which only a run
+  can answer, and so does a live solve (the edit stays, the message says
+  why). Its undo step puts the previous provenance back.
+- **New token:** `--timeline-h` 72px, the sim pane's timeline.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
@@ -416,7 +454,7 @@ own plan-mode phase and ships something usable.
 | U2 | **Done.** **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
 | U3 | **Done.** **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
 | U4 | **Done.** **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*), then `fit` and the follow-up fixes (*Settled for `fit`*), also done. | Commands carry view state (ranges, series). |
-| U5 | **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list. | A live, ticking view inside the contract. |
+| U5 | **Done.** **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list (see *Settled for U5*, *Built for U5*). | A live, ticking view inside the contract. |
 | U6 | **Mora → `mo ra`.** Document pane as a text-editing pane. | Keyboard capture and `esc` work for editors. |
 | U7 | **Monastery → `mo nastery`.** Agenda pane. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
 | U8 | **Monarch → `mo narch`.** Canvas graph only, restyled. Remove annotations (`core/annotations.py`, the annotation frontends, their docs) and ship a migration that drops their stored data. | The frozen debugger costs no more upkeep. |
@@ -488,6 +526,11 @@ Each step's done-check is the same:
   to show/hide a series, `z`/`Z` to zoom, `y` for log y, `[ ]` to pick
   a series, `j k` / `- +` for knobs. `f` waits for `fit`; export is
   `plot export`. Confirm.
+- **Motion keys and defaults.** The build chose (see *Built for U5*):
+  50 ticks by default, 12 ticks a second when playing, `[ ]` stepping
+  10 ticks, `pinned` meaning a freedom nothing solved, and `mo tion`
+  replacing the focused pane rather than the whole workspace. Confirm,
+  and confirm `--timeline-h` 72px.
 - **Pane header style.** Every header uses 2a's filled 24px
   `$ command` bar, not 2b's quieter 22px tiled header. Is that right?
 - **Result colours in `log`.** Successful results are `--fg`; only

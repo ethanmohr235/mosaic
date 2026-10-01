@@ -102,7 +102,13 @@ updates it in the same commit. Keep it compact: tables, no prose.
   solve, numpy only; `fit … --apply` writes value, σ and `source:
   fitted`): the `moxie:fit` pane, `monoss fit`, MCP `fit_model`. The plot
   pane's follow-up fixes are in too (narrow rail, solves off the lock,
-  magnitude-split axes). The next UI step is U5 (Motion).
+  magnitude-split axes).
+- Console **U5 is done**: Motion is `mo tion` (`scenarios | sim | rule
+  @sel`) over `core/motion.py` (the `sim` grammar and run rows, rule
+  cards, `why`, the undoable `solve`, the live solve); `console/motion.py`
+  is `api.motion`; `set --scenario` writes a scenario's override; the
+  shared playhead is store state. Motion's old window is deleted. The
+  next UI step is U6 (Mora).
 
 ## Split of work: cloud backend, local frontend
 

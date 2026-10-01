@@ -115,8 +115,9 @@ an adapter that holds logic of its own is a bug.
 - `core/` holds the domain: motes, relationships, species, rules,
   solvers (linear, Newton), units, providers, scenarios, sweeps, modoc,
   and sync.
-- Adapters: `cli/`, `mcp_server/`, and one package per app (`monarch/`,
-  `mora/`, `motion/`, …).
+- Adapters: `cli/`, `mcp_server/`, `console/` (the one tiled window,
+  where apps are being ported), and a package per not-yet-ported app
+  (`monarch/`, `mora/`, `monastery/`).
 - `sync_server/` provides optional sync between machines.
 
 The project favors readability, maintainability, and correctness over

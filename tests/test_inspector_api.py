@@ -2,7 +2,7 @@
 
 Tested once, here, rather than five times over: api_common.InspectorApi is
 mixed into every window's Api, so the same methods with the same shapes
-are what Monarch, Motion, Monolith, Mora and Monastery all expose. The
+are what Monarch, Mora and Monastery all expose. The
 last test in this file is the one that holds that claim up.
 """
 import pytest
@@ -10,7 +10,6 @@ import pytest
 import monarch.api
 import monastery.api
 import mora.api
-import motion.api
 from api_common import InspectorApi
 from core.gardens import create_garden
 
@@ -349,7 +348,7 @@ CONTRACT = [
 
 
 @pytest.mark.parametrize("module", [
-    monarch.api, motion.api, mora.api, monastery.api,
+    monarch.api, mora.api, monastery.api,
 ])
 def test_every_window_speaks_the_whole_contract(module):
     """The inspector is one surface in six windows, so it has to find the
@@ -359,15 +358,6 @@ def test_every_window_speaks_the_whole_contract(module):
     assert issubclass(module.Api, InspectorApi)
     for name in CONTRACT:
         assert callable(getattr(module.Api, name, None)), f"{module.__name__} lacks {name}"
-
-
-def test_motion_overrides_the_two_it_must(api):
-    """Motion is the only window that answers `why`, and the only one
-    whose writes can land on a scenario's override instead of the mote.
-    Both are overrides of the shared contract, not additions beside it."""
-    assert motion.api.Api.inspector_why is not InspectorApi.inspector_why
-    assert motion.api.Api.inspector_set_property is not InspectorApi.inspector_set_property
-    assert monarch.api.Api.inspector_why is InspectorApi.inspector_why
 
 
 def test_replacing_a_template_removes_the_old_one(api, garden):

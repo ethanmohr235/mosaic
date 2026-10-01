@@ -117,7 +117,6 @@ APPS = {
     "monarch": ("Monarch", REPO_ROOT / "run_monarch.py", None),
     "mora": ("Mora", REPO_ROOT / "run_mora.py", "--note"),
     "monastery": ("Monastery", REPO_ROOT / "run_monastery.py", "--focus"),
-    "motion": ("Motion", REPO_ROOT / "run_motion.py", "--focus"),
     # The console (docs/console.md): the one window the others are
     # being ported into. Listed so an old window can open it; it takes
     # no focus flag -- selection lives in the console's own store.
@@ -273,9 +272,8 @@ class InspectorApi:
 
     Assumes `self._conn` and `self._lock`, which every Api already has.
     An app that needs different write semantics overrides one method and
-    inherits the rest -- see motion/api.py, where a selected scenario
-    redirects property writes onto that scenario's override mote instead
-    of the mote itself."""
+    inherits the rest (Motion's old window, now the console's `mo tion`,
+    redirected writes onto a scenario's override this way)."""
 
     # ---- reading ----
 
@@ -474,11 +472,10 @@ class InspectorApi:
 
     @synchronized
     def inspector_why(self, mote_id: str, key: str) -> dict | None:
-        """Where a value came from. Only Motion can answer this -- it is
-        the window with a solver and its provenance -- so the base answer is
-        None and the Advanced section simply doesn't draw the control.
-        Declared here rather than only in motion/api.py so the frontend
-        can call it unconditionally instead of sniffing the bridge."""
+        """Where a value came from. The old windows have no solver, so the
+        answer is None and the Advanced section doesn't draw the control;
+        the console answers it with `why ‹m.k›` (core/motion.py). Declared
+        here so the frontend can call it unconditionally."""
         return None
 
 

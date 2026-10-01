@@ -41,10 +41,11 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 
 | Command | Does |
 |---|---|
-| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`; `mo tion`, `mo ra`, `mo nastery`, `mo narch`, `mo saic` still open old windows |
+| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`); `mo ra`, `mo nastery`, `mo narch`, `mo saic` still open old windows |
 | `find ‹conditions› [--sort k] [--group k] [--cols a,b] [--view name]` | Table of motes |
 | `open @sel\|#id\|name` | A mote's properties and links (`@sel` follows the selection) |
-| `set ‹target› ‹key› ‹value›` / `… --clear` | Set / remove a property (`5 mm` records the unit) |
+| `set ‹target› ‹key› ‹value›` / `… --clear` | Set / remove a property (`5 mm` records the unit); `set C1.voltage 30` also works |
+| `set --scenario ‹s› ‹m.k› ‹value›` / `… --clear` | Write / clear a scenario's override (makes the scenario if new); the garden is untouched |
 | `rename ‹target› ‹old› ‹new›` | Rename a property key |
 | `unlink ‹target› ‹type› ‹other›` / `unlink ‹target› #rel` | Remove a relationship |
 | `template ‹mote› ‹species›` | Make a mote its species' template |
@@ -56,6 +57,13 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `plot export csv\|png [path]` | Export the focused plot |
 | `fit ‹m.y› vs ‹m.x› --data ‹Y› vs ‹X› --free ‹m.k›…` | Fit inputs to measured points (every mote with `Y` and `X`); shows, never writes |
 | `fit … --apply` | Write the fitted values, their σ and `source: fitted` (undoable) |
+| `sim [--ticks N] [--scenario s] [--vs s\|garden] [--solver name] [conditions]` | Run N ticks (default 50) in memory and watch the values; conditions pick motes, as `find` |
+| `rule @sel\|‹rule›` | A rule's equation and bound values (a non-rule mote: every rule touching it) |
+| `why ‹m.k›` | How the last written solve got a value |
+| `scenarios` | Scenarios and their overrides |
+| `solve` | Solve once and write it (undoable; refused if a rule uses `prev()`) |
+| `solve --live on\|off` | Solve after every edit made here (top bar: `live`) |
+| `step +N\|-N\|‹tick›`, `play`, `pause` | Move the shared playhead (top bar: `tick 12/49 ▶`) |
 | `cd ‹garden›` | Switch garden |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |
@@ -120,6 +128,25 @@ Click selects, shift-click a range, ctrl-click toggles.
 | `a` / click *apply* | Apply the fit (runs the line with `--apply`) |
 | `h` `l` / click | Step through the points; status line shows point vs fit |
 | `esc` | Clear cursor |
+
+**Motion** (`sim`, `rule`, `why`, `scenarios`, `mo tion`) — every Motion pane
+
+| Key | Does |
+|---|---|
+| `space` | Play / pause the playhead |
+| `,` `.` | One tick back / on |
+| `[` `]` | Ten ticks back / on |
+
+Sim pane: `j` `k` `g` `G` row (the timeline draws it) · `⏎` / click
+select its mote · `d` toggle `--vs garden` · click/drag the timeline to
+scrub.
+
+Rule pane: `j` `k` binding · `⏎` select its mote · `w` why (`esc`
+back) · `i` edit the equation (prefills `set`).
+
+Scenarios pane: `j` `k` move · `⏎` run sim under it · `v` compare sim
+against it · `a` / `n` add override / new scenario (prefills `set
+--scenario`) · `d` `d` clear the override.
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.
 **New pane** (`view>`): `↑` `↓` choose, `⏎` place, `esc` cancel.

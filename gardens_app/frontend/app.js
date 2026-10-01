@@ -119,15 +119,6 @@ const APPS = [
       <rect x="17" y="24" width="6" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
     </svg>`,
   },
-  {
-    id: "motion", name: "Motion",
-    icon: `<svg width="17" height="17" viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="10.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55"></circle>
-      <ellipse cx="20" cy="20" rx="10.5" ry="4" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55" transform="rotate(-28 20 20)"></ellipse>
-      <circle cx="20" cy="20" r="3.2" fill="var(--accent)"></circle>
-      <circle cx="29.4" cy="15.3" r="2" fill="var(--accent)"></circle>
-    </svg>`,
-  },
 ];
 
 // ---- list -----------------------------------------------------------

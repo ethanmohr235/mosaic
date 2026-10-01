@@ -1,13 +1,12 @@
 # Running the desktop UI
 
-Four native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Three native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
-(`run_monarch.py`); **Mora**, the note editor (`run_mora.py`);
-**Monastery**, the calendar (`run_monastery.py`); and **Motion**, the
-simulator (`run_motion.py`). They share one palette and one set of
-vendored fonts, so they read as one product. Monolith, the table, and
-Moxie, the plots, have moved into the console (below) and have no
-windows of their own any more.
+(`run_monarch.py`); **Mora**, the note editor (`run_mora.py`); and
+**Monastery**, the calendar (`run_monastery.py`). They share one palette
+and one set of vendored fonts, so they read as one product. Monolith,
+the table, Moxie, the plots, and Motion, the simulator, have moved into
+the console (below) and have no windows of their own any more.
 
 A seventh window sits beside rather than among them: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
@@ -52,7 +51,7 @@ view, the `find` table, the props pane and plots.
 
 | Line | Does |
 |---|---|
-| `mo tion`, `mo xie`, `mo nolith`, … | Open that app (`mo` then `tab` lists them). Unported apps open their old window. |
+| `mo tion`, `mo xie`, `mo nolith`, … | Open that app (`mo` then `tab` lists them). `mo tion` opens three panes in the focused one's place. Unported apps open their old window. |
 | `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). `mo nolith` is `find` with no conditions. |
 | `open @sel\|#id\|<name>` | A mote's properties and links (below). `mo te` is `open @sel`. |
 | `rename <target> <old> <new>` | Rename a property, keeping its value and unit. Refuses to overwrite a key that exists. |
@@ -61,7 +60,11 @@ view, the `find` table, the props pane and plots.
 | `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `mo xie` is `plot` with nothing to plot yet. |
 | `plot save <name>`, `plot export csv\|png [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
 | `fit <m.y> vs <m.x> --data <Y> vs <X> --free <m.k>…` | Fit inputs to measured points (below). `--apply` writes the result. |
-| `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. |
+| `sim [--ticks N] [--scenario s] [--vs s\|garden] [<conditions>]` | Run the garden tick by tick and watch its values (below). Writes nothing. |
+| `rule @sel\|<rule>`, `why <m.k>`, `scenarios` | A rule and what it binds; how the last solve got a value; the scenarios and their overrides (below). |
+| `solve`, `solve --live on\|off` | Solve once and write it (one undo step); or solve after every edit made here. |
+| `step +N\|-N\|<tick>`, `play`, `pause` | Move the shared playhead. |
+| `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. `set C1.voltage 30` is the same as `set C1 voltage 30`; `set --scenario hot C1.voltage 30` writes the scenario's override instead (making the scenario if there is none by that name). |
 | `log` | The command and error log for this session. |
 | `cd <garden>` | Switch the workspace to another garden, with its own layouts and history. |
 | `layout save\|load\|list\|rm <name>` | Save or restore the pane layout. |
@@ -236,6 +239,88 @@ Not ported from the old window: baselines (a scenario's curve drawn
 dashed beside each series) and the plot grid, which tiling replaces.
 `fit` is the step after U4.
 
+### Motion (`sim`, `rule`, `scenarios`, `mo tion`)
+
+`mo tion` puts three panes where the focused one was:
+`scenarios | sim | rule @sel`. Each is also a command on its own.
+
+```
+sim [--ticks N] [--scenario hot] [--vs garden|cold] [--solver newton] [type:Divider …]
+```
+
+**The sim pane is a run as a watch list** (`core/motion.py`). It runs
+the garden N ticks in memory (default 50; a tick is one re-solve, which
+is what `prev()` and `tick` read) and shows one row per value: its
+state, its value at the playhead, Δ/tick, a bar for where that value
+sits in its range over the run, and with `--vs` the other run's value
+and the difference. Nothing is written.
+
+| State | Means |
+|---|---|
+| `solved` | the solver determined it at some tick |
+| `varied` | the scenario overrides it |
+| `pinned` | a declared freedom nothing solved, so it keeps its value |
+| `given` | everything else |
+
+With no conditions the rows are what matter to the run: every solved
+value, every freedom and every given a scenario varies. Find conditions
+(the same as `find`'s) watch every number on the matched motes instead.
+Under the table, the timeline draws the cursor row's series with its
+min and max, constraint breaks and a failed tick in red, and the
+playhead; click or drag it to scrub.
+
+**One playhead for the window.** The sim pane that last ran or was
+focused owns it; every Motion pane reads it, and the top bar shows
+`tick 12/49 ‖` (`▶` while playing). Two sim panes under different
+scenarios scrub together.
+
+| Key (any Motion pane) | Does |
+|---|---|
+| `space` | Play / pause |
+| `,` `.` | One tick back / on |
+| `[` `]` | Ten ticks back / on |
+
+| Key (sim) | Does |
+|---|---|
+| `j` `k`, `g` `G` | Move the row cursor (the timeline draws its row) |
+| `⏎` / click | Select the row's mote (`rule @sel` follows) |
+| `d` | Toggle `--vs garden` |
+
+**The rule pane** (`rule @sel`, `rule series`) shows the rule's equation
+and every value it binds, at the playhead's tick when a sim pane owns
+it. A mote that isn't a rule shows every rule touching it. Names the
+equation can't settle on one mote come back as hints (link the one you
+mean). `why C1.current` shows how the last written solve got a value,
+down through its inputs.
+
+| Key (rule) | Does |
+|---|---|
+| `j` `k` | Move between bindings |
+| `⏎` | Select the binding's mote |
+| `w` | `why` for the binding, in this pane (`esc` goes back) |
+| `i` | Put `set ‹rule› equation ‹it›` on the command line to edit |
+
+**The scenarios pane** lists `(garden)` and every scenario with its
+overrides beside the garden's value.
+
+| Key (scenarios) | Does |
+|---|---|
+| `⏎` | Run the sim pane under it (a new sim pane if there is none) |
+| `v` | Compare the sim pane against it (`--vs`) |
+| `a` / `n` | Put `set --scenario ‹it› ` / `set --scenario ` on the command line |
+| `d` `d` | Clear the override at the cursor |
+
+**Solving.** `solve` writes one static solve and its provenance as one
+undo step; it refuses a garden whose rules use `prev()` (only a run can
+answer those). `solve --live on` is the old Fast mode: every write made
+from the window is followed by a solve, folded into the same undo step,
+and the top bar says `live`. It is kept per garden in the console's
+sidecar, off by default.
+
+Not ported from the old window: the node board (a graph of the model
+comes back with Monarch in U8), value lanes, the pre-flight role check
+and the impact view (both stay in the CLI and MCP).
+
 ### Tiling
 
 `^w` is the prefix: `v`/`s` split side by side or stacked, `h j k l`
@@ -356,9 +441,8 @@ In it:
 * **Advanced** (the footer toggle, remembered): the mote's id with a
   copy button, a `name` marker under the title (the title is that
   property, in a bigger font), whether this mote is its species'
-  template, the door to its note in Mora, the raw JSON, and -- in Motion
-  only -- a `why` button per property that reads the last solve's record
-  of where a solved value came from.
+  template, the door to its note in Mora, and the raw JSON. (Where a
+  solved value came from is the console's `why ‹m.k›`.)
 
 Everything autosaves as you type, debounced, with a `saved` flash in the
 header.
@@ -392,8 +476,8 @@ preserved rather than dropped.
 Every window has a context menu on a mote now, and the first two items
 are the same everywhere: **Inspect** and **Inspect in new tab**. What
 follows is that window's own — Monarch offers copy/pin/delete on the
-whole selection, Monastery offers removing the one occurrence you
-clicked, Motion offers connecting or editing a rule.
+whole selection, and Monastery offers removing the one occurrence you
+clicked.
 
 ### Graph interactions
 
@@ -862,7 +946,7 @@ read (and edited) through the inspector, not a side pane.
 
 Mora writes exactly one thing: the `modoc` property. It has no `t+N`
 stepper and no Apply button any more -- a note shows the garden as it
-stands, and moving a garden through time is Motion's window. That makes
+stands, and moving a garden through time is the console's `sim`. That makes
 "saving a note can never write simulation results" a fact about the
 window rather than a rule two buttons were keeping.
 
@@ -1020,114 +1104,6 @@ compete.
 Prints PASS/FAIL per check and exits non-zero if anything failed. Never
 touches real data: `GARDENS_DIR` and the webview storage dir are both a
 fresh temp directory.
-
----
-
-# Motion -- the simulator
-
-A sixth window, over the same gardens: `./run_motion.py`, or
-`.venv/bin/python run_motion.py`. Same stack and the same terms as the
-other five.
-
-```
-./run_motion.py                        # the default garden
-./run_motion.py --garden reactor       # a specific garden
-./run_motion.py --focus <mote id>      # open with one mote selected
-```
-
-This is where simulation lives. It used to be Monarch's — a settings
-popover, a bottom scrub bar and a runs panel — and it is gone from there
-entirely: Monarch is a graph editor, and a window that has to be
-"committed or discarded" before you can edit anything is not one.
-
-### The two modes
-
-| Mode | What it is for |
-|---|---|
-| **Fast** | editing the model with the answer kept current: every edit is followed, debounced, by a solve that writes back. No rail, no dock. |
-| **Advanced** | previewing: **Run** solves N ticks in memory for the dock to scrub, **Solve** writes one static solve on demand, and the rail holds scenarios, comparison panes and the pre-flight role check |
-
-In Advanced mode the left rail holds scenarios; the dock at the bottom
-is the timeline; the right panel is Rules or Inspector. **+ compare**
-(or right-clicking a scenario) adds a comparison pane, a second board
-previewing that scenario beside the primary one. Everything except the
-run itself is local — dragging the playhead never re-solves, because the
-whole run came back in one payload.
-
-### What a node is, and where it sits
-
-Nothing is declared. A mote carries no coordinates and no simulation
-role, so `motion/payload.py` derives four kinds from what core already
-answers:
-
-| Kind | What makes it one |
-|---|---|
-| **rule** | an `equation` plus an `applies_to` (`core/kinds.py`) |
-| **free** | it declares `freedoms` — the solver may determine something on it |
-| **varied** | the active scenario overrides it |
-| **fixed** | everything else |
-
-`varied` depends on which scenario is selected, so the same mote changes
-colour when you pick one. Template and override motes are never drawn:
-`core/simulation.py` leaves both out of a solve, so a node for one would
-be a node no run can move. Layout is yours — drag a node and it stays,
-per garden, in `localStorage`.
-
-### Ticks, not seconds
-
-The axis counts **ticks**, and a tick is one re-solve of the equation
-set. `core/simulation.py` has no timestep, no seconds and no
-integration, so the dock says `ticks` out loud rather than implying a
-clock it doesn't have. The solver list comes from
-`core/solver_registry.py` — today `linear` and `newton`.
-
-Two things the design this window was built from shows, and which are
-deliberately **not** here: a hardware-in-the-loop rail, and a menu of ODE
-integrators (RK45, BDF2, `dt` in milliseconds, a tolerance). Neither has
-a backend — there is no device layer at all — and a live-looking readout
-that is really a sine wave is worse than an absent one. Both attach at
-named seams when they exist: `motion/payload.py::tick_axis` for a real
-time axis, the solver registry for an integrator.
-
-### Solving
-
-**Solve** (and Fast mode after each edit) runs one static solve and
-writes the answer back. It never trusts the numbers a preview handed the
-frontend — the only values that reach the database are ones Python
-computed for this solve — and it replaces the record `why` reads, so
-the inspector's explanation always matches the values on the motes.
-Solve is disabled while a scenario is selected, since a scenario answers
-what *would* happen and is never written. A rule using `prev()` is
-refused by a solve (there is no previous step outside a preview) and the
-refusal shows as a toast, or on the Fast-mode status chip.
-
-Nothing keeps a history of past runs: a run is a preview you scrub, not
-a record you revisit.
-
-A sixth window means a sixth port: `motion/app.py` asks for **42006**,
-falling back to an ephemeral one if taken. `.webview_data_motion/` is
-its own WebKit storage. A solve here is not seen by an open Monarch
-until it refetches — the same rule every adapter lives under.
-
-### Smoke test
-
-`scripts/motion_smoke_test.py`, the same instrument as the others. It
-drives a real window against a seeded throwaway garden and checks that
-Run really draws lanes, that stepping the dock really moves the numbers
-on the node cards, that a preview writes nothing, that Solve reaches the
-engine and reports a refusal without writing, that picking a scenario
-re-runs and disables Solve, that a comparison pane draws a second
-board, and that editing an
-equation in the panel writes the rule mote. It holds 42001-42003 for the
-whole run.
-
-```
-.venv/bin/python scripts/motion_smoke_test.py
-```
-
-Run it alone — the pywebview window suites interfere with each other,
-and two at once produce failures that are about the display rather than
-the code.
 
 ---
 

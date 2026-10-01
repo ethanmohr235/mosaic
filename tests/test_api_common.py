@@ -41,9 +41,6 @@ def test_open_app_passes_the_focus_flag_each_script_expects(monkeypatch):
     api_common.open_app("monastery", "test", "mote-1")
     assert calls[-1][0][-2:] == ["--focus", "mote-1"]
 
-    api_common.open_app("motion", "test", "mote-1")
-    assert calls[-1][0][-2:] == ["--focus", "mote-1"]
-
 
 def test_open_app_ignores_mote_id_where_the_script_has_no_flag_for_it(monkeypatch):
     """run_monarch.py takes no such flag -- see api_common.APPS."""

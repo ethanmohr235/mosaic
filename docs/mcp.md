@@ -79,7 +79,7 @@ is not exposed; do that in the app or the CLI.
 
 Its steps come back as `{"steps": [...]}`, each carrying `step`,
 `changes`, `summary`, `equation_count` and `constraint_violations` — the
-same shape Motion's timeline receives (`core.simulation.step_payloads`).
+same shape every adapter puts a run's steps on the wire in (`core.simulation.step_payloads`).
 
 `resolve_modoc(mote, step)` reads a mote's `.modoc` note and everything
 its macros currently resolve to -- which mote each `\mote{...}` points at,

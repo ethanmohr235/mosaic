@@ -2,14 +2,14 @@
 
 MonOSS can solve for unknown mote properties from equations you write yourself. The engine knows nothing about circuits, thermodynamics, or any other domain -- all of that lives in ordinary motes.
 
-Simulation has its own window: **Motion** (`run_motion.py`, and
-`docs/ui-setup.md`). Press **Run** to preview a time-based run -- every
-tick is solved in memory and nothing is written to the garden yet -- and
-scrub the timeline to step or play through the sequence, with each
-node's value at that tick on its card and every value that moved traced
-as a lane in the dock. **Solve** solves the garden once and writes the
-answer back; in Fast mode that happens on its own after every edit. A
-scenario is never written, since it answers what *would* happen.
+Simulation lives in the console's Motion panes (`mo tion`,
+`docs/ui-setup.md` → *Motion*). `sim` previews a time-based run -- every
+tick is solved in memory and nothing is written to the garden -- as a
+table of the values that matter, scrubbed with one shared playhead.
+`solve` solves the garden once and writes the answer back, one undo
+step; with `solve --live on` that happens after every edit. A scenario
+is never written, since it answers what *would* happen. The same answers
+are `core/motion.py`'s, so the CLI and MCP can reach them too.
 
 > This used to live in Monarch, as a settings popover and a bottom scrub
 > bar. It moved out wholesale: Monarch is a graph editor, and simulation
@@ -163,7 +163,7 @@ Solving runs in two stages:
 
 ## Solvers
 
-`run_simulation`/`run_time_series` (and Motion's `preview`/`solve`) all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
+`run_simulation`/`run_time_series` (and the console's `sim --solver`) all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
 
 - **`linear`** (the default). Exact, non-iterative least-squares solve of whatever's left after substitution. Fails with **could not be resolved** if any equation is genuinely nonlinear in its unknowns.
 - **`newton`**. Finds a root of the combined residual by Newton-Raphson with a numeric (finite-difference) Jacobian, so it can solve the cases `linear` can't -- an equation of state, a nonlinear structural relation, a `property()` call whose input is itself unknown. Being iterative, it needs a starting guess for each unknown (the mote's existing property value if there is one, otherwise `1.0`) and can fail to converge or find a different root than expected for a badly-conditioned or multi-rooted system. Configuration: `max_iterations` (default 50), `tolerance` (default `1e-9`), `epsilon` (the finite-difference step, default `1e-6`).
@@ -208,9 +208,10 @@ through the good ones rather than losing the whole preview.
 
 **Scrubbing** moves through the already-computed steps client-side (no
 further solving) to see how far each property has come from where it
-started, at whichever step you're looking at. Tick 0 is the real,
-unprojected garden -- exactly what's in the database right now -- with
-tick 1 through N being the cumulative state after that many steps.
+started, at whichever step you're looking at. In the console's `sim`
+pane tick `t` is the state after the solve whose `tick` variable read
+`t`, so ticks run 0 to N-1; the value before the run (the garden, under
+the scenario) is each row's `start`, which tick 0's Δ is measured from.
 
 A rule with no `t`/`prev()` in it just solves to the same values every
 step, which is a perfectly normal, boring, valid case -- not every rule
@@ -220,7 +221,7 @@ re-checked each step).
 
 ## Running and re-running
 
-A single `run_simulation()` call (what Motion's **Solve**, `simulate`
+A single `run_simulation()` call (what the console's `solve`, `simulate`
 and the worked example scripts use) solves the garden once and writes
 the solved values straight onto the motes. It is idempotent: freedoms
 are re-derived from the graph every time, so a solved value never gets
@@ -474,8 +475,8 @@ A name is for reaching one specific thing, and a garden with two `bd`s
 has a modelling problem no solve should paper over. `simulation
 .unresolved_equation_names()` reports exactly these collisions, with the
 colliding mote ids, so an editor can offer to draw the one relationship
-that resolves it (scope 2 beats scope 3). Motion's equation editor and
-the command bar both use it.
+that resolves it (scope 2 beats scope 3). The console's rule pane shows
+them as hints, and the command bar uses it too.
 
 ### Why the garden scope exists
 
@@ -654,8 +655,18 @@ High Load varies 1 mote(s):
 **A scenario run never writes to the graph.** `run_simulation` with a
 scenario solves and reports what *would* change, and records no
 provenance; `run_time_series` under a scenario is a preview like any
-other. To compare scenarios, preview them side by side (Motion's
-comparison panes).
+other. To compare scenarios, preview them side by side: two `sim` panes
+under different `--scenario`s, or one with `--vs` for a difference
+column.
+
+**Editing one.** `set --scenario hot C1.voltage 30` writes `voltage` on
+the override through which `hot` replaces C1 -- creating the override
+and its two relationships the first time, and the scenario mote itself
+when no mote has that name (`core/scenarios.py::get_or_create_override`;
+one undo step). `--clear` takes the override's value away, so the
+scenario reads the garden's again. A unit written on an override is
+merged into the target's `units` map, since an override replaces whole
+properties.
 
 This is not a limitation to lift later. The answer to a hypothetical is
 not the garden's state, and "where would a scenario run's results be
@@ -1372,7 +1383,7 @@ a rule that doesn't add up.
 
 - **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration. A solver backend for this shape (`dx/dt` rather than `F(x) == 0`) could join `linear`/`newton` later without changing how a rule is written.
 
-  There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. Motion says so rather than implying a clock -- its timeline is labelled in ticks, and the payload carries the axis it is counted in (`motion/payload.py::tick_axis`) so that a real time axis is one place to add rather than a frontend assumption to unpick. An integrator would reach Motion's solver menu by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
+  There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. The console's `sim` says so rather than implying a clock -- `--ticks`, the timeline and the playhead all count ticks. An integrator would reach `sim --solver` by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
 - **Per-literal unit syntax in an equation** (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with. (A solved freedom with no unit of its own *is* now given one -- see [Inference](#inference) above -- but only when it is the entire side of the equation that determined it; anything shapelier still has to be declared.)
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.

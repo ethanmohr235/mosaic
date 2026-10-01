@@ -180,21 +180,21 @@ def run_checks(window):
 
     check("selecting a garden fills the detail pane", selecting_a_garden_fills_the_detail_pane)
 
-    def open_in_offers_all_five_windows():
+    def open_in_offers_every_window():
         assert texts(window, "#open-in .app-chip") == [
-            "Monarch", "Mora", "Monastery", "Monolith", "Motion"
+            "Monarch", "Mora", "Monastery", "Monolith"
         ], f"got {texts(window, '#open-in .app-chip')}"
 
         js(window, """
             Array.from(document.querySelectorAll('#open-in .app-chip'))
-                .find(c => c.textContent.includes('Motion')).click();
+                .find(c => c.textContent.includes('Mora')).click();
         """)
         assert wait_until(lambda: json.loads(js(window, "JSON.stringify(window.__opened)"))), (
             "clicking an app chip should reach the bridge"
         )
-        assert json.loads(js(window, "JSON.stringify(window.__opened)")) == [["motion", "alpha"]]
+        assert json.loads(js(window, "JSON.stringify(window.__opened)")) == [["mora", "alpha"]]
 
-    check("Open in offers all five windows and launches the one clicked", open_in_offers_all_five_windows)
+    check("Open in offers every old window and launches the one clicked", open_in_offers_every_window)
 
     def creating_a_garden_adds_and_selects_it():
         click(window, "#new-btn")

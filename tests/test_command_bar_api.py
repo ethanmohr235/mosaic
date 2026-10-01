@@ -7,7 +7,6 @@ import pytest
 import monarch.api
 import monastery.api
 import mora.api
-import motion.api
 from api_common import CommandBarApi
 from core.gardens import create_garden
 
@@ -51,35 +50,8 @@ def test_delete_a_mote_needs_confirmation(api):
 
 
 @pytest.mark.parametrize("module", [
-    monarch.api, motion.api, mora.api, monastery.api,
+    monarch.api, mora.api, monastery.api,
 ])
 def test_every_window_speaks_the_contract(module):
     assert issubclass(module.Api, CommandBarApi)
     assert callable(getattr(module.Api, "command_run", None))
-
-
-def test_motion_overrides_command_run_for_scenarios():
-    """Motion's override has to replace the shared method, not sit beside
-    it, or a selected scenario would still let a command land on the
-    garden's own state instead of the override."""
-    assert motion.api.Api.command_run is not CommandBarApi.command_run
-    assert monarch.api.Api.command_run is CommandBarApi.command_run
-
-
-def test_motion_blocks_the_command_bar_while_a_scenario_is_active(tmp_path):
-    create_garden("motion-test")
-    instance = motion.api.Api("motion-test")
-    try:
-        made = instance.command_run("R1.resistance = 500 ohms")
-        assert made["ok"]
-        scenario = instance.create_mote({"name": "Scenario A"})["id"]
-        instance.set_inspector_scenario(scenario)
-        blocked = instance.command_run("R1.resistance = 700 ohms")
-        assert not blocked["ok"]
-        assert "scenario" in blocked["message"]
-
-        instance.set_inspector_scenario(None)
-        allowed = instance.command_run("R1.resistance = 700 ohms")
-        assert allowed["ok"]
-    finally:
-        instance.shutdown()

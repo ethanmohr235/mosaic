@@ -135,7 +135,7 @@ def test_an_app_you_can_open_outranks_one_that_is_not_available(conn, monkeypatc
     from core import commands as commands_module
     monkeypatch.setattr(commands_module, "CONSOLE_APPS", (
         commands_module.ConsoleApp("te", "Inspector"),
-        commands_module.ConsoleApp("tion", "Motion", legacy="motion"),
+        commands_module.ConsoleApp("tion", "Motion", default_view="motion:state"),
     ))
     result = complete(conn, "mo t")
     assert [r.value for r in result.rows if not r.dim][:2] == ["tion", "te"]

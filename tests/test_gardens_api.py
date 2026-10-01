@@ -232,5 +232,5 @@ def test_open_app_launches_that_app_on_that_garden(api, monkeypatch):
     launched = []
     monkeypatch.setattr(module, "_open_app", lambda *args: launched.append(args) or {"ok": True})
 
-    api.open_app("motion", "test")
-    assert launched == [("motion", "test")]
+    api.open_app("mora", "test")
+    assert launched == [("mora", "test")]

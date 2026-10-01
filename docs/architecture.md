@@ -127,7 +127,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance`, `uncertainty` and `archived` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
-The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
+The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `mo`, `find`, `set`, `open`, `rename`, `unlink`, `template`, `plot`, `fit`, `sim`, `rule`, `scenarios`, `solve`, `why`, `step`, `play`, `pause`, `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 
 A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below). The names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
 
@@ -392,7 +392,7 @@ The last solve that wrote to the garden also records *why* each value
 came out as it did: which equations, reading which already-known values,
 determined it. `core/provenance.py` collects this during the solve and
 `core/derivations.py` persists and replays it, backing the `why` command
-in both CLI surfaces, Motion and the MCP server.
+in both CLI surfaces, the console (`why ‹m.k›`) and the MCP server.
 
 The recording is pure and DB-free, and -- importantly -- it does not touch
 `core/formula.py`. Reads are captured by handing the evaluator a dict
@@ -606,8 +606,8 @@ the user should approve in the app, or need a live window. See
 # What belongs on which surface
 
 `core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/`,
-`motion/`, `gardens_app/`, `console/` and `mcp_server/` are
-eight adapters over it, and each one's job is a
+`gardens_app/`, `console/` and `mcp_server/` are
+seven adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -639,12 +639,10 @@ The charter:
   every mote and an edit applied to two hundred of them are shapes a
   graph, a page and a week all lack. It is the console's `find` pane
   now, not a window.
-* **Motion** -- likewise a sixth time, for the garden as a system that
-  runs (see Simulation below, and `docs/simulation.md`). A sixth window,
-  because a scenario rail, a tick-by-tick timeline and a rule's own
-  bindings are shapes none of the other five draws -- and because
-  simulation had been a settings panel and a scrub bar bolted onto
-  Monarch, which is a graph editor and not a simulator.
+* **Motion** -- likewise, for the garden as a system that runs (see
+  Simulation below, and `docs/simulation.md`): scenarios, a tick-by-tick
+  run and a rule's own bindings. It is the console's `sim`, `rule` and
+  `scenarios` panes now, not a window.
 * **Gardens** -- the gardens themselves, rather than anything inside
   one: create, rename, delete (with undo), import, export, and the
   per-garden sync folder. A seventh window, and the only one that opens
@@ -915,8 +913,8 @@ stands, and there is no step to ask for. Notes used to resolve at `t+N`
 against a `run_time_series()` preview, with Mora carrying a stepper and
 an `Apply t+N…` button that committed the projection; all of it is
 removed. The line it was crossing is the one the windows are divided on:
-a note reports what a garden *is*, Motion is where a garden moves through
-time, and Moxie is where a property is swept. A note editor that could
+a note reports what a garden *is*, `sim` is where a garden moves through
+time, and `plot` is where a property is swept. A note editor that could
 also run and commit a simulation held a lever belonging in another room.
 What is left is a stronger promise than "it asks first" -- the note path
 has no write in it at all.
@@ -1064,10 +1062,10 @@ it.
 
 # The inspector
 
-One mote, one surface, six windows. Selecting a mote anywhere -- a node
-in Monarch, a row in Monolith, a placement in Monastery, a link in Mora,
-a node in Motion -- opens the same floating panel, with the same tools
-in it.
+One mote, one surface, every window. Selecting a mote anywhere -- a node
+in Monarch, a placement in Monastery, a link in Mora -- opens the same
+floating panel, with the same tools in it; the console's `p` float and
+props pane draw the same payload (`core/inspect.py`).
 
 It was not like that. Each window had grown its own docked detail panel,
 and what you were allowed to do to a mote depended on which window you
@@ -1142,7 +1140,7 @@ the old panel calls `inspector_*` methods directly (docs/console.md ->
 two hundred is a different question, so Monarch's and Monolith's bulk
 editors stay where they were, as do Monarch's relationship panels,
 Monastery's occurrence controls (which placement was clicked, moving it,
-detaching it), and Motion's rule editor. Deleting a mote likewise stays
+detaching it). Deleting a mote likewise stays
 in each window's own chrome -- the inspector edits a mote, it does not
 end one.
 
@@ -1150,21 +1148,17 @@ end one.
 purpose. `valueEditor` lets a host offer a better editor for a value the
 generic ones would flatten -- what is left there is Monarch's `provider`
 summary, and the list is meant to keep shrinking: the interval picker
-used to be in it and is now everyone's. `advancedSections` adds to the Advanced pane, which is also where the
-two window-specific powers live: Motion's `why` (the last solve's answer
-for where a solved value came from -- it is the only window with a
-solver, so `inspector_why` returns None in the other five and the
-control is never drawn) and Monarch's "+ New instance". Anything only
-one window can do is a gap in the other five, so both lists should stay
-short and shrink.
+used to be in it and is now everyone's. `advancedSections` adds to the Advanced pane, which is where Monarch's
+"+ New instance" lives. (`inspector_why` returns None in every old
+window: where a solved value came from is the console's `why ‹m.k›`.)
+Anything only one window can do is a gap in the others, so both lists
+should stay short and shrink.
 
-**Motion writes differently.** While a scenario is selected, Motion
-redirects property writes onto that scenario's override mote rather than
-the mote itself -- looking at a hypothetical must never mean overwriting
-the garden's own state (see Scenarios). That is an override of
-`inspector_set_property`, one layer below the panel, so every editing
-affordance the shared panel has -- add a property, rename a key, toggle
-a boolean -- inherits the rule instead of each having to remember it.
+**Writing under a scenario is a command.** Looking at a hypothetical
+must never mean overwriting the garden's own state (see Scenarios), so
+the console never redirects an ordinary write: `set --scenario hot
+C1.voltage 30` says where the value goes, and writes that scenario's
+override (`core/commands.py`).
 
 # Dates and the interval picker
 
@@ -1362,45 +1356,44 @@ layout (`console/state.py`), never in the garden. See `docs/ui-setup.md`.
 
 # Simulation
 
-Motion (`motion/`) is a sixth window: the garden as a system that runs.
-Scenarios, solvers, previews, provenance and rule authoring are one subject,
-and it is the one subject Monarch could not give a full window to -- it
-lived there as a settings popover, a bottom scrub bar and a runs panel,
-gating every edit in the graph behind "commit or discard first". Moving
-it out removed that gate from Monarch entirely (`editBlocked` now
-answers only for attractor mode) and gave simulation the room it needed.
+Simulation is the console's Motion panes (`mo tion`, docs/console.md →
+*Settled for U5*): `scenarios | sim | rule @sel`. It was a sixth window
+(`motion/`), and before that a settings popover, a scrub bar and a runs
+panel on Monarch, gating every graph edit behind "commit or discard
+first"; both are gone.
 
-**Nothing about the engine moved.** `core/simulation.py` never imported
-from `monarch/`, so the split was two thin layers: the bridge methods
-(now `motion/api.py`) and the UI. `core/simulation.py::step_payloads`
-was already the shared shape for a preview's steps, and Motion's timeline
-and the MCP server both take them in that one shape.
+**Nothing about the engine moved.** `core/simulation.py` answers every
+run; `core/motion.py` is the console's grammar over it (`sim`, `rule`,
+`why`, `solve`) and shapes its answers, and `console/motion.py` is
+`api.motion`, which only calls it. The MCP server still takes a
+preview's steps in `core/simulation.py::step_payloads`' shape.
 
-**What a node *is* is derived, like everything else.** A mote carries no
-coordinates and no declared role in a simulation, so `motion/payload.py`
-derives four node kinds from facts core already answers: `rule` (an
-equation plus an `applies_to`, from `core/kinds.py`), `free` (declares
-`freedoms`), `varied` (some scenario overrides it -- so this one is
-relative to the scenario in hand) and `fixed`. The obvious carve-up
-(pump, sensor, valve) would be domain modelling, and that belongs in the
-garden rather than in a viewer. Layout is the frontend's and lives in
-`localStorage` per garden: writing a dragged position back would make
-every pan a graph edit.
+**A run is a watch list, not a board.** A mote carries no coordinates
+and no declared role in a simulation, so rather than derive a node
+board, the sim pane shows the values a run is about: one row per value
+with its state (`solved`, `varied`, `pinned`, `given` -- facts core
+already answers: the run's changes, the scenario's overrides, declared
+freedoms), and the row's whole series, so a playhead scrubs without a
+second solve. A graph of the model comes back with Monarch's canvas in
+U8.
 
-**The timeline counts ticks, and says so.** A tick is one re-solve of the
-equation set; the engine has no `dt`, no seconds and no integration.
-Rather than let the dock imply otherwise, every run payload carries an
-`axis` from `motion/payload.py::tick_axis`, which is the single place
-that answers "what is step N called" -- the seam a real time axis
-attaches to later. The solver menu is read from
-`core/solver_registry.py` for the same reason: a future integrator
-appears in Motion by being registered, not by editing the window.
+**One playhead.** The playhead is shell state (the store), like the
+selection: every Motion pane reads the same tick, and the sim pane that
+last ran or was focused owns it, publishing its run so the rule pane can
+ask for its bindings' series under the same run. Not saved in commands.
 
-Motion is a sixth process on the same terms as the other four:
-`motion/app.py::choose_port` asks for 42006 and falls back to an
-ephemeral port, and `.webview_data_motion/` is its own WebKit storage.
-A solve made here is not observed by an open Monarch until it refetches
--- the same rule every adapter lives under. See `docs/ui-setup.md`.
+**The timeline counts ticks, and says so.** A tick is one re-solve of
+the equation set; the engine has no `dt`, no seconds and no integration.
+`--ticks`, the timeline and the top bar all count ticks. The solver list
+is read from `core/solver_registry.py`: a future integrator appears in
+`sim --solver` by being registered.
+
+**`solve` and `live`.** `solve` writes one static solve and replaces
+the provenance, as one undo step that also puts the previous provenance
+back (`core/derivations.py::snapshot`/`restore`), so `why` after an undo
+explains the values the undo restored. `solve --live on` folds a solve
+into every write made from the window (`core/motion.py::live_solve`),
+kept per garden in the console sidecar -- UI state, like layouts.
 
 # Annotations
 

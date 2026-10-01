@@ -52,16 +52,6 @@ const Launcher = (() => {
         <rect x="21" y="20" width="5" height="5" rx="1" fill="var(--accent)"></rect>
       </svg>`,
     },
-    {
-      id: "motion", name: "Motion", kind: "simulation",
-      desc: "Run the garden's rules and scrub the result tick by tick.",
-      icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-        <circle cx="20" cy="20" r="10.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55"></circle>
-        <ellipse cx="20" cy="20" rx="10.5" ry="4" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.55" transform="rotate(-28 20 20)"></ellipse>
-        <circle cx="20" cy="20" r="3.2" fill="var(--accent)"></circle>
-        <circle cx="29.4" cy="15.3" r="2" fill="var(--accent)"></circle>
-      </svg>`,
-    },
   ];
 
   let api = null;
