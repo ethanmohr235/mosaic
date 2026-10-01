@@ -26,6 +26,7 @@ MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
 MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "fit"}  # U4
 MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
 MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply"}  # U6
+MONASTERY_BRIDGE = {"view", "rewrite", "edit", "skip", "slot", "follow"}  # U7
 
 
 @pytest.fixture
@@ -62,7 +63,7 @@ def test_boot_shape(api):
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None, "layout": None}
-    assert boot["verbs"][21] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][25] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -91,10 +92,10 @@ def _reachable(obj, seen=None):
 
 def test_pywebview_walk_reaches_no_connection(api):
     seen = _reachable(api)
-    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE | MORA_BRIDGE
+    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE | MORA_BRIDGE | MONASTERY_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api, api.monolith, api.mora, api.mote, api.motion, api.moxie]
+    assert seen["objects"] == [api, api.monastery, api.monolith, api.mora, api.mote, api.motion, api.moxie]
 
 
 # ---- statements --------------------------------------------------------------
@@ -150,11 +151,11 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
 
 
 def test_an_unported_app_opens_its_old_window(api, launched):
-    effect = api.run("mo nastery")
-    assert effect == {"effect": "legacy", "app": "monastery",
-                      "message": "opened Monastery (old window)"}
+    effect = api.run("mo narch")
+    assert effect == {"effect": "legacy", "app": "monarch",
+                      "message": "opened Monarch (old window)"}
     assert launched[-1][0] == sys.executable
-    assert launched[-1][1].endswith("run_monastery.py")
+    assert launched[-1][1].endswith("run_monarch.py")
     assert launched[-1][2:] == ["--garden", "test"]
 
 
@@ -777,3 +778,41 @@ def test_the_worksheet_previews_and_applies_as_one_step(api):
     assert "bd.l" in api.mora.worksheet()["text"]
     api.run("undo")
     assert api.mora.worksheet()["text"].strip() == ""
+
+
+# ---- Monastery (U7) ----------------------------------------------------------
+
+def test_mo_nastery_opens_agenda_and_week(api):
+    effect = api.run("mo nastery")
+    assert effect["effect"] == "open_layout" and effect["focus"] == "agenda"
+    assert [c["command"] for c in effect["tree"]["children"]] == ["agenda", "week"]
+    assert api.run("week 2026-10-05")["view"] == "monastery:week"
+    assert api.run("month")["view"] == "monastery:month"
+
+
+def test_the_calendar_panes_answer_and_edits_are_set_lines(api):
+    conn = api._session.conn
+    lab = motes_repo.create_mote(conn, {"name": "Lab", "date": "2026-10-08T13:00/PT2H"})
+    view = api.monastery.view("week 2026-10-08")
+    assert [r["name"] for r in view["rows"]] == ["Lab"]
+    assert api.monastery.rewrite("week 2026-10-08", {"page": 1}) == {"command": "week 2026-10-12"}
+    assert api.monastery.rewrite("week", {"key": "date"}) == {"command": "week --keys ''"}
+    line = api.monastery.edit(lab, "date", "2026-10-08T13:00", "2026-10-08T15:00", "2026-10-08T17:00")["line"]
+    assert api.run(line)["wrote"]
+    assert motes_repo.get_mote(conn, lab).properties["date"] == "2026-10-08T15:00/PT2H"
+    api.run("undo")
+    assert motes_repo.get_mote(conn, lab).properties["date"] == "2026-10-08T13:00/PT2H"
+    assert api.monastery.slot("2026-10-09T09:00", "2026-10-09T10:00", False) == {"value": "2026-10-09T09:00/PT1H"}
+    assert api.monastery.follow(lab) == {"command": f"open #{lab}", "newPane": True}
+    assert api.monastery.view("week --wat")["error"]
+
+
+def test_detach_is_a_write_verb(api):
+    conn = api._session.conn
+    standup = motes_repo.create_mote(conn, {"name": "Standup",
+                                            "date": "2026-10-05T09:00/PT15M\nRRULE:FREQ=DAILY;COUNT=5"})
+    effect = api.run(f"detach #{standup} date 2026-10-06T09:00 2026-10-06T11:00 2026-10-06T11:15")
+    assert effect["wrote"] and "out of its series" in effect["message"]
+    assert len(motes_repo.list_motes(conn)) == 2
+    api.run("undo")
+    assert len(motes_repo.list_motes(conn)) == 1

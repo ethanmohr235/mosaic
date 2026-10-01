@@ -67,7 +67,9 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
     ConsoleApp("ra", "Mora", default_view="mora:edit", default_command="edit @sel",
                layout={"split": "row", "sizes": [0.22, 0.39, 0.39], "children": [
                    {"command": "notes"}, {"command": "edit @sel"}, {"command": "read @sel"}]}),
-    ConsoleApp("nastery", "Monastery", legacy="monastery"),
+    ConsoleApp("nastery", "Monastery", default_view="monastery:agenda", default_command="agenda",
+               layout={"split": "row", "sizes": [0.4, 0.6], "children": [
+                   {"command": "agenda"}, {"command": "week"}]}),
     ConsoleApp("narch", "Monarch", legacy="monarch"),
     ConsoleApp("saic", "Home", legacy="gardens"),
 )
@@ -80,7 +82,8 @@ VERB_VIEWS: dict[str, str] = {"log": "log", "scenarios": "motion:scenarios",
 ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "plot": "moxie:plot",
                              "fit": "moxie:fit", "sim": "motion:state", "rule": "motion:rule",
                              "why": "motion:rule", "edit": "mora:edit", "read": "mora:read",
-                             "notes": "mora:notes"}
+                             "notes": "mora:notes", "agenda": "monastery:agenda",
+                             "week": "monastery:week", "month": "monastery:month"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
@@ -427,7 +430,16 @@ def run_template(conn: sqlite3.Connection, args: Sequence[str], selection: Seque
     return _written(f"{args[0]} is now the template of {args[1]}", steps)
 
 
-WRITE_VERBS = {"set": run_set, "rename": run_rename, "unlink": run_unlink, "template": run_template}
+def run_detach(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
+    """`detach #id ‹key› ‹occurrence› ‹start› ‹end›`: one occurrence out of
+    its series (core/agenda.py::detach), one undo step."""
+    from core import agenda
+    message, command = agenda.detach(conn, args)
+    return SetResult(message, 1, command)
+
+
+WRITE_VERBS = {"set": run_set, "rename": run_rename, "unlink": run_unlink, "template": run_template,
+               "detach": run_detach}
 
 
 def one_target(conn, target: str, selection: Sequence[str]) -> list[str]:
@@ -562,6 +574,10 @@ def complete(
     if word in ("sim", "rule", "why", "solve", "step"):
         from core import motion
         rows = [CompletionRow(v, d) for v, d in motion.choices(conn, word, rest)]
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word in ("agenda", "week", "month"):
+        from core import agenda
+        rows = [CompletionRow(v, d) for v, d in agenda.choices(conn, word, rest)]
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
     if word in ("edit", "read"):
         return _complete_from(RESERVED_VERBS[word]["usage"], _note_choices(conn, rest), rest, cursor)
