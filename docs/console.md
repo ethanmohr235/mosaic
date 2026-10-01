@@ -377,6 +377,36 @@ confirmed these defaults on 2026-10-01.
   why). Its undo step puts the previous provenance back.
 - **New token:** `--timeline-h` 72px, the sim pane's timeline.
 
+### Settled for U6, Mora (2026-10-01)
+
+- **Two panes, not one with modes.** `edit ‹note›` is the source and
+  `read ‹note›` the rendered document; tiling replaces the old
+  Source/Split/Read switch. The read pane shows unsaved typing live,
+  through a draft shared in the store. `mo ra` opens
+  `notes | edit @sel | read @sel`.
+- **Geist Mono everywhere**, but the read pane is its own surface: a
+  dark gray paper (around L 0.21, softer off-white text, gray rules, no
+  hue), so a rendered document never looks like the editor. Math is
+  KaTeX, moved from Mora's vendor folder (not a new dependency).
+- **Autosave, one undo step.** A note writes on a pause in typing; one
+  editing session (`i` … `esc`) is one garden undo step and one log
+  line, not a history entry. Inside the editor, Ctrl+Z is the text
+  box's own undo.
+- **Scope:** render every phase 3/7 macro (`\work`, the calc sections,
+  tables, figures, numbered equations and `\ref`, `\rule`, `\include`,
+  `\verification`), find/replace in the editors, and **the worksheet
+  pane**. Not in U6: print to PDF (phase 6 does real PDFs) and the `@`
+  mote picker (links are typed, `\mote{name}` or `\mote{#id}`).
+- **The worksheet is a pane** (answers the open question): a second
+  text-editing pane over `core/worksheet.py`, in a **full blueprint**
+  scheme (deep blue ground, pale blue-white text, faint row grid, line
+  kinds in tints of the same blue; status colours still mark errors and
+  checks). Typing only parses; **`esc` applies** the whole sheet as one
+  undo step. With `live` on, a solve follows.
+- **New colours.** The paper and blueprint surfaces are the first
+  tokens outside the neutral/status/species/series sets; the user asked
+  for both.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
@@ -509,10 +539,6 @@ Each step's done-check is the same:
   those, and whether the old window's bulk link, relationship matrix,
   bulk delete and *save view* come back as commands (`link @sel …`,
   `delete @sel`, `view save ‹name›`) -- U2 did not port them.
-- **Worksheet and command line.** Worksheet lines (`bd.x = 80 in`) are
-  the same statements the command line accepts. Is the worksheet a
-  pane that's just a persistent, editable list of them? Settle this in
-  roadmap phase 2.
 - **Size tokens added in U1.** The shell took these from the design
   canvas rather than the handoff README. Confirm or replace them:
   `--popup-mo` 36px, `--popup-app` 90px, `--picker-key` 150px,
