@@ -44,7 +44,7 @@ def test_round_trip(garden):
 
     on_disk = json.loads(console_state_path(garden).read_text())
     assert on_disk["version"] == 1
-    assert set(on_disk) == {"version", "layouts", "active", "working", "history", "live"}
+    assert set(on_disk) == {"version", "layouts", "active", "working", "history", "live", "pins"}
     assert on_disk["live"] is False
 
 

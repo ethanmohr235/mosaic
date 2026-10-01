@@ -314,6 +314,8 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
               "describe": "the month as a six-week grid"},
     "detach": {"usage": "detach #id ‹key› ‹occurrence› ‹start› ‹end›",
                "describe": "move one occurrence out of its series"},
+    "graph": {"usage": "graph [@sel|#id|‹name›] [--depth N] [--hide-rel a,b] [--view ‹saved›] [‹conditions›]",
+              "describe": "a mote's neighbourhood, or the whole garden, as a graph"},
     "cd": {"usage": "cd ‹garden›", "describe": "switch this workspace's garden"},
     "layout": {"usage": "layout save|load|list|rm ‹name›",
                "describe": "save or restore pane layouts"},

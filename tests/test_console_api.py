@@ -27,6 +27,7 @@ MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "f
 MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
 MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply"}  # U6
 MONASTERY_BRIDGE = {"view", "rewrite", "edit", "skip", "slot", "follow"}  # U7
+MONARCH_BRIDGE = {"view", "rewrite", "pins", "pin", "unpin"}  # U8
 
 
 @pytest.fixture
@@ -63,7 +64,7 @@ def test_boot_shape(api):
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None, "layout": None}
-    assert boot["verbs"][25] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][26] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -92,10 +93,10 @@ def _reachable(obj, seen=None):
 
 def test_pywebview_walk_reaches_no_connection(api):
     seen = _reachable(api)
-    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE | MORA_BRIDGE | MONASTERY_BRIDGE
+    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE | MORA_BRIDGE | MONASTERY_BRIDGE | MONARCH_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api, api.monastery, api.monolith, api.mora, api.mote, api.motion, api.moxie]
+    assert seen["objects"] == [api, api.monarch, api.monastery, api.monolith, api.mora, api.mote, api.motion, api.moxie]
 
 
 # ---- statements --------------------------------------------------------------
@@ -151,17 +152,12 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
 
 
 def test_an_unported_app_opens_its_old_window(api, launched):
-    effect = api.run("mo narch")
-    assert effect == {"effect": "legacy", "app": "monarch",
-                      "message": "opened Monarch (old window)"}
+    effect = api.run("mo saic")
+    assert effect == {"effect": "legacy", "app": "gardens",
+                      "message": "opened Home (old window)"}
     assert launched[-1][0] == sys.executable
-    assert launched[-1][1].endswith("run_monarch.py")
-    assert launched[-1][2:] == ["--garden", "test"]
-
-
-def test_saic_opens_the_gardens_window(api, launched):
-    assert api.run("mo saic")["app"] == "gardens"
     assert launched[-1][1].endswith("run_gardens.py")
+    assert launched[-1][2:] == ["--garden", "test"]
 
 
 def test_te_opens_the_props_pane_on_the_selection(api, launched):
@@ -816,3 +812,40 @@ def test_detach_is_a_write_verb(api):
     assert len(motes_repo.list_motes(conn)) == 2
     api.run("undo")
     assert len(motes_repo.list_motes(conn)) == 1
+
+
+# ---- Monarch (U8) ------------------------------------------------------------
+
+def test_mo_narch_opens_find_graph_and_props(api):
+    effect = api.run("mo narch")
+    assert effect["effect"] == "open_layout"
+    assert [c["command"] for c in effect["tree"]["children"]] == ["find", "graph @sel --depth 2", "open @sel"]
+    assert api.run("graph @sel --depth 3") == {"effect": "open_view", "view": "monarch:graph",
+                                               "command": "graph @sel --depth 3"}
+
+
+def test_the_graph_pane_answers_and_rewrites(api):
+    conn = api._session.conn
+    a = motes_repo.create_mote(conn, {"name": "A"})
+    b = motes_repo.create_mote(conn, {"name": "B"})
+    api.run("A -> feeds -> B")
+    view = api.monarch.view("graph @sel --depth 1", [a])
+    assert sorted(m["name"] for m in view["motes"]) == ["A", "B"]
+    assert view["edges"][0]["type"] == "feeds" and view["shown"] == 2
+    assert api.monarch.rewrite("graph @sel", {"depth": 1}) == {"command": "graph @sel --depth 3"}
+    assert "@sel is empty" in api.monarch.view("graph @sel")["error"]
+    assert api.monarch.view("graph --wat")["error"]
+    assert api.monarch.rewrite("graph", {"depth": 1})["error"]
+    rows = [r["value"] for r in api.complete("graph --hide-rel ")["rows"]]
+    assert "feeds" in rows
+    assert b
+
+
+def test_pins_live_in_the_console_state_not_the_garden(api):
+    assert api.monarch.pins() == {}
+    assert api.monarch.pin({"m1": [10, 20.04], "m2": [0, 0]}) == {"pins": 2}
+    assert api.monarch.unpin(["m2"]) == {"pins": 1}
+    assert state_repo.load("test").pins == {"m1": [10.0, 20.0]}
+    assert "a pin is" in api.monarch.pin({"m3": "far"})["error"]
+    api.monarch.unpin(None)
+    assert state_repo.load("test").pins == {}

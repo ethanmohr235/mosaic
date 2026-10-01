@@ -28,6 +28,7 @@ VERSION = 1
 HISTORY_LIMIT = 500
 MAX_TREE_BYTES = 64 * 1024
 MAX_LAYOUT_NAME = 64
+MAX_PINS = 5000
 
 
 @dataclass
@@ -39,6 +40,24 @@ class ConsoleState:
     # `solve --live on`: every write made from the window is followed by
     # a solve (docs/console.md -> Settled for U5). Off by default.
     live: bool = False
+    # The graph pane's pinned nodes, {mote id: [x, y]} in graph space
+    # (docs/console.md -> Settled for U8).
+    pins: dict = field(default_factory=dict)
+
+    def pin(self, positions: Any) -> None:
+        if not isinstance(positions, dict):
+            raise ValueError("pins are {mote id: [x, y]}")
+        checked = {str(mote_id): _checked_xy(xy) for mote_id, xy in positions.items()}
+        if len(self.pins.keys() | checked.keys()) > MAX_PINS:
+            raise ValueError(f"at most {MAX_PINS} pinned nodes")
+        self.pins.update(checked)
+
+    def unpin(self, ids: Any = None) -> None:
+        if ids is None:
+            self.pins = {}
+            return
+        for mote_id in ids:
+            self.pins.pop(str(mote_id), None)
 
     def layout_names(self) -> list[str]:
         return [layout["name"] for layout in self.layouts]
@@ -90,6 +109,7 @@ class ConsoleState:
             "working": self.working,
             "history": self.history,
             "live": self.live,
+            "pins": self.pins,
         }
 
 
@@ -154,6 +174,7 @@ def from_json(data: Any) -> ConsoleState:
         working=working,
         history=history[-HISTORY_LIMIT:],
         live=data.get("live") is True,
+        pins={str(k): _checked_xy(v) for k, v in (data.get("pins") or {}).items()},
     )
 
 
@@ -161,6 +182,13 @@ def _checked_layout(entry: Any) -> dict:
     validate_layout_name(entry["name"])
     validate_tree(entry["tree"], allow_none=False)
     return {"name": entry["name"], "tree": entry["tree"]}
+
+
+def _checked_xy(xy: Any) -> list[float]:
+    if (not isinstance(xy, (list, tuple)) or len(xy) != 2
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) < 1e7 for v in xy)):
+        raise ValueError(f"a pin is [x, y], got {xy!r}")
+    return [round(float(xy[0]), 1), round(float(xy[1]), 1)]
 
 
 def _checked_history(entry: Any) -> dict:

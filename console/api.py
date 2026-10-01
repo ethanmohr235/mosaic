@@ -25,6 +25,7 @@ from typing import Any
 
 import api_common
 from console import state as state_repo
+from console.monarch import MonarchApi
 from console.monastery import MonasteryApi
 from console.monolith import MonolithApi
 from console.mora import MoraApi
@@ -64,6 +65,7 @@ class Api:
         self.motion = MotionApi(self._session)
         self.mora = MoraApi(self._session, lambda: self._state.live)
         self.monastery = MonasteryApi(self._session)
+        self.monarch = MonarchApi(self._session, lambda: self._state, self._save_state)
 
     # ---- boot and gardens ----
 

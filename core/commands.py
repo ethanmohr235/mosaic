@@ -70,7 +70,9 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
     ConsoleApp("nastery", "Monastery", default_view="monastery:agenda", default_command="agenda",
                layout={"split": "row", "sizes": [0.4, 0.6], "children": [
                    {"command": "agenda"}, {"command": "week"}]}),
-    ConsoleApp("narch", "Monarch", legacy="monarch"),
+    ConsoleApp("narch", "Monarch", default_view="monarch:graph", default_command="graph @sel --depth 2",
+               layout={"split": "row", "sizes": [0.26, 0.48, 0.26], "children": [
+                   {"command": "find"}, {"command": "graph @sel --depth 2"}, {"command": "open @sel"}]}),
     ConsoleApp("saic", "Home", legacy="gardens"),
 )
 
@@ -83,7 +85,8 @@ ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "pl
                              "fit": "moxie:fit", "sim": "motion:state", "rule": "motion:rule",
                              "why": "motion:rule", "edit": "mora:edit", "read": "mora:read",
                              "notes": "mora:notes", "agenda": "monastery:agenda",
-                             "week": "monastery:week", "month": "monastery:month"}
+                             "week": "monastery:week", "month": "monastery:month",
+                             "graph": "monarch:graph"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
@@ -578,6 +581,10 @@ def complete(
     if word in ("agenda", "week", "month"):
         from core import agenda
         rows = [CompletionRow(v, d) for v, d in agenda.choices(conn, word, rest)]
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word == "graph":
+        from core import graphview
+        rows = [CompletionRow(v, d) for v, d in graphview.choices(conn, rest)]
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
     if word in ("edit", "read"):
         return _complete_from(RESERVED_VERBS[word]["usage"], _note_choices(conn, rest), rest, cursor)

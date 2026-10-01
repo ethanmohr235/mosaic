@@ -231,3 +231,26 @@ def _node(index, mote: Mote) -> dict:
     described = table_repo.describe(index, mote.id)
     return {"id": mote.id, "name": described["name"], "speciesId": described["speciesId"],
             "speciesName": described["speciesName"], "kinds": described["kinds"]}
+
+
+# ---- completion -----------------------------------------------------------
+
+def choices(conn, rest: str) -> list[tuple[str, str]]:
+    """What the command line offers after `graph `: a flag's values after
+    the flag, the flags after `-`, else a root (`@sel`, then names)."""
+    from core import relationships as rel_repo
+    words = rest.split()
+    partial = "" if not rest or rest[-1].isspace() else words[-1]
+    before = words[-2] if partial and len(words) > 1 else (words[-1] if words and not partial else None)
+    if before == HIDE_FLAG:
+        return [(t, "relationship type") for t in sorted({r.type for r in rel_repo.list_relationships(conn)})]
+    if before == VIEW_FLAG:
+        return [(shlex.quote(views_repo.name_of(v)), "saved view") for v in views_repo.list_views(conn)]
+    if before == DEPTH_FLAG:
+        return [(str(n), f"{n} hop{'s' if n > 1 else ''}") for n in (1, 2, 3, 4)]
+    if partial.startswith("-"):
+        return [(DEPTH_FLAG, "hops from the root"), (HIDE_FLAG, "leave out relationship types"),
+                (VIEW_FLAG, "start from a saved view")]
+    names = sorted({m.properties["name"] for m in motes_repo.list_motes(conn)
+                    if isinstance(m.properties.get("name"), str)})
+    return [(SEL, "the selection")] + [(_quote(n), "root") for n in names]
