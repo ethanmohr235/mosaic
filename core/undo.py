@@ -258,3 +258,60 @@ def combine(label: str, commands: list[Command]) -> Command:
             command.redo()
 
     return Command(label=label, undo=_undo, redo=_redo)
+
+
+# ---- a whole write, by comparison ---------------------------------------
+#
+# For a write that goes through many primitives no journal sees -- applying
+# a worksheet, a solve -- the garden before and after is compared instead,
+# and the difference is the undo step.
+
+@dataclass(frozen=True)
+class Snapshot:
+    motes: dict
+    relationships: dict
+
+
+def capture(conn) -> Snapshot:
+    """Every mote's properties and every relationship, as they stand."""
+    return Snapshot(
+        {m.id: dict(m.properties) for m in motes_repo.list_motes(conn)},
+        {r.id: (r.from_id, r.to_id, r.type) for r in rel_repo.list_relationships(conn)},
+    )
+
+
+_MISSING = object()
+
+
+def since(conn, before: Snapshot, label: str) -> "Command | None":
+    """One Command taking the garden from now back to `before`, and forward
+    again. None when nothing changed."""
+    after = capture(conn)
+    created = [m for m in after.motes if m not in before.motes]
+    deleted = [m for m in before.motes if m not in after.motes]
+    steps: list[Command] = []
+    for mote_id in created:
+        steps.append(for_create_mote(conn, mote_id, after.motes[mote_id], label))
+    gone = set(deleted)
+    for rel_id, (a, b, t) in after.relationships.items():
+        if rel_id not in before.relationships:
+            steps.append(for_create_relationship(conn, rel_id, a, b, t, label))
+    for mote_id, props in after.motes.items():
+        if mote_id not in before.motes:
+            continue
+        old = before.motes[mote_id]
+        changed = {k: v for k, v in props.items() if old.get(k, _MISSING) != v}
+        if changed:
+            steps.append(for_update_mote(conn, mote_id, {k: old[k] for k in changed if k in old},
+                                         changed, label))
+        for key in old:
+            if key not in props:
+                steps.append(for_delete_property(conn, mote_id, key, old[key], label))
+    for rel_id, (a, b, t) in before.relationships.items():
+        if rel_id not in after.relationships and not {a, b} & gone:
+            steps.append(for_delete_relationship(conn, rel_id, a, b, t, label))
+    for mote_id in deleted:
+        touching = [{"id": r, "fromId": a, "toId": b, "type": t}
+                    for r, (a, b, t) in before.relationships.items() if mote_id in (a, b)]
+        steps.append(for_delete_mote(conn, mote_id, before.motes[mote_id], touching, label))
+    return combine(label, steps) if steps else None

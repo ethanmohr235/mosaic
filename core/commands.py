@@ -64,19 +64,23 @@ CONSOLE_APPS: tuple[ConsoleApp, ...] = (
     ConsoleApp("tion", "Motion", default_view="motion:state", default_command="sim",
                layout={"split": "row", "sizes": [0.24, 0.46, 0.3], "children": [
                    {"command": "scenarios"}, {"command": "sim"}, {"command": "rule @sel"}]}),
-    ConsoleApp("ra", "Mora", legacy="mora"),
+    ConsoleApp("ra", "Mora", default_view="mora:edit", default_command="edit @sel",
+               layout={"split": "row", "sizes": [0.22, 0.39, 0.39], "children": [
+                   {"command": "notes"}, {"command": "edit @sel"}, {"command": "read @sel"}]}),
     ConsoleApp("nastery", "Monastery", legacy="monastery"),
     ConsoleApp("narch", "Monarch", legacy="monarch"),
     ConsoleApp("saic", "Home", legacy="gardens"),
 )
 
 # Verbs a view answers directly, rather than the root API acting on them.
-VERB_VIEWS: dict[str, str] = {"log": "log", "scenarios": "motion:scenarios"}
+VERB_VIEWS: dict[str, str] = {"log": "log", "scenarios": "motion:scenarios",
+                              "worksheet": "mora:worksheet"}
 # Verbs a view answers *with* their arguments: the whole line is the
 # pane's command (`find status:open --sort due`).
 ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "plot": "moxie:plot",
                              "fit": "moxie:fit", "sim": "motion:state", "rule": "motion:rule",
-                             "why": "motion:rule"}
+                             "why": "motion:rule", "edit": "mora:edit", "read": "mora:read",
+                             "notes": "mora:notes"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
@@ -559,6 +563,8 @@ def complete(
         from core import motion
         rows = [CompletionRow(v, d) for v, d in motion.choices(conn, word, rest)]
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word in ("edit", "read"):
+        return _complete_from(RESERVED_VERBS[word]["usage"], _note_choices(conn, rest), rest, cursor)
     if word in ("open", "rename", "unlink", "template"):
         return _complete_from(RESERVED_VERBS[word]["usage"], _u3_choices(conn, word, rest), rest, cursor)
     if word in RESERVED_VERBS:
@@ -676,6 +682,22 @@ def _u3_choices(conn, verb: str, rest: str) -> list[CompletionRow]:
     if (verb == "unlink" and len(done) == 2) or (verb == "template" and len(done) == 1):
         return [CompletionRow(n) for n in names]
     return []
+
+
+def _note_choices(conn, rest: str) -> list[CompletionRow]:
+    """`@sel`, then the notes, then every other named mote (a new note)."""
+    from core import modoc
+    if rest.split() and rest[-1].isspace():
+        return []
+    motes = motes_repo.list_motes(conn)
+    notes = sorted({m.properties["name"] for m in motes if isinstance(m.properties.get("name"), str)
+                    and modoc.has_modoc(m.properties)})
+    others = sorted({m.properties["name"] for m in motes if isinstance(m.properties.get("name"), str)}
+                    - set(notes))
+    quote = lambda n: shlex.quote(n)  # noqa: E731
+    return ([CompletionRow("@sel", "the selection")]
+            + [CompletionRow(quote(n), "note") for n in notes]
+            + [CompletionRow(quote(n), "no note yet", dim=True) for n in others])
 
 
 def _complete_from(hint: str, choices: list[CompletionRow], rest: str, cursor: int) -> Completion:

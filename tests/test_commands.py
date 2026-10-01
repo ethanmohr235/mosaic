@@ -58,7 +58,7 @@ def test_reserved_words_are_the_verbs_and_mo():
     assert list(RESERVED_VERBS) == [
         "mo", "find", "set", "open", "rename", "unlink", "template",
         "plot", "fit", "sim", "rule", "scenarios", "solve", "why", "step", "play", "pause",
-        "cd", "layout", "refresh", "undo", "redo", "log"]
+        "edit", "read", "notes", "worksheet", "cd", "layout", "refresh", "undo", "redo", "log"]
 
 
 def test_resolve_view():
@@ -116,7 +116,7 @@ def _values(completion):
 
 def test_first_token_lists_verbs(conn):
     result = complete(conn, "r")
-    assert [r.value for r in result.rows] == ["rename", "rule", "refresh", "redo"]
+    assert [r.value for r in result.rows] == ["rename", "rule", "read", "refresh", "redo"]
     assert (result.ghost, result.replace_from) == ("ename", 0)
 
 
@@ -126,7 +126,7 @@ def test_after_mo_lists_matching_apps_then_dim_apps(conn):
     assert [r.value for r in rows if not r.dim] == ["ra"]
     dim = [r.value for r in rows if r.dim]
     assert dim == ["nolith", "te", "xie", "tion", "nastery", "narch", "saic"]
-    assert rows[0].description == "Mora — old window"
+    assert rows[0].description == "Mora — mora:edit"
     assert result.hint == "mo ‹app›"
     assert (result.ghost, result.replace_from) == ("a", 3)
 

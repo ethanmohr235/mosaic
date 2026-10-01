@@ -25,6 +25,7 @@ BRIDGE = {
 MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
 MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "fit"}  # U4
 MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
+MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply"}  # U6
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ def test_boot_shape(api):
         "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
     assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
                                "defaultView": "monolith:table", "legacy": None, "layout": None}
-    assert boot["verbs"][17] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][21] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -90,10 +91,10 @@ def _reachable(obj, seen=None):
 
 def test_pywebview_walk_reaches_no_connection(api):
     seen = _reachable(api)
-    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE
+    assert seen["functions"] == BRIDGE | MONOLITH_BRIDGE | MOXIE_BRIDGE | MOTION_BRIDGE | MORA_BRIDGE
     for obj in seen["objects"]:
         assert not isinstance(obj, (sqlite3.Connection, Session))
-    assert seen["objects"] == [api, api.monolith, api.mote, api.motion, api.moxie]
+    assert seen["objects"] == [api, api.monolith, api.mora, api.mote, api.motion, api.moxie]
 
 
 # ---- statements --------------------------------------------------------------
@@ -149,11 +150,11 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
 
 
 def test_an_unported_app_opens_its_old_window(api, launched):
-    effect = api.run("mo ra")
-    assert effect == {"effect": "legacy", "app": "mora",
-                      "message": "opened Mora (old window)"}
+    effect = api.run("mo nastery")
+    assert effect == {"effect": "legacy", "app": "monastery",
+                      "message": "opened Monastery (old window)"}
     assert launched[-1][0] == sys.executable
-    assert launched[-1][1].endswith("run_mora.py")
+    assert launched[-1][1].endswith("run_monastery.py")
     assert launched[-1][2:] == ["--garden", "test"]
 
 
@@ -732,3 +733,45 @@ def test_the_motion_panes_answer(api):
     api.run("set --scenario hot C1.voltage 30")
     assert api.motion.scenarios()["scenarios"][0]["name"] == "hot"
     assert api.motion.sim("sim --scenario nope")["error"].startswith("no scenario")
+
+
+# ---- Mora (U6) ---------------------------------------------------------------
+
+def test_mo_ra_opens_its_three_panes(api):
+    effect = api.run("mo ra")
+    assert effect["effect"] == "open_layout" and effect["focus"] == "edit @sel"
+    assert [c["command"] for c in effect["tree"]["children"]] == ["notes", "edit @sel", "read @sel"]
+    assert api.run("edit Homework")["view"] == "mora:edit"
+    assert api.run("read @sel")["view"] == "mora:read"
+    assert api.run("notes truss")["view"] == "mora:notes"
+    assert api.run("worksheet")["view"] == "mora:worksheet"
+
+
+def test_a_note_is_written_and_one_session_is_one_undo_step(api):
+    opened = api.mora.open("edit Homework")
+    assert opened == {"noteId": None, "name": "Homework", "source": "", "exists": False}
+    first = api.mora.save(None, "Homework", "draft one", "s1")
+    assert first["created"]
+    note_id = first["noteId"]
+    api.mora.save(note_id, "Homework", "draft two", "s2")
+    api.mora.save(note_id, "Homework", "draft three", "s2")
+    assert api.mora.open("read Homework")["source"] == "draft three"
+    api.run("undo")
+    assert api.mora.open("read Homework")["source"] == "draft one"
+    assert [n["name"] for n in api.mora.notes("notes")["notes"]] == ["Homework"]
+
+
+def test_a_draft_renders_with_its_problems(api):
+    rendered = api.mora.render(None, "Hello \\mote{nobody}.")
+    assert rendered["blocks"][0]["type"] == "paragraph"
+    assert rendered["problems"][0]["kind"] == "unresolved_link"
+
+
+def test_the_worksheet_previews_and_applies_as_one_step(api):
+    lines = api.mora.preview("bd.x = 3 m\nbd.l = ?")["lines"]
+    assert [l["kind"] for l in lines] == ["given", "unknown"]
+    applied = api.mora.apply("bd.x = 3 m\nbd.y = 4 m\nbd.l = sqrt(bd.x^2 + bd.y^2)")
+    assert applied["wrote"] and "1 rule" in applied["message"] and "made bd" in applied["message"]
+    assert "bd.l" in api.mora.worksheet()["text"]
+    api.run("undo")
+    assert api.mora.worksheet()["text"].strip() == ""

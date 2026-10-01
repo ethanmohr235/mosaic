@@ -173,7 +173,8 @@ class _Garden:
 
 
 def assemble(
-    conn: sqlite3.Connection, note_id: str, depth: int = 0, seen: tuple = ()
+    conn: sqlite3.Connection, note_id: str, depth: int = 0, seen: tuple = (),
+    source: str | None = None,
 ) -> modoc.Document:
     """A note's document with every `\\include` spliced in, numbered over the
     whole of it.
@@ -187,8 +188,12 @@ def assemble(
     A cycle is refused with a diagnostic rather than followed: a note that
     includes itself is a mistake, and recursing until Python's stack gives
     out is a worse way to say so. So is depth: a chain long enough to hit
-    the limit is a structure nobody meant."""
-    source = modoc.read_source(conn, note_id)
+    the limit is a structure nobody meant.
+
+    `source` is the note's text when it isn't the stored one -- an editor's
+    unsaved draft, which a read pane shows as it is typed."""
+    if source is None:
+        source = modoc.read_source(conn, note_id)
     document = modoc.parse(source)
     if not modoc.includes(document):
         return document

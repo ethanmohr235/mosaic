@@ -88,6 +88,7 @@ from core import relationships as rel_repo
 from core import rules as rules_repo
 from core import simulation
 from core import uncertainty as uncertainty_repo
+from core import undo
 from core import species as species_repo
 from core import units as units_repo
 from core.entities import Mote
@@ -472,6 +473,65 @@ def _existing_rules(conn: sqlite3.Connection) -> tuple[list[rules_repo.Rule], in
         else:
             untouched += 1
     return ours, untouched
+
+
+def apply_undoable(conn: sqlite3.Connection, text: str) -> tuple[Applied, "undo.Command | None"]:
+    """apply(), and its writes as one undo step -- every mote it made, every
+    value, freedom and rule it wrote, every rule it deleted."""
+    before = undo.capture(conn)
+    applied = apply(conn, text)
+    return applied, undo.since(conn, before, "apply the worksheet")
+
+
+@dataclass(frozen=True)
+class Preview:
+    """What one line will become, for an editor's margin: its kind, why it
+    can't be written, and -- for a line naming a value -- that value as the
+    garden holds it now (an unknown's last solved value)."""
+    number: int
+    kind: str
+    problem: str = ""
+    value: str = ""
+
+
+def preview(conn: sqlite3.Connection, text: str) -> list[Preview]:
+    """Every line of `text`, read and not written. Ambiguous names are
+    found here too, since they can only be found against a garden."""
+    index = _by_name(conn)
+    by_id = {m.id: m for m in motes_repo.list_motes(conn)}
+    out = []
+    for line in parse(text).lines:
+        problem, value = line.problem, ""
+        if not problem and line.mote:
+            found = index.get(line.mote, [])
+            if len(found) > 1:
+                problem = f"'{line.mote}' names {len(found)} motes -- rename all but one"
+            elif found and (line.kind == UNKNOWN or (line.kind == EQUATION and line.free)):
+                value = _shown(by_id[found[0]].properties, line.key)
+        out.append(Preview(line.number, _kind(line), problem, value))
+    return out
+
+
+RELATION, CHECK = "relation", "check"
+
+
+def _kind(line: Line) -> str:
+    """The five shapes the table in docs/simulation.md names: an equation
+    that frees a value, a relation that frees nothing, and a check."""
+    if line.kind != EQUATION:
+        return line.kind
+    if line.check:
+        return CHECK
+    return EQUATION if line.free else RELATION
+
+
+def _shown(properties: dict, key: str) -> str:
+    value = properties.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    unit = units_repo.parse_units_property(properties.get(units_repo.UNITS_KEY)).get(key)
+    from core.calc import Quantity
+    return Quantity(value, unit).text()
 
 
 # ---- rendering it back out ----
