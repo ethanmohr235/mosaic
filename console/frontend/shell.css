@@ -895,3 +895,14 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .mo-date { color: var(--dim); }
 .mo-chip.bar { background: color-mix(in oklch, var(--ev) 28%, var(--bg)); }
 .mo-more { cursor: pointer; }
+
+/* monarch:graph (U8) -- the canvas fills the pane; the corner notes sit over it */
+.view-graph { position: relative; height: 100%; min-height: 0; overflow: hidden; }
+.graph-canvas { display: block; }
+.graph-corners { position: absolute; inset: 0; pointer-events: none; color: var(--dim); }
+.graph-corner { position: absolute; padding: 0 var(--pad-x); line-height: var(--row-h); white-space: nowrap;
+  max-width: 60%; overflow: hidden; text-overflow: ellipsis; background: var(--bg); }
+.graph-corner:empty { display: none; }
+.graph-corner.top-left { top: 0; left: 0; }
+.graph-corner.bottom-left { bottom: 0; left: 0; }
+.graph-corner.bottom-right { bottom: 0; right: 0; }

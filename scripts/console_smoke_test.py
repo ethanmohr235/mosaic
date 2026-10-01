@@ -1021,6 +1021,99 @@ def u7_checks(window):
     check("U7: [ ] page and t comes back; o follows; month draws six weeks", paging_and_follow)
 
 
+GRAPH = "document.querySelector('.view-graph canvas').graph"
+
+
+def graph_has(window, *mote_ids):
+    return js(window, f"(() => {{ const g = {GRAPH}; return !!g && {json.dumps(list(mote_ids))}"
+                      f".every(id => g.nodes.has(id)); }})()")
+
+
+def graph_names(window):
+    return js(window, f"(() => {{ const g = {GRAPH}; return g ? [...g.byId.values()].map(m => `${{m.name}}:${{m.id.slice(0, 6)}}`) : null; }})()")
+
+
+def command_line_text(window):
+    return js(window, "document.querySelector('#cmdline .c-input-native').value")
+
+
+def graph_drag(window, from_id, to_id=None, dx=0, dy=0, ctrl=False):
+    """Press on one node and let go on another (or `dx`,`dy` px away)."""
+    js(window, f"""(() => {{
+        const g = {GRAPH};
+        const a = g.screenPositionOf({json.dumps(from_id)});
+        const b = {json.dumps(to_id)} ? g.screenPositionOf({json.dumps(to_id)}) : {{x: a.x + {dx}, y: a.y + {dy}}};
+        const opts = (p) => ({{bubbles: true, button: 0, clientX: p.x, clientY: p.y, ctrlKey: {json.dumps(ctrl)}}});
+        g.canvas.dispatchEvent(new MouseEvent('mousedown', opts(a)));
+        window.dispatchEvent(new MouseEvent('mousemove', opts({{x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}})));
+        window.dispatchEvent(new MouseEvent('mousemove', opts(b)));
+        window.dispatchEvent(new MouseEvent('mouseup', opts(b)));
+    }})()""")
+
+
+def u8_checks(window):
+    graph_pane = "graph @sel --depth 2"
+
+    def mo_narch_follows_the_selection():
+        type_command(window, "mo narch", alt=True)
+        assert wait_until(lambda: {"find", graph_pane, "open @sel"} <= set(headers(window))), headers(window)
+        type_command(window, "chore0")
+        assert wait_until(lambda: graph_has(window, ids["c0"], ids["chore"], ids["c1"])), \
+            f"the graph should draw chore0's neighbourhood, got {graph_names(window)}"
+        assert not graph_has(window, ids["R1"]), "R1 is not two hops from chore0"
+        no_errors(window)
+
+    check("U8: `mo narch` opens find | graph | props, and the graph follows the selection",
+          mo_narch_follows_the_selection)
+
+    def keys_walk_select_and_rewrite_depth():
+        focus_pane(window, graph_pane)
+        press(window, "l")
+        assert wait_until(lambda: js(window, f"{GRAPH}.cursor") == ids["chore"]), "a walk reaches the species"
+        press(window, "Enter")
+        assert wait_until(lambda: js(window, f"{GRAPH}.primary") == ids["chore"]), "⏎ selects the cursor"
+        press(window, "]")
+        assert wait_until(lambda: "graph @sel --depth 3" in headers(window)), headers(window)
+        press(window, "[")
+        assert wait_until(lambda: graph_pane in headers(window)), headers(window)
+        no_errors(window)
+
+    check("U8: h j k l walk, ⏎ selects, [ ] rewrite the depth", keys_walk_select_and_rewrite_depth)
+
+    def gestures_become_commands():
+        assert wait_until(lambda: graph_has(window, ids["c0"], ids["c1"])), \
+            f"chore0 and chore1 should be drawn, got {graph_names(window)} under {headers(window)}"
+        focus_pane(window, graph_pane)
+        graph_drag(window, ids["c0"], ids["c1"], ctrl=True)
+        assert wait_until(lambda: command_line_text(window) == "chore0 ->  -> chore1"), \
+            f"{command_line_text(window)!r} on {graph_names(window)}, focus {focused_head(window)}"
+        press(window, "Escape")
+        press(window, "Escape")
+        focus_pane(window, graph_pane)
+        press(window, "d")
+        press(window, "d")
+        assert wait_until(lambda: command_line_text(window) == "delete chore"), command_line_text(window)
+        press(window, "Escape")
+        press(window, "Escape")
+        no_errors(window)
+
+    check("U8: ctrl+drag prefills a link, d d prefills a delete", gestures_become_commands)
+
+    def dragging_pins_and_u_unpins():
+        from console import state as console_state
+        focus_pane(window, graph_pane)
+        graph_drag(window, ids["c2"], dx=60, dy=40)
+        assert wait_until(lambda: ids["c2"] in console_state.load(GARDEN).pins), "a dragged node is pinned"
+        assert js(window, f"{GRAPH}.nodes.get({json.dumps(ids['c2'])}).pinned")
+        press(window, "U")
+        assert wait_until(lambda: not console_state.load(GARDEN).pins), "U unpins every node"
+        press(window, "o")
+        assert wait_until(lambda: f"open #{ids['chore']}" in headers(window)), headers(window)
+        no_errors(window)
+
+    check("U8: dragging a node pins it (beside the garden), U unpins, o opens", dragging_pins_and_u_unpins)
+
+
 def u4_restored_checks(window):
     def restored():
         assert wait_until(lambda: plot_command(window).startswith(PLOT), timeout=10), \
@@ -1088,6 +1181,7 @@ def drive(first, first_loaded):
         u5_checks(second)
         u6_checks(second)
         u7_checks(second)
+        u8_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)
