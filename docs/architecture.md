@@ -111,7 +111,7 @@ Called kinds and not roles, which is what this was: `core/roles.py` answers a di
 
 Two forms, one answer: `kinds_in(motes, relationships)` for a caller holding an already-fetched subgraph (each kind's id set computed once, then intersected), and each module's own `list_*()` for the same question asked as a query. Kinds are not exclusive -- a `template_of` target counts as a species so that a species you've set up but not yet instantiated still registers as one.
 
-`monarch/api.py::focus()` returns this as one `kinds` map (mote id -> kind names; motes of no particular kind are omitted rather than carrying an empty list). That replaced the `species_ids` array, one kind hardcoded into the payload's shape -- the frontend had no way to hear about the others. Adding a kind is now a change to the table, not to a payload.
+The graph pane's payload (`core/graphview.py`) carries each mote's kinds, from the same table (`core/table.py::describe`). One list of names per mote replaced the `species_ids` array, one kind hardcoded into the payload's shape -- the frontend had no way to hear about the others. Adding a kind is now a change to the table, not to a payload.
 
 Adapters must not answer "is this a species" for themselves. That is how a subtlety ends up true in one surface and false in another.
 
@@ -532,34 +532,10 @@ for it would produce a confident wrong number instead of a failure.
 
 See `docs/simulation.md` for the reference.
 
-# The Observatory
-
-`monarch/` is the desktop app, and like `cli/` and `mcp_server/` it is an
-adapter over `core/` -- `monarch/api.py` adds shaping for the JS bridge and no
-logic of its own. Everything the engine gained is reachable from it:
-`why` and the dependency queries as a per-property panel in the
-inspector, a scenario picker beside the solver picker, unit and
-constraint advisories on the sim bar, and a roles check in Tools.
-
-Two shaping decisions worth knowing. The three dependency queries are one
-`dependencies()` call, because the index is rebuilt per call by design
-and the panel shows them together. And a derivation's numbers reach the
-GUI in base SI units while the property rows above them show each mote's
-declared unit -- the panel says which it is showing, since this is the
-only place the two representations are visible at once.
-
-Roles, freedoms and scenarios needed no bespoke editors: they are
-ordinary properties and relationships, so the existing property editor
-and the reserved-name badge already cover them. That is the monism paying
-for itself -- every modeling abstraction (roles, freedoms, scenarios) arrived
-in the GUI as data the app already knew how to display.
-
-See `docs/ui-setup.md` for the interaction reference.
-
 # MCP server
 
-`mcp_server/` is a third adapter over `core/`, alongside `cli/` and
-`monarch/`: it exposes the same repository functions as tools an MCP client
+`mcp_server/` is an adapter over `core/`, alongside `cli/` and
+`console/`: it exposes the same repository functions as tools an MCP client
 can call (`run_mcp.py`), over stdio by default or streamable HTTP with
 `--http`. It adds no logic of its own -- every tool is a thin
 translation between an MCP call and the function the CLI or UI already
@@ -585,7 +561,7 @@ The package is deliberately not named `mcp/`: `run_mcp.py` puts the
 project root on `sys.path`, so a top-level package by that name would
 shadow the installed `mcp` SDK.
 
-Where `monarch/api.py` holds one long-lived connection for the open garden,
+Where the console (`console/session.py`) holds one long-lived connection for the open garden,
 every tool here opens and closes its own, and takes the garden as an
 optional argument (defaulting to `default`, like the CLI). The server is
 a separate process from the GUI, so holding a connection open for its
@@ -605,9 +581,8 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `monarch/`,
-`gardens_app/`, `console/` and `mcp_server/` are
-five adapters over it, and each one's job is a
+`core/` is the whole system. `cli/`, `gardens_app/`, `console/` and
+`mcp_server/` are four adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -625,8 +600,8 @@ The charter:
 * **UI** -- everything interactive. Anything a person would reach for
   while looking at a graph, including the things only a live window can
   do: opening links, exporting to Calendar, approving a simulation.
-  Monarch, the graph window, is frozen as a structure debugger: it gets
-  bug fixes only until console step U8 (`docs/console.md`).
+  Monarch, the graph, is the console's `graph` pane now, not a window
+  (see The graph below).
 * **Mora** -- the same charter as the UI, for one thing: writing and
   reading .modoc notes (see Notes below). It is the console's `edit`,
   `read` and `notes` panes now, not a window.
@@ -746,15 +721,9 @@ Durations use days/hours/minutes/seconds only: years and months have no
 fixed length, so an event lasting "one month" has no single answer.
 
 The one thing this costs: hand-typing a separate `duration` beside a date
-no longer does anything. An interval picker is the mitigation -- Monarch's
-detail panel (`monarch/frontend/app.js::intervalField`) composes and reads
-the notation above through a calendar grid and a repeat control (frequency,
-interval, weekdays, and an end that is either a count or a date, matching
-`FREQ`/`INTERVAL`/`BYDAY`/`COUNT`/`UNTIL`), rather than requiring anyone
-hand-type `RRULE:FREQ=WEEKLY`. It writes only what it can fully represent: a
-span or rule outside what its controls cover (a `BYMONTHDAY=`, a multi-day
-timed span) is shown and edited as raw text instead of being silently
-narrowed to fit.
+no longer does anything. The calendar panes are the mitigation: a move
+or a resize there writes the interval for you (`core/agenda.py`), so the
+notation is typed only to make a date in the first place.
 
 MonOSS reaches no network. There was one exception -- a manual, one-way
 export of dated motes to Google Calendar -- and it was removed once
@@ -1041,104 +1010,46 @@ additions -- and takes the next free one when that is claimed, which is
 what stops two species sharing a colour until the palette is genuinely
 full. Probing makes the answer depend on *which species exist*, and that
 is why the universe is the garden's whole species list
-(`api_common.py::species_ids`) rather than the ones a window can see:
-Monarch under a hop limit draws a subgraph, and a palette claimed from a
-subgraph would give one species two colours in two windows. Every
-window's main payload carries that list, so no window pays a call for
-it.
+(`core/inspect.py::species_ids`) rather than the ones a pane can see:
+the graph under a hop limit draws a subgraph, and a palette claimed from
+a subgraph would give one species two colours in two panes. Every
+pane's main payload carries that list, so no pane pays a call for it.
 
 # The inspector
 
-One mote, one surface, every window. Selecting a mote anywhere -- a node
-in Monarch -- opens the same
-floating panel, with the same tools in it; the console's `p` float and
-props pane draw the same payload (`core/inspect.py`).
+One mote, one surface. The console's `mote:props` pane and its `p` float
+draw the same payload, `core/inspect.py::inspect`, so they cannot
+disagree about what a mote is (docs/console.md -> *Settled for U3*).
 
-It was not like that. Each window had grown its own docked detail panel,
-and what you were allowed to do to a mote depended on which window you
-happened to be standing in: Monarch could add a property, rename a key
-and set a species; Motion could overwrite the values a mote already had
-and nothing else, with no way to add one; Mora could read properties and
-edit none. Same mote, six different sets of permissions, none of them
-decided -- just whichever panel had been written when.
+It was not like that. Each old window had grown its own docked detail
+panel, and what you were allowed to do to a mote depended on which
+window you happened to be standing in: Monarch could add a property,
+rename a key and set a species; Motion could overwrite the values a mote
+already had and nothing else; Mora could read properties and edit none.
+A shared floating panel (`frontend_shared/inspector.js` over
+`api_common.InspectorApi`) fixed that across the six windows, and went
+with the last of them, Monarch, in console step U8.
 
-The panel floats rather than docking, and that is the same argument as
-sharing it. A docked panel is part of the window it is docked to, and
-six docked panels read as six panels however alike they look. One slab
-of glass hovering over a graph, a table and a calendar reads as one
-instrument you carried there. It opens in the same place in every window
-(upper right), draws a dashed leader line back to whatever you clicked,
-and remembers where you drag it -- per window, because each is its own
-HTTP origin and localStorage cannot literally be shared between them.
+**Every edit is a command.** `set`, `rename`, `unlink`, `A -> type ->
+B` and `template` are what the props pane runs, so an edit is in the
+history, the log and undo; the old panel called bridge methods directly.
 
-**Three shared files, not one.** `frontend_shared/inspector.js` is the
-panel; `interval.js` is the calendar a date-shaped property opens, which
-was separate because two callers needed it -- the panel, and
-Monastery's old draft editor; `menu.js` is the right-click
-dropdown, which is separate because what goes *in* it is each window's
-own business and only the look, placement and dismissal are shared.
-
-**Two halves, one contract.** `api_common.py::InspectorApi` is mixed into
-all six `Api` classes and is the whole bridge the panel speaks:
-`inspect_mote` plus the `inspector_*` writes. `frontend_shared/
-inspector.js` and `inspector.css` are the panel, symlinked into each
-app's `frontend/` -- pywebview serves each frontend directory as its own
-HTTP root, so a file above that root is not fetchable, and the symlink
-is what makes six copies one file. `tests/test_inspector_api.py` asserts
-every window implements the whole contract, so a seventh window that
-grows an `Api` without the mixin fails there rather than at the first
-click in a panel that silently does nothing.
-
-**A species is a relationship, and the panel says so.** `instance_of`
-is listed like anything else. It was hidden at first, on the grounds
-that a species dropdown in Advanced said the same thing -- which made
-the one structural fact the whole graph is built on the only one you
-could not see in the list of what a mote is wired to. The dropdown is
-gone; setting a species is adding that relationship, in the same picker
-as any other. What stayed in Advanced is the template button, which is
+**A species is a relationship, and the pane says so.** `instance_of` is
+listed like anything else. Setting a species is adding that
+relationship, in the same picker as any other. The template action is
 not a restatement of anything: it declares that *this* mote is the one
 new instances start from.
 
-**Types come from the garden, not from a table.** The panel draws a
+**Types come from the garden, not from a table.** The payload gives a
 typed editor per property -- text, number, date, boolean, enum, or a
-button that walks to another mote -- and decides which from the value's
-shape and the mote's species, never from a hardcoded vocabulary of key
-names. An enum is a key whose values, across the instances of that
-species *and its template*, are a small repeated set; the template
-counts because it is the species' own statement of what a value looks
-like, and without it a four-instance garden shows `status` as free text
-until two motes happen to agree. The "usually has" chips are the
-template's keys this mote lacks. A species with no template offers none,
-which is honest: nothing in the garden has said what that kind of mote
-usually carries.
-
-**The console's props pane reads the same payload.** What the panel draws
-for a mote -- the editor kind per property, the enum vocabulary, the
-template's hints, the relationship rows -- is `core/inspect.py::inspect`,
-and `InspectorApi` only wraps it, so the old windows' floating panel and
-the console's `mote:props` pane (and its `p` float, `console/mote.py`)
-cannot disagree about what a mote is. The console writes differently on
-purpose: every edit there is a command (`set`, `rename`, `unlink`,
-`A -> type -> B`, `template`), so it is in the history and the log, where
-the old panel calls `inspector_*` methods directly (docs/console.md ->
-*Settled for U3*).
-
-**What stayed in app chrome.** The panel is for one mote. A selection of
-two hundred is a different question, so Monarch's and Monolith's bulk
-editors stay where they were, as do Monarch's relationship panels.
-Deleting a mote likewise stays
-in each window's own chrome -- the inspector edits a mote, it does not
-end one.
-
-**What a window may still contribute.** Two hooks, both narrow on
-purpose. `valueEditor` lets a host offer a better editor for a value the
-generic ones would flatten -- what is left there is Monarch's `provider`
-summary, and the list is meant to keep shrinking: the interval picker
-used to be in it and is now everyone's. `advancedSections` adds to the Advanced pane, which is where Monarch's
-"+ New instance" lives. (`inspector_why` returns None in every old
-window: where a solved value came from is the console's `why ‹m.k›`.)
-Anything only one window can do is a gap in the others, so both lists
-should stay short and shrink.
+link that walks to another mote -- decided from the value's shape and
+the mote's species, never from a hardcoded vocabulary of key names. An
+enum is a key whose values, across the instances of that species *and
+its template*, are a small repeated set; the template counts because it
+is the species' own statement of what a value looks like. The "usually
+has" hints are the template's keys this mote lacks. A species with no
+template offers none, which is honest: nothing in the garden has said
+what that kind of mote usually carries.
 
 **Writing under a scenario is a command.** Looking at a hypothetical
 must never mean overwriting the garden's own state (see Scenarios), so
@@ -1146,42 +1057,20 @@ the console never redirects an ordinary write: `set --scenario hot
 C1.voltage 30` says where the value goes, and writes that scenario's
 override (`core/commands.py`).
 
-# Dates and the interval picker
+# Dates
 
 A date in MonOSS is an ISO 8601 interval (`core/interval.py`): a start,
-an optional span after a `/`, and optional RRULE lines beneath it. That
-is a good thing to store and an awful thing to type, so any property
-holding one gets a calendar -- **by value shape, not by key name**.
-`date` stopped being a key the engine reads when a start became an
-interval, so `when`, `due`, `starts` or whatever this garden calls it
-all get the same editor, repeating or not.
+an optional span after a `/`, and optional RRULE lines beneath it. Any
+property holding one is a date **by value shape, not by key name**, so
+`when`, `due`, `starts` or whatever this garden calls it all show on the
+calendar panes, repeating or not.
 
-The widget is `frontend_shared/interval.js`, and it has two callers: the
-inspector's property rows, and Monastery's draft editor. It did not
-start that way. The picker was Monarch's, and the structured repeat
-editor -- frequency, interval, weekdays, how it ends -- was Monastery's,
-on the reasoning that Monastery is the window that actually reads a
-`recurring` mote back and so should be the window that authors the rule.
-Monarch's picker was correspondingly reduced to showing an RRULE as raw
-text. Both halves of that argument stopped holding when the inspector
-became one surface in six windows: "edit this date properly" has to work
-wherever you are standing. One widget now, one repeat editor inside it,
-two callers.
-
-It never expands a recurring value into occurrences -- that is
-`core/calendar.py`'s job, via dateutil, and "no JavaScript reads an
-RRULE" stays true for *that*. What it does is decompose a value into an
-editable draft and recompose one back. Anything it cannot safely
-decompose -- a multi-day span, two RRULE lines, a `BYMONTHDAY` -- is
-marked `simple: false` and kept as raw, editable text. Structured
-controls that silently dropped an `EXDATE` would be worse than an honest
-textarea.
-
-The popup is fixed-position rather than inline: the calendar needs real
-width, and the panel hosting it is resizable down to sizes that would
-crush it. It re-measures its anchor on every reposition and watches for
-the host panel moving, because measuring once on open is what left the
-calendar stranded at the coordinates the field used to be at.
+In the console a date is written as that text (`set Lab date
+2026-10-08T13:00/PT2H`), or moved and resized on the calendar panes,
+whose every edit is the `set` line the move means (`core/agenda.py`).
+The old windows' calendar picker (`frontend_shared/interval.js`) went
+with Monarch in U8. No JavaScript reads an RRULE: expanding a recurring
+value into occurrences is `core/calendar.py`'s job, via dateutil.
 
 # The table
 
@@ -1360,8 +1249,7 @@ board, the sim pane shows the values a run is about: one row per value
 with its state (`solved`, `varied`, `pinned`, `given` -- facts core
 already answers: the run's changes, the scenario's overrides, declared
 freedoms), and the row's whole series, so a playhead scrubs without a
-second solve. A graph of the model comes back with Monarch's canvas in
-U8.
+second solve. A graph of the model is the `graph` pane (U8).
 
 **One playhead.** The playhead is shell state (the store), like the
 selection: every Motion pane reads the same tick, and the sim pane that
@@ -1381,94 +1269,46 @@ explains the values the undo restored. `solve --live on` folds a solve
 into every write made from the window (`core/motion.py::live_solve`),
 kept per garden in the console sidecar -- UI state, like layouts.
 
-# Annotations
+# The graph
 
-An annotation -- a sticky note, a group box, or a pen stroke -- is
-commentary about a view of the graph, not data in it.
-`core/annotations.py` stores one in a garden's own `annotations` table
-(`core/db.py`) -- deliberately its own table, not a mote: an annotation
-must never appear in `list_motes()`/`neighborhood()`/species queries,
-and creating, moving, editing or deleting one never touches
-`core/motes.py`, `core/oplog.py` or `core/sync.py`. Annotations are
-local-only for now -- nothing about them replicates across devices --
-which falls out for free from never writing an oplog row rather than
-from any special-casing in `core/sync.py`.
+The console's `graph` pane (`monarch:graph`, `mo narch`) is Monarch's
+canvas renderer kept and restyled, not Cytoscape (docs/console.md ->
+*Settled for U8*). `core/graphview.py` answers the line:
 
-An annotation's `anchor_mode` is `"world"` (a fixed point in the graph's
-own coordinate space, panning and zooming with it) or `"mote"` (an
-offset from a mote's position, so the note tracks it if the mote moves).
-A mote-anchored annotation's `mote_id` carries no foreign key, on
-purpose: deleting the mote it's anchored to must neither cascade the
-note away nor block the delete, so the row is left to outlive it,
-orphaned rather than destroyed. `frontend_shared/annotations.js` treats
-that as best-effort -- it resolves a live mote-anchored note through
-`graph.nodes`, and falls back to redrawing at the note's last stored
-offset, flagged, once the mote is gone.
+    graph [@sel|#id|‹name›] [--depth N] [--hide-rel a,b] [--view ‹saved›] [‹conditions›]
 
-`type` and a JSON `data` column let every kind share the one table
-with no schema change: a `sticky_note` uses the text/size columns, a
-`group` keeps its member mote ids (and its automatic-color palette
-slot) in `data`, and a `stroke` keeps its points (offsets from its
-x/y, so moving one is an ordinary move) and width there.
-`frontend_shared/annotations.js` owns the shared state (every
-annotation, the selection, the current tool, all gestures) and the
-notes; `annotation_groups.js`, `annotation_ink.js` and
-`annotation_toolbar.js` each handle one other part and read that state
-through a `shared` object passed to their `install()`. All four are
-symlinked in like `undo.js`, but the integration
-runs the other way: it does not own the canvas or any event listener
-itself. The host graph (`monarch/frontend/graph.js` today) calls into
-it from its own render loop and pointer handlers, the same way
-`attractorMode` is a flag/behavior *on* the Graph instance rather than
-a module that reaches in from outside -- `Annotations.draw(ctx)` inside
-the same world-space transform the nodes are drawn in, and `Annotations
-.onMouseDown/onMouseMove/onMouseUp` given first refusal on a gesture
-while `graph.annotateMode` is on. Monarch is the only app wired up to
-it so far; the module makes no Monarch-specific assumption beyond the
-coordinate-transform contract (`_worldAt`/`_worldToScreen`/`camera
-.scale`/`nodes`) another app's own hand-written canvas graph would need
-to expose the same way to adopt it.
+A root draws its neighbourhood -- every mote within `--depth` hops
+(default 2), relationships counted both ways -- and no root draws the
+whole garden. Find conditions and `--view` keep what they match, as in
+`find`, and the root always stays. A hidden relationship type is neither
+drawn nor hopped through, so `--hide-rel instance_of` stops a species
+pulling in every instance it has. `[` and `]` rewrite `--depth`, so a
+layout reopens on the same neighbourhood.
 
-Undo/redo (`core/undo.py`'s `UndoManager`) covers annotations the same
-as motes and relationships -- session-only and in-memory either way, so
-wiring one more mutation kind into it added no new coupling to sync or
-the oplog. A note drag pushes through `UndoManager.push`'s existing
-`coalesce_key` support, the same mechanism a property edit's keystrokes
-were already built to use, so a whole drag gesture undoes in one step.
+**The layout is species-clustered.** Each species owns a direction from
+the centre, its instances cluster on that spoke and the species mote
+sits further in on it; edges across species pull only weakly, so the
+grouping carries the layout. Positions are seeded from a hash of the id,
+so a garden lays out the same way each time it opens. The loop stops
+once the layout settles rather than drawing every frame
+(`console/frontend/js/graph.js`).
 
-A note draws as a dark card in the host window's own palette (`--raised`
-fill, `--border` edge, `--fg` text, read from CSS at install), not a
-yellow sticky. The one visual cue for how a note is anchored is a faint
-dashed leader line from a mote-anchored note back to its mote; a
-world-anchored note has none. Text size, face, line height, and padding
-are world-unit constants shared by the canvas renderer and the textarea
-overlay, which scales them by `camera.scale` every frame, so a note
-reads identically while editing and after. A note's stored width/height
-is the size it was given (default, or dragged with its bottom-right
-grip); it is drawn taller whenever its text needs more, growing down
-from a fixed top edge, so a note never scrolls or clips.
+**Pins are UI state.** Dragging a node pins it there. Pins are kept per
+garden in the console's sidecar (`console/state.py`, `pins`), beside the
+layouts and history -- never in the .db and never synced, like every
+other position: a mote carries no coordinates.
 
-Notes are frosted glass: a 72%-opaque fill over the graph pixels
-already drawn beneath, blurred in place (`CanvasRenderingContext2D
-.filter`, feature-detected -- without it a note is just translucent; the
-editor overlay uses CSS `backdrop-filter` for the same look). Once the
-zoom makes a note's text smaller than ~6 screen px it collapses to a
-small fixed-size marker, which is also all that hit-tests; asking to
-edit a collapsed note zooms back in to it first. `A` toggles annotate
-mode (`ANNOTATE_KEY` in monarch/frontend/app.js).
+**Every edit is a command.** The pane writes nothing itself: ctrl+drag
+from one node to another puts `A ->  -> B` on the command line with the
+caret where the type goes, `n` puts `‹cursor› -> related_to -> `, and
+`d d` puts `delete ‹cursor›` (or `unlink …` for an edge). They run, and
+undo, like anything typed.
 
-Inside annotate mode the left button behaves the way it does in the
-graph editor, just over notes: click selects, shift+click adds, a drag
-on empty canvas box-selects, dragging a selected note moves the whole
-selection, and Delete removes it -- each batch one undo step
-(`AnnotatableApi.move_annotations`/`delete_annotations`). Double-click
-adds a note (attached, if it lands on a mote) or edits one; Backspace in
-an empty note deletes it. Ctrl+drag from a note onto a mote attaches it
-there, and onto the mote it's already on detaches it, mirroring ctrl+drag
-between motes -- `anchor_annotation` converts the stored x/y between an
-offset and an absolute position so the note doesn't move. Resizes and
-re-anchors change several columns at once, so their undo restores a
-whole-row snapshot (`core/undo.py`'s `for_replace_annotation`).
+**Annotations are gone.** Monarch's sticky notes, group boxes and pen
+strokes were commentary layered over its canvas, stored in their own
+`annotations` table and never synced. They went with the window, and
+`core/db.py` drops the table when a garden is opened. Commentary about
+a model is a note (see Notes).
 
 # Focus and the clipboard
 
@@ -1481,8 +1321,7 @@ its own subtree, with gaps between them:
   paste on the middle button's *mouseup*, into whatever element has
   focus, not the one under the cursor. So guarding only mousedown, or
   only one subtree, let a middle-drag pan across a canvas paste into a
-  field focused elsewhere (a sticky note being edited, an inspector
-  value). `focus.js` preventDefault()s both events in the capture phase
+  field focused elsewhere (a field being edited). `focus.js` preventDefault()s both events in the capture phase
   on `window`. Middle-drag panning reads `button === 1` itself and never
   needed the default action.
 - **Clicking outside a text field unfocuses it.** Browsers do this only
@@ -1497,40 +1336,3 @@ its own subtree, with gaps between them:
 A new window gets both by symlinking `focus.js` into its `frontend/` and
 loading it before its other scripts; no app should add its own
 middle-click or click-away handlers.
-
-## Group boxes, ink, and the tool bar
-
-While annotating, a tool bar along the bottom of the graph
-(`annotation_toolbar.js`) switches between Select, Note, Group, Pen, and
-Eraser (keys V/N/G/P/E; Escape goes back to Select first). Note and
-Group place one thing and then switch back to Select; Pen and Eraser
-stay selected. Its color row works like the species color rows in the
-view settings (preset swatches from the species palette, a native
-picker, ↺ for automatic). It recolors the selected groups and strokes,
-or sets the pen color when none are selected.
-
-A **group box** owns the motes whose centres were inside it when it was
-drawn. Membership is a layout constraint, never a pin, and that is the
-one place annotations reach into the force layout: `graph.js` calls
-`Annotations.applyLayoutForces()` in its simulation step (a gentle pull
-back toward the box for members nearing a wall) and
-`Annotations.constrainLayout()` on every frame, settled or not. That
-second call is a hard wall both ways: members are clamped inside their
-box, and every other mote is pushed out of every box. A mote being
-dragged is exempt until it's dropped, and `Annotations.onMotesDropped()`
-then makes it a member of whichever box it landed in, or of none. So
-dragging a mote out of a box removes it from the group, and dragging one
-in adds it. A mote belongs to at most one group:
-`AnnotatableApi.create_group`/`set_group_members` take it out of any
-other group in the same undo step. Moving a box (by its title tab or
-border; the interior stays clear for box-selecting) carries its members
-and any canvas-anchored notes and strokes lying wholly inside it. Mote
-positions are still view state and not part of undo, so undoing a box
-move only restores the box, and the wall brings the members back with
-it. Boxes draw under edges and nodes (`Annotations.drawUnderlay`).
-
-A **stroke** is vector ink: the captured points are simplified with
-Ramer-Douglas-Peucker when the pen lifts and drawn as quadratic curves
-through their midpoints. Its width is the pen's screen width divided by
-the zoom it was drawn at. The Eraser deletes every stroke it touches as
-one undo step, never part of a stroke.

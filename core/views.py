@@ -22,7 +22,7 @@ This lived in `monolith/api.py`. It is in `core/` because a saved view is
 not one window's state: `docs/architecture.md`'s charter says every
 capability lives in core and an adapter holding logic of its own is a bug,
 and this one was already being read by a second surface
-(`monarch/api.py::view_filter_ids`) through the property directly.
+(Monarch's graph filter, since gone) through the property directly.
 """
 import sqlite3
 

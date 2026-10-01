@@ -118,7 +118,15 @@ updates it in the same commit. Keep it compact: tables, no prose.
   `set` lines, the `detach` verb); `console/monastery.py` is
   `api.monastery`. Roadmap phase 5's bars and click-to-open are in;
   plan-my-week and planned vs. actual are not. Monastery's old window is
-  deleted. The next UI step is U8 (Monarch).
+  deleted.
+- Console **U8 is done**: Monarch is `mo narch` (`find | graph @sel
+  --depth 2 | open @sel`) over `core/graphview.py` (the `graph` grammar:
+  root, depth, hidden types, conditions); `console/monarch.py` is
+  `api.monarch` (pins in the console sidecar); `js/graph.js` is the
+  restyled canvas. Annotations are removed and `core/db.py` drops their
+  table. Monarch's window, `api_common`'s old-window mixins and every
+  `frontend_shared/` file but `focus.js` are deleted. The next UI step
+  is U9 (Home).
 
 ## Split of work: cloud backend, local frontend
 

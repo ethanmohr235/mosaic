@@ -3,12 +3,12 @@
 kind for each, the keys its template says it usually has, its species,
 and every relationship with the other end's label.
 
-This lived in `api_common.InspectorApi`, the old windows' bridge. It is
-in `core/` because two editors now draw from it -- the floating panel in
-the old windows and the console's props pane (docs/console.md, U3) --
+This lived in the old windows' shared bridge (api_common.InspectorApi,
+deleted with Monarch in U8). It is in `core/` because the console's
+props pane and its `p` float both draw from it (docs/console.md, U3),
 and "editing a mote works identically everywhere" starts with both
 seeing the same mote. Reads only; every write is a command
-(core/commands.py) or an InspectorApi method.
+(core/commands.py).
 """
 import re
 import sqlite3
@@ -44,10 +44,9 @@ def inspect(conn: sqlite3.Connection, mote_id: str) -> dict | None:
 
     One call rather than the six it would otherwise take (mote, species,
     template, siblings, relationships, their labels), because it runs on
-    every selection change in a view you can arrow-key through. The old
-    windows' floating panel (api_common.InspectorApi) and the console's
-    props pane (console/mote.py) both draw from this, so what a mote looks
-    like in an editor is decided once."""
+    every selection change in a view you can arrow-key through. The
+    console's props pane and float (console/mote.py) draw from this, so
+    what a mote looks like in an editor is decided once."""
     mote = motes_repo.get_mote(conn, mote_id)
     if mote is None:
         return None

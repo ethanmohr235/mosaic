@@ -41,7 +41,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 
 | Command | Does |
 |---|---|
-| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`), `mo nastery` (`agenda \| week`); `mo narch`, `mo saic` still open old windows |
+| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`), `mo nastery` (`agenda \| week`), `mo narch` (`find \| graph @sel --depth 2 \| open @sel`); `mo saic` still opens the Gardens window |
 | `find ‹conditions› [--sort k] [--group k] [--cols a,b] [--view name]` | Table of motes |
 | `open @sel\|#id\|name` | A mote's properties and links (`@sel` follows the selection) |
 | `set ‹target› ‹key› ‹value›` / `… --clear` | Set / remove a property (`5 mm` records the unit); `set C1.voltage 30` also works |
@@ -70,6 +70,8 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `worksheet` | The garden's calculation as text; `esc` applies it (one undo step) |
 | `agenda [from] [to]` | Dated motes, a row per occurrence by day (default: today + 14 days) |
 | `week [date]`, `month [date]` | Hour grid; six-week grid |
+| `graph [@sel\|#id\|‹name›] [--depth N]` | A mote's neighbourhood (default depth 2; `@sel` re-roots with the selection); no root: the whole garden |
+| `graph … --hide-rel a,b`, `--view ‹saved›`, `‹conditions›` | Leave out relationship types (not hopped either); keep what a saved view / conditions match |
 | `detach #id ‹key› ‹occurrence› ‹start› ‹end›` | Move one occurrence out of its series (what `t` runs) |
 | `cd ‹garden›` | Switch garden |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts |
@@ -189,6 +191,23 @@ Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
 
 Week grid: drag to move, drag the bottom edge to resize, click a slot
 for `n`, double-click to create. Month: `+N more` opens that week.
+
+**Graph** (`graph`, `mo narch`)
+
+| Key | Does |
+|---|---|
+| `h` `j` `k` `l`, arrows | Walk to the neighbour that way |
+| `⏎` / click | Select |
+| `o` / double-click | Open props in a new pane |
+| `[` `]` | Depth −1 / +1 |
+| `f`, `+` `-`, `0` | Fit, zoom, 100% at the cursor |
+| `u`, `U` | Unpin this node, every node |
+| `n` | New linked mote (prefills `‹cursor› -> related_to -> `) |
+| `d` `d` | Delete (prefills `delete ‹cursor›`, or `unlink …` on a clicked edge) |
+| `esc` | Clear the edge / the armed delete |
+
+Mouse: drag a node to move and pin it · drag empty space to pan · wheel
+zooms · ctrl+drag node → node prefills `A ->  -> B`.
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.
 **New pane** (`view>`): `↑` `↓` choose, `⏎` place, `esc` cancel.

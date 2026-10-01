@@ -1,7 +1,8 @@
 # core/command_bar.py
-"""The "/" command bar's grammar and execution -- one typed line edits the
-graph without leaving the keyboard, the same way in all six windows (see
-api_common.py's CommandBarApi and frontend_shared/commandbar.js).
+"""The statement grammar and execution -- one typed line edits the graph
+without leaving the keyboard. The console's command line runs every line
+that isn't a verb or an app through here (core/commands.py); it began as
+the old windows' "/" command bar.
 
 Seven forms, tried in this order (first match wins):
 
@@ -517,8 +518,7 @@ def _run_species(conn, mote_token: str, species_token: str) -> CommandResult:
     mote_id, mote_created = _find_or_create(conn, mote_token)
     species_id, species_created = _find_or_create(conn, species_token)
 
-    # Set, not add -- mirrors api_common.InspectorApi.inspector_set_species:
-    # the command bar's `:` is one slot, same as the inspector's species
+    # Set, not add: `:` is one slot, same as the props pane's species
     # control, so a second use replaces rather than accumulates.
     for rel in rel_repo.list_relationships(conn, from_id=mote_id, type_=species_repo.INSTANCE_OF):
         _delete_relationship(conn, rel)

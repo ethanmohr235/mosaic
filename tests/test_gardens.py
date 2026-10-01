@@ -182,7 +182,7 @@ def test_clear_sync_dir_on_a_garden_without_one_is_a_noop():
     assert get_sync_dir("work") is None
 
 
-# ---- auto-sync flag: gates monarch/api.py's lifecycle sync points, mirrors the
+# ---- auto-sync flag: gates the console's lifecycle sync points, mirrors the
 # sync-dir pointer's own delete/restore behavior ----
 
 def test_get_auto_sync_enabled_defaults_true_when_unset():

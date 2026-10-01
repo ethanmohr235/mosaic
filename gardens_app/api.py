@@ -5,8 +5,8 @@ Unlike the six app Apis, this one holds no garden connection. It is not
 open *on* a garden -- it manages all of them, and a garden it is about
 to rename, delete or import into is one it must not be holding open.
 Every method that needs to read a garden therefore opens a short-lived
-connection and closes it in a finally, the same shape monarch/api.py
-used for exporting a garden other than its own.
+connection and closes it in a finally, the same shape Monarch's old
+bridge used for exporting a garden other than its own.
 
 That also keeps this window honest about the other windows: Motion and
 Monarch may each have the same garden open in their own process while

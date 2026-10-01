@@ -9,9 +9,8 @@ from core.device import get_device_id
 from core.entities import Mote
 
 # Matches "key = value" (or "key=value"), e.g. "priority = high" --
-# structured equality on a specific property, shared with
-# monarch/frontend/app.js::matchesQuery so a query behaves the same whether
-# typed into the graph's search bar or an LLM's MCP call.
+# structured equality on a specific property, for an LLM's MCP call
+# (`search_motes`) and the CLI.
 _KEY_VALUE_QUERY_RE = re.compile(r"^\s*([^=\s][^=]*?)\s*=\s*(.*)$")
 
 
@@ -112,15 +111,9 @@ def search_motes(conn: sqlite3.Connection, query: str, limit: int = 60) -> list[
     """Case-insensitive text search over every mote's id and properties.
     "key = value" matches a specific property's value exactly; anything
     else is a substring match against the mote id or any property key or
-    value. An empty/blank query matches everything, same as the UI's own
-    search palette does with nothing typed.
-
-    monarch/frontend/app.js::matchesQuery is the same function for the search
-    palette (which filters an already-cached array rather than round-
-    tripping per keystroke). The two are kept behaviourally identical --
-    same query forms, matched against the same three things -- so a query
-    returns the same motes whichever surface asked; change one and change
-    the other."""
+    value. An empty/blank query matches everything. (Monarch's search
+    palette kept a JavaScript twin of this; the console searches with
+    `find`, core/findtext.py.)"""
     motes = list_motes(conn)
     query = (query or "").strip()
     if not query:

@@ -100,7 +100,7 @@ and the port order.
 | **Monolith** | The general table, plus a project variables pane (value, unit, given/solved/external, ±). |
 | **Monastery** | The agenda that launches work: project bars, plan-my-week, click-to-open, planned vs. actual time. |
 | **Gardens → Home** | The garden tree (owners → owned gardens) plus loose gardens. Health indicators come later. |
-| **Monarch** | Frozen as a structure debugger: a graph view for seeing and editing plumbing. Bug fixes only until console step U8. |
+| **Monarch** | A structure debugger: the console's `graph` pane, for seeing plumbing (edits are commands). No annotations. |
 | **CLI / MCP** | Scriptable and agent access to the same core. MCP is a side door, not the product. |
 
 `core/` holds all logic. Every surface is a thin adapter over it, and

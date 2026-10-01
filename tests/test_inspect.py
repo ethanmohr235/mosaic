@@ -1,6 +1,5 @@
-"""core/inspect.py -- what an inspector shows for one mote. The bridge
-behaviour is tests/test_inspector_api.py's; this is the core function
-the console's props pane calls without a bridge in front of it."""
+"""core/inspect.py -- what an inspector shows for one mote: the core
+function the console's props pane (console/mote.py) calls."""
 from core import inspect
 from core.motes import create_mote
 from core.relationships import create_relationship

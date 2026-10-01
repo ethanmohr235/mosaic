@@ -80,7 +80,8 @@ def kinds_in(
 
     Each kind's id set is computed once over the relationship list and
     then intersected, rather than re-scanned per mote, because the
-    callers are whole-subgraph classifiers (monarch/api.py::focus()). Motes
+    callers are whole-subgraph classifiers (core/table.py's index, which
+    the graph pane's payload reads). Motes
     of no particular kind are left out entirely: absence says "ordinary
     mote" without every payload carrying an empty list for most of the
     graph.

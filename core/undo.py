@@ -20,7 +20,6 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from core import annotations as annotations_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 
@@ -184,59 +183,6 @@ def for_update_relationship(conn, rel_id: str, old_fields: dict, new_fields: dic
         label=label,
         undo=lambda: rel_repo.update_relationship(conn, rel_id, **old_fields),
         redo=lambda: rel_repo.update_relationship(conn, rel_id, **new_fields),
-    )
-
-
-def for_create_annotation(conn, snapshot: dict, label: str) -> Command:
-    """snapshot: annotations_repo.to_dict() of the annotation right after
-    creation -- its id plus every field the redo half needs to recreate it
-    exactly (color/width/height may hold frontend defaults not passed to
-    create_sticky_note itself)."""
-    return Command(
-        label=label,
-        undo=lambda: annotations_repo.delete_annotation(conn, snapshot["id"]),
-        redo=lambda: annotations_repo._recreate(conn, snapshot),
-    )
-
-
-def for_delete_annotation(conn, snapshot: dict, label: str) -> Command:
-    """snapshot: annotations_repo.to_dict() read *before* the delete."""
-    return Command(
-        label=label,
-        undo=lambda: annotations_repo._recreate(conn, snapshot),
-        redo=lambda: annotations_repo.delete_annotation(conn, snapshot["id"]),
-    )
-
-
-def for_update_annotation(conn, annotation_id: str, old_fields: dict, new_fields: dict, label: str) -> Command:
-    """old_fields/new_fields hold whichever of text/color/width/height/etc
-    changed, same shape as for_update_relationship."""
-    return Command(
-        label=label,
-        undo=lambda: annotations_repo.update_annotation(conn, annotation_id, **old_fields),
-        redo=lambda: annotations_repo.update_annotation(conn, annotation_id, **new_fields),
-    )
-
-
-def for_move_annotation(conn, annotation_id: str, old_xy: tuple, new_xy: tuple, label: str) -> Command:
-    """Kept distinct from for_update_annotation so a drag's undo label
-    reads "move a note" rather than "edit a note", and so its push() can
-    use its own coalesce_key -- a drag fires many mousemove-driven moves
-    that should collapse into the one undo step the gesture represents."""
-    return Command(
-        label=label,
-        undo=lambda: annotations_repo.move_annotation(conn, annotation_id, *old_xy),
-        redo=lambda: annotations_repo.move_annotation(conn, annotation_id, *new_xy),
-    )
-
-
-def for_replace_annotation(conn, before: dict, after: dict, label: str) -> Command:
-    """before/after: annotations_repo.to_dict() snapshots of the same
-    annotation either side of a multi-column edit (resize, re-anchor)."""
-    return Command(
-        label=label,
-        undo=lambda: annotations_repo.replace_annotation(conn, before),
-        redo=lambda: annotations_repo.replace_annotation(conn, after),
     )
 
 

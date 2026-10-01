@@ -1,7 +1,7 @@
 """The Gardens window's bridge (gardens_app/api.py).
 
-Most of this moved here from tests/test_api.py, where it tested the same
-verbs inside Monarch -- creating, deleting, restoring, importing and
+Most of this moved here from Monarch's old bridge tests, which tested the
+same verbs inside that window -- creating, deleting, restoring, importing and
 exporting a garden, and pointing one at a sync server. Two things
 changed in the move and are tested as such: delete no longer refuses the
 last or the current garden (this window is open on none), and rename is
@@ -23,7 +23,8 @@ from core.gardens import (
     get_sync_dir,
 )
 from gardens_app.api import Api
-from monarch.api import Api as MonarchApi
+from core.db import get_connection
+from core.motes import create_mote, list_motes
 
 
 class _StubWindow:
@@ -47,13 +48,13 @@ def api():
 
 
 def _fill(garden: str, name: str) -> None:
-    """Put one mote in a garden, through an app bridge rather than this
-    one -- this window deliberately has no way to write into a garden."""
-    app = MonarchApi(garden)
+    """Put one mote in a garden, through the store rather than this
+    bridge -- this window deliberately has no way to write into a garden."""
+    conn = get_connection(garden)
     try:
-        app.create_mote({"name": name})
+        create_mote(conn, {"name": name})
     finally:
-        app.shutdown()
+        conn.close()
 
 
 # ---- the list ----
@@ -157,11 +158,11 @@ def test_export_then_import_round_trips_a_garden(api, tmp_path):
     result = api.import_garden_into_new("imported")
 
     assert result == {"garden": "imported", "motes": 1, "relationships": 0}
-    imported = MonarchApi("imported")
+    conn = get_connection("imported")
     try:
-        assert [m["properties"]["name"] for m in imported.list_motes()] == ["Original"]
+        assert [m.properties["name"] for m in list_motes(conn)] == ["Original"]
     finally:
-        imported.shutdown()
+        conn.close()
 
 
 def test_export_cancelled_writes_nothing(api, tmp_path):

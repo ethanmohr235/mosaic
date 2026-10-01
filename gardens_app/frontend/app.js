@@ -77,21 +77,12 @@ function formatWhen(epochSeconds) {
   return `${Math.round(days / 365)} years ago`;
 }
 
-// ---- the five windows this garden can be opened in -------------------
+// ---- where this garden can be opened ----------------------------------
 //
-// The same list, names and glyphs the ⌘J switcher carries in each app,
-// so "Motion" is the same mark wherever it is offered. api_common.APPS
-// is the Python-side source of the ids.
+// Only the console now: every old window has been ported into it
+// (docs/console.md). api_common.APPS is the Python-side source of the ids.
 
 const APPS = [
-  {
-    id: "monarch", name: "Monarch",
-    icon: `<svg width="17" height="17" viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="12" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></circle>
-      <ellipse cx="20" cy="20" rx="12" ry="4.5" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6" transform="rotate(-28 20 20)"></ellipse>
-      <circle cx="20" cy="20" r="4" fill="var(--accent)"></circle>
-    </svg>`,
-  },
   {
     id: "console", name: "Mosaic", icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
         <rect x="6" y="9" width="28" height="22" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>

@@ -70,8 +70,9 @@ Every tool takes an optional `garden`, defaulting to `default`.
 
 Property values keep whatever JSON type the client sends: `21` is stored
 as a number, `"21"` as a string. This is the one place the MCP adapter
-deliberately differs from `monarch/api.py`, which interprets incoming strings
-as JSON because GUI text fields deliver everything as text.
+deliberately differed from Monarch's old bridge, which interpreted incoming
+strings as JSON because GUI text fields deliver everything as text; the
+console reads a typed value through the statement grammar instead.
 
 `preview_simulation` computes a run entirely in memory and returns what
 *would* change — nothing is written. Solving and writing the answer back

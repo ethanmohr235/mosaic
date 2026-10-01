@@ -40,9 +40,7 @@ def instances_of(conn: sqlite3.Connection, species_id: str) -> list[Mote]:
 def species_ids_in(relationships: Iterable[Relationship]) -> set[str]:
     """Which motes a set of relationships makes into species. The pure
     counterpart of list_species(), for a caller that already holds the
-    relationships and shouldn't re-query: monarch/api.py classifies the exact
-    subgraph focus() is about to return, and does it for the library
-    garden too. One definition of "is a species", whether the question
+    relationships and shouldn't re-query (core/kinds.py::kinds_in). One definition of "is a species", whether the question
     arrives as a query or as an already-fetched list."""
     return {r.to_id for r in relationships if r.type in (INSTANCE_OF, TEMPLATE_OF)}
 

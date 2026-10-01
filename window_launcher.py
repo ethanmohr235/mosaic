@@ -1,6 +1,6 @@
 # window_launcher.py
 """Shared pywebview window-launching boilerplate for the desktop
-apps (monarch, mora, monastery, monolith). Before this, each app's
+apps (the console and the Gardens window). Before this, each app's
 app.py carried its own byte-for-byte copy of port picking and the
 WebKit HTTP-cache-clearing workaround -- see api_common.py for the
 other half of the boilerplate that used to get re-copied per app.

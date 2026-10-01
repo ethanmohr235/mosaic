@@ -1,21 +1,16 @@
 # Running the desktop UI
 
-One native window besides the console (via `pywebview`, a local
-HTML/CSS/JS frontend — no browser tab, no local web server): **Monarch**,
-the graph (`run_monarch.py`), frozen until U8. Monolith, the table,
-Moxie, the plots, Motion, the simulator, Mora, the notes, and Monastery,
-the calendar, have moved into the console (below) and have no windows
-of their own any more.
+One tiled window, **the console** (`run_console.py`, window title
+*Mosaic*, via `pywebview`: a local HTML/CSS/JS frontend, no browser tab,
+no local web server). Every app has moved into it -- Monolith, the
+table; Moxie, the plots; Motion, the simulator; Mora, the notes;
+Monastery, the calendar; and Monarch, the graph -- and their old windows
+are deleted (`docs/console.md`, steps U1–U8).
 
-A seventh window sits beside rather than among them: **Gardens**
+One other window remains until console step U9: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
-deleted, imported, exported and synced. Any of the windows opens it from
-its own garden dropdown ("Manage gardens…"); see below.
-
-The windows are being folded into one tiled window, **the console**
-(`run_console.py`, window title *Mosaic*). Apps move into it one at a
-time (`docs/console.md`, steps U1–U9), and each old window is deleted
-once its app is ported. New UI is built only in the console.
+deleted, imported, exported and synced. The console's `mo saic` opens it;
+see below.
 
 ---
 
@@ -319,7 +314,7 @@ and the top bar says `live`. It is kept per garden in the console's
 sidecar, off by default.
 
 Not ported from the old window: the node board (a graph of the model
-comes back with Monarch in U8), value lanes, the pre-flight role check
+is the `graph` pane, U8), value lanes, the pre-flight role check
 and the impact view (both stay in the CLI and MCP).
 
 ### Notes (`edit`, `read`, `notes`, `mo ra`)
@@ -465,6 +460,43 @@ Not ported from the old window: the mini calendar, the draft popover's
 species picker (type `R1 : task` after creating), and polling -- the
 console re-reads on focus and after every write, like every pane.
 
+### The graph (`graph`, `mo narch`)
+
+`mo narch` puts `find | graph @sel --depth 2 | open @sel` where the
+focused pane was.
+
+| Line | Pane |
+|---|---|
+| `graph` | the whole garden |
+| `graph @sel\|#id\|‹name› [--depth N]` | that mote's neighbourhood: every mote within N hops (default 2), relationships counted both ways; `@sel` re-roots as the selection moves |
+| `… --hide-rel a,b` | leave out those relationship types -- not drawn, and not hopped through |
+| `… --view ‹saved›`, `… ‹conditions›` | keep only what a saved view or find conditions match (the root stays) |
+
+Motes are squares stroked in their species colour, a species a diamond,
+a rule a square with a hollow one inside; the selection is filled.
+Instances cluster on their species' spoke. Edges touching the selection
+are solid and say their type; the rest are dashed. The corners say the
+layout and depth, the zoom and how much of the garden is shown, and what
+is under the pointer or the cursor.
+
+| Key / mouse | Does |
+|---|---|
+| `h j k l`, arrows | Walk the cursor to the neighbour that way |
+| `⏎` / click | Select the mote (the graph re-roots on it under `@sel`) |
+| `o` / double-click | Open its props in a new pane |
+| `[` `]` | Depth −1 / +1 (rewrites the line) |
+| `f`, `+` `-`, `0`, wheel | Fit, zoom, 100% at the cursor, zoom at the pointer |
+| drag a node | Move and pin it (pins are kept beside the garden) |
+| `u` / `U` | Unpin the cursor's node / every node |
+| drag empty space | Pan |
+| ctrl+drag node → node | `A ->  -> B` on the command line, caret on the type |
+| `n` | `‹cursor› -> related_to -> ` on the command line, to name a new mote |
+| click an edge, `d` `d` | `unlink …` for the edge, else `delete ‹cursor›`, on the command line to confirm |
+
+Monarch's sticky notes, group boxes and pen strokes are gone, and the
+first open of a garden drops their stored data (`docs/architecture.md`
+-> *The graph*).
+
 ### Tiling
 
 `^w` is the prefix: `v`/`s` split side by side or stacked, `h j k l`
@@ -515,346 +547,14 @@ Boots on a seeded temp garden and checks the following:
   `r_a = 50` without writing; `a` applies it with `source: fitted` and one
   `undo` takes it back
 - a plot pane survives a relaunch
+- `mo narch` opens find | graph | props and the graph draws the
+  selection's neighbourhood; a walk, `⏎`, and `[` `]` rewriting the
+  depth; ctrl+drag prefills a link and `d d` a delete; dragging pins a
+  node beside the garden, `U` unpins and `o` opens
 
 ---
 
-# Monarch -- the graph
-
-`./run_monarch.py`, or `.venv/bin/python run_monarch.py`.
-
-Monarch is frozen as a structure debugger: it gets bug fixes only until
-console step U8 (`docs/console.md`).
-
-```
-./run_monarch.py                       # the last garden opened
-./run_monarch.py --garden reactor      # a specific garden
-```
-
-The graph is drawn on a `<canvas>` by `monarch/frontend/graph.js`, which owns the
-force layout, camera and pointer gestures. There is no graph library: motes
-are clustered into radial sectors by species, and the camera pans to a mote
-on selection rather than re-fitting the whole view. Fonts are vendored under
-`monarch/frontend/vendor/fonts/`, so nothing is fetched at runtime.
-
-### The inspector
-
-Selecting a mote -- here, or in any of the other five windows -- opens
-the **inspector**: a floating panel on the right that is literally the
-same panel everywhere (`frontend_shared/inspector.js`, symlinked into
-each app's `frontend/`; see "The inspector" in `docs/architecture.md`
-for why). It is where a mote is edited, and what it can do does not
-change from window to window.
-
-| Gesture | Action |
-|---|---|
-| Left-click a mote | Open it, replacing the active tab |
-| Right-click a mote → Inspect in new tab | Open it in an additional tab |
-| Click a relationship, or a property that holds a mote id | Walk to that mote (Ctrl/Cmd-click for a new tab) |
-| Drag the header or tab strip | Move the panel |
-| Drag the bottom-right grip | Resize it |
-| Esc | Close it (or, while typing in a field, just leave the field) |
-
-Up to six tabs; the oldest drops off, and with only one open the tab
-ribbon hides entirely. Position and size are remembered per window, and
-the panel opens in the same place in each one.
-
-"In a new tab" is a right-click item rather than Ctrl-click because
-Ctrl+drag from a mote already draws a relationship in both windows with
-a canvas — deciding which of the two you meant from how far the mouse
-travelled is how you get a relationship you didn't ask for. Inside the
-panel, where nothing drags, Ctrl-click on a relationship or a mote-id
-property still opens it in a new tab.
-
-In it:
-
-* **The name**, as the title. Editing it renames the mote.
-* **Properties**, one row each, with an editor chosen from the value --
-  a dropdown where the species' other instances agree on a small set of
-  values, a full calendar for anything interval-shaped (see below), a
-  number box for a number, a toggle for a boolean, and a button that
-  walks there for a value that holds another mote's id. Click a key to
-  rename it in place. `×` removes it.
-* **An add row**, and -- if the mote's species has a template -- chips
-  for the keys that template has and this mote doesn't ("Task usually
-  has owner, due").
-* **Relationships**, both directions, each removable, plus a picker that
-  searches the garden and accepts a relationship type that doesn't exist
-  yet. `instance_of` is in this list like anything else — a species *is*
-  a relationship, and giving a mote one means adding that relationship
-  here.
-* **Advanced** (the footer toggle, remembered): the mote's id with a
-  copy button, a `name` marker under the title (the title is that
-  property, in a bigger font), whether this mote is its species'
-  template, and the raw JSON (a note is summarized, and written in the
-  console with `edit ‹note›`). (Where a
-  solved value came from is the console's `why ‹m.k›`.)
-
-Everything autosaves as you type, debounced, with a `saved` flash in the
-header.
-
-Deliberately not in it: deleting a mote, and editing a selection of
-several. Both stay in each window's own chrome -- the inspector is about
-one mote.
-
-
-### Dates
-
-Any property whose value is an ISO 8601 interval — a plain `2026-09-22`
-counts — is edited with a calendar rather than a text box, in every
-window. By value shape, not by key name: `when`, `due`, `starts` and
-whatever else this garden calls it all get the same editor.
-
-Click the summary line to open it. Inside: a month grid with Today /
-Tomorrow / Next week shortcuts, a start time and an optional end time
-(shown with the duration it works out to), and a repeat editor —
-frequency, how many of that unit, which weekdays for a weekly rule, and
-whether it ends never, after N times, or on a date. Done closes it;
-Clear removes the property's value entirely.
-
-A rule the editor can't represent — two RRULE lines, a `BYMONTHDAY`, an
-`EXDATE` left behind by detaching one occurrence in the calendar — is shown
-as editable RRULE text instead, and anything it doesn't understand is
-preserved rather than dropped.
-
-### Right-click
-
-Every window has a context menu on a mote now, and the first two items
-are the same everywhere: **Inspect** and **Inspect in new tab**. What
-follows is that window's own — Monarch offers copy/pin/delete on the
-whole selection.
-
-### Graph interactions
-
-| Gesture | Action |
-|---|---|
-| Left-click a mote | Select it, and open it in the inspector |
-| Right-click a mote | Context menu, including "Inspect in new tab" |
-| Left-click an edge | Select the relationship it represents |
-| Shift+Left-click an edge | Add/remove that relationship from the selection |
-| Left-click empty canvas | Deselect |
-| Left-drag a mote | Move + pin it (drags the whole selection together if it's part of one) |
-| Left-drag empty canvas | Box-select motes |
-| Shift+Left-drag empty canvas | Box-select relationships (distinct highlight color; mote and relationship selection stay mutually exclusive) |
-| Ctrl+Left-drag from a mote | Connect it to another mote |
-| Middle-drag | Pan |
-| Right-click a mote | Context menu: Copy, Pin/Unpin, Delete (acts on the whole selection if the mote is part of one) |
-| Right-click empty canvas | Context menu: New mote here, Paste |
-| Ctrl/Cmd+C / Ctrl/Cmd+V | Copy / paste the current selection (Ctrl+V pastes at the viewport center) |
-| Ctrl/Cmd+Z | Undo the most recent delete, while its toast is still up |
-| Arrow keys | Select whichever visible neighbour sits closest to that screen direction |
-| Delete / Backspace | Delete the current selection |
-| Esc | Close the frontmost menu/panel, or deselect if nothing else is open |
-| Scroll | Zoom |
-| Left-drag an attractor (attractor mode only) | Move that species' cluster |
-
-Motes/relationships highlight live as a box-select drag grows over them,
-not only once the mouse is released. Copying more than one mote preserves
-their relative layout on paste. The topbar's garden button opens a
-switcher over the gardens that exist; its "Manage gardens…" item (also
-reachable from the File menu) opens the Gardens window, which is where
-creating, renaming, deleting, importing, exporting and syncing live —
-for every window, not just this one.
-
-Shift+clicking an edge, or shift-dragging a box, builds up a relationship
-selection the same way plain box-select does for motes. Selecting
-relationships and selecting motes are mutually exclusive, same as a
-single relationship and a single mote already were: picking one kind
-clears the other. The detail panel's bulk delete button (and
-Delete/Backspace) act on whichever kind is currently selected.
-
-The search palette (Ctrl/Cmd+K) also accepts a `key = value` query (e.g.
-`priority = high`) instead of the usual substring match across every
-mote's label and properties -- an exact, case-insensitive match on one
-named property. Combine it with the species/relationship filter chips for
-something like "every Task with priority = high." Anything more involved
-than that is expected to live in external BI software instead, not here.
-
-Deleting motes/relationships surfaces a toast with an "Undo"
-action (also triggerable with Ctrl/Cmd+Z) for a few seconds afterward.
-It's single-step -- only the most recent delete can be undone, and the
-window closes once the toast disappears. A restored mote/relationship
-keeps its original id, so anything else that was pointing at it (other
-relationships) doesn't need to be reconnected by hand. Garden delete
-works the same way at the file level: the garden's `.db` file is moved
-aside rather than removed, so `restore_garden` can move it back; only the
-most recently trashed copy of a given name is kept.
-
-### Topbar menus
-
-The topbar is brand · garden dropdown · File · View · Tools · search, each
-of File/View/Tools an anchored dropdown reusing the same `.menu`/
-`.menu-item` styling the right-click context menu already established.
-Only one of these (plus the garden dropdown, plus the context menu) is
-ever open at a time -- opening any one closes the rest, and Esc or a
-click outside the open one closes it too.
-
-Most items are real, existing actions relocated rather than rebuilt:
-File hosts "Manage gardens…" (the same Gardens window the garden
-dropdown opens) and "Export to Calendar"; View hosts "Reset
-view", a "Hide/Show controls" toggle for the always-docked
-top-right panel (species legend, relationship filters, depth, reset
-view) -- the first way to reclaim that screen space, persisted across
-restarts -- and "Advanced view settings…" (below); Tools hosts the
-simulation step count, the **solver** and **scenario** pickers, the
-Simulate…/Exit simulation trigger for the same non-blocking
-preview/scrub/commit bar described above, "Check roles…", and "Sync…", which opens the Gardens window straight at
-this garden's sync settings. A handful of items (Import motes, Export as CSV/JSON,
-Print graph, Timeline view, Group by type, Automations, Webhooks, API
-access) are inert placeholders with a small "soon" badge, staged for
-future expansion -- clicking one just toasts an explanation rather than
-doing nothing silently. A stub is only allowed to describe something
-that genuinely doesn't exist yet: if the app can already do it
-somewhere, the menu item points at that instead.
-
-### Explaining a value
-
-Every **numeric** property in the detail panel carries a `?` button that
-opens a block underneath it answering two different questions from two
-different sources:
-
-- **How it was found** comes from the last solve that wrote to the
-  garden (`why`), so it needs one to have happened -- a preview leaves
-  nothing to read. It names the equations that produced the value, the
-  known values they read, and expands recursively into any of those the
-  solve also derived.
-  A value found together with others in a coupled solve says so rather
-  than pretending to a single cause. Numbers here are in **base SI
-  units**, which is what the solver worked in, so the numbers beside an
-  equation multiply out -- unlike the property rows above, which show
-  each mote's own declared unit.
-- **What it needs** and **what it could move** come from the rules
-  themselves, so they answer before anything has ever been solved.
-  Missing prerequisites are marked in red; anything the value could move
-  is clickable and selects that mote.
-
-The `?` is offered on every numeric property rather than only on solved
-ones, because which of the two a property is happens to be exactly what
-the panel answers.
-
-### Scenarios
-
-The Tools menu's **scenario** picker lists every mote that varies
-something (see `docs/simulation.md`), defaulting to "Garden as it
-stands". Running under a scenario previews the garden as that scenario
-would have it, and the sim bar says so.
-
-A scenario run is never written to the graph; to weigh a hypothetical
-against the real garden, preview both side by side.
-
-### Warnings and constraints
-
-Below the sim bar's error line (which only appears when a run actually
-stopped) is an advisory area for things that did not stop it: dimensional
-warnings about the *model*, and unsatisfied comparison relations about
-the *answer*. They are labelled apart because they are different kinds
-of problem, and neither prevents solving.
-
-### Advanced view settings
-
-Everything the graph's layout and colouring used to hardcode is
-adjustable per garden, from a panel opened by the control panel's
-"⚙ Advanced view settings" button or the View menu's matching item. It
-docks on the left rather than opening as a modal: every
-control in it is judged by what it does to the graph, so the graph has to
-stay visible while you drag a slider.
-
-**Forces.** Three global sliders -- repulsion, species pull (how hard a
-mote is drawn to its species' attractor), and edge length -- plus one
-attraction slider per relationship type in the garden. A type left alone
-reads "auto" and keeps the species-aware default (`0.05` within a
-species, `0.006` across one, since species grouping is what carries the
-layout); moving its slider replaces that with one explicit number for
-every edge of that type. Each slider has a ↺ back to its default.
-
-**Colours.** By default a mote's colour is its species', hashed from the
-species id, and each species gets a picker to override that with any
-colour. The alternative modes colour by something other than membership:
-by a chosen property's value (a hue per distinct value), by connection
-count, or by a chosen numeric property (both on a dim→bright ramp, with
-motes that have no usable value left grey). While a non-species mode is
-active the legend's dots hollow out -- the rows still filter by species,
-they just aren't a colour key any more. Colour-by-last-modified is
-deliberately absent: nothing in the schema records when a mote changed.
-
-**Layout.** "Arrange attractors…" enters a read-only mode where the point
-each species' cluster is pulled toward is drawn as a labelled ring and can
-be dragged. Only panning and zooming still work there -- selecting,
-dragging, connecting and the context menu are all off, and any edit
-attempted from elsewhere toasts instead, the same way it does mid-
-simulation-preview. Esc (or "Done arranging") leaves. A pinned mote
-ignores its anchor entirely, so a hand-arranged garden can make a moved
-attractor look broken; "Unpin all motes" is the way out of that.
-
-Settings live in `localStorage` under `monoss:viewSettings:<garden>`,
-beside the existing hidden-species and pinned-position keys, and only
-what's actually been changed is stored -- a garden nobody has adjusted has
-no key at all and renders on `graph.js`'s own defaults. This is view
-state, not garden data: it stays on this machine and is not part of a
-garden export.
-
-### Linking out to files and websites
-
-`url` is a reserved property name: give any mote a `url` property (a
-web address or a local file path) and its inspector row gets an
-"Open" (↗) button that launches it via the OS's default handler. In all
-six windows -- the button moved into the shared inspector along with
-everything else about editing one mote, so following a link is no longer
-something only the graph window could do.
-`core/links.py::classify_link` decides which: a web address goes to the
-stdlib `webbrowser` module, while a local file is instead handed to the
-OS's native "open with the registered default app" mechanism
-(`api_common.py::open_with_os_default`), not `webbrowser.open()`, since
-that always launches the web browser itself and would show a `.py`
-file as plain text rather than opening it in, say, VSCode. On Linux
-that's `gio open` (falling back to `xdg-open` only if `gio` isn't
-installed) rather than `xdg-open` directly -- `gio`'s content-type
-detection is the same extension-aware logic GTK file managers use,
-whereas `xdg-open`'s own MIME-sniffing can land on a different, unregistered
-alias for the same file (observed for `.py`: `text/x-script.python`
-instead of `text/x-python`) and silently fall back to something else
-entirely instead of erroring. On macOS it's `open`; on Windows,
-`os.startfile`. A bare domain like
-`youtube.com` (no `http(s)://`) is assumed to be a URL missing its
-scheme and gets `https://` added automatically; local paths need to be
-absolute or start with `~`/`./`/`../` to be recognized as local rather
-than a URL, since there's no other way to tell "example.com/page" and
-"notes/todo.txt" apart. This is purely a naming convention, not a
-schema change -- the property is still a
-normal, editable/deletable string like any other. There's no drag-and-
-drop yet; the path/URL has to be pasted in by hand.
-
-### Reserved names
-
-`docs/architecture.md` lists every property key and relationship type
-MonOSS recognizes by convention (`url`, `date`, `duration`, `equation`,
-`freedoms`, `roles`, `instance_of`, `overrides`, `varies`, ...). Any property or relationship using one of these
-is accented in the inspector rather than drawn as ordinary data --
-hover it for a tooltip. A reserved property key is also not renameable
-in place, since its name is what gives it meaning. This is
-purely a visual cue; the name still works exactly like any other
-property/relationship, editable and deletable like anything else.
-
-### Look and feel
-
-Monarch is dark-only, with its own palette and type pairing (IBM Plex
-Serif for names and titles, IBM Plex Sans for body, a mono for labels
-and ids) and its own vendored fonts, declared at the top of
-`monarch/frontend/style.css`. While other windows still existed, those
-tokens were copied verbatim into each -- pywebview's http server roots at
-the directory of the page it serves. The Gardens window keeps its own
-copy.
-
-The recurring pieces, so a new surface doesn't invent its own: a 46px
-topbar carrying a two-line brand block (the window's name over `MonOSS`
-in mono); section heads as a small, widely-tracked uppercase mono
-eyebrow; serif for a mote's name, a garden's name and a panel title;
-mono for ids, counts, keys and hints; and a 30px status bar along the
-bottom. Monarch's reports which garden is open, how much of it the
-current depth put on screen, and what is selected.
-
-Colours are OKLCH, which this WebKitGTK build handles in both CSS and
-canvas `fillStyle` -- which is why `graph.js` reads `--graph-bg` and the
-selection tokens straight off `:root` rather than keeping its own copies.
+# Installing pywebview
 
 ## This machine (Arch Linux)
 
@@ -892,8 +592,8 @@ when a working system install already exists.
 python3 -c "import gi, webview; from importlib.metadata import version; print(version('pywebview'))"
 ```
 
-If that prints a version with no errors, `python3 run_monarch.py` should open the
-Monarch window.
+If that prints a version with no errors, `python3 run_console.py` should open the
+Mosaic window.
 
 Note: if your `python3` on `PATH` resolves to a non-system interpreter (e.g.
 a conda/miniforge install), `--system-site-packages` won't see the system
@@ -903,90 +603,48 @@ e.g. `/usr/bin/python3 -m venv --system-site-packages .venv`.
 
 ## Desktop launcher
 
-Each window has its own user-level launcher (none tracked in this repo --
-they're machine-specific, pointing at an absolute `.venv` path) so it shows
-up in the regular application menu instead of needing a terminal:
-`~/.local/share/applications/monoss.desktop` for Monarch. In every case
-`StartupWMClass` has to match that window's own title (the string passed
-to `webview.create_window(...)` in its `app.py`), not the product name, or
-the desktop environment won't associate the launcher with the running
-window. Regenerate them with:
+A user-level launcher (not tracked in this repo -- it is machine-specific,
+pointing at an absolute `.venv` path) puts the console in the regular
+application menu instead of needing a terminal. `StartupWMClass` has to
+match the window's own title (the `name` `console/app.py` passes to
+`launch_window`), or the desktop environment won't associate the
+launcher with the running window. Regenerate it with:
 
 ```
 cat > ~/.local/share/applications/monoss.desktop <<EOF
 [Desktop Entry]
 Type=Application
-Name=Monarch
+Name=Mosaic
 Comment=Personal knowledge-graph organizer
-Exec=$(pwd)/.venv/bin/python $(pwd)/run_monarch.py
+Exec=$(pwd)/.venv/bin/python $(pwd)/run_console.py
 Icon=$(pwd)/assets/icon.svg
 Terminal=false
 Categories=Utility;
-StartupWMClass=Monarch
+StartupWMClass=Mosaic
 EOF
 
 update-desktop-database ~/.local/share/applications/
 ```
 
-Monarch's `assets/icon.svg` predates the amber
-accent theme and is still in blue; nothing here changes it.
+`assets/icon.svg` predates the console's palette and is still in blue;
+nothing here changes it.
 
 ## Regression testing
 
-`pytest` covers `core/`/`monarch/api.py` in isolation, but doesn't touch the
-actual GTK/WebKit window. `scripts/monarch_smoke_test.py` drives the real running
-app via pywebview's `evaluate_js` (mote/relationship CRUD, label rendering,
-layout position stability, search/browse/keyboard-nav, garden-switch
-isolation, species picking and templating, filters, depth, live box-select, middle-drag pan, the context menu's
-copy/paste/pin, multi-select copy/paste, Ctrl+C/Ctrl+V, bulk delete,
-Esc/Del, arrow-key navigation, the gardens modal's list/switch/
-create/delete, undoing a delete via the toast button and Ctrl+Z, the
-url property's Open button, dragging/pinning a whole multi-selection
-together, reserved-name badges, the resizable detail panel, selecting
-and inspecting a relationship by clicking its edge, shift+click and
-shift+drag both building a multi-relationship selection (live, and with
-the distinct box/edge color) and bulk-deleting it, a plain drag still
-box-selecting only motes, the "New mote here" form opening near the
-click, creating a mote by pressing Enter in that form instead of clicking
-Create, that form closing on an outside click, the search palette's
-`key = value` exact-match query, the topbar's File/View/Tools/garden
-dropdowns opening one at a time, closing on Esc or an outside click, the
-garden dropdown listing/switching gardens, the View menu's Hide/Show
-controls toggle and its persistence, a "soon" stub toasting
-instead of doing nothing, a hidden species' instances actually dropping
-out of the physics loop instead of just not being drawn, the advanced
-view settings panel (a per-relationship-type force slider reaching the
-layout and persisting, a custom species colour surviving a garden switch,
-colour-by-property-value giving different values different colours and no
-value grey, and "Reset every view setting" restoring every default),
-attractor mode (entering it, dragging an attractor so the species' motes
-follow, clicking a mote *not* opening the panel, and leaving)) against a
-throwaway temp `GARDENS_DIR` and
-webview storage dir — never touches real data. Run it by hand after UI
-changes:
-
-```
-.venv/bin/python scripts/monarch_smoke_test.py
-```
-
-Prints PASS/FAIL per check and exits non-zero if anything failed. Its
-own waits are polling, not flat sleeps sized for the worst case
-(`js_async`'s `wait=` and `wait_until()`'s `timeout=` are both ceilings),
-so it finishes well under the naive fixed-sleep total in the common case.
-
-One check samples the canvas pixels directly. That is not paranoia: the
-graph's render loop was once entirely dead while every other check passed,
-because hit-testing works off node coordinates rather than what was drawn —
-clicking, dragging and connecting all succeeded against a blank canvas.
+`pytest` covers `core/` and the bridges in isolation, but doesn't touch
+the actual GTK/WebKit window. `scripts/console_smoke_test.py` drives the
+real console (see *Smoke test* under the console above) against a
+throwaway temp `GARDENS_DIR` and webview storage dir -- never touching
+real data. Run it by hand after UI changes. It prints PASS/FAIL per
+check and exits non-zero if anything failed.
 
 ---
 
 # Gardens -- the garden manager
 
-`./run_gardens.py`, or `.venv/bin/python run_gardens.py`. Also reachable
-from every one of the six windows: the garden dropdown's "Manage
-gardens…" footer, plus Monarch's File menu and its Tools → Sync…, which
-opens it straight at the selected garden's sync settings.
+`./run_gardens.py`, or `.venv/bin/python run_gardens.py`. Also opened by
+the console's `mo saic`, until console step U9 brings it into the
+console.
 
 ```
 ./run_gardens.py                        # the list, nothing selected
@@ -996,8 +654,8 @@ opens it straight at the selected garden's sync settings.
 
 Garden management used to be Monarch's alone — a modal that only that
 window had — so making a garden from Motion meant opening Monarch first.
-This is that modal pulled out into a window all six processes share,
-and Monarch's copy is gone rather than duplicated.
+This is that modal pulled out into a window of its own; Monarch's copy
+went first, and Monarch itself with console step U8.
 
 ### Why a separate window, and a separate process
 
@@ -1010,9 +668,9 @@ a short-lived one and closes it), so both are ordinary operations here.
 
 The cost of being its own process is that it cannot switch the garden of
 the app that opened it. It doesn't try: each row's **Open in** launches
-any of the app windows already on that garden, and an app that is
-already running finds a newly created garden in its own switcher, which
-reads the directory every time it opens.
+the console already on that garden, and a console that is already
+running finds a newly created garden with `cd`, which reads the
+directory every time.
 
 ### What it does
 
@@ -1027,8 +685,8 @@ reads the directory every time it opens.
 
 ### Ports
 
-42007, after the app windows' 42001-42003 and 42006 (42005 and 42008
-were Monolith's and Moxie's, before they moved into the console),
+42007 (42001-42006 and 42008 were the old app windows', before they
+moved into the console, which has 42009),
 falling back to an ephemeral one if taken.
 `.webview_data_gardens/` is its own WebKit storage. Opening it twice is
 allowed rather than guarded: pywebview cannot raise and focus

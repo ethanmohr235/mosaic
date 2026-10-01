@@ -407,3 +407,27 @@ def test_a_garden_already_written_in_intervals_is_untouched():
 
     assert _properties(conn, "m1")["date"] == "2026-09-01T09:00/PT90M"
     conn.close()
+
+
+def test_initialize_database_drops_annotations():
+    # Monarch's sticky notes, groups and strokes went with its window
+    # (docs/console.md, U8). They were never synced, so the table goes
+    # with nothing to convert; a fresh garden never makes it.
+    create_garden("test")
+    conn = db.get_connection("test")
+    cur = conn.cursor()
+    assert "annotations" not in _tables(cur)
+    cur.executescript("""
+        CREATE TABLE annotations (id TEXT PRIMARY KEY, anchor_mode TEXT NOT NULL,
+            x REAL NOT NULL, y REAL NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE INDEX idx_annotations_mote ON annotations(id);
+        INSERT INTO annotations VALUES ('a1', 'world', 0, 0, 'now', 'now');
+    """)
+    conn.commit()
+
+    db.initialize_database(conn)
+
+    assert "annotations" not in _tables(cur)
+    cur.execute("SELECT 1 FROM sqlite_master WHERE name = 'idx_annotations_mote'")
+    assert cur.fetchone() is None
+    conn.close()

@@ -138,7 +138,8 @@ Each one was a separate act of filing. That lesson became a rule in
   motes), click-to-open (a lecture opens its note, a work block opens its
   project), and planned vs. actual time.
 - **Monarch:** freeze it as a structure-debugger tile. No new
-  investment.
+  investment. **Done:** the console's `graph` pane (U8), annotations
+  removed.
 - **Monolith:** keep the general table, and add a project variables pane
   (value, unit, given/solved/external, ±).
 - **Moxie:** add publication-quality export (SVG/PDF, unit-labelled
@@ -195,7 +196,8 @@ asking.
 - *New project from a past project* and *Import model from…*.
 - Scenarios presented as homework parts or design options (scenarios
   still work as they do today).
-- FBD sketch surface built from Monarch's ink tools.
+- FBD sketch surface (Monarch's ink tools it would have built on were
+  removed in U8).
 - Automations (still deferred).
 - Live links between gardens (`not-goals.md`).
 

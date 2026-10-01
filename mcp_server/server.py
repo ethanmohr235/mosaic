@@ -1,13 +1,13 @@
 # mcp_server/server.py
 """MCP-facing bridge over the core data layer -- a third adapter
-alongside cli/ and monarch/, exposing the same repository functions as tools
+alongside cli/ and console/, exposing the same repository functions as tools
 an MCP client can call.
 
 Deliberately *not* named `mcp/`: run_mcp.py puts the project root on
 sys.path, so a top-level package by that name would shadow the installed
 `mcp` SDK.
 
-Unlike monarch/api.py, which holds one long-lived connection for the open
+Unlike the console (console/session.py), which holds one long-lived connection for the open
 garden, every tool here opens and closes its own (see _connect). MCP
 calls are stateless and the server is a separate process from the UI --
 holding a connection open for the server's whole life would mean sitting

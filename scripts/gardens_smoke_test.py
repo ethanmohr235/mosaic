@@ -182,7 +182,7 @@ def run_checks(window):
 
     def open_in_offers_every_window():
         assert texts(window, "#open-in .app-chip") == [
-            "Monarch", "Mosaic"
+            "Mosaic"
         ], f"got {texts(window, '#open-in .app-chip')}"
 
         js(window, """

@@ -28,7 +28,7 @@ through plan mode, questions and approval before any code. Anything under
 | Handoff says | Actually |
 |---|---|
 | Frontend in `ui/frontend/`, API in `ui/api.py` | Neither exists. Each app has `<app>/api.py` + `<app>/frontend/`, with shared widgets in `frontend_shared/` (symlinked). See *Architecture*. |
-| Graph drawn with Cytoscape | Monarch's graph is a hand-written canvas (`monarch/frontend/graph.js`). Keep it, and apply the graph styling rules to it. |
+| Graph drawn with Cytoscape | Monarch's graph is a hand-written canvas, kept and restyled to the graph styling rules (`console/frontend/js/graph.js`, U8). |
 | Apps: Observatory (`mo rph`), Motion, Moxie, Monastery, Mote Inspector, Launcher | See *App names* below. Observatory is Monarch (`mo narch`), and there is no `mo rph`. Mora, Monolith and Home are missing from the handoff. Momentum is being removed and is never ported. |
 | Fixed mote-type colors: task, note, event, source | Mosaic privileges no type. Motes are colored by **species**, using the existing probed palette retuned into the design's band. See *Color*. |
 | Motion *runs* list, `diff vs #0412`, Moxie `run #0414` | Saved run history and *commit tick* are cut (`roadmap.md`). Motion lists **scenarios**. A run is a curve you plot, not a record you diff. |
@@ -144,7 +144,7 @@ These are user-facing names. Python packages keep their current names
 | `mo tion` | Motion | `motion:scenarios`, `motion:state`, `motion:rule` | Timeline sits under state. No runs list. |
 | `mo ra` | Mora | `mora:notes`, `mora:edit`, `mora:read`, `mora:worksheet` | `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
 | `mo nastery` | Monastery | `monastery:agenda`, `monastery:week`, `monastery:month` | Table and grid panes on the `--line` grid. |
-| `mo narch` | Monarch | `monarch:graph` | Frozen structure debugger. Graph only. |
+| `mo narch` | Monarch | `monarch:graph` (`graph …`) | Graph only, a structure debugger. Opens `find \| graph @sel --depth 2 \| open @sel`. |
 | `mo saic` | Home + settings | `mosaic:home`, `mosaic:gardens` | Ownership tree, loose gardens, garden management. Replaces the Gardens window and the launcher. |
 | — | shell | `log` | Command and error log. |
 
@@ -302,7 +302,7 @@ phase that builds them.
 ### Settled for U5, Motion (2026-09-30)
 
 - **No board.** The node-card board is not ported; a graph of the model
-  comes back with Monarch's canvas graph in U8. Linking stays a command.
+  is the `graph` pane (U8). Linking stays a command.
 - **Grammar:**
   ```
   sim [--ticks N] [--scenario s] [--vs s2] [--solver newton] [‹find conditions›]   motion:state
@@ -433,8 +433,8 @@ What the build decided within the settled plan above.
   `≡` `✓` `!`; an unknown or equation shows the garden's value after it.
   After `esc`, a clean sheet is replaced by the garden's reading of it;
   one with problems keeps your text.
-- **The inspector** in Monarch and Monastery no longer opens notes; it
-  summarizes a `modoc` property read-only.
+- **The inspector** in the old windows no longer opened notes; it
+  summarized a `modoc` property read-only (until U8 deleted it).
 - **New tokens:** `--paper-*` (the read pane), `--bp-*` (the worksheet),
   `--doc-measure` 72ch (the read pane's line length).
 
@@ -491,6 +491,66 @@ What the build decided within the settled plan above.
 - **Old windows' launchers** offer *Mosaic* (the console) in place of
   Monastery; Gardens' stale Monolith tile is gone.
 - **New tokens:** `--wk-gutter` 6ch, `--wk-hour` 36px.
+
+### Settled for U8, Monarch (2026-10-01)
+
+- **One line says what is drawn:** `graph [@sel|#id|‹name›] [--depth N]
+  [find conditions]`. A root draws its neighbourhood (default depth 2),
+  no root the whole garden, and a `@sel` root re-roots as the selection
+  moves. `mo narch` opens `find | graph @sel --depth 2 | open @sel`
+  (the handoff's Observatory screen).
+- **Gestures become commands:** ctrl+drag node → node prefills `A ->
+  ‹type› -> B` with the caret on the type; `n` prefills a new mote; `d d`
+  prefills `delete` (`unlink` on an edge). Not ported: copy/paste, the
+  multi-select panel, renaming a relationship type.
+- **Layout: minimal plus pins.** The species-clustered force layout as
+  it was; dragging a node pins it, pins saved per garden in the console
+  state; `u` unpins. Hiding is in the line: conditions, `--hide-rel`,
+  `--view`. Not ported: the force sliders, colour by property, arranging
+  species attractors.
+- **Style: handoff squares plus kind marks.** Squares stroked in species
+  colour; a species is a diamond, a rule has a hollow inner square;
+  small arrowheads; an edge's type shows only around the selection or
+  the pointer; the handoff's corner notes.
+- **Annotations are removed** (already decided in *Steps*): the code,
+  the docs, and a migration that drops their stored data.
+
+### Built for U8 (2026-10-01)
+
+What the build decided within the settled plan above.
+
+- **The grammar** (`core/graphview.py`): `--hide-rel a,b` and `--view
+  ‹saved›` join the conditions. A hidden type is not hopped either, so
+  hiding `instance_of` stops a species pulling in every instance. A word
+  with `:` or `~` is a condition; any other bare word is the root (a name
+  with a colon is rooted by `#id`). `[`/`]` rewrite `--depth`.
+- **The cursor is not the selection.** `h j k l` and the arrows walk the
+  cursor to the neighbour lying that way on screen (Monarch's arrow
+  walk); `⏎` or a click selects. `o` and double-click open `open #id` in
+  a new pane.
+- **View keys:** `f` fit, `+`/`-` zoom, `0` 100% at the cursor, `u`/`U`
+  unpin one/all. Drag on empty space pans (no box-select); the wheel
+  zooms at the pointer.
+- **Prefills:** a link is `A ->  -> B` with the caret between the
+  arrows; `n` is `‹cursor› -> related_to -> `, so the new mote is born
+  linked and shows up in the neighbourhood. A mote is named by its name
+  when that is one plain word unique on screen, else `#id`.
+- **Drawn in screen space:** nodes, labels and arrows keep their pixel
+  size at any zoom (selected half-size 7, labelled 5, unlabelled 3.5);
+  labels show everywhere up to 60 nodes, else around the focus or past
+  110%. The loop stops when the layout settles.
+- **An empty `@sel`** reads "nothing selected", dim, as the props pane
+  does.
+- **Pins** live in the console sidecar (`pins`, `{id: [x, y]}`), beside
+  layouts and history.
+- **Removed with Monarch:** `api_common`'s `InspectorApi`,
+  `CommandBarApi`, `UndoableApi` and `AnnotatableApi`; every
+  `frontend_shared/` file but `focus.js` (inspector, interval picker,
+  command bar, menu, undo, launcher, annotations); `run_monarch.py` and
+  its smoke test. `core/db.py` drops the `annotations` table on open.
+  The Gardens window's *Open in* offers only Mosaic.
+- **Lost with the old inspector:** the `url` property's *Open* button.
+  The props pane has no way to open a link yet (open question below).
 
 ### Visual system
 
@@ -572,7 +632,7 @@ own plan-mode phase and ships something usable.
 | U5 | **Done.** **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list (see *Settled for U5*, *Built for U5*). | A live, ticking view inside the contract. |
 | U6 | **Done.** **Mora → `mo ra`.** Document pane as a text-editing pane, plus the worksheet (see *Settled for U6*, *Built for U6*). | Keyboard capture and `esc` work for editors. |
 | U7 | **Done.** **Monastery → `mo nastery`.** Agenda, week and month panes with bars (see *Settled for U7*, *Built for U7*); plan-my-week and planned vs. actual wait. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
-| U8 | **Monarch → `mo narch`.** Canvas graph only, restyled. Remove annotations (`core/annotations.py`, the annotation frontends, their docs) and ship a migration that drops their stored data. | The frozen debugger costs no more upkeep. |
+| U8 | **Done.** **Monarch → `mo narch`.** Canvas graph only, restyled (see *Settled for U8*, *Built for U8*). Remove annotations (`core/annotations.py`, the annotation frontends, their docs) and ship a migration that drops their stored data. | The frozen debugger costs no more upkeep. |
 | U9 | **Home → `mo saic`.** Ownership tree, loose gardens, garden management and settings. Delete `gardens_app/`, `window_launcher.py`'s multi-window pieces and the `frontend_shared/` symlinks. | The window is the only surface. |
 
 Momentum is removed by roadmap phase 1 and is never ported. A roadmap
@@ -641,5 +701,9 @@ Each step's done-check is the same:
   `$ command` bar, not 2b's quieter 22px tiled header. Is that right?
 - **Result colours in `log`.** Successful results are `--fg`; only
   warn and fault use their colours. Should success be `--ok`?
+- **Opening a `url`** (U8). The old shared inspector's *Open* button
+  (`core/links.py::classify_link`, then the OS's opener) went with
+  Monarch, and the props pane has no equivalent. Should `⏎` on a `url`
+  row open it, and should it also be a command (`open --url @sel`)?
 - **Unsaved layout on switch.** `1`–`9` quietly drops unsaved drift
   from the active layout. Should it ask first?
