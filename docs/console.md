@@ -143,7 +143,7 @@ These are user-facing names. Python packages keep their current names
 | `mo xie` | Moxie | `moxie:plot` (`plot …`), `moxie:fit` (`fit …`) | |
 | `mo tion` | Motion | `motion:scenarios`, `motion:state`, `motion:rule` | Timeline sits under state. No runs list. |
 | `mo ra` | Mora | `mora:notes`, `mora:edit`, `mora:read`, `mora:worksheet` | `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
-| `mo nastery` | Monastery | `monastery:agenda` | A table or grid pane on the `--line` grid. |
+| `mo nastery` | Monastery | `monastery:agenda`, `monastery:week`, `monastery:month` | Table and grid panes on the `--line` grid. |
 | `mo narch` | Monarch | `monarch:graph` | Frozen structure debugger. Graph only. |
 | `mo saic` | Home + settings | `mosaic:home`, `mosaic:gardens` | Ownership tree, loose gardens, garden management. Replaces the Gardens window and the launcher. |
 | — | shell | `log` | Command and error log. |
@@ -466,6 +466,32 @@ What the build decided within the settled plan above.
   and find conditions (`agenda status!:done`). The default is every
   binding found; `b` cycles a key by rewriting the line.
 
+### Built for U7 (2026-10-01)
+
+What the build decided within the settled plan above.
+
+- **Defaults:** `agenda` runs from today for 14 days; a week starts on
+  Monday; a month is the six weeks around it. Dates also read as `find`
+  reads them (`today`, `7d`, `-2w`).
+- **Paging rewrites the line** (`week 2026-10-12`); `t` drops the date,
+  so the pane follows today again.
+- **`b` hides the key of the event under the cursor** (`--keys` lists the
+  rest), and `B` shows every key -- the "cycle a key" of the plan.
+- **Moves:** `J`/`K` an hour (a day when all-day), `H`/`L` a day, `<`/`>`
+  half an hour (a day when all-day); drag snaps to a quarter hour.
+- **"This one" is the `detach` verb** (`detach #id ‹key› ‹occurrence›
+  ‹start› ‹end›`): the one edit a `set` can't say, one undo step.
+  Deleting one occurrence is a `set` adding an `EXDATE`; deleting a
+  whole mote puts `delete #id` on the command line to confirm.
+- **`n`** puts `‹name›.date = ‹slot›` on the command line with the caret
+  where the name goes (`ctx.prefill` takes a caret now). The slot is a
+  clicked one in the week grid, else the cursor's day at 09:00.
+- **Rows vs bars:** a multi-day all-day value is only a bar; a `due`
+  stays a row on its day even when the same mote also has a due bar.
+- **Old windows' launchers** offer *Mosaic* (the console) in place of
+  Monastery; Gardens' stale Monolith tile is gone.
+- **New tokens:** `--wk-gutter` 6ch, `--wk-hour` 36px.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
@@ -545,7 +571,7 @@ own plan-mode phase and ships something usable.
 | U4 | **Done.** **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*), then `fit` and the follow-up fixes (*Settled for `fit`*), also done. | Commands carry view state (ranges, series). |
 | U5 | **Done.** **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list (see *Settled for U5*, *Built for U5*). | A live, ticking view inside the contract. |
 | U6 | **Done.** **Mora → `mo ra`.** Document pane as a text-editing pane, plus the worksheet (see *Settled for U6*, *Built for U6*). | Keyboard capture and `esc` work for editors. |
-| U7 | **Monastery → `mo nastery`.** Agenda pane. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
+| U7 | **Done.** **Monastery → `mo nastery`.** Agenda, week and month panes with bars (see *Settled for U7*, *Built for U7*); plan-my-week and planned vs. actual wait. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
 | U8 | **Monarch → `mo narch`.** Canvas graph only, restyled. Remove annotations (`core/annotations.py`, the annotation frontends, their docs) and ship a migration that drops their stored data. | The frozen debugger costs no more upkeep. |
 | U9 | **Home → `mo saic`.** Ownership tree, loose gardens, garden management and settings. Delete `gardens_app/`, `window_launcher.py`'s multi-window pieces and the `frontend_shared/` symlinks. | The window is the only surface. |
 

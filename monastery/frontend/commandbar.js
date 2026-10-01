@@ -1,1 +1,0 @@
-../../frontend_shared/commandbar.js

@@ -369,7 +369,7 @@ def is_calendar_value(value) -> bool:
 # Monastery lets you drag a rectangle; everything below says what that
 # means in properties. Still pure -- a mote and a datetime or two in, a
 # dict of properties out -- so what a drag *means* is tested in
-# tests/test_calendar.py without a window, and monastery/api.py only has
+# tests/test_calendar.py without a window, and core/agenda.py only has
 # to write down what it is handed.
 #
 # Which key a drag rewrites is the binding that placed the rectangle.
@@ -417,7 +417,7 @@ def with_exception(mote: Mote, binding: str, occurrence_start: datetime) -> dict
     """The binding's value with one more occurrence taken out of it, or
     `{}` when there is no rule to take it out of -- a mote that does not
     recur has nothing to except, and the caller deletes the mote itself
-    instead (monastery/api.py::delete_occurrence).
+    instead (the calendar panes run `delete`).
 
     Excluding the *anchor* occurrence is allowed and works: the series
     goes on expanding from a start that no longer places anything, which
@@ -532,7 +532,7 @@ def detached_properties(
     mote: Mote, binding: str, new_start: datetime, new_end: datetime
 ) -> dict:
     """The properties that make one occurrence stand on its own -- what
-    monastery/api.py copies the mote with when you move or resize a
+    core/agenda.py::detach copies the mote with when you move or resize a
     single occurrence instead of the series.
 
     The copy is a plain mote at a plain time: the rule lines are dropped

@@ -359,7 +359,7 @@ const IntervalPicker = (() => {
   /** The structured repeat editor: frequency, interval, weekdays, and
    *  how it ends.
    *
-   *  This lived in monastery/frontend/app.js and nowhere else, which is
+   *  This lived in Monastery's old window and nowhere else, which is
    *  why the picker in every other window had been reduced to showing an
    *  RRULE as raw text. It writes into `rule` in place -- the same shape
    *  decomposeRuleLines produces and composeRuleLines serializes -- and

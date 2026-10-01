@@ -5,7 +5,6 @@ the same wherever it runs."""
 import pytest
 
 import monarch.api
-import monastery.api
 from api_common import CommandBarApi
 from core.gardens import create_garden
 
@@ -49,7 +48,7 @@ def test_delete_a_mote_needs_confirmation(api):
 
 
 @pytest.mark.parametrize("module", [
-    monarch.api, monastery.api,
+    monarch.api,
 ])
 def test_every_window_speaks_the_contract(module):
     assert issubclass(module.Api, CommandBarApi)

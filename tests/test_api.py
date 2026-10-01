@@ -366,7 +366,7 @@ def test_open_app_delegates_to_api_common(api, monkeypatch):
     monkeypatch.setattr(
         api_common, "popen_detached", lambda args, **kwargs: calls.append(args)
     )
-    assert api.open_app("monastery") == {"app": "monastery", "garden": "test", "focus": None}
+    assert api.open_app("console") == {"app": "console", "garden": "test", "focus": None}
     assert calls[0][2:] == ["--garden", "test"]
 
 

@@ -1443,17 +1443,17 @@ def run_checks(window):
             JSON.stringify(Array.from(document.querySelectorAll('#launcher-results .launcher-name'))
                 .map(e => e.textContent))
         """))
-        assert "Monastery" in names, f"the launcher should list sibling apps, got {names}"
+        assert "Mosaic" in names, f"the launcher should list sibling apps, got {names}"
         assert "Monarch" not in names, "the launcher should not offer to open the app you're already in"
 
         js(window, """
             Array.from(document.querySelectorAll('#launcher-results .launcher-card'))
-                .find(c => c.querySelector('.launcher-name').textContent === 'Monastery')
+                .find(c => c.querySelector('.launcher-name').textContent === 'Mosaic')
                 .dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
         """)
         time.sleep(0.4)
         calls = json.loads(js(window, "JSON.stringify(window.__openAppCalls)"))
-        assert calls == [["monastery", None]], f"picking Monastery should open it with no mote, got {calls}"
+        assert calls == [["console", None]], f"picking Mosaic should open the console, got {calls}"
         closed = js(window, "document.getElementById('launcher-overlay').classList.contains('hidden')")
         assert closed is True, "opening an app from the launcher should close it"
 

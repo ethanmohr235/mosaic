@@ -41,7 +41,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 
 | Command | Does |
 |---|---|
-| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`); `mo nastery`, `mo narch`, `mo saic` still open old windows |
+| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`), `mo nastery` (`agenda \| week`); `mo narch`, `mo saic` still open old windows |
 | `find ‹conditions› [--sort k] [--group k] [--cols a,b] [--view name]` | Table of motes |
 | `open @sel\|#id\|name` | A mote's properties and links (`@sel` follows the selection) |
 | `set ‹target› ‹key› ‹value›` / `… --clear` | Set / remove a property (`5 mm` records the unit); `set C1.voltage 30` also works |
@@ -68,12 +68,18 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `read @sel\|#id\|‹name›` | A note rendered, following unsaved typing |
 | `notes [text]` | Every note, or those containing the text |
 | `worksheet` | The garden's calculation as text; `esc` applies it (one undo step) |
+| `agenda [from] [to]` | Dated motes, a row per occurrence by day (default: today + 14 days) |
+| `week [date]`, `month [date]` | Hour grid; six-week grid |
+| `detach #id ‹key› ‹occurrence› ‹start› ‹end›` | Move one occurrence out of its series (what `t` runs) |
 | `cd ‹garden›` | Switch garden |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |
 | `undo`, `redo` | Undo / redo the last write |
 | `log` | Command and error log |
 | anything else | Statement: `R1.x = 5 ohm`, `A -> B`, `A -> type -> B`, `R1 : Resistor`, `R1.x ?`, `delete R1` |
+
+Calendar flags: `--keys a,b` · `--type ‹species›` · find conditions. Dates:
+ISO, `today`, `7d`, `-2w`.
 
 Fit flags: `--from ‹import›` (one CSV import's rows) · `--scenario name`.
 
@@ -165,6 +171,24 @@ against it · `a` / `n` add override / new scenario (prefills `set
 Read pane: `j` `k` `g` `G` `space` scroll · click a link to select its mote.
 Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
 `n` new note (prefills `edit `).
+
+**Calendar** (`agenda`, `week`, `month`, `mo nastery`)
+
+| Key | Does |
+|---|---|
+| `[` `]`, `t` | Page back / on, today |
+| `j` `k` | Next / previous event |
+| `⏎` / click | Select its mote |
+| `o` | Follow: note → `read`, project → `cd`, else `open` |
+| `J` `K`, `H` `L` | Move ± an hour (all-day: a day), ± a day |
+| `<` `>` | Shorter / longer |
+| `n` | New event (prefills `‹name›.date = ‹slot›`) |
+| `d` `d` | Delete (prefills `delete #id`) |
+| `b`, `B` | Hide this event's key, show every key |
+| recurring: `t`, `s` | This occurrence (`detach`), the series |
+
+Week grid: drag to move, drag the bottom edge to resize, click a slot
+for `n`, double-click to create. Month: `+N more` opens that week.
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.
 **New pane** (`view>`): `↑` `↓` choose, `⏎` place, `esc` cancel.

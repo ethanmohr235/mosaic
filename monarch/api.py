@@ -45,8 +45,6 @@ def _classify(motes: list, rels: list) -> dict:
 # process rather than a second window on this one: it holds its own
 # garden connection and outlives or predeceases this window freely.
 
-# Monastery, the calendar window, on exactly the same terms.
-MONASTERY_SCRIPT = Path(__file__).resolve().parent.parent / "run_monastery.py"
 
 
 logger = logging.getLogger(__name__)
@@ -234,24 +232,10 @@ class Api(InspectorApi, CommandBarApi, UndoableApi, AnnotatableApi):
         return {"opened": target}
 
     @_synchronized
-    def open_monastery(self, mote_id: str | None = None) -> dict:
-        """Open Monastery, the calendar, on this garden -- optionally with
-        one mote already selected. Everything open_mora says applies here
-        unchanged: fire-and-forget through the detached launcher, under
-        `sys.executable` so it comes up in this virtualenv, holding its
-        own connection to the same garden file."""
-        command = [sys.executable, str(MONASTERY_SCRIPT), "--garden", self._current_garden]
-        if mote_id:
-            command += ["--focus", mote_id]
-        _popen_detached(command, quiet=False)
-        return {"garden": self._current_garden, "focus": mote_id}
-
-    @_synchronized
     def open_app(self, app_id: str, mote_id: str | None = None) -> dict:
         """Launch any MonOSS app on this same garden from the ⌘J switcher
-        -- the app-agnostic counterpart to open_mora/open_monastery
-        above (which stay as they are, since Monarch's own Tools menu
-        already calls each by name). Monarch is the one app
+        -- the old per-app open_mora/open_monastery went with their
+        windows. Monarch is the one app
         that can already reach every sibling, so this is also how the
         switcher opens a second Monarch window on itself, same as any
         other app id -- see window_launcher.choose_port for why that's a

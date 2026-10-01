@@ -1,12 +1,11 @@
 # Running the desktop UI
 
-Two native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
-frontend — no browser tab, no local web server: **Monarch**, the graph
-(`run_monarch.py`), and **Monastery**, the calendar (`run_monastery.py`).
-They share one palette and one set of vendored fonts, so they read as
-one product. Monolith, the table, Moxie, the plots, Motion, the
-simulator, and Mora, the notes, have moved into the console (below) and
-have no windows of their own any more.
+One native window besides the console (via `pywebview`, a local
+HTML/CSS/JS frontend — no browser tab, no local web server): **Monarch**,
+the graph (`run_monarch.py`), frozen until U8. Monolith, the table,
+Moxie, the plots, Motion, the simulator, Mora, the notes, and Monastery,
+the calendar, have moved into the console (below) and have no windows
+of their own any more.
 
 A seventh window sits beside rather than among them: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
@@ -374,6 +373,98 @@ deleted; with `live` on, a solve follows. A sheet that applied cleanly
 then shows the garden's own reading of it; one with problems keeps your
 text so you can fix it.
 
+### Calendar (`agenda`, `week`, `month`, `mo nastery`)
+
+`mo nastery` puts `agenda | week` where the focused pane was.
+
+| Line | Pane |
+|---|---|
+| `agenda [from] [to]` | a row per occurrence, grouped by day: time, name, which key placed it, `↻` repeats, `✎` has a note, `▣` owns a project. Today through two weeks by default |
+| `week [date]` | the hour grid of the week holding `date`: all-day items and bars across the top, timed events below, side by side where they overlap |
+| `month [date]` | six weeks of day cells, three items each and `+N more` (opens that week) |
+
+Dates are ISO days or what `find` reads as one (`today`, `7d`, `-2w`).
+All three take `--keys a,b` (which date keys), `--type ‹species›`, and
+find conditions (`agenda status!:done`).
+
+**Bars** run across the days they cover: any multi-day value
+(`2026-10-01/2026-10-09`), and any mote with both a start and a `due` --
+its `start`/`starts` value, else the day its project was started -- drawn
+dashed. A project's owner shows on its own because it carries `due`.
+
+| Key | Does |
+|---|---|
+| `[` `]`, `t` | Page back / on (rewrites the date in the line), today |
+| `j` `k` | Move between events |
+| `⏎` / click | Select the mote (props and `read @sel` follow) |
+| `o` | Follow: a note → `read`, a project owner → `cd` to its garden, else `open #id` |
+| `J` `K`, `H` `L` | Move an hour (a day when all-day), a day |
+| `<` `>` | Shorter / longer (half an hour, or a day when all-day) |
+| `n` | New event: `‹name›.date = ‹slot›` on the command line, caret at the name |
+| `d` `d` | Delete (puts `delete #id` on the command line to confirm) |
+| `b` / `B` | Hide the key under the cursor / show every key |
+
+In the week grid, drag an event to move it (a quarter hour at a time,
+across days too) and drag its bottom edge to resize; click an empty slot
+to point `n` at it, double-click to start an event there.
+
+**Every change is a command.** A move or resize runs the `set` that
+writes the new value into the key that placed the event, in the shape it
+was written. A **recurring** event asks first: `t` this one -- `detach
+#id ‹key› ‹occurrence› ‹start› ‹end›`, which excepts that occurrence from
+the series and copies it to its new time as a mote of its own (one undo
+step) -- or `s` the series. Deleting one occurrence is a `set` that adds
+an `EXDATE`.
+
+#### Which dates
+
+There is no "calendar entry" type, because MonOSS does not have types.
+The calendar reads **every** property whose value parses as a date and
+shows each such key -- so a garden where meetings say `when`, tasks say
+`due` and events say `starts` shows all three at once, with no migration
+and nothing declared. `--keys due,date` narrows a pane to some of them,
+and `b` / `B` hide the key under the cursor / show them all again.
+
+This is a read-side heuristic only. A new event from `n` writes `date`:
+reading is general because a garden is, but a new date has one right
+home.
+
+A value is an **ISO 8601 interval** and carries its own span and
+repetition -- there is no separate `duration` or `recurrence` property,
+and no reserved name involved anywhere:
+
+| Value | Placed as |
+|---|---|
+| `2026-08-24` | all-day, one day |
+| `2026-08-24/2026-08-27` | all-day, the 24th to the 26th — **the end is exclusive** |
+| `2026-08-24T09:15`, or `2026-08-24 09:15` | timed, the default 60 minutes |
+| `2026-08-24T09:15/PT20M` | timed, 20 minutes |
+| `2026-08-24T09:15/2026-08-24T11:00` | timed, an explicit end |
+| an `RRULE:…` line beneath any of them | expanded into one occurrence per repetition inside the visible range |
+| an `EXDATE:…` line beneath that | one occurrence excepted out of the series |
+
+Durations are days, hours, minutes and seconds (`P2D`, `PT1H30M`) —
+years and months have no fixed length, so an event lasting "one month"
+has no single answer.
+
+Gardens written the old way — `date` plus a separate `duration`, `ends`
+or `recurrence` — are folded into this on open, keeping whatever key each
+mote already used. The one thing it costs: typing a bare `duration`
+beside a date no longer does anything on its own.
+
+A recurring mote is still **one mote**: every occurrence it draws opens
+the same detail panel -- one mote → one event → the whole series. A rule
+that doesn't parse
+places the mote on its own date rather than hiding it -- the same
+permissiveness a broken note gets in the read pane.
+
+Templates and scenario overrides are never placed, even when dated: they
+hold replacement values rather than real data.
+
+Not ported from the old window: the mini calendar, the draft popover's
+species picker (type `R1 : task` after creating), and polling -- the
+console re-reads on focus and after every write, like every pane.
+
 ### Tiling
 
 `^w` is the prefix: `v`/`s` split side by side or stacked, `h j k l`
@@ -521,7 +612,7 @@ whether it ends never, after N times, or on a date. Done closes it;
 Clear removes the property's value entirely.
 
 A rule the editor can't represent — two RRULE lines, a `BYMONTHDAY`, an
-`EXDATE` left behind by detaching one occurrence in Monastery — is shown
+`EXDATE` left behind by detaching one occurrence in the calendar — is shown
 as editable RRULE text instead, and anything it doesn't understand is
 preserved rather than dropped.
 
@@ -530,8 +621,7 @@ preserved rather than dropped.
 Every window has a context menu on a mote now, and the first two items
 are the same everywhere: **Inspect** and **Inspect in new tab**. What
 follows is that window's own — Monarch offers copy/pin/delete on the
-whole selection, and Monastery offers removing the one occurrence you
-clicked.
+whole selection.
 
 ### Graph interactions
 
@@ -746,15 +836,13 @@ property/relationship, editable and deletable like anything else.
 
 ### Look and feel
 
-All three windows are dark-only and share one palette, one type pairing
-(IBM Plex Serif for names and titles, IBM Plex Sans for body, a mono for
-labels and ids) and one set of vendored fonts. The shared tokens are
-declared at the top of `monarch/frontend/style.css` and copied verbatim
-into `monastery/frontend/style.css` --
-pywebview's http server roots at the directory of the page it serves, so
-a stylesheet one directory over is not reachable, and three copies is
-the price of three windows that look like one product. Change a shared
-token in one and change it in all three.
+Monarch is dark-only, with its own palette and type pairing (IBM Plex
+Serif for names and titles, IBM Plex Sans for body, a mono for labels
+and ids) and its own vendored fonts, declared at the top of
+`monarch/frontend/style.css`. While other windows still existed, those
+tokens were copied verbatim into each -- pywebview's http server roots at
+the directory of the page it serves. The Gardens window keeps its own
+copy.
 
 The recurring pieces, so a new surface doesn't invent its own: a 46px
 topbar carrying a two-line brand block (the window's name over `MonOSS`
@@ -818,8 +906,7 @@ e.g. `/usr/bin/python3 -m venv --system-site-packages .venv`.
 Each window has its own user-level launcher (none tracked in this repo --
 they're machine-specific, pointing at an absolute `.venv` path) so it shows
 up in the regular application menu instead of needing a terminal:
-`~/.local/share/applications/monoss.desktop` for Monarch and
-`monastery.desktop` for Monastery. In every case
+`~/.local/share/applications/monoss.desktop` for Monarch. In every case
 `StartupWMClass` has to match that window's own title (the string passed
 to `webview.create_window(...)` in its `app.py`), not the product name, or
 the desktop environment won't associate the launcher with the running
@@ -838,24 +925,10 @@ Categories=Utility;
 StartupWMClass=Monarch
 EOF
 
-cat > ~/.local/share/applications/monastery.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=Monastery
-Comment=Calendar over a MonOSS garden's dated motes
-Exec=$(pwd)/.venv/bin/python $(pwd)/run_monastery.py
-Icon=$(pwd)/assets/icon-monastery.svg
-Terminal=false
-Categories=Utility;
-StartupWMClass=Monastery
-EOF
-
 update-desktop-database ~/.local/share/applications/
 ```
 
-Monastery's icon (`assets/icon-monastery.svg`) is the ringed-planet mark
-the window draws in its own topbar brand block
-(`monastery/frontend/index.html`). Monarch's `assets/icon.svg` predates the amber
+Monarch's `assets/icon.svg` predates the amber
 accent theme and is still in blue; nothing here changes it.
 
 ## Regression testing
@@ -905,135 +978,6 @@ One check samples the canvas pixels directly. That is not paranoia: the
 graph's render loop was once entirely dead while every other check passed,
 because hit-testing works off node coordinates rather than what was drawn —
 clicking, dragging and connecting all succeeded against a blank canvas.
-
----
-
-# Monastery -- the calendar
-
-A second window, over the same gardens: `./run_monastery.py`, or
-`.venv/bin/python run_monastery.py`. Same stack and the same terms as
-Monarch -- pywebview over a local HTML/CSS/JS frontend, its own process,
-its own garden connection, opening and closing independently of the
-graph window.
-
-```
-./run_monastery.py                      # the default garden
-./run_monastery.py --garden reactor     # a specific garden
-./run_monastery.py --focus <mote id>    # open with one mote selected
-```
-
-### Date bindings
-
-Monastery does not have a "calendar entry" type, because MonOSS does not
-have types. It reads **every** property whose value parses as a date and
-offers each such key as a **binding** -- so a garden where meetings say
-`when`, tasks say `due` and events say `starts` shows all three at once,
-with no migration and nothing declared. The sidebar lists every binding
-it found with a count, and toggling one off empties the grid of the motes
-it placed without touching them.
-
-This is a read-side heuristic only. Creating a mote from the calendar
-always writes `date`: reading is general because a garden is, but a new
-date has one right home.
-
-A value is an **ISO 8601 interval** and carries its own span and
-repetition -- there is no separate `duration` or `recurrence` property,
-and no reserved name involved anywhere:
-
-| Value | Placed as |
-|---|---|
-| `2026-08-24` | all-day, one day |
-| `2026-08-24/2026-08-27` | all-day, the 24th to the 26th — **the end is exclusive** |
-| `2026-08-24T09:15`, or `2026-08-24 09:15` | timed, the default 60 minutes |
-| `2026-08-24T09:15/PT20M` | timed, 20 minutes |
-| `2026-08-24T09:15/2026-08-24T11:00` | timed, an explicit end |
-| an `RRULE:…` line beneath any of them | expanded into one occurrence per repetition inside the visible range |
-| an `EXDATE:…` line beneath that | one occurrence excepted out of the series |
-
-Durations are days, hours, minutes and seconds (`P2D`, `PT1H30M`) —
-years and months have no fixed length, so an event lasting "one month"
-has no single answer.
-
-Gardens written the old way — `date` plus a separate `duration`, `ends`
-or `recurrence` — are folded into this on open, keeping whatever key each
-mote already used. The one thing it costs: typing a bare `duration`
-beside a date no longer does anything on its own.
-
-A recurring mote is still **one mote**: every occurrence it draws opens
-the same detail panel -- one mote → one event → the whole series. A rule
-that doesn't parse
-places the mote on its own date rather than hiding it -- the same
-permissiveness a broken note gets in the read pane.
-
-Templates and scenario overrides are never placed, even when dated: they
-hold replacement values rather than real data.
-
-### The window
-
-| Area | |
-|---|---|
-| Week | a 24-hour grid; overlapping events are packed into side-by-side lanes, all-day ones pin to a row above it |
-| Month | six weeks of day cells, three chips each and a `+N more` that opens that week |
-| Bindings rail | the mini calendar, the date-binding toggles, and a species filter |
-| Detail panel | which property placed the mote, its properties (any holding an interval marked), and its relationships |
-
-| Control | Action |
-|---|---|
-| `‹` / `›`, or ← / → | Previous / next week or month |
-| **Today**, or `T` | Back to the current week |
-| `W` / `M` | Week or month view |
-| Click any empty slot | Open the draft popover there |
-| Enter, in the draft's name field | Create the mote |
-| Esc | Close the draft, else the detail panel |
-
-The draft popover's type picker lists the garden's own **species** --
-whatever motes are pointed at by `instance_of` -- rather than a fixed set
-of kinds, and picking one adds that relationship to the new mote.
-
-### Live updates
-
-Nothing in MonOSS pushes: Monarch, the CLI and the MCP server
-all write the same file and none of them announces it. So Monastery
-**polls**, every few seconds, and only while its window has focus -- an
-edit made anywhere else appears on the next tick without a refresh. A
-poll never runs while the draft popover is open, so it cannot reload the
-inputs out from under someone typing into them.
-
-### Ports
-
-The third window means a third port. pywebview pins its server to 42001
-unless told otherwise (Monarch), and Monastery asks for **42003**, each falling back to an ephemeral port if
-theirs is taken. This is not tidiness: the process that loses that race
-still points its window at the winner's address, so it comes up showing
-another app's page against its own bridge -- which is exactly what
-happened to Mora's old window once. `.webview_data_monastery/` is its own WebKit
-storage for the same reason.
-
-### Smoke test
-
-`scripts/monastery_smoke_test.py`, the same instrument as Monarch's and for
-the same reason. It drives a real window against a seeded throwaway
-garden -- seeded relative to *today*, since the week view draws whatever
-week it opens on -- and checks that motes place under every binding, that
-an all-day span pins across each of its days, that a recurrence expands,
-that overlapping events share the column, that a dated template stays
-off the grid, that the toggles filter, that clicking an event opens the
-panel, that the draft popover writes a mote dated with the reserved key,
-and that an edit from another process arrives on the next poll. It holds
-42001 and 42002 for the whole run, because a Monastery that asks for the
-wrong port must fail visibly rather than load another app's page.
-
-Run the smoke tests one at a time. All five drive real windows with
-synthetic gestures, and the timing-sensitive checks flake when they
-compete.
-
-```
-.venv/bin/python scripts/monastery_smoke_test.py
-```
-
-Prints PASS/FAIL per check and exits non-zero if anything failed. Never
-touches real data: `GARDENS_DIR` and the webview storage dir are both a
-fresh temp directory.
 
 ---
 

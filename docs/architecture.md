@@ -605,9 +605,9 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `monarch/`, `monastery/`,
+`core/` is the whole system. `cli/`, `monarch/`,
 `gardens_app/`, `console/` and `mcp_server/` are
-six adapters over it, and each one's job is a
+five adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -631,8 +631,8 @@ The charter:
   reading .modoc notes (see Notes below). It is the console's `edit`,
   `read` and `notes` panes now, not a window.
 * **Monastery** -- likewise, for motes that have a time (see The
-  calendar below). A second window on the same terms, and for the same
-  reason: a week is a shape a graph canvas cannot draw.
+  calendar below): a week is a shape a graph canvas cannot draw. It is
+  the console's `agenda`, `week` and `month` panes now, not a window.
 * **Monolith** -- likewise once more, for the garden as a whole rather
   than for any one kind of mote (see The table below): a query across
   every mote and an edit applied to two hundred of them are shapes a
@@ -945,8 +945,10 @@ Mora was a separate window (`mora/`) until U6.
 
 # The calendar
 
-`core/calendar.py` places motes in time, and `monastery/` is the window
-that draws them (`run_monastery.py`).
+`core/calendar.py` places motes in time, and the console's calendar
+panes draw them (`agenda`, `week`, `month`, over `core/agenda.py`;
+docs/console.md → *Settled for U7*). Monastery was a separate window
+(`monastery/`) until U7.
 
 The design decision worth stating is what it does *not* do: there is no
 calendar-entry type, and no property that means "this is an event."
@@ -960,8 +962,7 @@ itself again -- the calendar needed no new object type, no new
 relationship, and no new reserved property.
 
 That generality is deliberately **read-side only** for *creation*.
-Creating a mote from the grid always writes `date`, the conventional
-name. Reading is general because a garden is; a *new* date has one right
+A new event (`n`) always writes `date`, the conventional name. Reading is general because a garden is; a *new* date has one right
 home, and having two would be how a garden ends up with the same event
 under three keys.
 
@@ -974,9 +975,10 @@ span lives inside the same value, so a move and a resize are both one
 write to one key. All of it is computed by pure functions in
 `core/calendar.py`'s writing section (`moved_properties`,
 `resized_properties`, `detached_properties`), so what a drag *means*
-is tested without a window, and `monastery/api.py::place_occurrence`
-only writes down what it is handed. Move and resize are one bridge
-method because the top edge of an event is both at once.
+is tested without a window, and `core/agenda.py::edit_line` turns the
+answer into the `set` line the pane runs -- so every move and resize is
+in the history, the log and undo like any other write. Move and resize
+are one function because the top edge of an event is both at once.
 
 `recurrence` -- an RFC 5545 RRULE -- is expanded by `dateutil.rrule`
 (the one new dependency, approved for this) into one occurrence per
@@ -997,31 +999,26 @@ read forwards: an `EXDATE` where it was, and an ordinary copy where it
 now is, carrying the original's species and dropping its rule lines.
 RFC 5545 would call that copy a `RECURRENCE-ID`
 override; MonOSS has no such thing on purpose, and a plain mote says the
-same thing without a second kind of event. Because one mote *is* the
-whole series, the window asks which was meant rather than guessing --
-the only question Monastery puts in front of a write.
+same thing without a second kind of event. It is the one edit a `set`
+can't say, so it is its own verb, `detach` (`core/agenda.py::detach`,
+one undo step). Because one mote *is* the whole series, the pane asks
+which was meant rather than guessing (`t` this one, `s` the series) --
+the only question the calendar puts in front of a write.
 
 Everything in `core/calendar.py` is pure: motes in, occurrences out, no
 connection. That is the discipline `core/scenarios.py::apply()` and
 `core/incidence.py` already follow, and it is why the whole calendar is
-testable without a window (`tests/test_calendar.py`). `monastery/api.py`
-adds only what a window knows -- which garden is open, and which
-bindings the person switched off -- and `monastery/payload.py` only
-reshapes.
+testable without a window (`tests/test_calendar.py`).
+`core/agenda.py` adds what a pane's line says -- which range, which keys,
+which species and conditions -- and the bars: a multi-day value, or a
+start (`start`/`starts`, else when the mote's `garden` was written)
+through a `due`.
 
 Two exclusions are inherited rather than reinvented. Templates and
 scenario overrides are never placed, even when dated, because they hold
 replacement values rather than real data. And a mote is coloured by its
 species through the same palette the graph canvas uses, so it reads the
-same colour in all six windows.
-
-Monastery is a second process on the same terms as Monarch, which means the
-same two collisions to avoid: `monastery/app.py::choose_port` asks for
-42003 (42001 is Monarch's; 42002 was Mora's old window) and falls back to an
-ephemeral port, and `.webview_data_monastery/` is its own WebKit
-storage. And since nothing in MonOSS pushes -- no adapter announces its
-writes -- the window **polls** while focused rather than waiting to be
-told. See `docs/ui-setup.md`.
+same colour everywhere. See `docs/ui-setup.md` → *Calendar*.
 
 # Species colour
 
@@ -1053,7 +1050,7 @@ it.
 # The inspector
 
 One mote, one surface, every window. Selecting a mote anywhere -- a node
-in Monarch, a placement in Monastery -- opens the same
+in Monarch -- opens the same
 floating panel, with the same tools in it; the console's `p` float and
 props pane draw the same payload (`core/inspect.py`).
 
@@ -1076,8 +1073,8 @@ HTTP origin and localStorage cannot literally be shared between them.
 
 **Three shared files, not one.** `frontend_shared/inspector.js` is the
 panel; `interval.js` is the calendar a date-shaped property opens, which
-is separate because two callers need it -- the panel, and Monastery's
-draft editor, which is not a panel at all; `menu.js` is the right-click
+was separate because two callers needed it -- the panel, and
+Monastery's old draft editor; `menu.js` is the right-click
 dropdown, which is separate because what goes *in* it is each window's
 own business and only the look, placement and dismissal are shared.
 
@@ -1128,9 +1125,8 @@ the old panel calls `inspector_*` methods directly (docs/console.md ->
 
 **What stayed in app chrome.** The panel is for one mote. A selection of
 two hundred is a different question, so Monarch's and Monolith's bulk
-editors stay where they were, as do Monarch's relationship panels,
-Monastery's occurrence controls (which placement was clicked, moving it,
-detaching it). Deleting a mote likewise stays
+editors stay where they were, as do Monarch's relationship panels.
+Deleting a mote likewise stays
 in each window's own chrome -- the inspector edits a mote, it does not
 end one.
 

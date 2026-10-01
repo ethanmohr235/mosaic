@@ -112,8 +112,13 @@ updates it in the same commit. Keep it compact: tables, no prose.
   @sel`) plus the `worksheet` pane; `core/document.py` renders a note's
   draft (every macro), `console/mora.py` is `api.mora`, `js/editor.js` is
   the modal editor with find/replace, and `core/worksheet.py` applies as
-  one undo step. Mora's old window is deleted. The next UI step is U7
-  (Monastery).
+  one undo step. Mora's old window is deleted.
+- Console **U7 is done**: Monastery is `mo nastery` (`agenda | week`,
+  and `month`) over `core/agenda.py` (the grammar, rows, bars, edits as
+  `set` lines, the `detach` verb); `console/monastery.py` is
+  `api.monastery`. Roadmap phase 5's bars and click-to-open are in;
+  plan-my-week and planned vs. actual are not. Monastery's old window is
+  deleted. The next UI step is U8 (Monarch).
 
 ## Split of work: cloud backend, local frontend
 

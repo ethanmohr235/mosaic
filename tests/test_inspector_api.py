@@ -8,7 +8,6 @@ last test in this file is the one that holds that claim up.
 import pytest
 
 import monarch.api
-import monastery.api
 from api_common import InspectorApi
 from core.gardens import create_garden
 
@@ -347,7 +346,7 @@ CONTRACT = [
 
 
 @pytest.mark.parametrize("module", [
-    monarch.api, monastery.api,
+    monarch.api,
 ])
 def test_every_window_speaks_the_whole_contract(module):
     """The inspector is one surface in six windows, so it has to find the

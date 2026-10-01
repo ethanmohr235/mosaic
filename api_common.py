@@ -115,7 +115,6 @@ REPO_ROOT = Path(__file__).resolve().parent
 # open_<sibling>() per existing app.
 APPS = {
     "monarch": ("Monarch", REPO_ROOT / "run_monarch.py", None),
-    "monastery": ("Monastery", REPO_ROOT / "run_monastery.py", "--focus"),
     # The console (docs/console.md): the one window the others are
     # being ported into. Listed so an old window can open it; it takes
     # no focus flag -- selection lives in the console's own store.

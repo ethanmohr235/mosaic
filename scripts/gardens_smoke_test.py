@@ -182,17 +182,17 @@ def run_checks(window):
 
     def open_in_offers_every_window():
         assert texts(window, "#open-in .app-chip") == [
-            "Monarch", "Monastery", "Monolith"
+            "Monarch", "Mosaic"
         ], f"got {texts(window, '#open-in .app-chip')}"
 
         js(window, """
             Array.from(document.querySelectorAll('#open-in .app-chip'))
-                .find(c => c.textContent.includes('Monastery')).click();
+                .find(c => c.textContent.includes('Mosaic')).click();
         """)
         assert wait_until(lambda: json.loads(js(window, "JSON.stringify(window.__opened)"))), (
             "clicking an app chip should reach the bridge"
         )
-        assert json.loads(js(window, "JSON.stringify(window.__opened)")) == [["monastery", "alpha"]]
+        assert json.loads(js(window, "JSON.stringify(window.__opened)")) == [["console", "alpha"]]
 
     check("Open in offers every old window and launches the one clicked", open_in_offers_every_window)
 

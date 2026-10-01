@@ -1,7 +1,7 @@
 # monarch/app.py
 """The Monarch window: the graph itself, and the first of the three.
 
-Mora (the old mora/app.py) and Monastery (monastery/app.py) are its twins --
+Mora and Monastery (both now console panes) were its twins --
 same pywebview settings, same cache workaround, different frontend and
 different Api. Each is its own window on the same gardens rather than a
 pane inside this one, so any of them can be closed, moved to a second

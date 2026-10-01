@@ -163,7 +163,7 @@ alongside all of them.
 | 2 | **Backend done.** Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
 | 3 | **Backend done.** Mora calc macros and LaTeX basics | A gradeable homework document |
 | 4 | **Backend done.** Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
-| 5 | Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
+| 5 | **Bars and click-to-open done (console U7).** Monastery agenda: plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
 | 7 | **Backend done except Moxie export.** Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
 | 8 | **Backend done.** Uncertainty propagation | Lab reports |

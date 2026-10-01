@@ -2,7 +2,7 @@
 
 Everything here is pure: motes in, occurrences out. No connection, no
 window. That is the point of the module living in core/ rather than in
-monastery/, and these tests are what it buys.
+Monastery (the console calendar panes), and these tests are what it buys.
 """
 from datetime import date, datetime, time, timedelta
 

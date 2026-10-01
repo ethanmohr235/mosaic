@@ -93,22 +93,11 @@ const APPS = [
     </svg>`,
   },
   {
-    id: "monastery", name: "Monastery",
-    icon: `<svg width="17" height="17" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="9" width="26" height="24" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="7" y="9" width="26" height="7" rx="3" fill="var(--fg)" opacity="0.25"></rect>
-      <rect x="12" y="21" width="6" height="5" rx="1" fill="var(--accent)"></rect>
-      <rect x="22" y="21" width="6" height="5" rx="1" fill="var(--fg)" opacity="0.35"></rect>
-    </svg>`,
-  },
-  {
-    id: "monolith", name: "Monolith",
-    icon: `<svg width="17" height="17" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="14" y="7" width="12" height="26" rx="2" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="17" y="12" width="6" height="3" rx="1" fill="var(--accent)"></rect>
-      <rect x="17" y="18" width="6" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-      <rect x="17" y="24" width="6" height="3" rx="1" fill="var(--fg)" opacity="0.4"></rect>
-    </svg>`,
+    id: "console", name: "Mosaic", icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
+        <rect x="6" y="9" width="28" height="22" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+        <rect x="6" y="9" width="10" height="7" fill="var(--accent)"></rect>
+        <rect x="20" y="9" width="1.6" height="22" fill="var(--fg)" opacity="0.4"></rect>
+      </svg>`,
   },
 ];
 

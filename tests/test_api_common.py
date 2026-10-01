@@ -22,21 +22,22 @@ def _launched(monkeypatch):
 
 def test_open_app_launches_the_right_script(monkeypatch):
     calls = _launched(monkeypatch)
-    result = api_common.open_app("monastery", "test")
+    result = api_common.open_app("monarch", "test")
     (args, kwargs) = calls[0]
     # The venv the app is running in, not a bare `python` off PATH --
     # see docs/ui-setup.md.
     assert args[0] == sys.executable
-    assert args[1].endswith("run_monastery.py")
+    assert args[1].endswith("run_monarch.py")
     assert args[2:] == ["--garden", "test"]
     assert kwargs == {"quiet": False}
-    assert result == {"app": "monastery", "garden": "test", "focus": None}
+    assert result == {"app": "monarch", "garden": "test", "focus": None}
 
 
 def test_open_app_passes_the_focus_flag_each_script_expects(monkeypatch):
+    """No window left takes one today; an app that does gets it."""
     calls = _launched(monkeypatch)
-
-    api_common.open_app("monastery", "test", "mote-1")
+    monkeypatch.setitem(api_common.APPS, "focused", ("Focused", api_common.REPO_ROOT / "run_x.py", "--focus"))
+    api_common.open_app("focused", "test", "mote-1")
     assert calls[-1][0][-2:] == ["--focus", "mote-1"]
 
 

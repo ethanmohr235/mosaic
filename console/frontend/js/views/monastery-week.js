@@ -20,7 +20,9 @@ const FIRST_HOUR = 7;    // where the grid opens scrolled to
 function create(ctx) {
   const { components, store } = ctx;
   const { h } = components;
-  let root = null, scroller = null, columns = [], drag = null, scrolled = false;
+  // `lastTop`: where the hours were scrolled to. Splitting panes moves a
+  // pane's element in the DOM, which resets its scroll; a resize puts it back.
+  let root = null, scroller = null, columns = [], drag = null, lastTop = null, resize = null;
 
   const days = () => {
     const p = cal.st.payload;
@@ -52,19 +54,16 @@ function create(ctx) {
       h("span", "wk-hour", `${String(i).padStart(2, "0")}:00`)));
     columns = week.map((d) => drawDay(d));
     body.append(gutter, ...columns.map((c) => c.el));
-    const keepTop = scroller ? scroller.scrollTop : null;
     scroller = h("div", "wk-scroll", body);
+    scroller.addEventListener("scroll", () => { lastTop = scroller.scrollTop; });
     const parts = [head, strip, scroller];
     const ask = cal.askText();
     const status = h("div", `plot-status${ask || st.armed ? " lvl-warn" : ""}`,
       ask || (st.armed ? "d again to delete" : statusText()));
     parts.push(status);
     root.replaceChildren(...parts);
-    if (keepTop !== null && scrolled) scroller.scrollTop = keepTop;
-    else {
-      scroller.scrollTop = FIRST_HOUR * HOUR_PX;
-      scrolled = true;
-    }
+    scroller.scrollTop = lastTop === null ? FIRST_HOUR * HOUR_PX : lastTop;
+    lastTop = scroller.scrollTop;
   }
 
   function statusText() {
@@ -219,12 +218,17 @@ function create(ctx) {
     mount(el) {
       root = h("div", "view-week");
       el.appendChild(root);
+      resize = new ResizeObserver(() => {
+        if (scroller && lastTop !== null && scroller.scrollTop !== lastTop) scroller.scrollTop = lastTop;
+      });
+      resize.observe(root);
     },
     run: cal.run,
     unmount() {
       off();
+      if (resize) resize.disconnect();
       cal.st.seq += 1;
-      root = scroller = null;
+      root = scroller = resize = null;
     },
     hints: cal.hints,
     onKey: cal.onKey,

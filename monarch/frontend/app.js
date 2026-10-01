@@ -1811,14 +1811,13 @@ const LAUNCHER_APPS = [
     </svg>`,
   },
   {
-    id: "monastery", name: "Monastery", kind: "calendar",
-    desc: "See and schedule a garden's dated motes.",
+    id: "console", name: "Mosaic", kind: "console",
+    desc: "The one tiled window: tables, plots, notes, motion, the calendar.",
     icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="9" width="26" height="24" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="7" y="15" width="26" height="1.6" fill="var(--fg)" opacity="0.5"></rect>
-      <rect x="12" y="20" width="5" height="5" rx="1" fill="var(--fg)" opacity="0.55"></rect>
-      <rect x="21" y="20" width="5" height="5" rx="1" fill="var(--accent)"></rect>
-    </svg>`,
+        <rect x="6" y="9" width="28" height="22" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
+        <rect x="6" y="9" width="10" height="7" fill="var(--accent)"></rect>
+        <rect x="20" y="9" width="1.6" height="22" fill="var(--fg)" opacity="0.4"></rect>
+      </svg>`,
   },
 ];
 const THIS_APP = "monarch";
