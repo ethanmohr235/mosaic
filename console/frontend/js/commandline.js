@@ -342,9 +342,9 @@ export function createCommandLine({ root, popupEl, store, api, components, onSub
     return document.activeElement === field.input;
   }
 
-  function focus(text = null) {
+  function focus(text = null, caret = null) {
     field.input.focus();
-    if (text !== null) field.set(text);
+    if (text !== null) field.set(text, caret === null ? text.length : caret);
     field.refresh();
   }
 
@@ -352,7 +352,7 @@ export function createCommandLine({ root, popupEl, store, api, components, onSub
     isActive,
     focus,
     /** `e` / header click: load a pane's command for editing. */
-    load: (text) => focus(text),
+    load: (text, caret = null) => focus(text, caret),
     blur: () => {
       if (isActive()) field.input.blur();
     },

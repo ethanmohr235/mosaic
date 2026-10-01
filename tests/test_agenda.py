@@ -73,6 +73,7 @@ def test_key_toggles_narrow_and_restore():
     off = agenda.rewrite(line, {"key": "due", "all_keys": ["date", "due"]}, TODAY)
     assert off.text() == "week --keys date"
     assert agenda.rewrite(off, {"key": "due", "all_keys": ["date", "due"]}, TODAY).text() == "week"
+    assert agenda.rewrite(off, {"keys": None}, TODAY).text() == "week"
 
 
 # ---- the answer ----

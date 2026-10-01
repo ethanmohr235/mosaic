@@ -909,6 +909,118 @@ def _named(name):
         conn.close()
 
 
+CAL = {}
+
+
+def seed_calendar():
+    from datetime import date
+    today = date.today().isoformat()
+    CAL["today"] = today
+    conn = get_connection(GARDEN)
+    try:
+        CAL["lab"] = create_mote(conn, {"name": "Lab7", "date": f"{today}T13:00/PT1H"})
+        CAL["standup"] = create_mote(conn, {"name": "Standup",
+                                            "date": f"{today}T08:00/PT15M\nRRULE:FREQ=DAILY;COUNT=10"})
+    finally:
+        conn.close()
+
+
+def click_agenda_row(window, name):
+    js(window, f"""(() => {{
+        const row = [...document.querySelectorAll('.view-agenda .c-table-row')]
+            .find(r => r.textContent.includes({json.dumps(name)}));
+        row.dispatchEvent(new MouseEvent('click', {{bubbles: true, button: 0}}));
+    }})()""")
+
+
+def mote_count():
+    conn = get_connection(GARDEN)
+    try:
+        from core.motes import list_motes
+        return len(list_motes(conn))
+    finally:
+        conn.close()
+
+
+def u7_checks(window):
+    def mo_nastery_opens_agenda_and_week():
+        seed_calendar()
+        type_command(window, "refresh")
+        type_command(window, "mo nastery", alt=True)
+        assert wait_until(lambda: {"agenda", "week"} <= set(headers(window))), headers(window)
+        assert wait_until(lambda: "Lab7" in js(window, "document.querySelector('.view-agenda').textContent")), \
+            "the agenda should list Lab7"
+        assert wait_until(lambda: count(window, ".view-week .wk-event") >= 2), "the week grid should draw events"
+        no_errors(window)
+
+    check("U7: `mo nastery` opens agenda | week with today's events", mo_nastery_opens_agenda_and_week)
+
+    def keys_move_through_set_and_undo():
+        focus_pane(window, "agenda")
+        click_agenda_row(window, "Lab7")
+        press(window, "J")
+        assert wait_until(lambda: prop(CAL["lab"], "date") == f"{CAL['today']}T14:00/PT1H"), prop(CAL["lab"], "date")
+        type_command(window, "undo")
+        assert wait_until(lambda: prop(CAL["lab"], "date") == f"{CAL['today']}T13:00/PT1H"), "undo moves it back"
+        no_errors(window)
+
+    check("U7: J moves an event an hour as a set line, and undo takes it back", keys_move_through_set_and_undo)
+
+    def dragging_moves_and_resizes():
+        def drag(dy, edge):
+            js(window, f"""(() => {{
+                const ev = [...document.querySelectorAll('.view-week .wk-event')].find(e => e.textContent === 'Lab7');
+                const r = ev.getBoundingClientRect();
+                const x = r.left + 4, y = {"r.bottom - 2" if edge else "r.top + 4"};
+                ev.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, button: 0, clientX: x, clientY: y}}));
+                window.dispatchEvent(new MouseEvent('mousemove', {{clientX: x, clientY: y + {dy}}}));
+                window.dispatchEvent(new MouseEvent('mouseup', {{clientX: x, clientY: y + {dy}}}));
+            }})()""")
+        assert wait_until(lambda: count(window, ".view-week .wk-event") >= 2)
+        drag(72, edge=False)  # two hours down
+        assert wait_until(lambda: prop(CAL["lab"], "date") == f"{CAL['today']}T15:00/PT1H"), prop(CAL["lab"], "date")
+        drag(36, edge=True)   # an hour longer
+        assert wait_until(lambda: prop(CAL["lab"], "date") == f"{CAL['today']}T15:00/PT2H"), prop(CAL["lab"], "date")
+        type_command(window, "undo")
+        type_command(window, "undo")
+        assert wait_until(lambda: prop(CAL["lab"], "date") == f"{CAL['today']}T13:00/PT1H"), prop(CAL["lab"], "date")
+        no_errors(window)
+
+    check("U7: dragging an event moves it, dragging its edge resizes it", dragging_moves_and_resizes)
+
+    def a_recurring_event_asks():
+        before = mote_count()
+        focus_pane(window, "agenda")
+        click_agenda_row(window, "Standup")
+        press(window, "L")
+        assert wait_until(lambda: "repeats" in js(window, "document.querySelector('.view-agenda').textContent")), \
+            "a recurring event should ask first"
+        press(window, "t")
+        assert wait_until(lambda: mote_count() == before + 1), "t detaches this one into a mote of its own"
+        assert "EXDATE" in prop(CAL["standup"], "date")
+        type_command(window, "undo")
+        assert wait_until(lambda: mote_count() == before and "EXDATE" not in prop(CAL["standup"], "date"))
+        no_errors(window)
+
+    check("U7: moving one occurrence of a series asks, and t detaches it (one undo)", a_recurring_event_asks)
+
+    def paging_and_follow():
+        focus_pane(window, "week")
+        press(window, "]")
+        assert wait_until(lambda: any(h.startswith("week 20") for h in headers(window))), headers(window)
+        press(window, "t")
+        assert wait_until(lambda: "week" in headers(window)), headers(window)
+        focus_pane(window, "agenda")
+        click_agenda_row(window, "Lab7")
+        press(window, "o")
+        assert wait_until(lambda: f"open #{CAL['lab']}" in headers(window)), headers(window)
+        type_command(window, "month", alt=True)
+        assert wait_until(lambda: count(window, ".view-month .mo-cell") == 42)
+        no_errors(window)
+
+    check("U7: [ ] page and t comes back; o follows; month draws six weeks", paging_and_follow)
+
+
 def u4_restored_checks(window):
     def restored():
         assert wait_until(lambda: plot_command(window).startswith(PLOT), timeout=10), \
@@ -975,6 +1087,7 @@ def drive(first, first_loaded):
         fit_checks(second)
         u5_checks(second)
         u6_checks(second)
+        u7_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)

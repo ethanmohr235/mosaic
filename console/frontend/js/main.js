@@ -43,7 +43,7 @@ function wire(api) {
     onPlace: (id, view) => shell.actions.place(id, view),
     onCancel: (id) => shell.actions.close(id),
     onRun: (line, options) => shell.runLine(line, options),
-    onPrefill: (line) => shell.commandLine.load(line),
+    onPrefill: (line, caret) => shell.commandLine.load(line, caret),
     isCommandLineActive: () => !!shell.commandLine && shell.commandLine.isActive(),
   });
   shell.actions = createActions({ store, panes: shell.panes, api });

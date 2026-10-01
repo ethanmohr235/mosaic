@@ -94,6 +94,8 @@
   --bp-check: oklch(0.82 0.06 200);
   --bp-caret: oklch(0.97 0.02 240);
   --doc-measure: 72ch;       /* the read pane's line length */
+  --wk-gutter: 6ch;          /* the week grid's hour column (U7) */
+  --wk-hour: 36px;           /* one hour of the week grid; views/monastery-week.js HOUR_PX matches */
 
   /* Type. One family, one body size; hierarchy is weight + brightness. */
   --font: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;

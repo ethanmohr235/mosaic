@@ -36,8 +36,9 @@
  *               pane), and its message shows in the command line's
  *               status. Resolves to {message, level}. How a view writes:
  *               it never calls a write method on its namespace.
- *   prefill(line)  put `line` on the command line for the user to finish
- *               (the scenarios pane's `a`: `set --scenario hot `).
+ *   prefill(line, caret?)  put `line` on the command line for the user to
+ *               finish (the scenarios pane's `a`: `set --scenario hot `),
+ *               the caret at `caret` (default: the end).
  *   isFocused()  whether this pane is the focused one.
  *   setSummary({summary, level})  update the header between runs (an
  *               editor that saved, or found a problem, while typing).
@@ -81,9 +82,12 @@ import moraEdit from "./mora-edit.js";
 import moraRead from "./mora-read.js";
 import moraNotes from "./mora-notes.js";
 import moraWorksheet from "./mora-worksheet.js";
+import monasteryAgenda from "./monastery-agenda.js";
+import monasteryWeek from "./monastery-week.js";
+import monasteryMonth from "./monastery-month.js";
 
 export const VIEWS = [log, monolithTable, moteProps, moxiePlot, moxieFit, motionState, motionRule,
-  motionScenarios, moraEdit, moraRead, moraNotes, moraWorksheet];
+  motionScenarios, moraEdit, moraRead, moraNotes, moraWorksheet, monasteryAgenda, monasteryWeek, monasteryMonth];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;

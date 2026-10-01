@@ -169,10 +169,12 @@ def rewrite(line: CalLine, change: dict, today: date | None = None) -> CalLine:
     """A pane gesture as a line: `page` (+1/-1) moves a whole view's
     worth, `today` comes back to now, `key` turns one key off or back on
     (`all_keys` is every key the garden has, so the first toggle can say
-    which remain)."""
+    which remain), `keys` sets them outright (None: every key)."""
     today = today or date.today()
     if "today" in change:
         return replace(line, start=None, end=None)
+    if "keys" in change:
+        return replace(line, keys=tuple(change["keys"]) if change["keys"] is not None else None)
     if "page" in change:
         step = int(change["page"])
         start, end = window(line, today)

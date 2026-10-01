@@ -847,3 +847,51 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .doc-problems { margin-top: var(--group-gap); border-top: var(--border) solid var(--paper-rule); padding-top: var(--table-head-pad); }
 .doc-problem { color: var(--paper-fg); }
 .view-doc .katex { font-size: 1.1em; }
+
+/* ---------- the calendar (U7: agenda, week, month) ---------- */
+
+.cal-ask { padding: var(--table-head-pad) var(--pad-x); }
+.cal-bar-when { color: var(--fg); }
+.view-agenda .c-table-group .c-group-label { color: var(--bright); font-weight: var(--w-bold); }
+
+.view-week, .view-month { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.wk-head, .wk-strip { display: flex; border-bottom: var(--border) solid var(--line); flex-shrink: 0; }
+.wk-gutter { flex: 0 0 var(--wk-gutter); }
+.wk-day-head { flex: 1; min-width: 0; padding: 0 var(--table-head-pad); color: var(--dim);
+  border-left: var(--border) solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-day-head.today { color: var(--bright); font-weight: var(--w-bold); }
+.wk-strip > .wk-gutter { padding-left: var(--table-head-pad); }
+.wk-strip-grid { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); min-height: var(--row-h); }
+.wk-bar, .wk-allday, .wk-event, .mo-chip {
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
+  border-left: 2px solid var(--ev); padding: 0 var(--table-head-pad); background: var(--bg-raised); color: var(--fg);
+}
+.wk-bar { background: color-mix(in oklch, var(--ev) 28%, var(--bg)); color: var(--bright); }
+.wk-bar.due-bar { background: none; border-bottom: var(--border) dashed var(--ev); }
+.wk-event.recurring::after, .wk-allday.recurring::after { content: " ↻"; color: var(--dim); }
+.wk-bar.selected, .wk-allday.selected, .wk-event.selected, .mo-chip.selected { background: var(--fg); color: var(--bg); }
+.wk-bar.cursor, .wk-allday.cursor, .wk-event.cursor, .mo-chip.cursor { box-shadow: var(--focus-ring); }
+.wk-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.wk-body { display: flex; position: relative; }
+.wk-hours { display: flex; flex-direction: column; color: var(--dim); }
+.wk-hour { height: var(--wk-hour); padding-left: var(--table-head-pad); border-top: var(--border) solid var(--track); }
+.wk-col {
+  flex: 1; min-width: 0; position: relative; border-left: var(--border) solid var(--line);
+  background-image: linear-gradient(to bottom, var(--track) 1px, transparent 1px);
+  background-size: 100% var(--wk-hour);
+}
+.wk-col.today { background-color: var(--bg-raised); }
+.wk-event { position: absolute; box-sizing: border-box; border-top: var(--border) solid var(--bg); line-height: var(--lh-body); }
+.wk-event::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px; cursor: ns-resize; }
+.wk-slot { position: absolute; left: 0; right: 0; border: var(--border) dashed var(--fg); pointer-events: none; }
+
+.mo-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: var(--row-h) repeat(6, 1fr); border-top: var(--border) solid var(--line); }
+.mo-weekday { padding: 0 var(--table-head-pad); border-left: var(--border) solid var(--line); }
+.mo-cell { min-width: 0; min-height: 0; overflow: hidden; padding: 0 var(--table-head-pad);
+  border-left: var(--border) solid var(--line); border-top: var(--border) solid var(--line); }
+.mo-cell.outside .mo-date { color: var(--ghost); }
+.mo-cell.today .mo-date { color: var(--bg); background: var(--fg); padding: 0 var(--table-head-pad); }
+.mo-date { color: var(--dim); }
+.mo-chip.bar { background: color-mix(in oklch, var(--ev) 28%, var(--bg)); }
+.mo-more { cursor: pointer; }
