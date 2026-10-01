@@ -19,11 +19,14 @@ writes only through the connection its caller handed it.
 `start_project` is the only write. It creates the garden and links it in
 one step, because creating the project is meant to be the only act of
 filing."""
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass
 
 from core import db, gardens as gardens_repo, motes as motes_repo, undo
+
+logger = logging.getLogger(__name__)
 
 GARDEN_KEY = "garden"
 # `archived: true` on an owner archives the garden it owns and everything
@@ -223,6 +226,11 @@ def _owners_of(garden: str) -> list[Owner]:
     conn = db.get_connection(garden)
     try:
         return owners_in(conn, garden)
+    except sqlite3.DatabaseError:
+        # A .db that isn't a garden (a half-written copy from a sync tool)
+        # claims nothing; Home still lists it, uncounted.
+        logger.exception("could not read ownership in %r", garden)
+        return []
     finally:
         conn.close()
 
@@ -537,6 +545,8 @@ def _marked_gardens(gardens: list[str]) -> set[str]:
         try:
             if _markers_in(conn):
                 marked.add(garden)
+        except sqlite3.DatabaseError:
+            logger.exception("could not read archive markers in %r", garden)
         finally:
             conn.close()
     return marked
