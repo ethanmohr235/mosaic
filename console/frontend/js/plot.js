@@ -350,3 +350,18 @@ export function render(host, model) {
   host.prepend(svg);
   return { g, X };
 }
+
+/** A figure from core/plotview.py::figure_json as a still model -- no
+ * cursor, no knobs: what a document's `\graph` draws (views/mora-read.js).
+ * Series take their colour by order, as the plot pane's legend does. */
+export function figureModel(f, width, height) {
+  const base = { mode: f.mode, width, height, xLo: f.xLo, xHi: f.xHi, yLo: f.yLo, yHi: f.yHi,
+    xLabel: f.xLabel, yLabel: f.yLabel, yScale: f.yScale };
+  if (f.mode === "surface") return { ...base, cells: f.cells, rows: f.rows, cols: f.cols, lo: f.lo, hi: f.hi };
+  if (f.mode === "correlate") return { ...base, dots: f.dots.map((d) => ({ ...d, label: d.name, color: "var(--s1)" })) };
+  const series = (f.series || []).map((s, i) => ({
+    id: s.id, band: s.band, ...seriesStyle(i),
+    points: (s.points || []).map((p) => (p ? { x: p[0], y: p[1] } : null)),
+  }));
+  return { ...base, bands: f.bands, series, failedSpans: f.failed, violatedSpans: f.violated };
+}

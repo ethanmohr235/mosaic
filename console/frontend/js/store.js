@@ -16,6 +16,8 @@
  *   playhead   the shared playhead moved, started/stopped, or a sim pane
  *              claimed it with its run ({tick, count, playing, run} changed)
  *   live       `solve --live on|off` flipped the workspace's live toggle
+ *   draft      an editor's unsaved text for a note changed ({key}); a read
+ *              pane on the same note re-renders from it
  *
  * The tree held here is the *internal* tree (tree.js): leaves carry a
  * stable `id` the panes are keyed by. `tree.toJSON` strips those ids
@@ -45,6 +47,9 @@ export function createStore() {
     // pane reads `tick`; the sim pane that last ran or was focused owns it
     // and publishes its tick `count` and `run` ({ticks, scenario, solver}).
     playhead: { tick: 0, count: 0, playing: false, run: null, owner: null },
+    // Unsaved note text by note key (its id, or `new:‹name›` before the
+    // first save), so `read` shows what `edit` is typing (Settled for U6).
+    drafts: new Map(),
   };
   state.focusedId = T.firstLeaf(state.tree).id;
 
@@ -150,6 +155,7 @@ function sessionOps(state, emit) {
       state.labels = new Map();
       state.live = !!boot.live;
       state.playhead = { tick: 0, count: 0, playing: false, run: null, owner: null };
+      state.drafts = new Map();
       emit("garden", boot);
     },
 
@@ -211,6 +217,12 @@ function playheadOps(state, emit) {
       Object.assign(p, { owner: null, count: 0, run: null, playing: false });
       emit("playhead", { run: true });
     },
+    setDraft(key, text) {
+      if (text === null || text === undefined) state.drafts.delete(key);
+      else state.drafts.set(key, text);
+      emit("draft", { key });
+    },
+    draft: (key) => (state.drafts.has(key) ? state.drafts.get(key) : null),
     setLive(live) {
       state.live = !!live;
       emit("live", state.live);

@@ -16,3 +16,10 @@ Geist Mono 400 (`GeistMono-Regular`), 500 (`GeistMono-Medium`) and 600
 
 The files are the package's static woff2 files, unmodified
 (~150 KB total). The `@font-face` rules live in `../tokens.css`.
+
+## katex/
+
+KaTeX, which typesets a note's maths in the read pane (`docs/modoc.md`).
+Moved here from Mora's old window (`mora/frontend/vendor/katex/`) in U6,
+unmodified: `katex.min.js` (loaded as a classic script, the global
+`katex`), `katex.min.css` and its `fonts/`. MIT licence (`katex/LICENSE`).

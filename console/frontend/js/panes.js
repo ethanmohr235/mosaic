@@ -39,6 +39,11 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
       setCommand: (command) => setPaneCommand(pane, command),
       runCommand: (line, options) => onRun(line, options),
       prefill: (line) => onPrefill(line),
+      setSummary: ({ summary = "", level = "idle" } = {}) => {
+        if (panes.get(pane.id) !== pane) return;
+        Object.assign(pane, { summary, level });
+        updateHeader(pane);
+      },
       isFocused: () => store.state.focusedId === pane.id,
       paneAction: (viewId, action) => {
         const instance = instanceFor(viewId);

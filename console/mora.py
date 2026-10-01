@@ -31,6 +31,9 @@ from core.command_bar import CommandError
 logger = logging.getLogger(__name__)
 
 _ERRORS = (CommandError, ValueError, LookupError)
+# Every backslash-word the parser reads outside maths, for the editor's
+# highlighter: anything else is coloured as a typo.
+COMMANDS = sorted({*modoc.INLINE_COMMANDS, *modoc.BLOCK_COMMANDS})
 # One editing session folds into one undo step: the coalescing window is
 # longer than any pause, and a different write in between ends it anyway.
 _SESSION_WINDOW = 24 * 3600.0
@@ -55,7 +58,7 @@ class MoraApi:
             found = document.target(self._session.conn, words[1], selection or [])
             source = modoc.read_source(self._session.conn, found.mote_id) if found.mote_id else ""
             return {"noteId": found.mote_id, "name": found.name, "source": source,
-                    "exists": found.mote_id is not None}
+                    "exists": found.mote_id is not None, "commands": COMMANDS}
         return self._answer(command, answer)
 
     @locked

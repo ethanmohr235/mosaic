@@ -72,6 +72,29 @@
   --s5: oklch(0.80 0.11 195);
   --s6: oklch(0.78 0.13 40);
 
+  /* Surfaces (U6, docs/console.md → Settled for U6). The read pane is a
+   * dark gray paper -- no hue, lifted from --bg, softer text -- so a
+   * rendered document never reads as the editor. The worksheet is a
+   * blueprint: a deep blue ground, pale blue-white text, a faint row grid,
+   * line kinds in tints of the same blue. Status colours still mean what
+   * they mean on both. */
+  --paper-bg: oklch(0.21 0 0);
+  --paper-fg: oklch(0.86 0 0);
+  --paper-bright: oklch(0.95 0 0);
+  --paper-dim: oklch(0.62 0 0);
+  --paper-rule: oklch(0.34 0 0);
+  --paper-link: oklch(0.86 0 0);
+  --bp-bg: oklch(0.24 0.06 255);
+  --bp-grid: oklch(0.30 0.06 255);
+  --bp-fg: oklch(0.93 0.03 240);
+  --bp-dim: oklch(0.66 0.06 245);
+  --bp-given: oklch(0.86 0.07 230);
+  --bp-equation: oklch(0.80 0.10 220);
+  --bp-relation: oklch(0.74 0.09 260);
+  --bp-check: oklch(0.82 0.06 200);
+  --bp-caret: oklch(0.97 0.02 240);
+  --doc-measure: 72ch;       /* the read pane's line length */
+
   /* Type. One family, one body size; hierarchy is weight + brightness. */
   --font: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --fs-body: 12px;

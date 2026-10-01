@@ -749,3 +749,101 @@ body.dragging-col { cursor: row-resize; }
 .view-props .motion-why { padding-left: 0; }
 .motion-scenario { font-weight: var(--w-bold); }
 .motion-scenario.running { color: var(--bright); }
+
+/* ---------- the editor (U6: edit, worksheet) ---------- */
+
+.view-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.c-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.c-editor-scroll { flex: 1; min-height: 0; overflow: auto; }
+.c-editor-wrap { position: relative; min-height: 100%; }
+.c-editor-mirror, .c-editor-text {
+  margin: 0; padding: var(--table-head-pad) var(--pad-x); border: 0;
+  font: var(--fs-body)/var(--lh-body) var(--font); white-space: pre; tab-size: 2;
+}
+.c-editor-wrap.wrap .c-editor-mirror, .c-editor-wrap.wrap .c-editor-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.c-editor-wrap.with-gutter .c-editor-mirror, .c-editor-wrap.with-gutter .c-editor-text { padding-left: calc(var(--pad-x) + 3ch); }
+.c-editor-mirror { color: var(--fg); pointer-events: none; min-height: 100%; }
+.c-editor-text {
+  position: absolute; inset: 0; width: 100%; height: 100%; resize: none; overflow: hidden;
+  background: transparent; color: transparent; caret-color: var(--bright); outline: none;
+}
+.c-editor-text::selection { background: var(--line-strong); color: transparent; }
+.c-editor:not(.editing) .c-editor-text { caret-color: transparent; cursor: default; }
+.c-editor.editing { box-shadow: var(--focus-ring); }
+.c-editor-gutter { position: absolute; left: var(--pad-x); top: var(--table-head-pad); width: 2ch;
+  display: flex; flex-direction: column; color: var(--dim); pointer-events: none; }
+.c-editor-gutter .mark { height: var(--lh-body); line-height: var(--lh-body); text-align: center; }
+.ln-after { color: var(--ghost); }
+.ln-problem { text-decoration: underline wavy var(--fault); text-underline-offset: 3px; }
+.hl-comment { color: var(--dim); }
+.hl-cmd { color: var(--bright); font-weight: var(--w-medium); }
+.hl-cmd-unknown { color: var(--fault); }
+.hl-brace { color: var(--dim); }
+.hl-math { color: var(--s1); }
+.hl-math-cmd { color: var(--s1); font-weight: var(--w-medium); }
+.find-hit { background: var(--line); }
+.find-hit.current { background: var(--line-strong); color: var(--bright); }
+.c-find { display: flex; gap: var(--header-gap); align-items: center; padding: 0 var(--pad-x);
+  height: var(--header-h); border-bottom: var(--border) solid var(--line); flex-shrink: 0; }
+.c-find-input { flex: 1; min-width: 0; background: var(--bg-raised); color: var(--fg); border: var(--border) solid var(--line);
+  font: var(--fs-body) var(--font); padding: 0 var(--table-head-pad); outline: none; }
+.c-find-input:focus { border-color: var(--fg); }
+
+/* The worksheet's blueprint. */
+.editor-blueprint { background: var(--bp-bg); }
+.editor-blueprint .c-editor-mirror {
+  color: var(--bp-fg);
+  background-image: linear-gradient(to bottom, transparent calc(var(--lh-body) - 1px), var(--bp-grid) calc(var(--lh-body) - 1px));
+  background-size: 100% var(--lh-body); background-position: 0 var(--table-head-pad);
+}
+.editor-blueprint .c-editor-text { caret-color: var(--bp-caret); }
+.editor-blueprint .c-editor-gutter { color: var(--bp-dim); }
+.editor-blueprint .c-find { background: var(--bp-bg); border-color: var(--bp-grid); }
+.editor-blueprint .ln-after { color: var(--bp-dim); }
+.editor-blueprint .ws-given { color: var(--bp-given); }
+.editor-blueprint .ws-unknown { color: var(--bp-fg); }
+.editor-blueprint .ws-equation { color: var(--bp-equation); }
+.editor-blueprint .ws-relation { color: var(--bp-relation); }
+.editor-blueprint .ws-check { color: var(--bp-check); }
+.editor-blueprint .ws-problem { color: var(--fault); text-decoration: line-through; }
+.editor-blueprint .c-editor-gutter .ws-problem { color: var(--fault); text-decoration: none; }
+
+/* ---------- the read pane's paper (U6) ---------- */
+
+.view-doc { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--paper-bg); }
+.doc-page { padding: var(--group-gap) calc(2 * var(--pad-x)); color: var(--paper-fg); }
+.doc { max-width: var(--doc-measure); }
+.doc-heading { color: var(--paper-bright); font-size: var(--fs-title); font-weight: var(--w-bold); margin: var(--group-gap) 0 var(--table-head-pad); }
+h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-bottom: var(--table-head-pad); }
+.doc-p { margin: 0 0 var(--lh-body); }
+.doc-list { margin: 0 0 var(--lh-body); padding-left: 3ch; }
+.doc strong { color: var(--paper-bright); font-weight: var(--w-bold); }
+.doc code { color: var(--paper-bright); }
+.doc-link { color: var(--paper-link); text-decoration: underline; text-decoration-color: var(--paper-dim); cursor: pointer; }
+.doc-link:hover { color: var(--paper-bright); }
+.doc-value { color: var(--paper-bright); }
+.doc-ref { color: var(--paper-bright); }
+.doc-broken { color: var(--fault); }
+.doc-note { color: var(--paper-dim); }
+.doc-math.raw { color: var(--paper-dim); }
+.doc-math.display { margin: var(--table-head-pad) 0; }
+.doc-code { font-family: var(--font); }
+.doc-eq { display: flex; align-items: center; gap: var(--pad-x); margin: 0 0 var(--lh-body); }
+.doc-eq-body { flex: 1; min-width: 0; overflow-x: auto; }
+.doc-eq-number { color: var(--paper-dim); }
+.doc-caption { color: var(--paper-dim); margin-top: var(--table-head-pad); }
+.doc-figure { margin: 0 0 var(--lh-body); }
+.doc-figure-area { position: relative; overflow: hidden; }
+.doc-table-wrap { margin: 0 0 var(--lh-body); }
+.doc-table { border-collapse: collapse; }
+.doc-table th { color: var(--paper-dim); font-weight: var(--w-regular); text-align: left; border-bottom: var(--border) solid var(--paper-rule); }
+.doc-table th, .doc-table td { padding: 0 var(--col-gap) 0 0; vertical-align: top; }
+.doc-num { text-align: right; color: var(--paper-bright); }
+.doc-section { margin: 0 0 var(--lh-body); }
+.doc-section-head { color: var(--paper-bright); font-weight: var(--w-bold); border-bottom: var(--border) solid var(--paper-rule); margin-bottom: var(--table-head-pad); }
+.doc-work { margin: 0 0 var(--lh-body); padding-left: 3ch; }
+.doc-work-step.result { color: var(--paper-bright); }
+.doc-check .lvl-ok { color: var(--ok); }
+.doc-problems { margin-top: var(--group-gap); border-top: var(--border) solid var(--paper-rule); padding-top: var(--table-head-pad); }
+.doc-problem { color: var(--paper-fg); }
+.view-doc .katex { font-size: 1.1em; }

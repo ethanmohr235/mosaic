@@ -15,7 +15,7 @@
  *   }
  *
  * `ctx` is {api, store, components, navigate(id), setCommand(command),
- * runCommand(line), prefill(line), isFocused(), paneAction(viewId, action)};
+ * runCommand(line), prefill(line), isFocused(), setSummary(s), paneAction(viewId, action)};
  * one per pane:
  *   api         the root bridge (js/bridge.js); an app's namespace is api.<app>
  *   store       js/store.js -- read state.selection / primary(), request
@@ -39,6 +39,8 @@
  *   prefill(line)  put `line` on the command line for the user to finish
  *               (the scenarios pane's `a`: `set --scenario hot `).
  *   isFocused()  whether this pane is the focused one.
+ *   setSummary({summary, level})  update the header between runs (an
+ *               editor that saved, or found a problem, while typing).
  *   paneAction(viewId, action)  hand `action` to the pane showing
  *               `viewId` (focused first), as a `pane_action` effect does:
  *               its instance.action(action). Null when there is none.
@@ -75,9 +77,13 @@ import moxieFit from "./moxie-fit.js";
 import motionState from "./motion-state.js";
 import motionRule from "./motion-rule.js";
 import motionScenarios from "./motion-scenarios.js";
+import moraEdit from "./mora-edit.js";
+import moraRead from "./mora-read.js";
+import moraNotes from "./mora-notes.js";
+import moraWorksheet from "./mora-worksheet.js";
 
 export const VIEWS = [log, monolithTable, moteProps, moxiePlot, moxieFit, motionState, motionRule,
-  motionScenarios];
+  motionScenarios, moraEdit, moraRead, moraNotes, moraWorksheet];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;
