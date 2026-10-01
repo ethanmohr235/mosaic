@@ -917,7 +917,6 @@ def main():
     seed()
     squatters = [
         _occupy(GRAPH_WINDOW_PORT, PROJECT_ROOT / "monarch" / "frontend"),
-        _occupy(MORA_PORT, PROJECT_ROOT / "mora" / "frontend"),
     ]
     api = Api(GARDEN)
     window = webview.create_window(

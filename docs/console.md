@@ -142,7 +142,7 @@ These are user-facing names. Python packages keep their current names
 | `mo te` | Inspector | `mote:props` | `open @sel` follows the selection; `open #id` is pinned. |
 | `mo xie` | Moxie | `moxie:plot` (`plot …`), `moxie:fit` (`fit …`) | |
 | `mo tion` | Motion | `motion:scenarios`, `motion:state`, `motion:rule` | Timeline sits under state. No runs list. |
-| `mo ra` | Mora | `mora:doc` | Text-editing pane (see *Keyboard*). |
+| `mo ra` | Mora | `mora:notes`, `mora:edit`, `mora:read`, `mora:worksheet` | `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
 | `mo nastery` | Monastery | `monastery:agenda` | A table or grid pane on the `--line` grid. |
 | `mo narch` | Monarch | `monarch:graph` | Frozen structure debugger. Graph only. |
 | `mo saic` | Home + settings | `mosaic:home`, `mosaic:gardens` | Ownership tree, loose gardens, garden management. Replaces the Gardens window and the launcher. |
@@ -407,6 +407,37 @@ confirmed these defaults on 2026-10-01.
   tokens outside the neutral/status/species/series sets; the user asked
   for both.
 
+### Built for U6 (2026-10-01)
+
+What the build decided within the settled plan above.
+
+- **Verbs:** `edit`, `read`, `notes [text]`, `worksheet`. `edit` on a
+  name no mote has makes the note on its first save; on a mote with no
+  note it opens a blank page. `mo ra` replaces the focused pane with
+  `notes | edit @sel | read @sel`, focused on `edit`.
+- **Modal editors** (`js/editor.js`, shared by `edit` and `worksheet`):
+  `i` / `⏎` start, `esc` stops. `^f` find/replace inside the pane: `⏎`
+  `⇧⏎` next/previous, `tab` between fields, `⏎` in replace replaces
+  one, `^⏎` all -- through the textarea's own editing, so `^z` takes a
+  replacement back. `tab` while typing inserts two spaces.
+- **`edit @sel` never switches note while you type**; a selection change
+  catches up on `esc`.
+- **Saving:** 0.9 s after typing pauses. Every save of one session is
+  pushed with the same coalescing key, so the session is one undo step.
+  `esc` logs `saved ‹note›` and re-runs the panes.
+- **Drafts** are store state (`store.setDraft`, the `draft` event), keyed
+  by note id (or `new:‹name›`); a read pane re-renders 0.18 s after one.
+- **Problems** come from rendering the draft and underline their lines in
+  the editor (hover for the message).
+- **Worksheet:** previews 0.15 s after typing; margin marks `=` `?` `ƒ`
+  `≡` `✓` `!`; an unknown or equation shows the garden's value after it.
+  After `esc`, a clean sheet is replaced by the garden's reading of it;
+  one with problems keeps your text.
+- **The inspector** in Monarch and Monastery no longer opens notes; it
+  summarizes a `modoc` property read-only.
+- **New tokens:** `--paper-*` (the read pane), `--bp-*` (the worksheet),
+  `--doc-measure` 72ch (the read pane's line length).
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
@@ -485,7 +516,7 @@ own plan-mode phase and ships something usable.
 | U3 | **Done.** **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
 | U4 | **Done.** **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*), then `fit` and the follow-up fixes (*Settled for `fit`*), also done. | Commands carry view state (ranges, series). |
 | U5 | **Done.** **Motion → `mo tion`.** Scenarios, state table with timeline and playhead, rule pane. No runs list (see *Settled for U5*, *Built for U5*). | A live, ticking view inside the contract. |
-| U6 | **Mora → `mo ra`.** Document pane as a text-editing pane. | Keyboard capture and `esc` work for editors. |
+| U6 | **Done.** **Mora → `mo ra`.** Document pane as a text-editing pane, plus the worksheet (see *Settled for U6*, *Built for U6*). | Keyboard capture and `esc` work for editors. |
 | U7 | **Monastery → `mo nastery`.** Agenda pane. Coordinate with roadmap phase 5, and build the agenda features here, not in the old window. | Date-shaped data in the grid style. |
 | U8 | **Monarch → `mo narch`.** Canvas graph only, restyled. Remove annotations (`core/annotations.py`, the annotation frontends, their docs) and ship a migration that drops their stored data. | The frozen debugger costs no more upkeep. |
 | U9 | **Home → `mo saic`.** Ownership tree, loose gardens, garden management and settings. Delete `gardens_app/`, `window_launcher.py`'s multi-window pieces and the `frontend_shared/` symlinks. | The window is the only surface. |

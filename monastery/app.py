@@ -1,5 +1,5 @@
 # monastery/app.py
-"""The Monastery window. mora/app.py's twin, for the same reasons it is
+"""The Monastery window. the old mora/app.py's twin, for the same reasons it is
 monarch/app.py's -- same pywebview settings, same cache workaround,
 different frontend and different Api. window_launcher.py carries the
 settings and workaround all six apps share.
@@ -29,7 +29,7 @@ WEBVIEW_STORAGE_DIR = PROJECT_ROOT / ".webview_data_monastery"
 # A third app asking for either is not a near miss: the process that
 # loses the bind does not fail visibly -- it points its window at the
 # winner's address and calls the wrong bridge. That shipped once already
-# as a window titled Mora showing the Monarch graph (see mora/app.py).
+# as a window titled Mora showing the Monarch graph (see the old mora/app.py).
 # window_launcher.choose_port() is the fallback that prevents it from
 # costing the window too.
 DEFAULT_HTTP_PORT = 42003

@@ -77,7 +77,7 @@ maths.
 Maths is the one place this grammar does not look inside. A `$...$` body
 and an `\begin{equation}` body are kept as the TeX you typed and are
 typeset by [KaTeX](https://katex.org) (vendored under
-`mora/frontend/vendor/katex/`), so `\frac`, `\sum` with limits, `\left(`,
+`console/frontend/vendor/katex/`), so `\frac`, `\sum` with limits, `\left(`,
 and environments KaTeX knows -- `aligned`, `matrix`, `cases` -- all work:
 
     \begin{equation}
@@ -116,8 +116,8 @@ plain textarea.
 matches uniquely (exactly, then case-insensitively). Ids win outright, so
 a hand-typed name can never shadow one.
 
-Write names while drafting; let Mora's `@` picker insert ids for anything
-you'd rather survive a rename. A reference that matches nothing, or
+Write names while drafting; write `\mote{#id}` for anything you'd rather
+survive a rename. A reference that matches nothing, or
 matches two motes, renders visibly broken and shows up under Problems --
 it is never silently blank.
 
@@ -423,13 +423,13 @@ Everything above resolves against **the garden as it stands**, and that
 is the only reading a note has. `\val{t}` is 0, because a note is not at
 a step.
 
-This used to be otherwise: notes resolved at `t+N`, Mora carried a
+This used to be otherwise: notes resolved at `t+N`, Mora's old window carried a
 stepper that flipped **Real** to **Projected**, and an `Apply t+N…`
 button committed the projection to the graph. All of it is gone, and the
 reason is worth keeping written down. A note says what a garden *is*.
-What it will be after N steps is a simulation, which is Motion's window
-(`preview_simulation` on the MCP surface); how a value
-moves as another one changes is a sweep, which is Moxie's. A note editor
+What it will be after N steps is a simulation, which is the console's
+`sim` (`preview_simulation` on the MCP surface); how a value
+moves as another one changes is a sweep, which is `plot`. A note editor
 that could also run and commit a simulation was holding a lever that
 belonged in another room -- and the projection was never quite the same
 answer as the one the window built for it gave.
@@ -444,15 +444,15 @@ A note with a typo in it still renders, with the broken part visibly
 broken. Everything that went wrong -- an unknown command, an unresolved
 reference, an expression that wouldn't evaluate -- is collected as a
 diagnostic (`core/modoc_bind.py::problems`) and reported in one list, the
-same list `monoss modoc check` prints and Mora's Problems popover shows.
+same list `monoss modoc check` prints and the console's read pane lists.
 
 ## Using it
 
-### Mora
+### The console
 
-The editor: `./run_mora.py [--garden <name>] [--note <mote id>]`. Source
-and Rendered panes, a mode switcher, and `@` to insert a link. See
-`docs/ui-setup.md`.
+`mo ra` opens `notes | edit @sel | read @sel`: write the source in the
+editor and the read pane renders it as you type -- every macro below,
+problems listed at the end. See `docs/ui-setup.md` → *Notes*.
 
 ### CLI
 
@@ -493,10 +493,11 @@ it is, ask `preview_simulation`.
 | `core/plotview.py` | a saved Moxie view, re-solved for a `\graph` |
 | `core/simulation.py::expression_context` | the evaluation context a `\val` gets |
 | `cli/render.py::print_modoc` | the terminal's renderer |
-| `mora/` | the window: bridge, payload shaping, frontend |
+| `core/document.py` | the whole document as the console's read pane draws it |
+| `console/mora.py`, `console/frontend/js/views/mora-*.js` | the console's notes panes (`edit`, `read`, `notes`) |
 
-One parser and one resolver, so `monoss modoc render` and Mora can
-disagree about typography and never about meaning.
+One parser and one resolver, so `monoss modoc render` and the console's
+read pane can disagree about typography and never about meaning.
 
 ## Not yet
 

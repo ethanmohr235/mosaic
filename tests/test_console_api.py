@@ -749,7 +749,9 @@ def test_mo_ra_opens_its_three_panes(api):
 
 def test_a_note_is_written_and_one_session_is_one_undo_step(api):
     opened = api.mora.open("edit Homework")
-    assert opened == {"noteId": None, "name": "Homework", "source": "", "exists": False}
+    assert {k: opened[k] for k in ("noteId", "name", "source", "exists")} == {
+        "noteId": None, "name": "Homework", "source": "", "exists": False}
+    assert "work" in opened["commands"] and "mote" in opened["commands"]
     first = api.mora.save(None, "Homework", "draft one", "s1")
     assert first["created"]
     note_id = first["noteId"]

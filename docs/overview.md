@@ -117,7 +117,7 @@ an adapter that holds logic of its own is a bug.
   and sync.
 - Adapters: `cli/`, `mcp_server/`, `console/` (the one tiled window,
   where apps are being ported), and a package per not-yet-ported app
-  (`monarch/`, `mora/`, `monastery/`).
+  (`monarch/`, `monastery/`).
 - `sync_server/` provides optional sync between machines.
 
 The project favors readability, maintainability, and correctness over

@@ -28,7 +28,7 @@ class Directory:
     """Everything the payloads need to say about a mote beyond its id:
     its name, its species (which is what colours it, in all three
     windows) and its kinds. Built once per request from one read of the
-    garden. mora/payload.py's, deliberately duplicated rather than
+    garden. the old mora/payload.py's, deliberately duplicated rather than
     imported -- no adapter imports another adapter, and the two windows
     answer this question about different payloads."""
     motes: dict[str, Mote]

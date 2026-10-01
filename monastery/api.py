@@ -1,12 +1,12 @@
 # monastery/api.py
 """JS-facing bridge for Monastery, the calendar window.
 
-A fifth adapter over core/, alongside cli/, monarch/, mora/ and mcp_server/ --
+A fifth adapter over core/, alongside cli/, monarch/ and mcp_server/ --
 not part of monarch/ for the same reason Mora isn't: Monastery is its own
 window with its own concerns, and sharing monarch/api.py would mean sharing a
 garden connection between windows that open and close independently.
 
-It follows mora/api.py's shape deliberately: one long-lived connection
+It follows the old mora/api.py (deleted in U6)'s shape deliberately: one long-lived connection
 for the open garden, held as instance state, with every exposed method
 serialized behind a lock because pywebview calls in from a pool of
 worker threads.
@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # up. Monastery is opened *from* Monarch (monarch/api.py::
 # open_monastery) and may sit alongside Mora too, so several processes
 # holding the same garden file open at once is the normal case here, not
-# the exception -- the same reason mora/api.py and mcp_server/server.py
+# the exception -- the same reason the old mora/api.py (deleted in U6) and mcp_server/server.py
 # set this. core/db.py stays untouched, so the CLI and the main UI keep
 # their current behavior exactly.
 _BUSY_TIMEOUT_MS = 5000
@@ -87,7 +87,7 @@ class Api(InspectorApi, CommandBarApi, UndoableApi):
         return conn
 
     def _best_effort_sync(self) -> None:
-        """Same call, same reasoning, as mora/api.py::Api._best_effort_sync:
+        """Same call, same reasoning, as the old mora/api.py (deleted in U6)::Api._best_effort_sync:
         run_monastery.py is its own launch path, not only ever opened from
         Monarch, so a mote dated here must converge on its own
         rather than depending on that other window's session having also

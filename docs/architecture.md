@@ -605,9 +605,9 @@ the user should approve in the app, or need a live window. See
 
 # What belongs on which surface
 
-`core/` is the whole system. `cli/`, `monarch/`, `mora/`, `monastery/`,
+`core/` is the whole system. `cli/`, `monarch/`, `monastery/`,
 `gardens_app/`, `console/` and `mcp_server/` are
-seven adapters over it, and each one's job is a
+six adapters over it, and each one's job is a
 different question, so none of
 them is expected to expose everything. What is *not* acceptable is a gap
 with no reason behind it -- which is what the surfaces had accumulated:
@@ -628,11 +628,10 @@ The charter:
   Monarch, the graph window, is frozen as a structure debugger: it gets
   bug fixes only until console step U8 (`docs/console.md`).
 * **Mora** -- the same charter as the UI, for one thing: writing and
-  reading .modoc notes (see Notes below). A second window rather than a
-  fourth kind of adapter -- it is the UI's charter applied to a surface
-  a graph canvas has no room for.
+  reading .modoc notes (see Notes below). It is the console's `edit`,
+  `read` and `notes` panes now, not a window.
 * **Monastery** -- likewise, for motes that have a time (see The
-  calendar below). A third window on the same terms, and for the same
+  calendar below). A second window on the same terms, and for the same
   reason: a week is a shape a graph canvas cannot draw.
 * **Monolith** -- likewise once more, for the garden as a whole rather
   than for any one kind of mote (see The table below): a query across
@@ -842,9 +841,9 @@ with `plot save`, and `core/plotview.py` re-solves that view's saved specificati
 against the garden as it stands. A note therefore never describes a
 figure of its own -- there is one place a figure is designed, one place
 it is computed (`core/sweep.py`), and one figure payload
-(`plotview.figure_json`) that both the console's renderer
-(`console/frontend/js/plot.js`) and Mora's old window
-(`frontend_shared/plot.js`, until U6) draw. The note refers.
+(`plotview.figure_json`) that the console's renderer
+(`console/frontend/js/plot.js`) draws in a plot pane and in a note's
+read pane alike. The note refers.
 
 **A document can span several notes, and is numbered as one.**
 `\include{Method}` is the only macro that changes the *document* rather
@@ -927,31 +926,22 @@ What counts as a problem is answered once, in
 exists: it was briefly the CLI's own, and Mora promptly reported a note
 with a dangling `\mote{...}` in it as having no problems at all.
 
-`mora/` is the editor (`run_mora.py`) -- a second pywebview window with
-its own garden connection and source/rendered panes. It parses nothing
-itself: the rendered pane is built from the
-tree `core/` produced and `mora/payload.py` shaped, which is why the
-window and `monoss modoc render` cannot come to disagree about what a
-note means. Only the source pane's syntax highlighting runs in
-JavaScript, colour being presentation rather than meaning.
+Notes are written in the console (`mo ra`: `notes | edit @sel | read
+@sel`, docs/console.md → *Settled for U6*). The read pane parses nothing
+itself: `core/document.py::render` hands it the whole document --
+every block `core/modoc.py` parsed, with what `core/modoc_bind.py`
+resolved it to inlined -- which is why the pane and `monoss modoc
+render` cannot come to disagree about what a note means. Only the
+editor's syntax highlighting runs in JavaScript, colour being
+presentation rather than meaning; the list of commands it knows comes
+from `core/modoc.py`.
 
-Monarch reaches it through `monarch/api.py::open_mora`, which spawns
-`run_mora.py` detached under `sys.executable` -- a sibling process, not a
-child window, so neither app's lifetime is tied to the other's. That
-makes two processes on one garden file the normal case rather than the
-exception, which is why `mora/api.py` sets `busy_timeout` on its
-connection for the same reason `mcp_server/server.py` does. `core/db.py`
-is deliberately left alone, so the CLI and Monarch keep the
-behavior they have.
-
-Two apps at once also means the two must not want the same HTTP port or
-the same WebKit storage directory, and the port is the one with teeth:
-pywebview pins its server to 42001 unless told otherwise, and the
-process that loses that race does not fail visibly -- it points its
-window at the winner's address and loads the other app's page against
-its own bridge. `mora/app.py::choose_port` asks for 42002 and falls back
-to an ephemeral port; `.webview_data_mora/` is its own storage. See
-`docs/ui-setup.md`.
+The read pane renders the editor's *draft*, not the stored note, so it
+follows unsaved typing (`modoc_bind.assemble(..., source=)`); figures
+are memoised until the garden changes (`core/document.py::FigureMemo`).
+A note saves on every pause in typing, and one editing session folds
+into one undo step (the session's `UndoManager.push` coalescing key).
+Mora was a separate window (`mora/`) until U6.
 
 # The calendar
 
@@ -1025,9 +1015,9 @@ replacement values rather than real data. And a mote is coloured by its
 species through the same palette the graph canvas uses, so it reads the
 same colour in all six windows.
 
-Monastery is a third process on the same terms as Mora, which means the
+Monastery is a second process on the same terms as Monarch, which means the
 same two collisions to avoid: `monastery/app.py::choose_port` asks for
-42003 (42001 is Monarch's, 42002 Mora's) and falls back to an
+42003 (42001 is Monarch's; 42002 was Mora's old window) and falls back to an
 ephemeral port, and `.webview_data_monastery/` is its own WebKit
 storage. And since nothing in MonOSS pushes -- no adapter announces its
 writes -- the window **polls** while focused rather than waiting to be
@@ -1063,7 +1053,7 @@ it.
 # The inspector
 
 One mote, one surface, every window. Selecting a mote anywhere -- a node
-in Monarch, a placement in Monastery, a link in Mora -- opens the same
+in Monarch, a placement in Monastery -- opens the same
 floating panel, with the same tools in it; the console's `p` float and
 props pane draw the same payload (`core/inspect.py`).
 

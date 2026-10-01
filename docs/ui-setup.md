@@ -1,12 +1,12 @@
 # Running the desktop UI
 
-Three native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
+Two native windows (via `pywebview`), each wrapping a local HTML/CSS/JS
 frontend — no browser tab, no local web server: **Monarch**, the graph
-(`run_monarch.py`); **Mora**, the note editor (`run_mora.py`); and
-**Monastery**, the calendar (`run_monastery.py`). They share one palette
-and one set of vendored fonts, so they read as one product. Monolith,
-the table, Moxie, the plots, and Motion, the simulator, have moved into
-the console (below) and have no windows of their own any more.
+(`run_monarch.py`), and **Monastery**, the calendar (`run_monastery.py`).
+They share one palette and one set of vendored fonts, so they read as
+one product. Monolith, the table, Moxie, the plots, Motion, the
+simulator, and Mora, the notes, have moved into the console (below) and
+have no windows of their own any more.
 
 A seventh window sits beside rather than among them: **Gardens**
 (`run_gardens.py`), where the gardens themselves are made, renamed,
@@ -51,7 +51,7 @@ view, the `find` table, the props pane and plots.
 
 | Line | Does |
 |---|---|
-| `mo tion`, `mo xie`, `mo nolith`, … | Open that app (`mo` then `tab` lists them). `mo tion` opens three panes in the focused one's place. Unported apps open their old window. |
+| `mo tion`, `mo ra`, `mo xie`, `mo nolith`, … | Open that app (`mo` then `tab` lists them). `mo tion` and `mo ra` open three panes in the focused one's place. Unported apps open their old window. |
 | `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). `mo nolith` is `find` with no conditions. |
 | `open @sel\|#id\|<name>` | A mote's properties and links (below). `mo te` is `open @sel`. |
 | `rename <target> <old> <new>` | Rename a property, keeping its value and unit. Refuses to overwrite a key that exists. |
@@ -60,6 +60,8 @@ view, the `find` table, the props pane and plots.
 | `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `mo xie` is `plot` with nothing to plot yet. |
 | `plot save <name>`, `plot export csv\|png [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
 | `fit <m.y> vs <m.x> --data <Y> vs <X> --free <m.k>…` | Fit inputs to measured points (below). `--apply` writes the result. |
+| `edit @sel\|<note>`, `read @sel\|<note>`, `notes [text]` | Write a note, read it rendered, list the notes (below). |
+| `worksheet` | The garden's calculation as lines of text; `esc` applies it (below). |
 | `sim [--ticks N] [--scenario s] [--vs s\|garden] [<conditions>]` | Run the garden tick by tick and watch its values (below). Writes nothing. |
 | `rule @sel\|<rule>`, `why <m.k>`, `scenarios` | A rule and what it binds; how the last solve got a value; the scenarios and their overrides (below). |
 | `solve`, `solve --live on\|off` | Solve once and write it (one undo step); or solve after every edit made here. |
@@ -106,8 +108,8 @@ pane (with one, it focuses that pane). It follows the selection, has
 the keys while open, and `p` or `esc` closes it.
 
 Not in the console yet: the calendar picker for a date (dates edit as
-`2026-10-02` text until U7), "open in Mora" (U6) and a solved value's
-`why` (U5).
+`2026-10-02` text until U7). A note is written with `edit ‹note›` and a
+solved value explained with `why ‹m.k›`.
 
 ### The table (`find`, `mo nolith`)
 
@@ -204,7 +206,7 @@ never repaints the others; a seventh repeats the first, dashed.
 **`plot save <name>`** writes the focused pane's line as a saved plot:
 an ordinary mote with a `plot` property holding the *specification*
 (what to solve, never the points), an instance of `Saved Plot`. Saving
-a name again updates that plot. `\graph{name}` in a Mora note draws it,
+a name again updates that plot. `\graph{name}` in a note draws it,
 re-solved at every render (`docs/modoc.md`). **`plot export csv`** writes
 the full-resolution points and **`plot export png`** the pane's picture,
 to `path` or through a save dialog.
@@ -320,6 +322,57 @@ sidecar, off by default.
 Not ported from the old window: the node board (a graph of the model
 comes back with Monarch in U8), value lanes, the pre-flight role check
 and the impact view (both stay in the CLI and MCP).
+
+### Notes (`edit`, `read`, `notes`, `mo ra`)
+
+`mo ra` puts three panes where the focused one was:
+`notes | edit @sel | read @sel`. Each is also a command on its own.
+
+| Line | Pane |
+|---|---|
+| `notes [text]` | every note (name, words, problems), or those whose name or prose contains the text; `⏎` selects one, so `@sel` panes follow; `n` puts `edit ` on the command line |
+| `edit @sel\|#id\|<name>` | the note's `.modoc` source. A mote with no note opens a blank page; a name no mote has makes the note on its first save |
+| `read @sel\|#id\|<name>` | the note rendered, on the gray paper surface, from what the `edit` pane is typing (saved or not) |
+
+**Editing is modal**, like every text-editing pane: `i` or `⏎` starts
+typing, and from then on the editor has every key but `^w` until `esc`.
+The source is highlighted (commands the parser doesn't know in --fault),
+and a line with a problem is underlined (hover for why).
+
+| Key (editing) | Does |
+|---|---|
+| `esc` | Stop editing (saves) |
+| `^f` | Find / replace: `⏎` `⇧⏎` next / previous, `tab` to the replace field, `⏎` there replaces one, `^⏎` replaces all, `esc` closes |
+| `^z` | The text box's own undo, typing and replacements alike |
+
+**Saving** happens on every pause in typing. One editing session (`i` …
+`esc`) is one undo step in the garden, however many pauses it saved on,
+and `esc` logs it (`saved Homework 4`).
+
+**The read pane** draws every macro (`docs/modoc.md`): links (a click
+selects the mote), `\val`, numbered equations and `\ref`, `\work`, the
+calc sections, `\checks` with ✓ / ✗, `\verification`, tables and figures
+with captions, cited rules, `\include`d notes, and the note's problems at
+the end. Maths is KaTeX; a `\graph` draws with the console's plot
+renderer, re-solved (and remembered until the garden changes). `j` `k`
+scroll, `g` `G` top and end.
+
+Not ported from the old window: the `@` mote picker (type `\mote{name}`
+or `\mote{#id}`), print to PDF (phase 6 makes real PDFs), and the
+inspector's door into a note.
+
+### The worksheet (`worksheet`)
+
+The garden's calculation as lines of text (`docs/simulation.md` → *The
+worksheet*), on the blueprint surface. Editing is modal as in a note.
+While you type each line is only read: the margin marks it (`=` given,
+`?` unknown, `ƒ` equation, `≡` relation, `✓` check, `!` a line that
+can't be written, struck through, with why on hover), and an unknown or
+an equation shows the garden's current value after it, faded. **`esc`
+applies the whole sheet** as one undo step and logs what it made and
+deleted; with `live` on, a solve follows. A sheet that applied cleanly
+then shows the garden's own reading of it; one with problems keeps your
+text so you can fix it.
 
 ### Tiling
 
@@ -441,7 +494,8 @@ In it:
 * **Advanced** (the footer toggle, remembered): the mote's id with a
   copy button, a `name` marker under the title (the title is that
   property, in a bigger font), whether this mote is its species'
-  template, the door to its note in Mora, and the raw JSON. (Where a
+  template, and the raw JSON (a note is summarized, and written in the
+  console with `edit ‹note›`). (Where a
   solved value came from is the console's `why ‹m.k›`.)
 
 Everything autosaves as you type, debounced, with a `saved` flash in the
@@ -553,9 +607,7 @@ view) -- the first way to reclaim that screen space, persisted across
 restarts -- and "Advanced view settings…" (below); Tools hosts the
 simulation step count, the **solver** and **scenario** pickers, the
 Simulate…/Exit simulation trigger for the same non-blocking
-preview/scrub/commit bar described above, "Check roles…", and
-"Notes (Mora)…", which opens the note editor on the current garden (see
-Mora, below), and "Sync…", which opens the Gardens window straight at
+preview/scrub/commit bar described above, "Check roles…", and "Sync…", which opens the Gardens window straight at
 this garden's sync settings. A handful of items (Import motes, Export as CSV/JSON,
 Print graph, Timeline view, Group by type, Automations, Webhooks, API
 access) are inert placeholders with a small "soon" badge, staged for
@@ -698,7 +750,7 @@ All three windows are dark-only and share one palette, one type pairing
 (IBM Plex Serif for names and titles, IBM Plex Sans for body, a mono for
 labels and ids) and one set of vendored fonts. The shared tokens are
 declared at the top of `monarch/frontend/style.css` and copied verbatim
-into `mora/frontend/style.css` and `monastery/frontend/style.css` --
+into `monastery/frontend/style.css` --
 pywebview's http server roots at the directory of the page it serves, so
 a stylesheet one directory over is not reachable, and three copies is
 the price of three windows that look like one product. Change a shared
@@ -766,8 +818,8 @@ e.g. `/usr/bin/python3 -m venv --system-site-packages .venv`.
 Each window has its own user-level launcher (none tracked in this repo --
 they're machine-specific, pointing at an absolute `.venv` path) so it shows
 up in the regular application menu instead of needing a terminal:
-`~/.local/share/applications/monoss.desktop` for Monarch,
-`mora.desktop` for Mora, `monastery.desktop` for Monastery. In every case
+`~/.local/share/applications/monoss.desktop` for Monarch and
+`monastery.desktop` for Monastery. In every case
 `StartupWMClass` has to match that window's own title (the string passed
 to `webview.create_window(...)` in its `app.py`), not the product name, or
 the desktop environment won't associate the launcher with the running
@@ -786,18 +838,6 @@ Categories=Utility;
 StartupWMClass=Monarch
 EOF
 
-cat > ~/.local/share/applications/mora.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=Mora
-Comment=Note editor for a MonOSS garden
-Exec=$(pwd)/.venv/bin/python $(pwd)/run_mora.py
-Icon=$(pwd)/assets/icon-mora.svg
-Terminal=false
-Categories=Utility;
-StartupWMClass=Mora
-EOF
-
 cat > ~/.local/share/applications/monastery.desktop <<EOF
 [Desktop Entry]
 Type=Application
@@ -813,11 +853,9 @@ EOF
 update-desktop-database ~/.local/share/applications/
 ```
 
-Mora's and Monastery's icons (`assets/icon-mora.svg`, `assets/icon-monastery.svg`)
-are the same ringed-planet mark both windows already draw in their own
-topbar brand block (`mora/frontend/index.html`, `monastery/frontend/index.html`)
--- the two are visually identical today because that mark is, not a
-mistake introduced here. Monarch's `assets/icon.svg` predates the amber
+Monastery's icon (`assets/icon-monastery.svg`) is the ringed-planet mark
+the window draws in its own topbar brand block
+(`monastery/frontend/index.html`). Monarch's `assets/icon.svg` predates the amber
 accent theme and is still in blue; nothing here changes it.
 
 ## Regression testing
@@ -870,118 +908,11 @@ clicking, dragging and connecting all succeeded against a blank canvas.
 
 ---
 
-# Mora -- the note editor
-
-A second window, over the same gardens: `./run_mora.py`, or
-`.venv/bin/python run_mora.py`. Same stack as the main app -- pywebview
-over a local HTML/CSS/JS frontend, no browser tab, no build step -- but a
-separate process holding its own garden connection, so it opens and
-closes independently of Monarch.
-
-```
-./run_mora.py                       # the default garden
-./run_mora.py --garden reactor      # a specific garden
-./run_mora.py --note <mote id>      # straight to one mote's note
-```
-
-### Opening it from the graph
-
-Three ways, all of them the same launch with different arguments:
-
-| Where | Opens |
-|---|---|
-| Tools → **Notes (Mora)…** | Mora on the current garden |
-| Detail panel → **Write a note… / Open note…** | Mora on the selected mote |
-| Detail panel → the `modoc` row's ↗ | the same, from the property itself |
-
-`monarch/api.py::open_mora` spawns it detached with `sys.executable` -- the
-virtualenv the app is already running in -- so it is a sibling process,
-not a child window, and closing the graph does not close it. Its output
-is *not* discarded: a Mora that fails to start prints its traceback on
-whatever terminal Monarch was launched from.
-
-The two apps must not want the same HTTP port. pywebview pins its
-built-in server to 42001 whenever `private_mode` is off and no port is
-given, which Monarch takes; Mora asks for **42002**, falling
-back to whatever the OS hands out if that is busy (a second Mora
-window). This is not a tidiness point -- the process that loses that
-race still points its window at the winner's address, so it comes up
-showing the other app's page against its own bridge. Mora keeps its own
-WebKit storage directory (`.webview_data_mora/`) for the same reason:
-Monarch's is not something two processes should share, least of
-all when each clears its own cache on startup.
-
-Two consequences worth knowing. The two processes hold separate
-connections to the same garden file, so neither sees the other's writes
-until it refetches -- refocus the graph after saving in Mora. Nothing is
-lost either way: both write one property at a time, so editing a mote in
-the panel never clobbers a note saved next door.
-
-A note is a property like any other, so it also appears in the detail
-panel's Properties list -- as a `N lines — edit in Mora` summary rather
-than an editable field, because a document is not a thing to edit through
-a one-line box in a side panel. Deleting it is an ordinary property
-delete, because that is all it is.
-
-With neither flag it opens the first mote in the garden that already
-carries a note, and otherwise the most recent mote -- as an empty page to
-start writing on, not an error. `docs/modoc.md` is the language; this is
-the window.
-
-| Pane | |
-|---|---|
-| Source | a textarea over a syntax-highlight layer. `@` opens a mote picker that inserts `\mote{<id>}{<name>}` |
-| Rendered | the note with every macro resolved. Clicking a `\mote` link opens the shared floating inspector (`frontend_shared/inspector.js`) on that mote -- the same editing surface every other window uses. A `\graph{<saved view>}` draws as a figure, through `frontend_shared/plot.js`, the renderer the console's plot pane (`console/frontend/js/plot.js`) was ported from |
-
-`Source` / `Split` / `Read` choose which panes are shown. Mora has no
-docked data panel of its own; a mote's properties and relationships are
-read (and edited) through the inspector, not a side pane.
-
-| Control | Action |
-|---|---|
-| (autosave) | About a second after typing stops -- and on leaving the source pane, switching note or garden, or closing the window -- the source is written back on its own. The pill reads `edited`, `saving…`, `synced` |
-| Ctrl/Cmd+S, or **Save** | Write now, without waiting for the pause. Same write: the mote's `modoc` property and nothing else |
-| Esc | Close the note menu or the `@` picker |
-| Footer **N problems** | Toggles a popover listing this note's diagnostics |
-
-Mora writes exactly one thing: the `modoc` property. It has no `t+N`
-stepper and no Apply button any more -- a note shows the garden as it
-stands, and moving a garden through time is the console's `sim`. That makes
-"saving a note can never write simulation results" a fact about the
-window rather than a rule two buttons were keeping.
-
-### Smoke test
-
-`scripts/mora_smoke_test.py` is Mora's equivalent of the UI smoke test
-above, and exists for the same reason -- the half of the app pytest
-cannot reach. It drives a real window against a seeded throwaway garden
-and checks that the note renders, that `\val` and `\mote` resolve (and
-visibly fail when they can't), that a `\graph` naming a saved plot
-draws and re-solves rather than replaying stored points, that a link
-opens the shared inspector, that the footer offers no clock,
-that Save writes only the note, and that no uncaught JS errors were
-logged. The entry points *into* Mora belong to the main window, so
-they are checked by `scripts/monarch_smoke_test.py` instead, with `open_mora`
-stubbed -- an automated suite has no business spawning a second app.
-
-Run the two one at a time. Both drive real windows with synthetic
-gestures, and the timing-sensitive checks flake when they compete.
-
-```
-.venv/bin/python scripts/mora_smoke_test.py
-```
-
-Prints PASS/FAIL per check and exits non-zero if anything failed. Never
-touches real data: `GARDENS_DIR` and the webview storage dir are both a
-fresh temp directory.
-
----
-
 # Monastery -- the calendar
 
-A third window, over the same gardens: `./run_monastery.py`, or
+A second window, over the same gardens: `./run_monastery.py`, or
 `.venv/bin/python run_monastery.py`. Same stack and the same terms as
-Mora -- pywebview over a local HTML/CSS/JS frontend, its own process,
+Monarch -- pywebview over a local HTML/CSS/JS frontend, its own process,
 its own garden connection, opening and closing independently of the
 graph window.
 
@@ -1032,7 +963,7 @@ A recurring mote is still **one mote**: every occurrence it draws opens
 the same detail panel -- one mote → one event → the whole series. A rule
 that doesn't parse
 places the mote on its own date rather than hiding it -- the same
-permissiveness a broken note gets in Mora.
+permissiveness a broken note gets in the read pane.
 
 Templates and scenario overrides are never placed, even when dated: they
 hold replacement values rather than real data.
@@ -1071,17 +1002,16 @@ inputs out from under someone typing into them.
 ### Ports
 
 The third window means a third port. pywebview pins its server to 42001
-unless told otherwise (Monarch), Mora asks for 42002, and
-Monastery asks for **42003**, each falling back to an ephemeral port if
+unless told otherwise (Monarch), and Monastery asks for **42003**, each falling back to an ephemeral port if
 theirs is taken. This is not tidiness: the process that loses that race
 still points its window at the winner's address, so it comes up showing
 another app's page against its own bridge -- which is exactly what
-happened to Mora once. `.webview_data_monastery/` is its own WebKit
+happened to Mora's old window once. `.webview_data_monastery/` is its own WebKit
 storage for the same reason.
 
 ### Smoke test
 
-`scripts/monastery_smoke_test.py`, the same instrument as Mora's and for
+`scripts/monastery_smoke_test.py`, the same instrument as Monarch's and for
 the same reason. It drives a real window against a seeded throwaway
 garden -- seeded relative to *today*, since the week view draws whatever
 week it opens on -- and checks that motes place under every binding, that

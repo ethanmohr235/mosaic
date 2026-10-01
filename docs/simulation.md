@@ -877,6 +877,12 @@ monoss worksheet read
 monoss worksheet apply --file sheet.txt      # or on standard input
 ```
 
+In the console it is the `worksheet` pane: typing only reads each line
+(`core/worksheet.py::preview` -- its kind, why it can't be written, and
+an unknown's current value), and `esc` applies the sheet as one undo step
+(`apply_undoable`, which compares the garden before and after). See
+`docs/ui-setup.md` → *The worksheet*.
+
 `FEA-Homework-4` is the case this exists for: 10 motes and 10
 relationships to express about 9 numbers and 5 equations, built one dialog
 at a time. Six of those relationships existed only so `bd.l` would resolve

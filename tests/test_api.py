@@ -353,48 +353,9 @@ def test_open_link_missing_file_raises(api):
         api.open_link("/no/such/file/anywhere")
 
 
-# ---- opening Mora ----
-
-def _mora_commands(monkeypatch):
-    """What open_mora would actually launch, without launching it."""
-    launched = []
-    monkeypatch.setattr(
-        monarch.api, "_popen_detached", lambda args, **kwargs: launched.append(args)
-    )
-    return launched
-
-
-def test_open_mora_launches_the_editor_on_the_current_garden(api, monkeypatch):
-    launched = _mora_commands(monkeypatch)
-    assert api.open_mora() == {"garden": "test", "note": None}
-    (command,) = launched
-    # The venv the app is running in, not a bare `python` off PATH --
-    # see docs/ui-setup.md.
-    assert command[0] == sys.executable
-    assert command[1].endswith("run_mora.py")
-    assert command[2:] == ["--garden", "test"]
-
-
-def test_open_mora_passes_the_mote_whose_note_was_asked_for(api, monkeypatch):
-    launched = _mora_commands(monkeypatch)
-    mote_id = api.create_mote({"name": "Notebook"})["id"]
-    assert api.open_mora(mote_id)["note"] == mote_id
-    assert launched[0][-2:] == ["--note", mote_id]
-
-
-def test_open_mora_follows_a_garden_switch(api, monkeypatch):
-    launched = _mora_commands(monkeypatch)
-    create_garden("elsewhere")
-    api.switch_garden("elsewhere")
-    api.open_mora()
-    assert launched[0][2:] == ["--garden", "elsewhere"]
-
-
 # ---- the ⌘J switcher ----
 #
-# open_mora/open_monastery above stay named the way
-# Monarch's own Tools menu calls them; open_app is the app-agnostic
-# counterpart the switcher uses instead. Its command-building is
+# open_app is the app-agnostic launcher the switcher uses. Its command-building is
 # api_common.open_app's own test (tests/test_api_common.py) -- what's
 # worth checking here is only that this method delegates to it.
 
@@ -405,7 +366,7 @@ def test_open_app_delegates_to_api_common(api, monkeypatch):
     monkeypatch.setattr(
         api_common, "popen_detached", lambda args, **kwargs: calls.append(args)
     )
-    assert api.open_app("mora") == {"app": "mora", "garden": "test", "focus": None}
+    assert api.open_app("monastery") == {"app": "monastery", "garden": "test", "focus": None}
     assert calls[0][2:] == ["--garden", "test"]
 
 

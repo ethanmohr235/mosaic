@@ -1737,16 +1737,6 @@ const LAUNCHER_APPS = [
     </svg>`,
   },
   {
-    id: "mora", name: "Mora", kind: "notes",
-    desc: "Write and link long-form .modoc notes.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="9" y="6" width="22" height="28" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="14" y="14" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="20" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="26" width="7" height="1.8" rx="0.9" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
     id: "monastery", name: "Monastery", kind: "calendar",
     desc: "See and schedule a garden's dated motes.",
     icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
@@ -1829,7 +1819,7 @@ async function launchApp(appId) {
 
 async function init() {
   api = window.pywebview.api;
-  Inspector.install({ api, onChanged: refresh, onOpenMora: () => toast("Opening Mora…") });
+  Inspector.install({ api, onChanged: refresh });
   CommandBar.install({
     api,
     onChanged: refresh,

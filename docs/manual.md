@@ -41,7 +41,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 
 | Command | Does |
 |---|---|
-| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`); `mo ra`, `mo nastery`, `mo narch`, `mo saic` still open old windows |
+| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`); `mo nastery`, `mo narch`, `mo saic` still open old windows |
 | `find ‹conditions› [--sort k] [--group k] [--cols a,b] [--view name]` | Table of motes |
 | `open @sel\|#id\|name` | A mote's properties and links (`@sel` follows the selection) |
 | `set ‹target› ‹key› ‹value›` / `… --clear` | Set / remove a property (`5 mm` records the unit); `set C1.voltage 30` also works |
@@ -64,6 +64,10 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `solve` | Solve once and write it (undoable; refused if a rule uses `prev()`) |
 | `solve --live on\|off` | Solve after every edit made here (top bar: `live`) |
 | `step +N\|-N\|‹tick›`, `play`, `pause` | Move the shared playhead (top bar: `tick 12/49 ▶`) |
+| `edit @sel\|#id\|‹name›` | Write a note (a new name makes it on the first save) |
+| `read @sel\|#id\|‹name›` | A note rendered, following unsaved typing |
+| `notes [text]` | Every note, or those containing the text |
+| `worksheet` | The garden's calculation as text; `esc` applies it (one undo step) |
 | `cd ‹garden›` | Switch garden |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |
@@ -147,6 +151,20 @@ back) · `i` edit the equation (prefills `set`).
 Scenarios pane: `j` `k` move · `⏎` run sim under it · `v` compare sim
 against it · `a` / `n` add override / new scenario (prefills `set
 --scenario`) · `d` `d` clear the override.
+
+**Editors** (`edit`, `worksheet`)
+
+| Key | Does |
+|---|---|
+| `i` / `⏎` | Start typing (then every key but `^w` is the editor's) |
+| `esc` | Stop: a note saves (one undo step per session), the worksheet applies |
+| `^f` | Find / replace: `⏎` `⇧⏎` next/prev · `tab` field · `⏎` in replace: one · `^⏎` all · `esc` close |
+| `^z` | Undo typing (the text box's own) |
+| `j` `k`, `g` `G` | Scroll (not typing) |
+
+Read pane: `j` `k` `g` `G` `space` scroll · click a link to select its mote.
+Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
+`n` new note (prefills `edit `).
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.
 **New pane** (`view>`): `↑` `↓` choose, `⏎` place, `esc` cancel.

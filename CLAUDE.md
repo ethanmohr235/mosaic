@@ -57,7 +57,7 @@ updates it in the same commit. Keep it compact: tables, no prose.
     (`core/modoc.py`, `core/modoc_bind.py::assemble`)
   - new reserved property `source` (`assumed`, `external`)
   - `monoss calc ...`; MCP `calc_sections`, `shown_work`
-  - the UI it needs is Mora / console step U6
+  - its UI is the console's read pane (U6)
 - Roadmap **phase 4's backend is done** (`core/projects.py`): the reserved
   `garden` property, `start_project`, the one-owner check, the ownership
   tree and the cover (`name`, `due`, `status`, `author`, `revision`);
@@ -107,8 +107,13 @@ updates it in the same commit. Keep it compact: tables, no prose.
   @sel`) over `core/motion.py` (the `sim` grammar and run rows, rule
   cards, `why`, the undoable `solve`, the live solve); `console/motion.py`
   is `api.motion`; `set --scenario` writes a scenario's override; the
-  shared playhead is store state. Motion's old window is deleted. The
-  next UI step is U6 (Mora).
+  shared playhead is store state. Motion's old window is deleted.
+- Console **U6 is done**: Mora is `mo ra` (`notes | edit @sel | read
+  @sel`) plus the `worksheet` pane; `core/document.py` renders a note's
+  draft (every macro), `console/mora.py` is `api.mora`, `js/editor.js` is
+  the modal editor with find/replace, and `core/worksheet.py` applies as
+  one undo step. Mora's old window is deleted. The next UI step is U7
+  (Monastery).
 
 ## Split of work: cloud backend, local frontend
 

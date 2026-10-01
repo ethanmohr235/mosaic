@@ -858,20 +858,6 @@ async function openDetailPanel(moteId, options = {}) {
   });
 }
 
-/** A mote's note is edited in Mora, not here -- .modoc is a document
- *  format with live bindings in it (docs/modoc.md), and a one-line text
- *  box in a side panel is the wrong instrument for one. So the panel
- *  offers the door rather than the room, and says which side of it the
- *  mote is on. */
-function openMora(moteId) {
-  call(api.open_mora(moteId || null));
-  showToast(
-    moteId
-      ? "Opening Mora… notes saved there appear here after a refocus."
-      : "Opening Mora…",
-  );
-}
-
 /** Shown instead of the single-mote panel once a box-select (or shift-add)
  *  produces more than one selected mote. Its own small render function
  *  rather than a generalization of openDetailPanel -- an aggregate view
@@ -1825,16 +1811,6 @@ const LAUNCHER_APPS = [
     </svg>`,
   },
   {
-    id: "mora", name: "Mora", kind: "notes",
-    desc: "Write and link long-form .modoc notes.",
-    icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="9" y="6" width="22" height="28" rx="3" fill="none" stroke="var(--fg)" stroke-width="1.6" opacity="0.6"></rect>
-      <rect x="14" y="14" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="20" width="12" height="1.8" rx="0.9" fill="var(--fg)" opacity="0.7"></rect>
-      <rect x="14" y="26" width="7" height="1.8" rx="0.9" fill="var(--accent)"></rect>
-    </svg>`,
-  },
-  {
     id: "monastery", name: "Monastery", kind: "calendar",
     desc: "See and schedule a garden's dated motes.",
     icon: `<svg width="20" height="20" viewBox="0 0 40 40" aria-hidden="true">
@@ -2153,7 +2129,6 @@ async function init() {
     onChanged: () => refocus(focusId, { pan: false }).then(refreshMoteCache),
     valueEditor: monarchValueEditor,
     advancedSections: [monarchSpeciesExtras],
-    onOpenMora: () => showToast("Opening Mora…"),
     // Without this the panel falls back to its own hash-based palette,
     // which disagrees with the graph whenever a species has a custom
     // colour picked in view settings.

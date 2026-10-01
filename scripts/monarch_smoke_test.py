@@ -47,7 +47,7 @@ from core.gardens import create_garden  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "monarch" / "frontend"
 
-# Neither Monarch's 42001 (mora/app.py) nor Mora's 42002, so a
+# Neither Monarch's 42001 (the old mora/app.py) nor Mora's 42002, so a
 # smoke run can share a desktop with both apps already open.
 SMOKE_HTTP_PORT = 42003
 
@@ -1443,17 +1443,17 @@ def run_checks(window):
             JSON.stringify(Array.from(document.querySelectorAll('#launcher-results .launcher-name'))
                 .map(e => e.textContent))
         """))
-        assert "Mora" in names and "Monastery" in names, f"the launcher should list sibling apps, got {names}"
+        assert "Monastery" in names, f"the launcher should list sibling apps, got {names}"
         assert "Monarch" not in names, "the launcher should not offer to open the app you're already in"
 
         js(window, """
             Array.from(document.querySelectorAll('#launcher-results .launcher-card'))
-                .find(c => c.querySelector('.launcher-name').textContent === 'Mora')
+                .find(c => c.querySelector('.launcher-name').textContent === 'Monastery')
                 .dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
         """)
         time.sleep(0.4)
         calls = json.loads(js(window, "JSON.stringify(window.__openAppCalls)"))
-        assert calls == [["mora", None]], f"picking Mora should open it with no mote, got {calls}"
+        assert calls == [["monastery", None]], f"picking Monastery should open it with no mote, got {calls}"
         closed = js(window, "document.getElementById('launcher-overlay').classList.contains('hidden')")
         assert closed is True, "opening an app from the launcher should close it"
 
@@ -1461,7 +1461,7 @@ def run_checks(window):
 
     check("the app launcher (\u2318J) lists and opens sibling apps", switch_app_launcher_opens_a_sibling_app)
 
-    def a_note_property_shows_as_a_summary_with_a_way_into_mora():
+    def a_note_property_shows_as_a_summary():
         # Injected as JSON rather than written inline: a .modoc source is
         # backslashes and newlines all the way down, and nesting it in a
         # Python string in a JS string in an eval is three escapings deep.
@@ -1498,25 +1498,12 @@ def run_checks(window):
         assert "4 lines" in summary["value"], \
             f"the row should summarize the note, got {summary['value']!r}"
         assert summary["readOnly"] is True, "a note must not be editable from the properties list"
-        assert summary["hasOpen"] is True, "the note row should offer a way into Mora"
-
-        # The \u2197 follow button is that door -- clicking it opens Mora on
-        # this mote (frontend_shared/inspector.js::trailingControls).
-        js(window, """
-            Array.from(document.querySelectorAll('.ins-body .ins-row'))
-                .find(r => r.querySelector('.ins-key').value === 'modoc')
-                .querySelector('.ins-follow').click();
-        """)
-        time.sleep(0.4)
-        calls = json.loads(js(window, "JSON.stringify(window.__openAppCalls)"))
-        note_mote_id = json.loads(js(window, "JSON.stringify(window.__noteMote)"))
-        assert calls == [["mora", note_mote_id]], \
-            f"the follow button should open Mora on this mote, got {calls}"
+        assert summary["hasOpen"] is False, "Mora's window is gone: notes are written in the console"
 
         js(window, "api.open_app = window.__origOpenApp;")
 
-    check("a `modoc` property renders as a summary with a way into Mora",
-          a_note_property_shows_as_a_summary_with_a_way_into_mora)
+    check("a `modoc` property renders as a read-only summary",
+          a_note_property_shows_as_a_summary)
 
     def depth_control_limits_the_graph():
         def visible_at(value):
@@ -3430,11 +3417,11 @@ def main():
     # An explicit free port, never pywebview's pinned 42001. monarch/app.py
     # takes that one, so running this while the real app is open meant
     # the test's own server failed to bind and its window then loaded
-    # *the running app's* page off 42001 -- the exact failure mora/app.py
+    # *the running app's* page off 42001 -- the exact failure the old mora/app.py
     # documents and works around with choose_port(). The run did not blow
     # up when that happened; it quietly scored 76/81 against the wrong
     # page, which is the worse outcome. Same reasoning as
-    # mora_smoke_test.py, and the same helper.
+    # the old mora_smoke_test.py, and the same helper.
     webview.start(http_server=True, http_port=choose_port("Monarch smoke test", SMOKE_HTTP_PORT),
                   private_mode=False, storage_path=str(_TMP / "webview_data"))
 

@@ -17,7 +17,7 @@
  *
  * Host apps drive it with three calls:
  *
- *   Inspector.install({ api, onChanged, onOpenMora })   once, after the bridge is up
+ *   Inspector.install({ api, onChanged })   once, after the bridge is up
  *   Inspector.open(moteId, { anchor, newTab })
  *   Inspector.close()
  *   Inspector.updateAnchor(anchor)          re-anchor the leader after a pan/zoom
@@ -138,7 +138,6 @@ const Inspector = (() => {
   let extraSections = [];
   let hostEditor = null;
   let notesDoor = true;
-  let onOpenMora = () => {};
   let hostSpeciesColor = null;
 
   let root = null;
@@ -175,7 +174,6 @@ const Inspector = (() => {
     hostEditor = options.valueEditor || null;
     // Mora is the room, not a door to it.
     notesDoor = options.notesDoor !== false;
-    onOpenMora = options.onOpenMora || (() => {});
     hostSpeciesColor = options.speciesColorFor || null;
     build();
     restoreGeometry();
@@ -717,24 +715,7 @@ const Inspector = (() => {
     if (key === "url") {
       controls.push(followButton("Open", () => api.inspector_open_link(value)));
     }
-    if (key === "modoc") {
-      // A .modoc note has live bindings in it (docs/modoc.md) and Mora is
-      // the window that renders them. The inspector offers the door
-      // rather than pretending a property box is the room.
-      controls.push(followButton("Open this note in Mora",
-        () => openMora(data.id)));
-    }
     return controls;
-  }
-
-  /** The one door out of the panel to Mora, from both the ↗ follow
-   *  button and double-clicking the note summary. `onOpenMora` is the
-   *  host's launcher toast ("Opening Mora…") -- this is the same act of
-   *  opening the app, just triggered from inside a mote instead of the
-   *  launcher grid, and should read the same way. */
-  function openMora(moteId) {
-    api.open_app("mora", moteId);
-    onOpenMora();
   }
 
   function followButton(title, action) {
@@ -754,7 +735,7 @@ const Inspector = (() => {
    *  the size of the garden. */
   function valueEditor(data, key, meta, value) {
     if (key === "modoc" && typeof value === "string") {
-      return noteSummary(value, () => bridge(() => openMora(data.id)));
+      return noteSummary(value);
     }
 
     // By shape, not by key name: `date` stopped being a key the engine
@@ -912,20 +893,16 @@ const Inspector = (() => {
     return input;
   }
 
-  /** A note, summarized and not editable. Mora renders .modoc; a 12px
-   *  property box can only mangle it, so the panel says how much note
-   *  there is and leaves the editing to the window that can do it.
-   *  Double-clicking it is the same door as the ↗ follow button next to
-   *  it (trailingControls) -- this is just the bigger target, since the
-   *  box is what most of the row's width actually is. */
-  function noteSummary(text, onOpen) {
+  /** A note, summarized and not editable: a 12px property box can only
+   *  mangle .modoc, so the panel says how much note there is. Notes are
+   *  written in the console (`edit ‹note›`). */
+  function noteSummary(text) {
     const lines = text.split("\n").length;
     const field = document.createElement("input");
     field.className = "ins-input";
     field.readOnly = true;
     field.value = `${lines} line${lines === 1 ? "" : "s"}`;
-    field.title = "Notes are edited in Mora -- double-click to open";
-    if (onOpen) field.addEventListener("dblclick", onOpen);
+    field.title = "Notes are written in the console: edit ‹note›";
     return field;
   }
 

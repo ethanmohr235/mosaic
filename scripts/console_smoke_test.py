@@ -139,7 +139,10 @@ def type_command(window, line, alt=False):
     press(window, ":")
     assert wait_until(lambda: js(window, "document.activeElement.classList.contains('c-input-native')"
                                          " && !!document.activeElement.closest('#cmdline')")), \
-        "`:` did not move focus to the command line"
+        "`:` did not move focus to the command line; focus was on " + js(window, """(() => {
+            const a = document.activeElement; const pane = a && a.closest('.pane');
+            return `${a ? a.tagName + '.' + a.className : 'nothing'} in ${pane ? pane.querySelector('.c-head').textContent : 'no pane'}`;
+        })()""")
     js(window, f"""
         (() => {{
           const input = document.activeElement;
@@ -149,6 +152,13 @@ def type_command(window, line, alt=False):
         }})();
     """)
     press(window, "Enter", alt=alt)
+    # The line runs asynchronously, and the command line keeps focus until
+    # it has finished (it blurs then). A key pressed sooner lands in the
+    # command line and is lost when it blurs -- so wait for the run to end.
+    # A line that failed keeps the command line focused: that ends the wait
+    # by timing out, and the next `:` finds it already there.
+    wait_until(lambda: not js(window, "!!document.activeElement && !!document.activeElement.closest('#cmdline')"),
+               timeout=3)
 
 
 def pane_grows(window):
@@ -792,6 +802,113 @@ def u5_checks(window):
     check("U5: `solve` is one undo step; `solve --live on` solves after each edit", solve_and_live)
 
 
+NOTE_ID = {}
+
+
+def seed_note():
+    conn = get_connection(GARDEN)
+    try:
+        NOTE_ID["Homework"] = create_mote(conn, {
+            "name": "Homework", "modoc": "The divider \\mote{C1} runs at \\val{C1.voltage}."})
+    finally:
+        conn.close()
+
+
+def read_text(window):
+    return js(window, "[...document.querySelectorAll('.view-doc .doc')].map(d => d.textContent).join(' | ')")
+
+
+def focused_text(window):
+    return js(window, "(() => { const t = document.querySelector('.pane.focused textarea.c-editor-text');"
+                      " return t ? t.value : null; })()")
+
+
+def focus_pane(window, command):
+    """Click the pane whose header is `command` (mouse parity: a click
+    focuses a pane)."""
+    js(window, f"""(() => {{
+        const pane = [...document.querySelectorAll('.pane')]
+            .find(p => p.querySelector('.c-head-command').textContent === {json.dumps(command)});
+        pane.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, button: 0}}));
+    }})()""")
+
+
+def focused_head(window):
+    return js(window, "document.querySelector('.pane.focused .c-head').textContent")
+
+
+def type_into_editor(window, text):
+    js(window, f"""(() => {{ const t = document.querySelector('.pane.focused textarea.c-editor-text');
+        t.value = {json.dumps(text)}; t.dispatchEvent(new Event('input', {{bubbles: true}})); }})()""")
+
+
+def u6_checks(window):
+    def mo_ra_opens_three_panes():
+        seed_note()
+        type_command(window, "refresh")
+        type_command(window, "mo ra", alt=True)
+        assert wait_until(lambda: {"notes", "edit @sel", "read @sel"} <= set(headers(window))), headers(window)
+        assert "edit @sel" in focused_head(window), "mo ra focuses the editor"
+        focus_pane(window, "notes")
+        assert wait_until(lambda: "Homework" in js(window, "document.querySelector('.pane.focused').textContent")), \
+            "the notes pane should list Homework; focused: " + focused_head(window)
+        press(window, "g")
+        press(window, "Enter")
+        assert wait_until(lambda: "The divider C1 runs at 10" in read_text(window)), read_text(window)
+        no_errors(window)
+
+    check("U6: `mo ra` opens notes | edit @sel | read @sel, and ⏎ on a note shows it", mo_ra_opens_three_panes)
+
+    def typing_follows_and_saves_once():
+        focus_pane(window, "edit @sel")
+        assert wait_until(lambda: (focused_text(window) or "").startswith("The divider")), focused_text(window)
+        press(window, "i")
+        type_into_editor(window, "The circuit \\mote{C1} runs at \\val{C1.voltage}.")
+        assert wait_until(lambda: "The circuit C1" in read_text(window)), "the read pane should follow the draft"
+        press(window, "f", ctrl=True)
+        js(window, """(() => { const i = document.querySelector('.pane.focused .c-find-input');
+            i.value = 'runs at'; i.dispatchEvent(new Event('input', {bubbles: true})); })()""")
+        js(window, """(() => { const i = document.querySelectorAll('.pane.focused .c-find-input')[1];
+            i.value = 'holds'; i.focus(); })()""")
+        press(window, "Enter", ctrl=True)
+        assert wait_until(lambda: "holds" in (focused_text(window) or "")), focused_text(window)
+        press(window, "Escape")  # closes the find bar
+        press(window, "Escape")  # stops editing: saves
+        assert wait_until(lambda: "holds" in (prop(NOTE_ID["Homework"], "modoc") or "")), \
+            prop(NOTE_ID["Homework"], "modoc")
+        type_command(window, "undo")
+        assert wait_until(lambda: (prop(NOTE_ID["Homework"], "modoc") or "").startswith("The divider")), \
+            "one undo takes back the whole editing session"
+        no_errors(window)
+
+    check("U6: the read pane follows typing; find/replace; esc saves one undoable session",
+          typing_follows_and_saves_once)
+
+    def worksheet_applies_on_esc():
+        type_command(window, "worksheet", alt=True)
+        assert wait_until(lambda: focused_text(window) is not None)
+        press(window, "i")
+        type_into_editor(window, (focused_text(window) or "") + "\nzz.q = 7 m")
+        assert wait_until(lambda: count(window, ".pane.focused .ws-given") >= 1)
+        press(window, "Escape")
+        assert wait_until(lambda: prop(_named("zz"), "q") == 7 if _named("zz") else False), "esc should apply"
+        type_command(window, "undo")
+        assert wait_until(lambda: _named("zz") is None), "undo takes the worksheet back"
+        no_errors(window)
+
+    check("U6: the worksheet applies on esc as one undo step", worksheet_applies_on_esc)
+
+
+def _named(name):
+    conn = get_connection(GARDEN)
+    try:
+        from core.motes import list_motes
+        found = [m.id for m in list_motes(conn) if m.properties.get("name") == name]
+        return found[0] if found else None
+    finally:
+        conn.close()
+
+
 def u4_restored_checks(window):
     def restored():
         assert wait_until(lambda: plot_command(window).startswith(PLOT), timeout=10), \
@@ -857,6 +974,7 @@ def drive(first, first_loaded):
         u4_checks(second)
         fit_checks(second)
         u5_checks(second)
+        u6_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)
