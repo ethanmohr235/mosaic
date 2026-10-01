@@ -639,28 +639,22 @@ e.g. `/usr/bin/python3 -m venv --system-site-packages .venv`.
 
 ## Desktop launcher
 
-A user-level launcher (not tracked in this repo -- it is machine-specific,
-pointing at an absolute `.venv` path) puts the console in the regular
-application menu instead of needing a terminal. `StartupWMClass` has to
-match the window's own title (the `name` `console/app.py` passes to
-`launch_window`), or the desktop environment won't associate the
-launcher with the running window. Regenerate it with:
+A user-level launcher puts the console in the regular application menu
+instead of needing a terminal. It is machine-specific (it points at this
+checkout's `.venv`), so a script writes it rather than the repo
+tracking it:
 
 ```
-cat > ~/.local/share/applications/monoss.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=Mosaic
-Comment=Personal knowledge-graph organizer
-Exec=$(pwd)/.venv/bin/python $(pwd)/run_console.py
-Icon=$(pwd)/assets/icon.svg
-Terminal=false
-Categories=Utility;
-StartupWMClass=Mosaic
-EOF
-
-update-desktop-database ~/.local/share/applications/
+scripts/install_desktop_entry.sh
 ```
+
+That writes `~/.local/share/applications/monoss.desktop` -- the file
+Monarch's launcher used, so an old Monarch entry becomes Mosaic -- and
+runs `update-desktop-database`. Run it again after moving the checkout.
+`StartupWMClass=Mosaic` has to match the window's own title (the `name`
+`console/app.py` passes to `launch_window`), or the desktop environment
+won't associate the launcher with the running window. From a terminal,
+`./run_console.py [--garden name]` works as `./run_monarch.py` did.
 
 `assets/icon.svg` predates the console's palette and is still in blue;
 nothing here changes it.
