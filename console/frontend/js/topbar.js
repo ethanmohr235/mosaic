@@ -1,12 +1,14 @@
 /* The top bar. Left: the `[mo]` box flush to the edge, the focused
- * pane's app suffix (`saic` for shell views), and `/ garden` in --dim.
+ * pane's app suffix (`saic` for shell views), and the garden's ownership
+ * path in --dim (`/ college-fall-2026 / hw4`); a crumb above the open
+ * garden `cd`s there (docs/console.md → Settled for U9).
  * Right: the saved layouts as `1:name` tabs (the active one inverted,
  * with `*` when the tree has drifted from it), the playhead (`tick 12/49
  * ▶`) and `live` when Motion has them, then `unsaved layout` in
  * --warn, and `sel X +N · linked in N panes` or the pane count. A tab
  * click switches layout, like its number key. */
 
-export function createTopbar({ root, store, panes, actions, components }) {
+export function createTopbar({ root, store, panes, actions, components, onRun = () => {} }) {
   const { h } = components;
 
   function suffix() {
@@ -49,12 +51,26 @@ export function createTopbar({ root, store, panes, actions, components }) {
     return parts;
   }
 
+  function breadcrumb() {
+    const crumbs = store.state.crumbs && store.state.crumbs.length ? store.state.crumbs : [store.state.garden];
+    const parts = [];
+    crumbs.forEach((garden, i) => {
+      parts.push(i ? " / " : "/ ");
+      if (i === crumbs.length - 1) return parts.push(h("span", "crumb here", garden));
+      const crumb = h("span", "crumb up", garden);
+      crumb.title = `cd ${garden}`;
+      crumb.addEventListener("click", () => onRun(`cd ${/^[\w.-]+$/.test(garden) ? garden : JSON.stringify(garden)}`));
+      parts.push(crumb);
+    });
+    return h("span", "breadcrumb", parts);
+  }
+
   function render() {
     const dirty = store.dirty();
     root.replaceChildren(
       h("span", "mo-box", "mo"),
       h("span", "app-suffix", suffix()),
-      h("span", "breadcrumb", `/ ${store.state.garden}`),
+      breadcrumb(),
       h("span", "grow"),
       h("span", "tabs", tabs(dirty)),
       ...motion(),

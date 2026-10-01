@@ -86,10 +86,12 @@ import monasteryAgenda from "./monastery-agenda.js";
 import monasteryWeek from "./monastery-week.js";
 import monasteryMonth from "./monastery-month.js";
 import monarchGraph from "./monarch-graph.js";
+import mosaicGardens from "./mosaic-gardens.js";
+import mosaicGarden from "./mosaic-garden.js";
 
 export const VIEWS = [log, monolithTable, moteProps, moxiePlot, moxieFit, motionState, motionRule,
   motionScenarios, moraEdit, moraRead, moraNotes, moraWorksheet, monasteryAgenda, monasteryWeek, monasteryMonth,
-  monarchGraph];
+  monarchGraph, mosaicGardens, mosaicGarden];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;

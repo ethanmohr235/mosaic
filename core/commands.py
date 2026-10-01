@@ -88,7 +88,8 @@ ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "pl
                              "why": "motion:rule", "edit": "mora:edit", "read": "mora:read",
                              "notes": "mora:notes", "agenda": "monastery:agenda",
                              "week": "monastery:week", "month": "monastery:month",
-                             "graph": "monarch:graph", "gardens": "mosaic:gardens"}
+                             "graph": "monarch:graph", "gardens": "mosaic:gardens",
+                             "garden": "mosaic:garden"}
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"

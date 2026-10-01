@@ -1114,6 +1114,59 @@ def u8_checks(window):
     check("U8: dragging a node pins it (beside the garden), U unpins, o opens", dragging_pins_and_u_unpins)
 
 
+def home_names(window):
+    """The garden names in the tree, without the `└ ` an owned one is drawn with."""
+    return [t.lstrip("└ ").strip() for t in texts(window, ".view-gardens .c-table-row .home-garden")]
+
+
+def u9_checks(window):
+    from core.gardens import garden_exists
+
+    def mo_saic_lists_and_follows():
+        type_command(window, "mo saic", alt=True)
+        assert wait_until(lambda: {"gardens", "garden"} & set(headers(window)) == {"gardens", "garden"}
+                          or any(h.startswith("garden ") for h in headers(window))), headers(window)
+        assert wait_until(lambda: {GARDEN, OTHER_GARDEN} <= set(home_names(window))), home_names(window)
+        focus_pane(window, "gardens")
+        press(window, "g")
+        press(window, "j")
+        assert wait_until(lambda: any(h.startswith("garden ") for h in headers(window))), \
+            f"the detail pane should follow the cursor, got {headers(window)}"
+        no_errors(window)
+
+    check("U9: `mo saic` opens gardens | garden, and the detail follows the cursor", mo_saic_lists_and_follows)
+
+    def garden_verbs_make_remove_restore():
+        type_command(window, "garden new labnine")
+        assert wait_until(lambda: "labnine" in home_names(window)), home_names(window)
+        type_command(window, "garden rm labnine")
+        assert garden_exists("labnine"), "one ⏎ only asks"
+        press(window, "Enter")
+        assert wait_until(lambda: not garden_exists("labnine") and "labnine" not in home_names(window))
+        press(window, "Escape")
+        type_command(window, "garden restore labnine")
+        assert wait_until(lambda: garden_exists("labnine") and "labnine" in home_names(window))
+        no_errors(window)
+
+    check("U9: garden new, rm (a second ⏎) and restore", garden_verbs_make_remove_restore)
+
+    def project_start_and_the_breadcrumb():
+        type_command(window, "Projnine")
+        type_command(window, "project start @sel")
+        assert wait_until(lambda: garden_exists("projnine")), "project start makes the garden"
+        assert wait_until(lambda: "projnine" in home_names(window)), home_names(window)
+        type_command(window, "cd projnine")
+        assert wait_until(lambda: texts(window, "#topbar .breadcrumb") == [f"/ {GARDEN} / projnine"]), \
+            texts(window, "#topbar .breadcrumb")
+        js(window, "document.querySelector('#topbar .breadcrumb .crumb.up').click()")
+        assert wait_until(lambda: texts(window, "#topbar .breadcrumb") == [f"/ {GARDEN}"]), \
+            "clicking a crumb cds there"
+        no_errors(window)
+
+    check("U9: project start gives a mote its garden; the breadcrumb shows and climbs the path",
+          project_start_and_the_breadcrumb)
+
+
 def u4_restored_checks(window):
     def restored():
         assert wait_until(lambda: plot_command(window).startswith(PLOT), timeout=10), \
@@ -1182,6 +1235,7 @@ def drive(first, first_loaded):
         u6_checks(second)
         u7_checks(second)
         u8_checks(second)
+        u9_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")
         opened.append(third)

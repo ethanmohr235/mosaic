@@ -154,6 +154,7 @@ function sessionOps(state, emit) {
       state.selection = [];
       state.labels = new Map();
       state.live = !!boot.live;
+      state.crumbs = boot.crumbs || [boot.garden];
       state.playhead = { tick: 0, count: 0, playing: false, run: null, owner: null };
       state.drafts = new Map();
       emit("garden", boot);

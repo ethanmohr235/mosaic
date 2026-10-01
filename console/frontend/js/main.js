@@ -74,7 +74,8 @@ function wire(api) {
     onRun: (line) => shell.runLine(line) });
   shell.keys = createKeys({ store, panes: shell.panes, actions: shell.actions,
     commandLine: shell.commandLine, runner, float: shell.float });
-  createTopbar({ root: $("topbar"), store, panes: shell.panes, actions: shell.actions, components });
+  createTopbar({ root: $("topbar"), store, panes: shell.panes, actions: shell.actions, components,
+    onRun: (line) => shell.runLine(line) });
   createPlayer({ store });
   createHintbar({ root: $("hintbar"), store, keys: shell.keys, components });
 
