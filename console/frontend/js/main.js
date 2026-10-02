@@ -40,7 +40,7 @@ function wire(api) {
       store.focus(id);
       shell.keys.editFocused();
     },
-    onPlace: (id, view) => shell.actions.place(id, view),
+    onPrompt: (text) => shell.commandLine.focus(text),
     onCancel: (id) => shell.actions.close(id),
     onRun: (line, options) => shell.runLine(line, options),
     onPrefill: (line, caret) => shell.commandLine.load(line, caret),
@@ -68,7 +68,13 @@ function wire(api) {
   shell.commandLine = createCommandLine({
     root: $("cmdline"), popupEl: $("popup"), store, api, components,
     onSubmit: (line, options) => runner.run(line, options),
-    onLeave: () => shell.panes.focusDom(),
+    onLeave: ({ cancelled }) => {
+      // esc out of a blank pane's prompt cancels the split it came from.
+      const pane = shell.panes.focused();
+      if (cancelled && pane && pane.instance && pane.instance.blank && shell.panes.count() > 1) {
+        shell.actions.close(pane.id);
+      } else shell.panes.focusDom();
+    },
   });
   shell.float = createFloat({ store, api, components, panes: shell.panes,
     onRun: (line) => shell.runLine(line) });

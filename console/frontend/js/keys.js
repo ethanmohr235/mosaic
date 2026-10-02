@@ -64,7 +64,7 @@ export function createKeys({ store, panes, actions, commandLine, runner, float }
   }
 
   function undoKey(event) {
-    if (!(event.ctrlKey || event.metaKey)) return false;
+    if (!event.ctrlKey) return false;
     const key = event.key.toLowerCase();
     if (key === "z") runner.undo(event.shiftKey ? "redo" : "undo").then(report);
     else if (key === "y") runner.undo("redo").then(report);

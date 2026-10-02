@@ -185,7 +185,7 @@ function create(ctx) {
     const node = event.target.closest && event.target.closest(".c-cell");
     moveTo(index, node ? Number(node.dataset.col) : st.cursor.col);
     if (event.shiftKey) selectRange(index);
-    else if (event.ctrlKey || event.metaKey) toggle(row.id);
+    else if (event.ctrlKey) toggle(row.id);
     else {
       select([row.id]);
       st.anchorId = row.id;

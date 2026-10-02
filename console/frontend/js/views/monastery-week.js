@@ -12,7 +12,7 @@
 
 import { createCalendar, parse, iso, dayIso, hhmm, dayLabel } from "../calendar.js";
 
-const HOUR_PX = 36;      // two rows of --row-h per hour
+const MIN_HOUR_PX = 36;  // --wk-hour: two rows of --row-h; a taller pane stretches the hours to fill it
 const SNAP_MIN = 15;
 const EDGE_PX = 6;       // the bottom band that resizes rather than moves
 const FIRST_HOUR = 7;    // where the grid opens scrolled to
@@ -23,6 +23,7 @@ function create(ctx) {
   // `lastTop`: where the hours were scrolled to. Splitting panes moves a
   // pane's element in the DOM, which resets its scroll; a resize puts it back.
   let root = null, scroller = null, columns = [], drag = null, lastTop = null, resize = null;
+  let hourPx = MIN_HOUR_PX;
 
   const days = () => {
     const p = cal.st.payload;
@@ -49,7 +50,7 @@ function create(ctx) {
       `wk-day-head${dayIso(d) === p.today ? " today" : ""}`, dayLabel(d)))]);
     const strip = drawStrip(week);
     const body = h("div", "wk-body");
-    body.style.height = `${24 * HOUR_PX}px`;
+    body.style.height = `${24 * hourPx}px`;
     const gutter = h("div", "wk-gutter wk-hours", Array.from({ length: 24 }, (_, i) =>
       h("span", "wk-hour", `${String(i).padStart(2, "0")}:00`)));
     columns = week.map((d) => drawDay(d));
@@ -62,8 +63,21 @@ function create(ctx) {
       ask || (st.armed ? "d again to delete" : statusText()));
     parts.push(status);
     root.replaceChildren(...parts);
-    scroller.scrollTop = lastTop === null ? FIRST_HOUR * HOUR_PX : lastTop;
+    if (fitHours()) return draw();
+    scroller.scrollTop = lastTop === null ? FIRST_HOUR * hourPx : lastTop;
     lastTop = scroller.scrollTop;
+  }
+
+  /** Stretch an hour so the day fills the pane, never below MIN_HOUR_PX
+   * (then it scrolls). True when the hour changed and the grid needs
+   * drawing again. */
+  function fitHours() {
+    if (!scroller || !scroller.clientHeight) return false;
+    const next = Math.max(MIN_HOUR_PX, Math.floor(scroller.clientHeight / 24));
+    if (next === hourPx) return false;
+    hourPx = next;
+    root.style.setProperty("--wk-hour", `${hourPx}px`);
+    return true;
   }
 
   function statusText() {
@@ -134,8 +148,8 @@ function create(ctx) {
     });
     for (const { item, s, e, lane } of placed) {
       const node = block(item, "wk-event");
-      node.style.top = `${((s - start) / 3600e3) * HOUR_PX}px`;
-      node.style.height = `${Math.max(((e - s) / 3600e3) * HOUR_PX, 10)}px`;
+      node.style.top = `${((s - start) / 3600e3) * hourPx}px`;
+      node.style.height = `${Math.max(((e - s) / 3600e3) * hourPx, 10)}px`;
       node.style.left = `${(lane / lanes.length) * 100}%`;
       node.style.width = `${100 / lanes.length}%`;
       node.addEventListener("mousedown", (ev) => startDrag(ev, item, node));
@@ -144,13 +158,13 @@ function create(ctx) {
     const slot = cal.st.slot;
     if (slot && !slot.allDay && dayIso(slot.start) === dayIso(day)) {
       const mark = h("div", "wk-slot");
-      mark.style.top = `${((slot.start - start) / 3600e3) * HOUR_PX}px`;
-      mark.style.height = `${HOUR_PX}px`;
+      mark.style.top = `${((slot.start - start) / 3600e3) * hourPx}px`;
+      mark.style.height = `${hourPx}px`;
       col.appendChild(mark);
     }
     col.addEventListener("mousedown", (ev) => {
       if (ev.button !== 0 || ev.target !== col) return;
-      const minutes = snap(((ev.clientY - col.getBoundingClientRect().top) / HOUR_PX) * 60, 30);
+      const minutes = snap(((ev.clientY - col.getBoundingClientRect().top) / hourPx) * 60, 30);
       const at = new Date(start + minutes * 60e3);
       cal.st.slot = { start: at, end: new Date(at.getTime() + 3600e3), allDay: false };
       draw();
@@ -183,14 +197,14 @@ function create(ctx) {
     drag = { item, node, resize, x: event.clientX, y: event.clientY, top: node.offsetTop, height: node.offsetHeight,
       minutes: 0, days: 0, moved: false };
     const move = (e) => {
-      const minutes = snap(((e.clientY - drag.y) / HOUR_PX) * 60);
+      const minutes = snap(((e.clientY - drag.y) / hourPx) * 60);
       const dayShift = resize ? 0 : Math.round((e.clientX - drag.x) / colWidth);
       drag.moved = drag.moved || Math.abs(e.clientY - drag.y) > 3 || Math.abs(e.clientX - drag.x) > 3;
       drag.minutes = minutes;
       drag.days = dayShift;
-      if (resize) node.style.height = `${Math.max(drag.height + (minutes / 60) * HOUR_PX, 10)}px`;
+      if (resize) node.style.height = `${Math.max(drag.height + (minutes / 60) * hourPx, 10)}px`;
       else {
-        node.style.top = `${drag.top + (minutes / 60) * HOUR_PX}px`;
+        node.style.top = `${drag.top + (minutes / 60) * hourPx}px`;
         node.style.transform = `translateX(${dayShift * colWidth}px)`;
       }
     };
@@ -219,7 +233,8 @@ function create(ctx) {
       root = h("div", "view-week");
       el.appendChild(root);
       resize = new ResizeObserver(() => {
-        if (scroller && lastTop !== null && scroller.scrollTop !== lastTop) scroller.scrollTop = lastTop;
+        if (fitHours()) draw();
+        else if (scroller && lastTop !== null && scroller.scrollTop !== lastTop) scroller.scrollTop = lastTop;
       });
       resize.observe(root);
     },

@@ -4,7 +4,7 @@
  * and after.
  *
  * On the bridge (and on disk) a tree is the contract's JSON:
- *   leaf   {command: "find type:task"}        ("" = an empty pane: the view picker)
+ *   leaf   {command: "find type:task"}        ("" = an empty pane: blank.js)
  *   split  {split: "row"|"col", sizes: [0.5, 0.5], children: [...]}
  * `row` puts children side by side (a vertical divider, `^w v`); `col`
  * stacks them (`^w s`). Sizes are fractions summing to 1.

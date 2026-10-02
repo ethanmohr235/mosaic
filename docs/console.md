@@ -362,7 +362,7 @@ confirmed these defaults on 2026-10-01.
 - **The owner** of the playhead is the sim pane that last ran (unless
   another holds it) or was focused; its run (`ticks`, `scenario`,
   `solver`) is what the rule pane asks its bindings' series under.
-- **`mo tion` replaces the focused pane** with its three (⌥⏎: a new
+- **`mo tion` replaces the focused pane** with its three (^⏎: a new
   split's), focused on `sim` -- an app may now open a layout
   (`ConsoleApp.layout`, the `open_layout` effect).
 - **Scenarios pane:** `⏎` runs the sim pane under the scenario (or opens
@@ -482,7 +482,8 @@ What the build decided within the settled plan above.
 - **"This one" is the `detach` verb** (`detach #id ‹key› ‹occurrence›
   ‹start› ‹end›`): the one edit a `set` can't say, one undo step.
   Deleting one occurrence is a `set` adding an `EXDATE`; deleting a
-  whole mote puts `delete #id` on the command line to confirm.
+  whole mote puts `delete #id` on the command line to confirm (since
+  the post-U9 fixes, `d d` runs it; see *Fixes after U9*).
 - **`n`** puts `‹name›.date = ‹slot›` on the command line with the caret
   where the name goes (`ctx.prefill` takes a caret now). The slot is a
   clicked one in the week grid, else the cursor's day at 09:00.
@@ -501,7 +502,7 @@ What the build decided within the settled plan above.
   (the handoff's Observatory screen).
 - **Gestures become commands:** ctrl+drag node → node prefills `A ->
   ‹type› -> B` with the caret on the type; `n` prefills a new mote; `d d`
-  prefills `delete` (`unlink` on an edge). Not ported: copy/paste, the
+  runs `delete` (`unlink` on an edge; it prefilled until the post-U9 fixes). Not ported: copy/paste, the
   multi-select panel, renaming a relationship type.
 - **Layout: minimal plus pins.** The species-clustered force layout as
   it was; dragging a node pins it, pins saved per garden in the console
@@ -564,8 +565,8 @@ What the build decided within the settled plan above.
   on|off`, beside `cd`. Import and export take a path, or ask with a
   native file dialog. *Start project* is `project start @sel [name]` /
   `project stop @sel`.
-- **Removing:** `garden rm` asks for a second ⏎; `garden restore` brings
-  it back. Not on `undo`, which belongs to the open garden.
+- **Removing:** a typed `garden rm` asks for a second ⏎ (the tree's `d d`
+  doesn't, since the post-U9 fixes); `garden restore` brings it back. Not on `undo`, which belongs to the open garden.
 - **Also in:** the top bar's breadcrumb is the ownership path, and a
   crumb `cd`s there.
 - **Not in:** cross-garden search, health indicators, a default-garden
@@ -580,7 +581,7 @@ What the build decided within the settled plan above.
   line to `garden ‹name›`, so a layout reopens on it. `garden` alone is
   the open garden; a garden named like a subverb is `garden show ‹name›`.
 - **Tree keys:** `j k` move, `⏎` `cd`, `n` new, `r` rename, `d d` remove
-  (prefills `garden rm`, which asks again), `a` archive/unarchive (runs),
+  (runs `garden rm`), `a` archive/unarchive (runs),
   `s` sync, `e` export (runs, with a dialog), `i` import, `z` folds the
   archived by rewriting the line to `gardens --archived`.
 - **The open garden** can't be removed (`cd` elsewhere first); renaming
@@ -596,6 +597,34 @@ What the build decided within the settled plan above.
   the console's `legacy` app mechanism, and `frontend_shared/`
   (`focus.js` is a file of the console's own). `window_launcher.py`
   stays as the one window's launch boilerplate.
+
+### Fixes after U9 (2026-10-01)
+
+The user's first list of small fixes after the rework.
+
+- **`^⏎` runs into a new pane** (was `⌥⏎`). No key has a macOS spelling
+  or a Cmd alias any more: `^` means Ctrl only.
+- **A new pane is blank and asks for an ordinary command** (replaces the
+  `view>` picker): the command line takes the caret the first time the
+  pane is focused, `⏎` runs into it, `esc` (there or in the pane) closes
+  it, and typing in the pane goes to the command line (`js/blank.js`).
+- **`d d` is the confirmation.** In every pane, the second `d` runs the
+  delete (`delete`, `unlink`, `garden rm`, clearing an override) through
+  `ctx.runCommand(line, {confirm: true})`; nothing is prefilled for a
+  second ⏎. A recurring event still asks `t` / `s`. A typed `delete` or
+  `garden rm` still asks for a second ⏎.
+- **The focus ring is drawn over the pane's content** (`.pane.focused
+  ::after`), so a view's grid lines pass under the pane's edge.
+- **The week grid fills its pane:** an hour is the pane's height over 24,
+  never below `--wk-hour` (then it scrolls).
+- **The read pane centres its column** (`--doc-measure` wide).
+- **Monarch's canvas repaints in the frame it is resized**, ignores
+  no-op and zero-size resizes, and repaints after any layout change.
+- **The worksheet reads in blocks** (`core/worksheet.py::read`): one per
+  independent calculation (equations sharing a mote), a blank line
+  between; in each, the givens and unknowns of its motes, then its
+  equations in dependency order (a simultaneous system keeps creation
+  order). The user chose this over blocks per mote and over `#` headings.
 
 ### Visual system
 
@@ -642,7 +671,7 @@ exact shape is documented at the top of
 `console/frontend/js/views/index.js`. It covers:
 
 - **`id`, `app`, `describe`**: the id and one-line description that
-  appear in the view picker and the completion popup.
+  appear in the completion popup.
 - **`commands`**: the verbs this view answers, and a completer for
   their arguments (driven by `core/` data, not hard-coded lists).
 - **`create(ctx)`** returns one instance per pane, so two panes can
@@ -670,7 +699,7 @@ own plan-mode phase and ships something usable.
 
 | # | Step | Proves |
 |---|---|---|
-| U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker; layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
+| U1 | **Done.** **Shell.** Root API and shared connection; tokens and vendored font; top bar, workspace, command line, hint bar; split tree, `^w` keys, divider drag, view picker (since replaced by the blank pane); layouts and history file; merged grammar in `core/` with app-switch completion; store; components module; `log` view. | Two panes, split and resized from keyboard and mouse. A layout survives a restart. |
 | U2 | **Done.** **Monolith → `mo nolith`.** `find` table with multi-row selection, batch edits via `@sel`. Delete Monolith's window. | The contract holds for a real view, and selection is shared. |
 | U3 | **Done.** **Props → `mo te`.** Props pane plus floating on demand. Replaces `inspector.js` for the shell. | Editing a mote works identically everywhere. |
 | U4 | **Done.** **Moxie → `mo xie`.** The `plot` pane on the restyled `plot.js` (see *Settled for U4*), then `fit` and the follow-up fixes (*Settled for `fit`*), also done. | Commands carry view state (ranges, series). |
@@ -687,7 +716,7 @@ view after U1, and after U3 if it edits motes.
 Each step's done-check is the same:
 
 - The view works from both keyboard and mouse.
-- It appears in the view picker and completion.
+- It appears in completion.
 - It survives a layout save and restart.
 - `docs/ui-setup.md` and `architecture.md` describe it as it now is.
 - The old window is deleted.
@@ -731,7 +760,7 @@ Each step's done-check is the same:
   `delete @sel`, `view save ‹name›`) -- U2 did not port them.
 - **Size tokens added in U1.** The shell took these from the design
   canvas rather than the handoff README. Confirm or replace them:
-  `--popup-mo` 36px, `--popup-app` 90px, `--picker-key` 150px,
+  `--popup-mo` 36px, `--popup-app` 90px,
   `--divider-hit` 3px (invisible grab margin), `--popup-rows` 12,
   `--prompt-gap` 6px, `--bar-gap` 8px, `--border` 1px. U4 added
   `--plot-rail` 240px (the plot pane's legend/knob column; the design

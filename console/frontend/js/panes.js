@@ -5,7 +5,7 @@
  * *Panes are commands*). Its view is found with api.resolve(command),
  * created, mounted into the pane body, then run; the header shows
  * `$ command` and the summary/level run() returned. A pane whose
- * command is "" shows the view picker (picker.js).
+ * command is "" is blank (blank.js) and asks for a command.
  *
  * Re-run rules: panes whose command has @sel, or whose view followsSel,
  * re-run on a selection change; every pane re-runs after a write and on
@@ -17,11 +17,11 @@
 
 import * as T from "./tree.js";
 import { viewById } from "./views/index.js";
-import { createPicker } from "./picker.js";
+import { createBlank } from "./blank.js";
 
 const GUIDE_LINGER_MS = 1000;
 
-export function createPanes({ root, store, api, components, onEdit, onPlace, onCancel, onRun,
+export function createPanes({ root, store, api, components, onEdit, onPrompt, onCancel, onRun,
   onPrefill, isCommandLineActive }) {
   const { h } = components;
   const panes = new Map();
@@ -84,7 +84,7 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
       try {
         pane.instance.unmount();
       } catch (err) {
-        console.error(`unmounting ${pane.view ? pane.view.id : "picker"} failed`, err);
+        console.error(`unmounting ${pane.view ? pane.view.id : "blank pane"} failed`, err);
       }
     }
     Object.assign(pane, { instance: null, view: null, summary: "", level: "idle" });
@@ -107,7 +107,7 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
     teardown(pane);
     updateHeader(pane);
     if (!command) {
-      mountInstance(pane, pickerFor(pane), null, "");
+      mountInstance(pane, blankFor(pane), null, "");
       return;
     }
     let resolved;
@@ -134,10 +134,10 @@ export function createPanes({ root, store, api, components, onEdit, onPlace, onC
     return runPane(pane);
   }
 
-  function pickerFor(pane) {
-    return createPicker({
+  function blankFor(pane) {
+    return createBlank({
       components,
-      onPlace: (view) => onPlace(pane.id, view),
+      onPrompt: (text = null) => onPrompt(text),
       onCancel: () => onCancel(pane.id),
     });
   }

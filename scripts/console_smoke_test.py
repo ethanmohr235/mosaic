@@ -10,8 +10,8 @@ hand after touching console/:
 
 What it covers is the half the Python tests can't reach: that the shell
 boots on the bridge without a JavaScript error, that `^w v` and a
-divider drag really split and resize panes, that the view picker places
-a view, that a statement typed at the command line lands in the log and
+divider drag really split and resize panes, that a line typed into a
+new, blank pane places a view there, that a statement typed at the command line lands in the log and
 selects its mote, that a saved layout and the history come back after a
 reload and after a relaunch on a fresh Api, and that `cd` swaps the
 whole workspace. Once the Api has its `monolith` namespace (U2) it
@@ -134,8 +134,8 @@ def tile(window, key):
     press(window, key, shift=key in "<>")
 
 
-def type_command(window, line, alt=False):
-    """`:` to the command line, type `line`, ⏎."""
+def type_command(window, line, new_pane=False):
+    """`:` to the command line, type `line`, ⏎ (`^⏎` for a new pane)."""
     press(window, ":")
     assert wait_until(lambda: js(window, "document.activeElement.classList.contains('c-input-native')"
                                          " && !!document.activeElement.closest('#cmdline')")), \
@@ -151,7 +151,7 @@ def type_command(window, line, alt=False):
           input.dispatchEvent(new Event('input', {{bubbles: true}}));
         }})();
     """)
-    press(window, "Enter", alt=alt)
+    press(window, "Enter", ctrl=new_pane)
     # The line runs asynchronously, and the command line keeps focus until
     # it has finished (it blurs then). A key pressed sooner lands in the
     # command line and is lost when it blurs -- so wait for the run to end.
@@ -237,16 +237,18 @@ def first_launch_checks(window):
         tile(window, "v")
         assert wait_until(lambda: count(window, ".pane") == 2), "`^w v` did not make a second pane"
         assert count(window, ".split.row") == 1, "`^w v` should split side by side"
-        assert count(window, ".pane.focused .picker") == 1, "the new pane should be focused on the picker"
+        assert count(window, ".pane.focused .blank") == 1, "the new pane should be blank and focused"
+        assert js(window, "!!document.activeElement && !!document.activeElement.closest('#cmdline')"), \
+            "a blank pane should put the caret on the command line"
 
     check("`^w v` splits the focused pane", splits)
 
-    def picks_log():
-        js(window, "document.querySelector('.pane.focused .picker-row[data-view=\"log\"]').click()")
+    def places_log():
+        type_command(window, "log")
         assert wait_until(lambda: headers(window) == ["log", "log"]), \
-            f"picking `log` should place it, got {headers(window)}"
+            f"`log` typed into the blank pane should place it, got {headers(window)}"
 
-    check("picking `log` in the view picker places it", picks_log)
+    check("a line typed into the blank pane places its view there", places_log)
 
     def drags():
         before = pane_grows(window)
@@ -472,7 +474,7 @@ def u3_checks(window):
         type_command(window, "find type:chore --sort name")
         assert wait_until(lambda: len(table_keys(window)) >= 4, timeout=8)
         click_row(window, 0)
-        type_command(window, "open @sel", alt=True)
+        type_command(window, "open @sel", new_pane=True)
         assert wait_until(lambda: props_title(window).startswith("chore0"), timeout=8), \
             f"the props pane should show the clicked row, got {props_title(window)!r}"
         # Select another row by clicking it in the table pane.
@@ -561,7 +563,7 @@ def u3_checks(window):
             f"the float should show the selection, {shown!r}, got {props_title(window, '.props-float')!r}"
         press(window, "Escape")
         assert wait_until(lambda: count(window, ".props-float:not([hidden])") == 0), "`esc` should close it"
-        type_command(window, "open @sel", alt=True)  # back, for the relaunch check
+        type_command(window, "open @sel", new_pane=True)  # back, for the relaunch check
         assert wait_until(lambda: count(window, ".pane .view-props") == 1)
         no_errors(window)
 
@@ -577,7 +579,7 @@ def u3_checks(window):
             "typing `mo ` should draw the [mo] box"
         assert texts(window, "#cmdline .cmd-prompt") == ["$"], "the command line's prompt is `$`"
         press(window, "Escape")
-        type_command(window, "mo te", alt=True)
+        type_command(window, "mo te", new_pane=True)
         assert wait_until(lambda: "open @sel" in headers(window)), "`mo te` should open the props view"
         no_errors(window)
 
@@ -628,7 +630,7 @@ def saved_plots():
 
 def u4_checks(window):
     def mo_xie_opens():
-        type_command(window, "mo xie", alt=True)
+        type_command(window, "mo xie", new_pane=True)
         assert wait_until(lambda: count(window, ".view-plot .plot-empty") == 1), "`mo xie` should open an empty plot pane"
         no_errors(window)
 
@@ -705,7 +707,7 @@ def rail_text(window):
 
 def fit_checks(window):
     def fit_pane():
-        type_command(window, FIT, alt=True)
+        type_command(window, FIT, new_pane=True)
         assert wait_until(lambda: FIT in headers(window)), f"headers: {headers(window)}"
         assert wait_until(lambda: count(window, ".view-plot circle.plot-point") == 4), "the four measured points"
         assert wait_until(lambda: count(window, ".view-plot path.plot-series") >= 1), "the fitted curve"
@@ -736,7 +738,7 @@ def sim_text(window):
 
 def u5_checks(window):
     def mo_tion_opens_three_panes():
-        type_command(window, "mo tion", alt=True)
+        type_command(window, "mo tion", new_pane=True)
         assert wait_until(lambda: {"scenarios", "sim", "rule @sel"} <= set(headers(window))), \
             f"headers: {headers(window)}"
         assert wait_until(lambda: "C1.current" in sim_text(window)), sim_text(window)
@@ -846,7 +848,7 @@ def u6_checks(window):
     def mo_ra_opens_three_panes():
         seed_note()
         type_command(window, "refresh")
-        type_command(window, "mo ra", alt=True)
+        type_command(window, "mo ra", new_pane=True)
         assert wait_until(lambda: {"notes", "edit @sel", "read @sel"} <= set(headers(window))), headers(window)
         assert "edit @sel" in focused_head(window), "mo ra focuses the editor"
         focus_pane(window, "notes")
@@ -885,7 +887,7 @@ def u6_checks(window):
           typing_follows_and_saves_once)
 
     def worksheet_applies_on_esc():
-        type_command(window, "worksheet", alt=True)
+        type_command(window, "worksheet", new_pane=True)
         assert wait_until(lambda: focused_text(window) is not None)
         press(window, "i")
         type_into_editor(window, (focused_text(window) or "") + "\nzz.q = 7 m")
@@ -946,7 +948,7 @@ def u7_checks(window):
     def mo_nastery_opens_agenda_and_week():
         seed_calendar()
         type_command(window, "refresh")
-        type_command(window, "mo nastery", alt=True)
+        type_command(window, "mo nastery", new_pane=True)
         assert wait_until(lambda: {"agenda", "week"} <= set(headers(window))), headers(window)
         assert wait_until(lambda: "Lab7" in js(window, "document.querySelector('.view-agenda').textContent")), \
             "the agenda should list Lab7"
@@ -967,19 +969,21 @@ def u7_checks(window):
     check("U7: J moves an event an hour as a set line, and undo takes it back", keys_move_through_set_and_undo)
 
     def dragging_moves_and_resizes():
-        def drag(dy, edge):
+        def drag(hours, edge):
+            # An hour stretches with the pane, so read how tall it is.
             js(window, f"""(() => {{
                 const ev = [...document.querySelectorAll('.view-week .wk-event')].find(e => e.textContent === 'Lab7');
+                const hour = parseFloat(getComputedStyle(ev.closest('.view-week')).getPropertyValue('--wk-hour'));
                 const r = ev.getBoundingClientRect();
-                const x = r.left + 4, y = {"r.bottom - 2" if edge else "r.top + 4"};
+                const x = r.left + 4, y = {"r.bottom - 2" if edge else "r.top + 4"}, dy = {hours} * hour;
                 ev.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, button: 0, clientX: x, clientY: y}}));
-                window.dispatchEvent(new MouseEvent('mousemove', {{clientX: x, clientY: y + {dy}}}));
-                window.dispatchEvent(new MouseEvent('mouseup', {{clientX: x, clientY: y + {dy}}}));
+                window.dispatchEvent(new MouseEvent('mousemove', {{clientX: x, clientY: y + dy}}));
+                window.dispatchEvent(new MouseEvent('mouseup', {{clientX: x, clientY: y + dy}}));
             }})()""")
         assert wait_until(lambda: count(window, ".view-week .wk-event") >= 2)
-        drag(72, edge=False)  # two hours down
+        drag(2, edge=False)  # two hours down
         assert wait_until(lambda: prop(CAL["lab"], "date") == f"{CAL['today']}T15:00/PT1H"), prop(CAL["lab"], "date")
-        drag(36, edge=True)   # an hour longer
+        drag(1, edge=True)   # an hour longer
         assert wait_until(lambda: prop(CAL["lab"], "date") == f"{CAL['today']}T15:00/PT2H"), prop(CAL["lab"], "date")
         type_command(window, "undo")
         type_command(window, "undo")
@@ -1014,7 +1018,7 @@ def u7_checks(window):
         click_agenda_row(window, "Lab7")
         press(window, "o")
         assert wait_until(lambda: f"open #{CAL['lab']}" in headers(window)), headers(window)
-        type_command(window, "month", alt=True)
+        type_command(window, "month", new_pane=True)
         assert wait_until(lambda: count(window, ".view-month .mo-cell") == 42)
         no_errors(window)
 
@@ -1055,7 +1059,7 @@ def u8_checks(window):
     graph_pane = "graph @sel --depth 2"
 
     def mo_narch_follows_the_selection():
-        type_command(window, "mo narch", alt=True)
+        type_command(window, "mo narch", new_pane=True)
         assert wait_until(lambda: {"find", graph_pane, "open @sel"} <= set(headers(window))), headers(window)
         type_command(window, "chore0")
         assert wait_until(lambda: graph_has(window, ids["c0"], ids["chore"], ids["c1"])), \
@@ -1092,12 +1096,15 @@ def u8_checks(window):
         focus_pane(window, graph_pane)
         press(window, "d")
         press(window, "d")
-        assert wait_until(lambda: command_line_text(window) == "delete chore"), command_line_text(window)
-        press(window, "Escape")
-        press(window, "Escape")
+        # The graph is rooted at @sel, which was the deleted mote: read the log.
+        assert wait_until(lambda: any(t.endswith("deleted chore") for t in log_texts(window))), \
+            f"`d d` should delete the cursor's mote, got {log_texts(window)[-4:]}"
+        type_command(window, "undo")
+        assert wait_until(lambda: any(n.startswith("chore:") for n in graph_names(window) or [])), \
+            "undo should bring it back"
         no_errors(window)
 
-    check("U8: ctrl+drag prefills a link, d d prefills a delete", gestures_become_commands)
+    check("U8: ctrl+drag prefills a link, d d deletes", gestures_become_commands)
 
     def dragging_pins_and_u_unpins():
         from console import state as console_state
@@ -1123,7 +1130,7 @@ def u9_checks(window):
     from core.gardens import garden_exists
 
     def mo_saic_lists_and_follows():
-        type_command(window, "mo saic", alt=True)
+        type_command(window, "mo saic", new_pane=True)
         assert wait_until(lambda: {"gardens", "garden"} & set(headers(window)) == {"gardens", "garden"}
                           or any(h.startswith("garden ") for h in headers(window))), headers(window)
         assert wait_until(lambda: {GARDEN, OTHER_GARDEN} <= set(home_names(window))), home_names(window)

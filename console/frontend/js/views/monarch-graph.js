@@ -144,7 +144,7 @@ function create(ctx) {
     else ctx.prefill("");
   }
 
-  function remove() {
+  async function remove() {
     const target = graph.edgeCursor || graph.cursor;
     if (!target) return;
     if (st.armed !== target) {
@@ -154,10 +154,10 @@ function create(ctx) {
       return;
     }
     st.armed = null;
-    const e = edge(graph.edgeCursor);
-    if (e) ctx.prefill(`unlink #${e.from} #${e.id}`);
-    else ctx.prefill(`delete ${ref(graph.cursor)}`);
     draw();
+    const e = edge(graph.edgeCursor);
+    if (e) await ctx.runCommand(`unlink #${e.from} #${e.id}`, { confirm: true });
+    else await ctx.runCommand(`delete ${ref(graph.cursor)}`, { confirm: true });
   }
 
   async function savePin(id, x, y) {
@@ -220,11 +220,27 @@ function create(ctx) {
     return true;
   }
 
-  const off = store.subscribe("selection", () => {
+  const offSelection = store.subscribe("selection", () => {
     if (!graph || !st.payload) return;
     graph.setSelection(store.state.selection, store.primary());
     draw();
   });
+  // Other panes re-rendering move this one's element in the page; paint
+  // again once they have, in case the canvas was resized or dropped.
+  let repaint = 0;
+  const offLayout = store.subscribe("layout", () => {
+    cancelAnimationFrame(repaint);
+    repaint = requestAnimationFrame(() => {
+      if (!graph) return;
+      graph.resize();
+      graph.draw();
+    });
+  });
+  const off = () => {
+    offSelection();
+    offLayout();
+    cancelAnimationFrame(repaint);
+  };
 
   return {
     mount(el) {

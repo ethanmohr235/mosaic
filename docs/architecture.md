@@ -433,7 +433,9 @@ no saved source text: `read()` renders the garden's equations and their
 inputs back as lines, and `apply()` writes lines into the graph. That is
 `philosophy.md`'s "editors are shortcuts over the graph, never a separate
 store" taken at its word, and the price is paid rather than hidden —
-comments, blank lines and line order do not survive a round trip. What does
+comments, blank lines and line order do not survive a round trip (`read()`
+puts its own order back: a block per independent calculation, inputs
+first, each equation after the ones it reads). What does
 survive is everything that means something: a line's `! name` becomes the
 rule's `name`, and every other line is reconstructed from what it wrote.
 
@@ -1298,7 +1300,7 @@ other position: a mote carries no coordinates.
 **Every edit is a command.** The pane writes nothing itself: ctrl+drag
 from one node to another puts `A ->  -> B` on the command line with the
 caret where the type goes, `n` puts `‹cursor› -> related_to -> `, and
-`d d` puts `delete ‹cursor›` (or `unlink …` for an edge). They run, and
+`d d` runs `delete ‹cursor›` (or `unlink …` for an edge). They run, and
 undo, like anything typed.
 
 **Annotations are gone.** Monarch's sticky notes, group boxes and pen
@@ -1323,7 +1325,8 @@ the ownership and archive scans skip what they cannot read.
 **Garden acts are commands outside undo.** `garden new|rename|rm|restore|
 archive|unarchive|export|import|sync` act on gardens, not on the open
 garden's motes, so none is on its undo stack; `rm` moves the file aside
-(a second ⏎ confirms it) and `garden restore` brings it back. Removing
+(typed, a second ⏎ confirms it; the tree's `d d` is its own
+confirmation) and `garden restore` brings it back. Removing
 the open garden is refused; renaming it reopens the session under the
 new name (`console/session.py::Session.rename`). Import always lands in
 a new garden and removes it again if the file fails. Without a path,

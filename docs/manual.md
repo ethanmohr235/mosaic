@@ -27,12 +27,12 @@ Mouse: click a pane to focus it; drag a divider to resize.
 
 | Key | Does |
 |---|---|
-| `⏎` | Run in the focused pane (a second `⏎` confirms a delete) |
-| `⌥⏎` | Run in a new pane |
+| `⏎` | Run in the focused pane (a typed `delete` asks for a second `⏎`) |
+| `^⏎` | Run in a new pane |
 | `tab` | Take the completion |
 | `↑` `↓` | Move through completions; `↑` on an empty line opens history |
 | `^r` | Search history |
-| `esc` | Close the popup, then back to the pane |
+| `esc` | Close the popup, then back to the pane (closes a new, empty pane) |
 
 ## Commands
 
@@ -77,7 +77,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `gardens [--archived]` | Every garden: the ownership tree, loose, archived (folded) |
 | `garden [‹name›]` | A garden's details (none: the open one) |
 | `garden new ‹name›`, `garden rename ‹old› ‹new›` | Make / rename a garden (renaming the open one follows it) |
-| `garden rm ‹name›` / `garden restore ‹name›` | Move aside (second ⏎ confirms; not the open one) / bring back |
+| `garden rm ‹name›` / `garden restore ‹name›` | Move aside (a typed one asks for a second ⏎; not the open one) / bring back |
 | `garden archive\|unarchive ‹name›` | Archive with everything it owns / undo that |
 | `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
 | `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
@@ -193,7 +193,7 @@ Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
 | `J` `K`, `H` `L` | Move ± an hour (all-day: a day), ± a day |
 | `<` `>` | Shorter / longer |
 | `n` | New event (prefills `‹name›.date = ‹slot›`) |
-| `d` `d` | Delete (prefills `delete #id`) |
+| `d` `d` | Delete (a recurring one asks `t` / `s`) |
 | `b`, `B` | Hide this event's key, show every key |
 | recurring: `t`, `s` | This occurrence (`detach`), the series |
 
@@ -211,7 +211,7 @@ for `n`, double-click to create. Month: `+N more` opens that week.
 | `f`, `+` `-`, `0` | Fit, zoom, 100% at the cursor |
 | `u`, `U` | Unpin this node, every node |
 | `n` | New linked mote (prefills `‹cursor› -> related_to -> `) |
-| `d` `d` | Delete (prefills `delete ‹cursor›`, or `unlink …` on a clicked edge) |
+| `d` `d` | Delete the cursor, or `unlink` a clicked edge |
 | `esc` | Clear the edge / the armed delete |
 
 Mouse: drag a node to move and pin it · drag empty space to pan · wheel
@@ -224,7 +224,7 @@ zooms · ctrl+drag node → node prefills `A ->  -> B`.
 | `j` `k` / click | Move; the `garden` pane follows |
 | `⏎` | `cd` there |
 | `n`, `r` | New, rename (prefills `garden …`) |
-| `d` `d` | Remove (prefills `garden rm`) |
+| `d` `d` | Remove (`garden rm`; `garden restore` brings it back) |
 | `a` | Archive / unarchive |
 | `s`, `e`, `i` | Sync (prefills), export (file dialog), import (prefills) |
 | `z` | Show / fold archived |
@@ -232,4 +232,4 @@ zooms · ctrl+drag node → node prefills `A ->  -> B`.
 `garden` pane: `⏎` or a click on a garden named there `cd`s.
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.
-**New pane** (`view>`): `↑` `↓` choose, `⏎` place, `esc` cancel.
+**New pane**: the command line takes the caret; `⏎` runs into the pane, `esc` closes it.

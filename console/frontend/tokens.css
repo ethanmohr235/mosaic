@@ -95,7 +95,7 @@
   --bp-caret: oklch(0.97 0.02 240);
   --doc-measure: 72ch;       /* the read pane's line length */
   --wk-gutter: 6ch;          /* the week grid's hour column (U7) */
-  --wk-hour: 36px;           /* one hour of the week grid; views/monastery-week.js HOUR_PX matches */
+  --wk-hour: 36px;           /* the least an hour of the week grid gets; views/monastery-week.js MIN_HOUR_PX matches */
 
   /* Type. One family, one body size; hierarchy is weight + brightness. */
   --font: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -136,9 +136,6 @@
   --gap: 1px;                /* tiled panes: 1px gaps over --line */
   --divider-hit: 3px;        /* invisible grab margin either side of a divider */
   --picker-pad-y: 6px;
-  --picker-gap: 4px;
-  --picker-key: 150px;
-  --picker-row-pad: 6px;
 
   /* Popups (completion, history). */
   --popup-w: 560px;

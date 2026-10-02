@@ -3,13 +3,13 @@
  * A view is one ES module whose default export is a *definition*:
  *
  *   {
- *     id:         "log",                 // view id: picker, completion, pane header
+ *     id:         "log",                 // view id: completion, pane header
  *     app:        null | "nolith" | ...  // the app suffix it belongs to (null = the shell)
- *     describe:   "command and error log",   // one line, shown in the picker
+ *     describe:   "command and error log",   // one line, shown in completion
  *     commands:   [{verb: "log", canonical?: "log", complete?(line, cursor) -> rows}],
  *                                        // verbs this view answers; commands[0]'s
- *                                        // canonical line (else its verb) is what
- *                                        // the picker places
+ *                                        // canonical line is the one it opens on
+ *                                        // (the `p` float's `open @sel`)
  *     followsSel: false,                 // re-run on selection change even without @sel
  *     create(ctx) -> instance,           // one instance per pane showing this view
  *   }
@@ -36,6 +36,9 @@
  *               pane), and its message shows in the command line's
  *               status. Resolves to {message, level}. How a view writes:
  *               it never calls a write method on its namespace.
+ *               {confirm: true} runs a line that would otherwise ask for a
+ *               second ⏎ (`delete`, `garden rm`) as already confirmed: a
+ *               view's `d d` is its confirmation.
  *   prefill(line, caret?)  put `line` on the command line for the user to
  *               finish (the scenarios pane's `a`: `set --scenario hot `),
  *               the caret at `caret` (default: the end).
@@ -95,11 +98,4 @@ export const VIEWS = [log, monolithTable, moteProps, moxiePlot, moxieFit, motion
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;
-}
-
-/** The command the picker places for a view: its first command's
- * `canonical` line (`open @sel`), else that command's verb, else its id. */
-export function canonicalCommand(view) {
-  const first = view.commands && view.commands[0];
-  return (first && (first.canonical || first.verb)) || view.id;
 }

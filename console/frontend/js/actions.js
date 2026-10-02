@@ -5,7 +5,6 @@
  * or a command. */
 
 import * as T from "./tree.js";
-import { canonicalCommand } from "./views/index.js";
 
 export function createActions({ store, panes, api }) {
   const focusedId = () => store.state.focusedId;
@@ -70,15 +69,16 @@ export function createActions({ store, panes, api }) {
     only: () => store.setTree(T.only(tree(), focusedId())),
     equalize: () => store.setTree(T.equalize(tree())),
     swap: () => store.setTree(T.swap(tree(), focusedId())),
-    place: (id, view) => setCommand(canonicalCommand(view), id),
-    /** ⌥⏎: split the focused pane and run `command` in the new one. */
+    /** ^⏎: split the focused pane and run `command` in the new one. */
     openInNewPane: (command) => split("row", command),
     /** An app that opens several panes (`mo tion`): they take the focused
-     * pane's place (⌥⏎: a new split's), focus on `focusCommand`'s pane. */
+     * pane's place (^⏎: a new split's), focus on `focusCommand`'s pane. */
     openLayout(json, { newPane = false, focusCommand = null } = {}) {
-      const id = newPane ? split("row") : focusedId();
-      if (!id) return;
-      const result = T.replaceLeaf(tree(), id, json, focusCommand);
+      // One tree change: a split drawn on its own would be a blank pane,
+      // which takes the command line for a moment.
+      const base = newPane ? T.split(tree(), focusedId(), "row", "") : { tree: tree(), id: focusedId() };
+      if (!base.id) return;
+      const result = T.replaceLeaf(base.tree, base.id, json, focusCommand);
       store.setTree(result.tree, result.focusId);
     },
   };

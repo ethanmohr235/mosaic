@@ -165,7 +165,7 @@ export function createCalendar(ctx, { draw, order }) {
       if (scope === "series") await placeSeries(item, asking.start, asking.end);
       else await ctx.runCommand(`detach #${item.moteId} ${item.binding} ${item.start.slice(0, 16)} ${iso(asking.start)} ${iso(asking.end)}`);
     } else if (scope === "series") {
-      ctx.prefill(`delete #${item.moteId}`);
+      await ctx.runCommand(`delete #${item.moteId}`, { confirm: true });
     } else {
       const r = await api.monastery.skip(item.moteId, item.binding, item.start);
       if (r.error) store.log("result", r.error, { level: "fault" });
@@ -203,7 +203,7 @@ export function createCalendar(ctx, { draw, order }) {
       draw();
       return;
     }
-    ctx.prefill(`delete #${item.moteId}`);
+    await ctx.runCommand(`delete #${item.moteId}`, { confirm: true });
   }
 
   async function follow() {

@@ -32,7 +32,7 @@ function create(ctx) {
   }
 
   function onRow(entry, event) {
-    if (event.shiftKey || event.ctrlKey || event.metaKey) store.toggleSelection(entry.moteId);
+    if (event.shiftKey || event.ctrlKey) store.toggleSelection(entry.moteId);
     else ctx.navigate(entry.moteId);
   }
 

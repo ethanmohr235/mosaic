@@ -954,7 +954,7 @@ def _words(text: str) -> int:
 
 def plain_text(document: Document) -> str:
     """The note's prose, flattened to one searchable string -- what a
-    reader sees, not what they typed. Backs Mora's notes search (⌘P): a
+    reader sees, not what they typed. Backs Mora's notes search: a
     query matches a `\\textbf{plan}` or a `\\mote{id}{Atlas}`'s label the
     same way it matches ordinary text, and never matches a `\\val`
     expression or a graph spec, neither of which is prose. Block

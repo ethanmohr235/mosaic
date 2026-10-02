@@ -9,7 +9,7 @@
  * Every act is a command:
  *   ⏎  cd ‹garden›            a  garden archive|unarchive ‹garden›
  *   n  garden new …           r  garden rename ‹garden› …
- *   d d  garden rm ‹garden›   s  garden sync ‹garden› …
+ *   d d  garden rm ‹garden› (runs) s  garden sync ‹garden› …
  *   e  garden export ‹garden› (a file dialog)   i  garden import … */
 
 const HINTS = [["j k", "move"], ["⏎", "open (cd)"], ["n", "new"], ["r", "rename"], ["d d", "remove"],
@@ -77,7 +77,7 @@ function create(ctx) {
     if (row) ctx.paneAction("mosaic:garden", { garden: row.garden });
   }
 
-  function remove() {
+  async function remove() {
     const row = here();
     if (!row) return;
     if (st.armed !== st.cursor) {
@@ -87,8 +87,8 @@ function create(ctx) {
       return;
     }
     st.armed = null;
-    ctx.prefill(`garden rm ${arg(row.garden)}`);
     render();
+    await ctx.runCommand(`garden rm ${arg(row.garden)}`, { confirm: true });
   }
 
   const on = (f) => () => { const row = here(); if (row) f(row); };

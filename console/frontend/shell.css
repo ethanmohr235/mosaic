@@ -325,9 +325,19 @@ body.dragging-col { cursor: row-resize; }
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
+  isolation: isolate;
 }
 
-.pane.focused { box-shadow: var(--focus-ring); }
+/* The ring sits over the body, so a view's own grid lines and backgrounds
+ * pass under the pane's edge rather than over it. */
+.pane.focused::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: var(--focus-ring);
+  pointer-events: none;
+  z-index: 100;
+}
 
 .pane-body {
   flex: 1;
@@ -499,43 +509,16 @@ body.dragging-col { cursor: row-resize; }
   overflow: hidden;
 }
 
-/* ---------- view picker ---------- */
+/* ---------- the blank pane ---------- */
 
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--picker-gap);
-  padding: var(--picker-pad-y) var(--pad-x);
-  min-height: 0;
-  overflow: auto;
-}
-
-.picker-prompt {
+.blank {
   display: flex;
   gap: var(--bar-gap);
+  padding: var(--picker-pad-y) var(--pad-x);
 }
 
-.picker-label { color: var(--bright); }
-
-.picker-row {
-  display: grid;
-  grid-template-columns: var(--picker-key) 1fr;
-  padding: 0 var(--picker-row-pad);
-  margin: 0 calc(-1 * var(--picker-row-pad));
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.picker-row:hover { background: var(--bg-bar); }
-.picker-describe { color: var(--dim); }
-
-.picker-row.highlighted {
-  background: var(--fg);
-  color: var(--bg);
-}
-
-.picker-row.highlighted .picker-describe { color: var(--line); }
-.picker-empty { color: var(--dim); }
+.blank-prompt { color: var(--bright); }
+.blank-hint { color: var(--dim); }
 
 /* ---------- resize guide ---------- */
 
@@ -812,7 +795,7 @@ body.dragging-col { cursor: row-resize; }
 
 .view-doc { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--paper-bg); }
 .doc-page { padding: var(--group-gap) calc(2 * var(--pad-x)); color: var(--paper-fg); }
-.doc { max-width: var(--doc-measure); }
+.doc { max-width: var(--doc-measure); margin: 0 auto; }
 .doc-heading { color: var(--paper-bright); font-size: var(--fs-title); font-weight: var(--w-bold); margin: var(--group-gap) 0 var(--table-head-pad); }
 h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-bottom: var(--table-head-pad); }
 .doc-p { margin: 0 0 var(--lh-body); }

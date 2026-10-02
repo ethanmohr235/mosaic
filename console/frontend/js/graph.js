@@ -70,7 +70,10 @@ export class GraphCanvas {
     this.panTarget = null;
     this.fitUntil = 0;
     this.gesture = null;
-    this.colors = {};
+    this.width = 0;
+    this.height = 0;
+    this.dpr = 1;
+    this.readTokens();
     this.frame = 0;
     this.timer = 0;
     this.running = false;
@@ -350,9 +353,16 @@ export class GraphCanvas {
 
   /* ---- drawing ---- */
 
+  /** Size the canvas to its pane. Setting a canvas's size clears it, so
+   *  this only does so when the size really changed, and paints again
+   *  before the frame is shown -- otherwise a pane resize, or another pane
+   *  re-rendering, flashes a blank canvas. A pane with no size (detached
+   *  mid re-render, hidden) keeps the canvas it has. */
   resize() {
     const rect = this.canvas.parentElement.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+    if (rect.width < 1 || rect.height < 1) return;
+    if (rect.width === this.width && rect.height === this.height && dpr === this.dpr) return;
     this.width = rect.width;
     this.height = rect.height;
     this.dpr = dpr;
@@ -361,6 +371,7 @@ export class GraphCanvas {
     this.canvas.style.width = `${rect.width}px`;
     this.canvas.style.height = `${rect.height}px`;
     this.readTokens();
+    this.draw();
     this.kick();
   }
 
@@ -577,7 +588,7 @@ export class GraphCanvas {
     if (event.button === 1) event.preventDefault();
     if (event.button !== 0 && event.button !== 1) return;
     const id = event.button === 0 ? this.nodeAt(pt) : null;
-    if (id && (event.ctrlKey || event.metaKey)) {
+    if (id && event.ctrlKey) {
       this.gesture = { kind: "connect", from: id, at: pt };
     } else if (id) {
       const node = this.nodes.get(id);

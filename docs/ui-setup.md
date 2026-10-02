@@ -31,7 +31,7 @@ view, the `find` table, the props pane and plots.
   selection (`sel bd +2 · linked in N panes`) or, with nothing selected,
   the pane count.
 - **Command line** (`$` prompt; a typed `mo ` shows as the `[mo]` box): `:` or `/` focuses it and `esc`
-  leaves. `⏎` runs in the focused pane, `⌥⏎` in a new pane. `tab`
+  leaves. `⏎` runs in the focused pane, `^⏎` in a new pane. `tab`
   completes, and the best match shows as ghost text. `↑` on an empty
   line opens this garden's history (`^r` searches it). Errors show in
   red on the right. A delete asks for a second `⏎`.
@@ -365,6 +365,11 @@ deleted; with `live` on, a solve follows. A sheet that applied cleanly
 then shows the garden's own reading of it; one with problems keeps your
 text so you can fix it.
 
+The garden's reading is in **blocks**, one per independent calculation
+(equations that share a mote), a blank line between them: each block's
+givens and unknowns, then its equations, each after the ones that work
+out what it reads.
+
 ### Calendar (`agenda`, `week`, `month`, `mo nastery`)
 
 `mo nastery` puts `agenda | week` where the focused pane was.
@@ -393,7 +398,7 @@ dashed. A project's owner shows on its own because it carries `due`.
 | `J` `K`, `H` `L` | Move an hour (a day when all-day), a day |
 | `<` `>` | Shorter / longer (half an hour, or a day when all-day) |
 | `n` | New event: `‹name›.date = ‹slot›` on the command line, caret at the name |
-| `d` `d` | Delete (puts `delete #id` on the command line to confirm) |
+| `d` `d` | Delete (runs; a recurring event asks `t` / `s` first) |
 | `b` / `B` | Hide the key under the cursor / show every key |
 
 In the week grid, drag an event to move it (a quarter hour at a time,
@@ -488,7 +493,7 @@ is under the pointer or the cursor.
 | drag empty space | Pan |
 | ctrl+drag node → node | `A ->  -> B` on the command line, caret on the type |
 | `n` | `‹cursor› -> related_to -> ` on the command line, to name a new mote |
-| click an edge, `d` `d` | `unlink …` for the edge, else `delete ‹cursor›`, on the command line to confirm |
+| click an edge, `d` `d` | `unlink …` the edge, else `delete ‹cursor›` (runs) |
 
 Monarch's sticky notes, group boxes and pen strokes are gone, and the
 first open of a garden drops their stored data (`docs/architecture.md`
@@ -510,7 +515,7 @@ bar's breadcrumb is the open garden's ownership path
 | `j` `k` / click | Move (the `garden` pane follows) |
 | `⏎` | `cd` there |
 | `n`, `r` | `garden new …`, `garden rename ‹garden› …` on the command line |
-| `d` `d` | `garden rm ‹garden›` on the command line (⏎, then ⏎ again) |
+| `d` `d` | `garden rm ‹garden›` (runs; `garden restore` brings it back) |
 | `a` | Archive / unarchive |
 | `s` | `garden sync ‹garden› …` on the command line |
 | `e`, `i` | Export (asks where), `garden import …` |
@@ -523,7 +528,7 @@ the open garden's motes.
 |---|---|
 | `garden new ‹name›` | Name checked against the rule `core/db.py` enforces |
 | `garden rename ‹old› ‹new›` | Moves the `.db` and its sidecars (layouts and history too). Refused while the garden syncs -- the sync server keys its history by name. Renaming the open garden reopens the console on the new name |
-| `garden rm ‹name›` | Asks for a second ⏎, then moves the file aside; `garden restore ‹name›` brings it back. The open garden can't be removed |
+| `garden rm ‹name›` | Typed, asks for a second ⏎ (`d d` in the tree doesn't), then moves the file aside; `garden restore ‹name›` brings it back. The open garden can't be removed |
 | `garden archive\|unarchive ‹name›` | Archives it and everything it owns (`archived: true` on its owner, or a marker mote in a loose garden) |
 | `garden export ‹name› [path]`, `garden import [path] ‹new name›` | JSON, `core/garden_io.py`'s format; without a path, a file dialog. Import always makes a new garden, and removes it again if the file fails |
 | `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Point it at a sync server, stop (the oplog stays), sync once (errors shown), or gate the automatic syncs on open, `cd` and close |
@@ -535,8 +540,9 @@ the open garden's motes.
 move focus, `<`/`>` resize, `o` only this pane, `=` equalize, `x`
 swap. `1`–`9` switch saved layouts, `e` (or a click on a header)
 loads a pane's command into the command line, and `x` closes the
-pane. A new pane opens the `view>` picker. Dividers drag with the
-mouse.
+pane. A new pane is blank and asks for an ordinary command: the
+command line takes the caret, `⏎` runs the line into the new pane, and
+`esc` closes it. Dividers drag with the mouse.
 
 Layouts and history are UI state, not knowledge: they live in
 `gardens/<name>.db.console.json`, never in the garden or in sync, and
@@ -556,7 +562,7 @@ back to a free port (`window_launcher.choose_port`).
 ```
 
 Boots on a seeded temp garden and checks the following:
-- `^w v` splits, and the picker places `log`
+- `^w v` splits, and `log` typed into the blank pane places it
 - a divider drag and `^w >` resize
 - a statement lands in the log and selects its mote
 - `layout save` works and drift marks the layout unsaved
@@ -582,7 +588,7 @@ Boots on a seeded temp garden and checks the following:
 - a plot pane survives a relaunch
 - `mo narch` opens find | graph | props and the graph draws the
   selection's neighbourhood; a walk, `⏎`, and `[` `]` rewriting the
-  depth; ctrl+drag prefills a link and `d d` a delete; dragging pins a
+  depth; ctrl+drag prefills a link and `d d` deletes; dragging pins a
   node beside the garden, `U` unpins and `o` opens
 - `mo saic` opens gardens | garden and the detail follows the cursor;
   `garden new`, `garden rm` (a second ⏎) and `garden restore`; `project

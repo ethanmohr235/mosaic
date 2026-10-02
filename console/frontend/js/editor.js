@@ -224,7 +224,7 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
 
   function onKey(event) {
     const inFind = event.target === findInput || event.target === replaceInput;
-    const ctrl = event.ctrlKey || event.metaKey;
+    const ctrl = event.ctrlKey;
     if (ctrl && event.key.toLowerCase() === "f") {
       openFind();
       return true;
