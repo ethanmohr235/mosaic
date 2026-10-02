@@ -1,4 +1,4 @@
-/* `moxie:fit` (`fit …`): measured points, the model fitted through them,
+/* `fit` (`fit …`): measured points, the model fitted through them,
  * and what the fit found (docs/console.md → Settled for `fit`).
  *
  * The pane is its command. api.moxie.fit(command) answers it -- core/fit.py
@@ -224,8 +224,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "moxie:fit",
-  app: "xie",
+  id: "fit",
   describe: "fit inputs to measured points (fit)",
   commands: [{ verb: "fit" }],
   followsSel: false,

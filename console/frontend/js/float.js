@@ -1,4 +1,4 @@
-/* The `p` float: the props view (views/mote-props.js) over any layout
+/* The `p` float: the props view (views/props.js) over any layout
  * that has no props pane (docs/console.md → *Inspector*). One component,
  * two hosts -- what you can do to a mote is the same in the pane and
  * here, because it is the same view instance code with the same ctx.
@@ -9,7 +9,7 @@
  * change, after a write and on refresh, like a linked pane. The popup
  * style: --bg-raised, 1px --line-strong, no shadow, no leader line. */
 
-import moteProps from "./views/mote-props.js";
+import moteProps from "./views/props.js";
 
 const COMMAND = moteProps.commands[0].canonical;
 const CLOSE_HINTS = [["esc p", "close"]];

@@ -1,4 +1,4 @@
-/* `mora:notes` (`notes [‹text›]`, `layout docs`): every note in the garden, or
+/* `notes` (`notes [‹text›]`, `layout docs`): every note in the garden, or
  * those whose name or prose contains the text (docs/console.md → Settled
  * for U6). ⏎ or a click selects the note's mote, so `edit @sel` and
  * `read @sel` follow; `n` puts `edit ` on the command line to start one. */
@@ -108,8 +108,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "mora:notes",
-  app: "ra",
+  id: "notes",
   describe: "every note in the garden (notes)",
   commands: [{ verb: "notes" }],
   followsSel: false,

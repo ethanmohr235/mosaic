@@ -208,10 +208,10 @@ class Api:
             return self._verb_fit(literal)
         if literal.kind == commands.VERB and literal.head == home_repo.GARDEN_VERB:
             return self._verb_garden(literal, confirm)
-        if literal.kind == commands.VERB and literal.head in commands.ARG_VIEWS:
+        if literal.kind == commands.VERB and literal.head in commands.LINE_VIEW_VERBS:
             # The literal line is the pane's command: `open @sel` keeps
             # following the selection rather than freezing on today's.
-            return {"effect": "open_view", "view": commands.ARG_VIEWS[literal.head],
+            return {"effect": "open_view", "view": commands.view_for(literal.head),
                     "command": literal.text}
         expanded = commands.expand_sel(text, selection)
         if expanded != text and motes_repo.get_mote(self._session.conn, selection[0]) is None:
@@ -258,8 +258,8 @@ class Api:
             return self._verb_playhead(parsed.head, parsed.args)
         if parsed.args:
             return _error(_no_arguments(parsed.head))
-        if parsed.head in commands.VERB_VIEWS:
-            return {"effect": "open_view", "view": commands.VERB_VIEWS[parsed.head],
+        if parsed.head in commands.BARE_VIEW_VERBS:
+            return {"effect": "open_view", "view": commands.view_for(parsed.head),
                     "command": parsed.head}
         if parsed.head == "refresh":
             return {"effect": "refresh", "message": self._refresh()}
@@ -284,7 +284,7 @@ class Api:
         the pane then runs the full `plot save ‹name› ‹its line›` (so the
         history holds the whole write) or exports what it shows."""
         command = plotcmd.parse(parsed.args)
-        view = commands.ARG_VIEWS[plotcmd.PLOT_VERB]
+        view = commands.view_for(plotcmd.PLOT_VERB)
         if command.kind == plotcmd.PLOT:
             return {"effect": "open_view", "view": view, "command": parsed.text}
         if command.kind == plotcmd.SAVE and command.line is not None:
@@ -301,7 +301,7 @@ class Api:
         `fit … --apply` runs the fit and writes it, one undo step."""
         line = fit_repo.parse(parsed.args)
         if not line.apply:
-            return {"effect": "open_view", "view": commands.ARG_VIEWS[fit_repo.FIT_VERB],
+            return {"effect": "open_view", "view": commands.view_for(fit_repo.FIT_VERB),
                     "command": parsed.text}
         result = fit_repo.run(self._session.conn, line)
         message, undo_command = fit_repo.apply(self._session.conn, result)
@@ -318,7 +318,7 @@ class Api:
         garden reopens the workspace on the new name."""
         line = home_repo.parse(parsed.args)
         if line.shows:
-            return {"effect": "open_view", "view": "mosaic:garden", "command": parsed.text}
+            return {"effect": "open_view", "view": "garden", "command": parsed.text}
         if line.action == "rm" and not confirm:
             return {"effect": "statement", "ok": False, "needsConfirm": True,
                     "message": f"⏎ again to move {line.args[0]!r} aside (garden restore brings it back)",

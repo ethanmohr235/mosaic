@@ -1,4 +1,4 @@
-/* `mosaic:gardens` (`gardens [--archived]`, `layout gardens`): every garden as
+/* `gardens` (`gardens [--archived]`, `layout gardens`): every garden as
  * the ownership tree (docs/console.md → Settled for U9).
  *
  * Owned gardens sit under their owner's garden, labelled with the cover
@@ -74,7 +74,7 @@ function create(ctx) {
     st.armed = null;
     render();
     const row = here();
-    if (row) ctx.paneAction("mosaic:garden", { garden: row.garden });
+    if (row) ctx.paneAction("garden", { garden: row.garden });
   }
 
   async function remove() {
@@ -166,8 +166,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "mosaic:gardens",
-  app: "saic",
+  id: "gardens",
   describe: "every garden: the ownership tree, loose and archived (gardens)",
   commands: [{ verb: "gardens" }],
   followsSel: false,

@@ -1,4 +1,4 @@
-/* `mora:worksheet` (`worksheet`): the garden's calculation as lines of
+/* `worksheet` (`worksheet`): the garden's calculation as lines of
  * text, on the blueprint surface (docs/console.md → Settled for U6;
  * docs/simulation.md → The worksheet).
  *
@@ -172,8 +172,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "mora:worksheet",
-  app: "ra",
+  id: "worksheet",
   describe: "the garden's calculation as lines of text (worksheet)",
   commands: [{ verb: "worksheet" }],
   followsSel: false,

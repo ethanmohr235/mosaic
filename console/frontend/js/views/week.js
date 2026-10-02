@@ -1,4 +1,4 @@
-/* `monastery:week` (`week [date] …`, `layout plan`): the week as an hour
+/* `week` (`week [date] …`, `layout plan`): the week as an hour
  * grid on the --line grid (docs/console.md → Settled for U7).
  *
  * Above the hours, the all-day strip: bars (multi-day values, a start
@@ -251,8 +251,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "monastery:week",
-  app: "nastery",
+  id: "week",
   describe: "the week as an hour grid (week)",
   commands: [{ verb: "week" }],
   followsSel: false,

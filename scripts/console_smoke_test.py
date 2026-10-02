@@ -350,7 +350,7 @@ def garden_checks(window):
     check("`cd` swaps the workspace to another garden and back", cd_swaps)
 
 
-# ---------- U2: the find table (monolith:table) ----------
+# ---------- U2: the find table (table) ----------
 
 TABLE_ROW = ".pane.focused .view-table .c-table-row"
 
@@ -437,7 +437,7 @@ def u2_checks(window):
     check("U2: an inline cell edit writes through `set`", inline_edit)
 
 
-# ---------- U3: the props pane (mote:props) and the `p` float ----------
+# ---------- U3: the props pane (props) and the `p` float ----------
 
 PROPS = ".pane .view-props"
 

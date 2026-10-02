@@ -1,4 +1,4 @@
-/* `motion:rule` (`rule @sel|‹rule›`, `why ‹m.k›`): a rule's equation and
+/* `rule` (`rule @sel|‹rule›`, `why ‹m.k›`): a rule's equation and
  * the values it binds, or how the last solve determined one value
  * (docs/console.md → Settled for U5).
  *
@@ -222,8 +222,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "motion:rule",
-  app: "tion",
+  id: "rule",
   describe: "a rule and the values it binds, or why a value is what it is (rule, why)",
   commands: [{ verb: "rule", canonical: "rule @sel" }, { verb: "why" }],
   followsSel: false,

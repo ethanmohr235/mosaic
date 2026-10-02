@@ -134,7 +134,7 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
 
 
 def test_open_sel_opens_the_props_pane_on_the_selection(api):
-    assert api.resolve("open @sel") == {"view": "mote:props", "command": "open @sel"}
+    assert api.resolve("open @sel") == {"view": "props", "command": "open @sel"}
 
 
 def test_resolve(api):
@@ -303,11 +303,11 @@ def _keys(payload):
 
 def test_find_opens_the_table_with_the_whole_line_as_its_command(api):
     effect = api.run("find status:open --sort rank")
-    assert effect == {"effect": "open_view", "view": "monolith:table",
+    assert effect == {"effect": "open_view", "view": "table",
                       "command": "find status:open --sort rank"}
-    assert api.resolve("find status:open") == {"view": "monolith:table",
+    assert api.resolve("find status:open") == {"view": "table",
                                                "command": "find status:open"}
-    assert api.run("find") == {"effect": "open_view", "view": "monolith:table", "command": "find"}
+    assert api.run("find") == {"effect": "open_view", "view": "table", "command": "find"}
 
 
 def test_table_answers_a_find_line(api, chores):
@@ -402,8 +402,8 @@ def test_a_typed_statement_is_undone_by_undo(api):
 
 def test_open_keeps_at_sel_literal_so_the_pane_follows(api, chores):
     effect = api.run("open @sel", selection=[chores[0]])
-    assert effect == {"effect": "open_view", "view": "mote:props", "command": "open @sel"}
-    assert api.resolve("open #abc") == {"view": "mote:props", "command": "open #abc"}
+    assert effect == {"effect": "open_view", "view": "props", "command": "open @sel"}
+    assert api.resolve("open #abc") == {"view": "props", "command": "open #abc"}
 
 
 def test_rename_moves_value_and_unit_and_undoes(api, chores):
@@ -526,13 +526,13 @@ LINE = "plot C1.current vs C1.voltage 0:300 --steps 30"
 
 def test_plot_opens_the_plot_pane(api):
     assert api.run("plot")["effect"] == "open_view"
-    assert api.resolve("plot") == {"view": "moxie:plot", "command": "plot"}
-    assert api.resolve(LINE) == {"view": "moxie:plot", "command": LINE}
+    assert api.resolve("plot") == {"view": "plot", "command": "plot"}
+    assert api.resolve(LINE) == {"view": "plot", "command": LINE}
     assert "error" in api.resolve("plot export csv")
 
 
 def test_a_plot_line_opens_a_pane_with_the_literal_line(api):
-    assert api.run(LINE) == {"effect": "open_view", "view": "moxie:plot", "command": LINE}
+    assert api.run(LINE) == {"effect": "open_view", "view": "plot", "command": LINE}
 
 
 def test_the_plot_payload_coarse_then_full(api, divider):
@@ -573,7 +573,7 @@ def test_plot_save_is_one_undoable_write(api, divider):
     ("plot export png", {"action": "export", "name": None, "format": "png", "path": None}),
 ])
 def test_save_or_export_with_no_line_acts_on_the_focused_pane(api, line, action):
-    assert api.run(line) == {"effect": "pane_action", "view": "moxie:plot", **action}
+    assert api.run(line) == {"effect": "pane_action", "view": "plot", **action}
 
 
 def test_export_csv_to_a_path(api, divider, tmp_path):
@@ -621,8 +621,8 @@ FIT = "fit C1.current vs C1.voltage --data I vs V --free C1.r_a"
 
 
 def test_a_fit_line_opens_a_fit_pane(api):
-    assert api.run(FIT) == {"effect": "open_view", "view": "moxie:fit", "command": FIT}
-    assert api.resolve(FIT) == {"view": "moxie:fit", "command": FIT}
+    assert api.run(FIT) == {"effect": "open_view", "view": "fit", "command": FIT}
+    assert api.resolve(FIT) == {"view": "fit", "command": FIT}
     assert "error" in api.resolve(FIT + " --apply")
 
 
@@ -677,11 +677,11 @@ def test_layout_calc_opens_the_three_calc_panes(api):
 
 
 def test_sim_rule_why_and_scenarios_open_panes(api):
-    assert api.run("sim --ticks 5") == {"effect": "open_view", "view": "motion:state",
+    assert api.run("sim --ticks 5") == {"effect": "open_view", "view": "sim",
                                         "command": "sim --ticks 5"}
-    assert api.run("rule @sel")["view"] == "motion:rule"
-    assert api.run("why C1.current")["view"] == "motion:rule"
-    assert api.run("scenarios")["view"] == "motion:scenarios"
+    assert api.run("rule @sel")["view"] == "rule"
+    assert api.run("why C1.current")["view"] == "rule"
+    assert api.run("scenarios")["view"] == "scenarios"
 
 
 def test_solve_writes_one_undo_step(api):
@@ -736,10 +736,10 @@ def test_layout_docs_opens_the_three_document_panes(api):
     effect = api.run("layout docs")
     assert effect["effect"] == "open_layout" and effect["focus"] == "edit @sel"
     assert [c["command"] for c in effect["tree"]["children"]] == ["notes", "edit @sel", "read @sel"]
-    assert api.run("edit Homework")["view"] == "mora:edit"
-    assert api.run("read @sel")["view"] == "mora:read"
-    assert api.run("notes truss")["view"] == "mora:notes"
-    assert api.run("worksheet")["view"] == "mora:worksheet"
+    assert api.run("edit Homework")["view"] == "edit"
+    assert api.run("read @sel")["view"] == "read"
+    assert api.run("notes truss")["view"] == "notes"
+    assert api.run("worksheet")["view"] == "worksheet"
 
 
 def test_a_note_is_written_and_one_session_is_one_undo_step(api):
@@ -780,8 +780,8 @@ def test_layout_plan_opens_agenda_and_week(api):
     effect = api.run("layout plan")
     assert effect["effect"] == "open_layout" and effect["focus"] == "agenda"
     assert [c["command"] for c in effect["tree"]["children"]] == ["agenda", "week"]
-    assert api.run("week 2026-10-05")["view"] == "monastery:week"
-    assert api.run("month")["view"] == "monastery:month"
+    assert api.run("week 2026-10-05")["view"] == "week"
+    assert api.run("month")["view"] == "month"
 
 
 def test_the_calendar_panes_answer_and_edits_are_set_lines(api):
@@ -818,7 +818,7 @@ def test_layout_graph_opens_find_graph_and_props(api):
     effect = api.run("layout graph")
     assert effect["effect"] == "open_layout"
     assert [c["command"] for c in effect["tree"]["children"]] == ["find", "graph @sel --depth 2", "open @sel"]
-    assert api.run("graph @sel --depth 3") == {"effect": "open_view", "view": "monarch:graph",
+    assert api.run("graph @sel --depth 3") == {"effect": "open_view", "view": "graph",
                                                "command": "graph @sel --depth 3"}
 
 
@@ -855,9 +855,9 @@ def test_layout_gardens_opens_gardens_and_garden(api):
     effect = api.run("layout gardens")
     assert effect["effect"] == "open_layout"
     assert [c["command"] for c in effect["tree"]["children"]] == ["gardens", "garden"]
-    assert api.run("gardens --archived") == {"effect": "open_view", "view": "mosaic:gardens",
+    assert api.run("gardens --archived") == {"effect": "open_view", "view": "gardens",
                                              "command": "gardens --archived"}
-    assert api.run("garden test")["view"] == "mosaic:garden"
+    assert api.run("garden test")["view"] == "garden"
 
 
 def test_the_home_panes_answer(api):

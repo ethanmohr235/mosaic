@@ -1,4 +1,4 @@
-/* `mosaic:garden` (`garden [‹name›]`, `layout gardens`): one garden's details
+/* `garden` (`garden [‹name›]`, `layout gardens`): one garden's details
  * (docs/console.md → Settled for U9) -- its ownership path, its cover and
  * owner, what it owns, counts and size, when it last changed, how it
  * syncs, why it is archived, and what is wrong with its ownership.
@@ -8,7 +8,7 @@
  * to `garden ‹name›`, so a saved layout reopens on it. ⏎ (or a click on a
  * garden named here) is `cd`. */
 
-import { arg } from "./mosaic-gardens.js";
+import { arg } from "./gardens.js";
 
 const HINTS = [["⏎", "open (cd)"], ["click", "a garden named here: cd"]];
 
@@ -113,8 +113,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "mosaic:garden",
-  app: "saic",
+  id: "garden",
   describe: "one garden's details: owner, size, sync, problems (garden)",
   commands: [{ verb: "garden" }],
   followsSel: false,

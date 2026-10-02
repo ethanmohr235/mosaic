@@ -1,4 +1,4 @@
-/* `motion:state` (`sim …`, `layout calc`): a run of the garden, tick by tick,
+/* `sim` (`sim …`, `layout calc`): a run of the garden, tick by tick,
  * as a watch list (docs/console.md → Settled for U5).
  *
  * One row per watched value: its state (solved, varied, pinned, given),
@@ -359,8 +359,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "motion:state",
-  app: "tion",
+  id: "sim",
   describe: "run the garden tick by tick and watch its values (sim)",
   commands: [{ verb: "sim" }],
   followsSel: false,

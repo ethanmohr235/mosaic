@@ -84,7 +84,6 @@ function create(ctx) {
 
 export default {
   id: "log",
-  app: null,
   describe: "command and error log",
   commands: [{ verb: "log" }],
   followsSel: false,

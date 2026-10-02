@@ -1,4 +1,4 @@
-/* `mote:props` (`open @sel|#id|name`): one mote's properties and
+/* `props` (`open @sel|#id|name`): one mote's properties and
  * links -- the console's inspector (docs/console.md → *Inspector*, U3).
  *
  * The handoff's layout: the name as a title, a key/value grid with a
@@ -457,8 +457,7 @@ function paletteFor(universe) {
 }
 
 export default {
-  id: "mote:props",
-  app: "te",
+  id: "props",
   describe: "a mote's properties and links (open)",
   commands: [{ verb: "open", canonical: "open @sel" }],
   followsSel: false,

@@ -61,7 +61,7 @@ class MoxieApi:
             return {"error": f"internal error: {e}"}
 
     def fit(self, command: str) -> dict[str, Any]:
-        """The `moxie:fit` pane's answer: the fit a `fit …` line asks for,
+        """The `fit` pane's answer: the fit a `fit …` line asks for,
         read under the session lock and solved outside it. Writes nothing
         -- `fit … --apply` is a command the root runs."""
         try:

@@ -1,4 +1,4 @@
-/* `moxie:plot` (`plot …`): a value against another, re-solved
+/* `plot` (`plot …`): a value against another, re-solved
  * from the garden at every point and never written back
  * (docs/console.md → Settled for U4).
  *
@@ -672,8 +672,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "moxie:plot",
-  app: "xie",
+  id: "plot",
   describe: "plot values against another, re-solved (plot)",
   commands: [{ verb: "plot" }],
   followsSel: false,

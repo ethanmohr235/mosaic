@@ -3,8 +3,7 @@
  * A view is one ES module whose default export is a *definition*:
  *
  *   {
- *     id:         "log",                 // view id: completion, pane header
- *     app:        null | "nolith" | ...  // the app suffix it belongs to (null = the shell)
+ *     id:         "log",                 // view id, named for its verb (`table` answers `find`)
  *     describe:   "command and error log",   // one line, shown in completion
  *     commands:   [{verb: "log", canonical?: "log", complete?(line, cursor) -> rows}],
  *                                        // verbs this view answers; commands[0]'s
@@ -17,7 +16,8 @@
  * `ctx` is {api, store, components, navigate(id), setCommand(command),
  * runCommand(line), prefill(line), isFocused(), setSummary(s), paneAction(viewId, action)};
  * one per pane:
- *   api         the root bridge (js/bridge.js); an app's namespace is api.<app>
+ *   api         the root bridge (js/bridge.js); its namespaces (api.moxie, …) keep
+ *               the old app names, which the UI no longer shows
  *   store       js/store.js -- read state.selection / primary(), request
  *               changes with setSelection / toggleSelection, never copy them
  *   components  js/components.js -- table (markTable, swatch), kvGrid,
@@ -74,27 +74,26 @@
  * Register a new view by importing it below and adding it to VIEWS. */
 
 import log from "./log.js";
-import monolithTable from "./monolith-table.js";
-import moteProps from "./mote-props.js";
-import moxiePlot from "./moxie-plot.js";
-import moxieFit from "./moxie-fit.js";
-import motionState from "./motion-state.js";
-import motionRule from "./motion-rule.js";
-import motionScenarios from "./motion-scenarios.js";
-import moraEdit from "./mora-edit.js";
-import moraRead from "./mora-read.js";
-import moraNotes from "./mora-notes.js";
-import moraWorksheet from "./mora-worksheet.js";
-import monasteryAgenda from "./monastery-agenda.js";
-import monasteryWeek from "./monastery-week.js";
-import monasteryMonth from "./monastery-month.js";
-import monarchGraph from "./monarch-graph.js";
-import mosaicGardens from "./mosaic-gardens.js";
-import mosaicGarden from "./mosaic-garden.js";
+import table from "./table.js";
+import props from "./props.js";
+import plot from "./plot.js";
+import fit from "./fit.js";
+import sim from "./sim.js";
+import rule from "./rule.js";
+import scenarios from "./scenarios.js";
+import edit from "./edit.js";
+import read from "./read.js";
+import notes from "./notes.js";
+import worksheet from "./worksheet.js";
+import agenda from "./agenda.js";
+import week from "./week.js";
+import month from "./month.js";
+import graph from "./graph.js";
+import gardens from "./gardens.js";
+import garden from "./garden.js";
 
-export const VIEWS = [log, monolithTable, moteProps, moxiePlot, moxieFit, motionState, motionRule,
-  motionScenarios, moraEdit, moraRead, moraNotes, moraWorksheet, monasteryAgenda, monasteryWeek, monasteryMonth,
-  monarchGraph, mosaicGardens, mosaicGarden];
+export const VIEWS = [log, table, props, plot, fit, sim, rule, scenarios, edit, read, notes, worksheet,
+  agenda, week, month, graph, gardens, garden];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;

@@ -1,4 +1,4 @@
-/* `motion:scenarios` (`scenarios`, `layout calc`): the garden's scenarios and
+/* `scenarios` (`scenarios`, `layout calc`): the garden's scenarios and
  * what each overrides, beside the garden's own value (docs/console.md →
  * Settled for U5).
  *
@@ -96,7 +96,7 @@ function create(ctx) {
     const row = here();
     if (!row) return;
     const name = row.name;
-    const done = await ctx.paneAction("motion:state", { op, name });
+    const done = await ctx.paneAction("sim", { op, name });
     if (done) return;
     const flag = op === "vs" ? `--vs ${arg(name || "garden")}` : name ? `--scenario ${arg(name)}` : "";
     await ctx.runCommand(`sim ${flag}`.trim(), { newPane: true });
@@ -194,8 +194,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "motion:scenarios",
-  app: "tion",
+  id: "scenarios",
   describe: "the garden's scenarios and what each overrides (scenarios)",
   commands: [{ verb: "scenarios" }],
   followsSel: false,

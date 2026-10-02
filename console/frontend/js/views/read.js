@@ -1,4 +1,4 @@
-/* `mora:read` (`read @sel|#id|‹name›`, `layout docs`): a note, rendered
+/* `read` (`read @sel|#id|‹name›`, `layout docs`): a note, rendered
  * (docs/console.md → Settled for U6).
  *
  * Drawn on its own surface -- the dark gray paper tokens (--paper-*) --
@@ -283,8 +283,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "mora:read",
-  app: "ra",
+  id: "read",
   describe: "a note, rendered; follows unsaved typing (read)",
   commands: [{ verb: "read", canonical: "read @sel" }],
   followsSel: false,

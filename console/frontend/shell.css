@@ -528,7 +528,7 @@ body.dragging-pane, body.dragging-pane * { cursor: grabbing; user-select: none; 
 
 .view-log { padding-top: var(--table-head-pad); }
 
-/* monolith:table -- the table scrolls both ways under a header that stays put. */
+/* table -- the table scrolls both ways under a header that stays put. */
 .view-table { scroll-padding-top: calc(var(--row-h) + var(--table-head-pad)); }
 .view-table .c-table { width: max-content; min-width: 100%; }
 
@@ -541,7 +541,7 @@ body.dragging-pane, body.dragging-pane * { cursor: grabbing; user-select: none; 
 
 .view-table .c-table-empty { padding: var(--table-head-pad) var(--pad-x); color: var(--dim); }
 
-/* ---------- mote:props (the inspector) ----------
+/* ---------- props (the inspector) ----------
  * The handoff's props layout: the name as a title, a key/value grid, then
  * `links N` and a `→ relation  target` row per relationship. Rows share
  * the table's cursor mark (`›`) and cell editor. */
@@ -636,7 +636,7 @@ body.dragging-pane, body.dragging-pane * { cursor: grabbing; user-select: none; 
 .props-float .view-props { overflow: auto; min-height: 0; }
 .props-float[hidden] { display: none; }
 
-/* ---------- moxie:plot (U4) ---------- */
+/* ---------- plot (U4) ---------- */
 
 .view-plot { display: flex; height: 100%; min-height: 0; }
 /* The plot keeps at least half a narrow pane; the rail gives way first. */
@@ -859,7 +859,7 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .mo-chip.bar { background: color-mix(in oklch, var(--ev) 28%, var(--bg)); }
 .mo-more { cursor: pointer; }
 
-/* monarch:graph (U8) -- the canvas fills the pane; the corner notes sit over it */
+/* graph (U8) -- the canvas fills the pane; the corner notes sit over it */
 .view-graph { position: relative; height: 100%; min-height: 0; overflow: hidden; }
 .graph-canvas { display: block; }
 .graph-corners { position: absolute; inset: 0; pointer-events: none; color: var(--dim); }
@@ -870,7 +870,7 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .graph-corner.bottom-left { bottom: 0; left: 0; }
 .graph-corner.bottom-right { bottom: 0; right: 0; }
 
-/* mosaic:gardens and mosaic:garden (U9) */
+/* gardens and garden (U9) */
 .topbar .breadcrumb .crumb.up { cursor: pointer; }
 .topbar .breadcrumb .crumb.up:hover { color: var(--fg); }
 .home-garden { white-space: pre; }

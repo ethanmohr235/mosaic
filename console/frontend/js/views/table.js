@@ -1,4 +1,4 @@
-/* `monolith:table` (`find …`): the garden's motes as one
+/* `table` (`find …`): the garden's motes as one
  * dense table. The query, sort, grouping and columns all live in the
  * pane's command; api.monolith.table(command) answers it (the U2 bridge
  * contract) and api.monolith.rewrite() turns a gesture (a header click,
@@ -398,8 +398,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "monolith:table",
-  app: "nolith",
+  id: "table",
   describe: "table of motes (find)",
   commands: [{ verb: "find" }],
   followsSel: false,

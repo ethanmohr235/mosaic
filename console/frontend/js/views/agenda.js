@@ -1,4 +1,4 @@
-/* `monastery:agenda` (`agenda [from] [to] …`, `layout plan`): every dated
+/* `agenda` (`agenda [from] [to] …`, `layout plan`): every dated
  * mote in the range, a row per occurrence, grouped by day -- the calendar's
  * keyboard home (docs/console.md → Settled for U7).
  *
@@ -105,8 +105,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "monastery:agenda",
-  app: "nastery",
+  id: "agenda",
   describe: "dated motes by day, a row per occurrence (agenda)",
   commands: [{ verb: "agenda" }],
   followsSel: false,

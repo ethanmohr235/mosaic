@@ -35,7 +35,7 @@ through plan mode, questions and approval before any code. Anything under
 | `hil disconnected` hardware row | Not a feature. Ignore it. |
 | The prompt is always `mo`; the first token is an app suffix or a command | The prompt is `$`, and the first token is a verb or a statement. The top bar keeps the `[mo]` box as the `[mo]saic` wordmark. |
 | Selection is one mote id | Selection is an **ordered set with a primary**. See *Selection*. |
-| Inspector is only the `mote:props` pane | The props pane plus a floating inspector on demand. See *Inspector*. |
+| Inspector is only the `props` pane | The props pane plus a floating inspector on demand. See *Inspector*. |
 | Google Fonts for Geist Mono | Vendored, like the current fonts. Nothing is fetched at runtime. |
 
 ## Decided
@@ -82,7 +82,7 @@ A pane is a **command string plus its rendered output**, and nothing
 else.
 
 - A view id is shorthand for a canonical command. For example,
-  `mote:props` means `open @sel`, and `monolith:table` means `find`.
+  `props` means `open @sel`, and `table` means `find`.
   The pane header shows the command, or the view id in tiled mode.
   Either way, `e` loads the command into the command line.
 - A **layout** is a split tree of command strings plus sizes. Saving,
@@ -134,14 +134,14 @@ Python packages keep their old app names (see *Rename*).
 
 | Verb | View | What it shows |
 |---|---|---|
-| `find …` | `monolith:table` | The general table. A project variables pane per the roadmap is still to come. |
-| `open @sel\|#id\|‹name›` | `mote:props` | One mote's properties and links; `@sel` follows the selection, `#id` is pinned. |
-| `plot …`, `fit …` | `moxie:plot`, `moxie:fit` | Plots re-solved at every point; a model fitted to data. |
-| `scenarios`, `sim …`, `rule …`, `why …` | `motion:scenarios`, `motion:state`, `motion:rule` | Scenarios, a run as a watch list over a timeline, the rules on a mote. |
-| `notes`, `edit …`, `read …`, `worksheet` | `mora:notes`, `mora:edit`, `mora:read`, `mora:worksheet` | Notes, a note's source and its rendered document, the worksheet. `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
-| `agenda`, `week`, `month` | `monastery:agenda`, `monastery:week`, `monastery:month` | Dated motes and project bars, on the `--line` grid. |
-| `graph …` | `monarch:graph` | The structure graph, a debugger. |
-| `gardens`, `garden …` | `mosaic:gardens`, `mosaic:garden` | The ownership tree with loose and archived gardens; one garden's details. |
+| `find …` | `table` | The general table. A project variables pane per the roadmap is still to come. |
+| `open @sel\|#id\|‹name›` | `props` | One mote's properties and links; `@sel` follows the selection, `#id` is pinned. |
+| `plot …`, `fit …` | `plot`, `fit` | Plots re-solved at every point; a model fitted to data. |
+| `scenarios`, `sim …`, `rule …`, `why …` | `scenarios`, `sim`, `rule` | Scenarios, a run as a watch list over a timeline, the rules on a mote. |
+| `notes`, `edit …`, `read …`, `worksheet` | `notes`, `edit`, `read`, `worksheet` | Notes, a note's source and its rendered document, the worksheet. `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
+| `agenda`, `week`, `month` | `agenda`, `week`, `month` | Dated motes and project bars, on the `--line` grid. |
+| `graph …` | `graph` | The structure graph, a debugger. |
+| `gardens`, `garden …` | `gardens`, `garden` | The ownership tree with loose and archived gardens; one garden's details. |
 | `log` | `log` | Command and error log. |
 
 The built-in layouts (`calc`, `docs`, `plan`, `graph`, `gardens`) are in
@@ -213,7 +213,7 @@ this table by the roadmap phase that builds them.
 
 ### Inspector
 
-- **`mote:props` is a pane** that follows `@sel`'s primary. It is the
+- **`props` is a pane** that follows `@sel`'s primary. It is the
   main place a mote is edited, and it follows the handoff's props
   layout: title, key/value grid, `links N`, `→ relation target`.
 - **Floating on demand.** `p` (settled in U3) pops the same editor
@@ -244,7 +244,7 @@ this table by the roadmap phase that builds them.
 
 - **U4 is `plot` only.** `fit` (fitting a rule's chosen inputs to data
   series, least squares with numpy) is its own step after U4, with its
-  own plan. `moxie:fit` waits for it.
+  own plan. `fit` waits for it.
 - **The `plot` grammar.** Names are garden-scope names (`bd.l`).
   ```
   plot bd.sigma bd.tau vs bd.l 4:24 --steps 200
@@ -285,7 +285,7 @@ this table by the roadmap phase that builds them.
 - **`--apply` writes value, σ and source**, as one undo step: the
   fitted value, its σ into the reserved `uncertainty` map, and `source:
   {kind: fitted, note: ‹the fit line›}` (`fitted` is a new source kind).
-- **Its own pane, `moxie:fit`**: data dots, the fitted curve, and a
+- **Its own pane, `fit`**: data dots, the fitted curve, and a
   results column. Nothing is written without `--apply`.
 - **Unitless series split by magnitude.** Series with no unit whose
   ranges differ by more than 100× take a second y axis, as two
@@ -304,9 +304,9 @@ this table by the roadmap phase that builds them.
   is the `graph` pane (U8). Linking stays a command.
 - **Grammar:**
   ```
-  sim [--ticks N] [--scenario s] [--vs s2] [--solver newton] [‹find conditions›]   motion:state
-  rule ‹rule›|@sel                                                                 motion:rule
-  scenarios                                                                        motion:scenarios
+  sim [--ticks N] [--scenario s] [--vs s2] [--solver newton] [‹find conditions›]   sim
+  rule ‹rule›|@sel                                                                 rule
+  scenarios                                                                        scenarios
   solve [--live on|off]      one static solve, written, undoable
   why ‹m.k›                  explain a solved value
   step +N|-N|‹tick›, play, pause
@@ -677,6 +677,14 @@ read as one tool rather than seven apps.
 - **One top bar.** Its left end is the `[mo]saic` wordmark and the
   ownership path, whatever is focused; the focused pane's app suffix is
   gone. The command line no longer draws a typed `mo ` as a box.
+- **A view is named for its verb.** View ids lost their app prefixes:
+  `table` (answers `find`), `props` (`open`), `rule` (also `why`), and
+  every other view is its verb (`plot`, `sim`, `edit`, `week`, `graph`,
+  `gardens`, …; `core/commands.py::view_for`). Each view's file is named
+  after it (`views/plot.js`), and a view has no `app` field. Layouts store
+  commands, not ids, so saved layouts are untouched. The sections above
+  were updated to the new ids. The Python namespaces (`api.moxie`,
+  `console/motion.py`, …) keep the old names until the code rename.
 
 ### Visual system
 
@@ -801,10 +809,10 @@ Each step's done-check is the same:
 
 - **Verb list and view ids.** The tables above are proposals. Confirm
   each app's canonical commands in its port step. U2 built `find …`
-  (view `monolith:table`, `mo nolith` = `find`) and `set
+  (view `table`, `mo nolith` = `find`) and `set
   @sel|#id|‹name› ‹key› ‹value›|--clear`, where `set`'s `@sel` is the
   whole selection and everywhere else `@sel` is the primary. U3 added
-  `open @sel|#id|‹name›` (view `mote:props`, `mo te` = `open @sel`),
+  `open @sel|#id|‹name›` (view `props`, `mo te` = `open @sel`),
   `rename`, `unlink` and `template`, which also take the whole
   selection. Confirm
   those, and whether the old window's bulk link, relationship matrix,

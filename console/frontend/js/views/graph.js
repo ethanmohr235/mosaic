@@ -1,4 +1,4 @@
-/* `monarch:graph` (`graph [@sel|#id|name] [--depth N] …`, `layout graph`): a
+/* `graph` (`graph [@sel|#id|name] [--depth N] …`, `layout graph`): a
  * mote's neighbourhood, or the whole garden, on the canvas graph
  * (js/graph.js; docs/console.md → Settled for U8).
  *
@@ -279,8 +279,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "monarch:graph",
-  app: "narch",
+  id: "graph",
   describe: "a mote's neighbourhood, or the garden, as a graph (graph)",
   commands: [{ verb: "graph", canonical: "graph @sel --depth 2" }],
   followsSel: false,

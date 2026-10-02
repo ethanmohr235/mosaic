@@ -1,5 +1,5 @@
-/* The console's text editor: a note's source (views/mora-edit.js) and the
- * worksheet (views/mora-worksheet.js). docs/console.md → Settled for U6.
+/* The console's text editor: a note's source (views/edit.js) and the
+ * worksheet (views/worksheet.js). docs/console.md → Settled for U6.
  *
  * A real <textarea> sits transparent over a mirror of its text that
  * carries the colour (syntax ranges, find matches, a per-line class and

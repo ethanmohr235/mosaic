@@ -1,4 +1,4 @@
-/* `mora:edit` (`edit @sel|#id|‹name›`, `layout docs`): a note's .modoc source
+/* `edit` (`edit @sel|#id|‹name›`, `layout docs`): a note's .modoc source
  * (docs/console.md → Settled for U6).
  *
  * The editor (js/editor.js) is modal: `i` or ⏎ starts typing, `esc` stops.
@@ -262,8 +262,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "mora:edit",
-  app: "ra",
+  id: "edit",
   describe: "a note's source, saved as you type (edit)",
   commands: [{ verb: "edit", canonical: "edit @sel" }],
   followsSel: false,

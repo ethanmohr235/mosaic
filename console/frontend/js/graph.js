@@ -1,4 +1,4 @@
-/* The canvas graph the `monarch:graph` pane draws with -- Monarch's
+/* The canvas graph the `graph` pane draws with -- Monarch's
  * hand-written renderer (it replaced Cytoscape), ported to an ES module
  * and restyled to the handoff's graph rules (docs/console.md → Settled for
  * U8; docs/design/mosaic-console/README.md → Graph styling).
@@ -22,7 +22,7 @@
  *   - labels 11px mono --dim to the right of the node, --bright selected
  *
  * Nothing here knows the command line: gestures are callbacks the pane
- * turns into commands (views/monarch-graph.js). */
+ * turns into commands (views/graph.js). */
 
 import { hashString } from "./palette.js";
 

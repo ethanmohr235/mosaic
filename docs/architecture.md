@@ -1016,7 +1016,7 @@ pane's main payload carries that list, so no pane pays a call for it.
 
 # The inspector
 
-One mote, one surface. The console's `mote:props` pane and its `p` float
+One mote, one surface. The console's `props` pane and its `p` float
 draw the same payload, `core/inspect.py::inspect`, so they cannot
 disagree about what a mote is (docs/console.md -> *Settled for U3*).
 
@@ -1270,7 +1270,7 @@ kept per garden in the console sidecar -- UI state, like layouts.
 
 # The graph
 
-The console's `graph` pane (`monarch:graph`, `layout graph`) is Monarch's
+The console's `graph` pane (`graph`, `layout graph`) is Monarch's
 canvas renderer kept and restyled, not Cytoscape (docs/console.md ->
 *Settled for U8*). `core/graphview.py` answers the line:
 

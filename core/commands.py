@@ -68,18 +68,19 @@ def builtin_layout(name: str) -> BuiltinLayout | None:
     return next((layout for layout in BUILTIN_LAYOUTS if layout.name == name), None)
 
 
-# Verbs a view answers directly, rather than the root API acting on them.
-VERB_VIEWS: dict[str, str] = {"log": "log", "scenarios": "motion:scenarios",
-                              "worksheet": "mora:worksheet"}
-# Verbs a view answers *with* their arguments: the whole line is the
-# pane's command (`find status:open --sort due`).
-ARG_VIEWS: dict[str, str] = {"find": "monolith:table", "open": "mote:props", "plot": "moxie:plot",
-                             "fit": "moxie:fit", "sim": "motion:state", "rule": "motion:rule",
-                             "why": "motion:rule", "edit": "mora:edit", "read": "mora:read",
-                             "notes": "mora:notes", "agenda": "monastery:agenda",
-                             "week": "monastery:week", "month": "monastery:month",
-                             "graph": "monarch:graph", "gardens": "mosaic:gardens",
-                             "garden": "mosaic:garden"}
+# A pane's view is named for its verb (docs/console.md -> Polish and
+# unification), except the three below. Bare verbs open their view with no
+# arguments; the others answer their whole line (`find status:open --sort due`).
+BARE_VIEW_VERBS = frozenset({"log", "scenarios", "worksheet"})
+LINE_VIEW_VERBS = frozenset({"find", "open", "plot", "fit", "sim", "rule", "why", "edit", "read", "notes",
+                             "agenda", "week", "month", "graph", "gardens", "garden"})
+_VIEW_NOT_NAMED_FOR_VERB = {"find": "table", "open": "props", "why": "rule"}
+
+
+def view_for(verb: str) -> str:
+    """The id of the view that answers `verb`'s lines."""
+    return _VIEW_NOT_NAMED_FOR_VERB.get(verb, verb)
+
 
 SET_VERB = "set"
 CLEAR_FLAG = "--clear"
@@ -161,14 +162,14 @@ def resolve_view(command: str) -> tuple[str, str]:
     parsed = parse(command)
     if not parsed.text:
         return "", ""
-    if parsed.kind == VERB and parsed.head in VERB_VIEWS and not parsed.args:
-        return VERB_VIEWS[parsed.head], parsed.text
-    if parsed.kind == VERB and parsed.head in ARG_VIEWS:
+    if parsed.kind == VERB and parsed.head in BARE_VIEW_VERBS and not parsed.args:
+        return view_for(parsed.head), parsed.text
+    if parsed.kind == VERB and parsed.head in LINE_VIEW_VERBS:
         if parsed.head == "plot" and parsed.args[:1] in (("save",), ("export",)):
             raise CommandError(f"{parsed.text!r} is an action, not a pane")
         if parsed.head == "fit" and "--apply" in parsed.args:
             raise CommandError(f"{parsed.text!r} is a write, not a pane")
-        return ARG_VIEWS[parsed.head], parsed.text
+        return view_for(parsed.head), parsed.text
     raise CommandError(f"no view answers {parsed.text!r}")
 
 

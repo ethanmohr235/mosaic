@@ -1,4 +1,4 @@
-/* `monastery:month` (`month [date] …`): six weeks of day cells on the
+/* `month` (`month [date] …`): six weeks of day cells on the
  * --line grid (docs/console.md → Settled for U7). Each day lists up to
  * three items (bars first, then all-day, then timed by start) and
  * `+N more`, which opens that week in a new pane. A bar shows on every
@@ -109,8 +109,7 @@ function create(ctx) {
 }
 
 export default {
-  id: "monastery:month",
-  app: "nastery",
+  id: "month",
   describe: "the month as a six-week grid (month)",
   commands: [{ verb: "month" }],
   followsSel: false,

@@ -199,7 +199,7 @@ def test_find_and_set_resolve_and_complete(conn):
     from core import motes as motes_repo
     motes_repo.create_mote(conn, {"name": "a", "status": "open"})
     motes_repo.create_mote(conn, {"name": "b", "status": "done"})
-    assert commands.resolve_view("find status:open") == ("monolith:table", "find status:open")
+    assert commands.resolve_view("find status:open") == ("table", "find status:open")
 
     def values(line):
         return [row.value for row in commands.complete(conn, line).rows]
@@ -228,4 +228,11 @@ def test_u3_verbs_complete_targets_then_their_arguments(conn):
     assert values("unlink a ") == ["blocks"]
     assert values("unlink a blocks ") == ["a", "b"]
     assert values("template ") == ["a", "b"]
-    assert commands.resolve_view("open @sel") == ("mote:props", "open @sel")
+    assert commands.resolve_view("open @sel") == ("props", "open @sel")
+
+
+def test_a_view_is_named_for_its_verb():
+    named = {verb: commands.resolve_view(verb if verb in commands.BARE_VIEW_VERBS else f"{verb} x")[0]
+             for verb in commands.BARE_VIEW_VERBS | commands.LINE_VIEW_VERBS}
+    assert {verb: view for verb, view in named.items() if verb != view} == {
+        "find": "table", "open": "props", "why": "rule"}

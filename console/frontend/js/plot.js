@@ -1,7 +1,7 @@
 /* The plot renderer: hand-written SVG, no library. Pure -- render() is
  * handed a finished model and owns nothing beyond the node it draws into.
  * What to draw (which series, which pass of the refinement) is the view's
- * business (views/moxie-plot.js); the figure itself comes from
+ * business (views/plot.js); the figure itself comes from
  * core/plotview.py.
  *
  * Ported from the old windows' shared plot.js (since deleted) and restyled to the handoff (docs/design/mosaic-console/README.md →
@@ -241,7 +241,7 @@ function renderLines(host, svg, g, model) {
     }
   }
 
-  // Measured points over the curves (moxie:fit): open rings, so a curve
+  // Measured points over the curves (fit): open rings, so a curve
   // passing through a point still shows where the point is.
   for (const pt of model.points || []) {
     const Y = (bands[pt.band || 0] || bands[0]).Y;
@@ -351,7 +351,7 @@ export function render(host, model) {
 }
 
 /** A figure from core/plotview.py::figure_json as a still model -- no
- * cursor, no knobs: what a document's `\graph` draws (views/mora-read.js).
+ * cursor, no knobs: what a document's `\graph` draws (views/read.js).
  * Series take their colour by order, as the plot pane's legend does. */
 export function figureModel(f, width, height) {
   const base = { mode: f.mode, width, height, xLo: f.xLo, xHi: f.xHi, yLo: f.yLo, yHi: f.yHi,
