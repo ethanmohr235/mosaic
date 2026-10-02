@@ -6,6 +6,9 @@
 
 import * as T from "./tree.js";
 
+/** A `newPane` option as a split direction: "col" (below) or "row" (right). */
+const splitDir = (newPane) => (newPane === "col" ? "col" : "row");
+
 export function createActions({ store, panes, api }) {
   const focusedId = () => store.state.focusedId;
   const tree = () => store.state.tree;
@@ -69,14 +72,15 @@ export function createActions({ store, panes, api }) {
     only: () => store.setTree(T.only(tree(), focusedId())),
     equalize: () => store.setTree(T.equalize(tree())),
     swap: () => store.setTree(T.swap(tree(), focusedId())),
-    /** ^⏎: split the focused pane and run `command` in the new one. */
-    openInNewPane: (command) => split("row", command),
+    /** ^⏎ / ⇧⏎: split the focused pane and run `command` in the new one,
+     * below ("col") or to the right ("row"; also what `true` means). */
+    openInNewPane: (command, dir = "row") => split(splitDir(dir), command),
     /** An app that opens several panes (`mo tion`): they take the focused
-     * pane's place (^⏎: a new split's), focus on `focusCommand`'s pane. */
+     * pane's place (^⏎ / ⇧⏎: a new split's), focus on `focusCommand`'s pane. */
     openLayout(json, { newPane = false, focusCommand = null } = {}) {
       // One tree change: a split drawn on its own would be a blank pane,
       // which takes the command line for a moment.
-      const base = newPane ? T.split(tree(), focusedId(), "row", "") : { tree: tree(), id: focusedId() };
+      const base = newPane ? T.split(tree(), focusedId(), splitDir(newPane), "") : { tree: tree(), id: focusedId() };
       if (!base.id) return;
       const result = T.replaceLeaf(base.tree, base.id, json, focusCommand);
       store.setTree(result.tree, result.focusId);

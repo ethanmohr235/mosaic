@@ -3,14 +3,14 @@
  * outcome for the command line's status: {message, level, needsConfirm?}.
  *
  *   statement  log it; select the mote it named; a write re-runs every pane
- *   open_view  the focused pane gets the command (^⏎: a new split does)
+ *   open_view  the focused pane gets the command (^⏎ / ⇧⏎: a new split below / right does)
  *   layout     save / load / rm / list
  *   garden     `cd` (or renaming the open garden): the workspace is
  *              re-booted on the new garden
  *   undo/redo  log what was undone; every pane re-runs
  *   refresh    every pane re-runs
  *   open_layout  an app that opens several panes (`mo tion`): they take
- *              the focused pane's place (^⏎: a new split's)
+ *              the focused pane's place (^⏎ / ⇧⏎: a new split's)
  *   live       `solve --live on|off`: the top bar's `live`
  *   playhead   `step`, `play`, `pause`: the shared playhead
  *   pane_action  a line that acts on a pane of one view (`plot save ‹name›`,
@@ -39,7 +39,7 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
   }
 
   function openView(e, { newPane }) {
-    if (newPane) actions.openInNewPane(e.command);
+    if (newPane) actions.openInNewPane(e.command, newPane);
     else actions.setCommand(e.command);
     store.log("result", `${e.view}: ${e.command}`, { level: "ok" });
     return { message: "", level: "ok" };

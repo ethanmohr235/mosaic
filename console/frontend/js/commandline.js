@@ -7,7 +7,8 @@
  * api.complete / api.run); this module only draws and routes keys.
  *
  *   ⏎      run in the focused pane (or as a statement)
- *   ^⏎     run into a new pane
+ *   ^⏎     run into a new pane below (a split, as ^w s)
+ *   ⇧⏎     run into a new pane to the right (a vsplit, as ^w v)
  *   tab    take the highlighted completion
  *   ↑ ↓    move through the completion popup; ↑ on an empty line opens history
  *   ^r     search history
@@ -17,11 +18,17 @@
  * line confirms it. */
 
 const HINTS = {
-  line: [["⏎", "run"], ["^⏎", "run in new pane"], ["tab", "complete"], ["↑", "history"], ["esc", "back to pane"]],
-  completion: [["⏎", "run"], ["^⏎", "run in new pane"], ["tab", "complete"], ["↑↓", "choose"], ["esc", "close"]],
-  history: [["⏎", "re-run"], ["^⏎", "to new pane"], ["e", "edit"], ["^r", "search history"], ["esc", "close"]],
+  line: [["⏎", "run"], ["^⏎ ⇧⏎", "run in pane below / right"], ["tab", "complete"], ["↑", "history"], ["esc", "back to pane"]],
+  completion: [["⏎", "run"], ["^⏎ ⇧⏎", "run in pane below / right"], ["tab", "complete"], ["↑↓", "choose"], ["esc", "close"]],
+  history: [["⏎", "re-run"], ["^⏎ ⇧⏎", "to pane below / right"], ["e", "edit"], ["^r", "search history"], ["esc", "close"]],
   confirm: [["⏎", "confirm"], ["esc", "cancel"]],
 };
+
+/** ⏎'s modifier as where the line runs: ^ a new pane below, ⇧ one to the right. */
+function splitFor(event) {
+  if (event.ctrlKey) return "col";
+  return event.shiftKey ? "row" : false;
+}
 
 export function createCommandLine({ root, popupEl, store, api, components, onSubmit, onLeave }) {
   const { h } = components;
@@ -103,7 +110,7 @@ export function createCommandLine({ root, popupEl, store, api, components, onSub
       return { cells, dim: row.dim, current: row.current };
     });
     const sel = store.primary();
-    const footer = appMode ? "tab complete · ⏎ open · ^⏎ open in new pane"
+    const footer = appMode ? "tab complete · ⏎ open · ^⏎ ⇧⏎ open below / right"
       : `tab complete · ⏎ run · ↑ history${sel ? ` · @sel = ${store.label(sel)}` : ""}`;
     return components.popupList({
       hint: comp.hint || "", rows, layout: appMode ? "app" : "key",
@@ -170,7 +177,7 @@ export function createCommandLine({ root, popupEl, store, api, components, onSub
       rows: hist.entries.map((e) => ({ cells: [(e.time || "").slice(11, 16), e.command] })),
       layout: "time",
       highlighted: hist.highlighted,
-      footer: "⏎ re-run · e edit · ^⏎ to new pane · type to filter",
+      footer: "⏎ re-run · e edit · ^⏎ ⇧⏎ below / right · type to filter",
       onPick: (i) => {
         hist.highlighted = i;
         previewHistory();
@@ -188,7 +195,7 @@ export function createCommandLine({ root, popupEl, store, api, components, onSub
     else if (key === "ArrowDown") moveHistory(1);
     else if (key === "Enter") {
       closePopup();
-      submit(field.value(), { newPane: event.ctrlKey });
+      submit(field.value(), { newPane: splitFor(event) });
     } else if (key === "Escape") {
       field.set(hist.draft);
       closePopup();
@@ -287,7 +294,7 @@ export function createCommandLine({ root, popupEl, store, api, components, onSub
     if (key === "Enter") {
       event.preventDefault();
       if (comp && comp.navigated) applyCompletion(comp.highlighted);
-      submit(field.value(), { newPane: event.ctrlKey });
+      submit(field.value(), { newPane: splitFor(event) });
     } else if (key === "Tab") {
       event.preventDefault();
       if (comp) applyCompletion(comp.highlighted);

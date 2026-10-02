@@ -641,6 +641,10 @@ read as one tool rather than seven apps.
   and `esc`). Empty states say the fact (`no scenarios`, `no gardens`,
   `nothing to verify`) and leave how-to to the hint bar and the manual. A
   pane whose header already says `nothing selected` draws an empty body.
+- **`^⏎` and `⇧⏎` split as vim does.** `^⏎` runs the line into a new
+  pane below (a split, as `^w s`), `⇧⏎` into one to the right (a vsplit,
+  as `^w v`). A view's own "open in a new pane" (`o` in the graph, a
+  month day) still opens to the right.
 
 ### Visual system
 

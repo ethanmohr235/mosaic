@@ -31,7 +31,7 @@ view, the `find` table, the props pane and plots.
   selection (`sel bd +2 · linked in N panes`) or, with nothing selected,
   the pane count.
 - **Command line** (`$` prompt; a typed `mo ` shows as the `[mo]` box): `:` or `/` focuses it and `esc`
-  leaves. `⏎` runs in the focused pane, `^⏎` in a new pane. `tab`
+  leaves. `⏎` runs in the focused pane, `^⏎` in a new pane below and `⇧⏎` in one to the right. `tab`
   completes, and the best match shows as ghost text. `↑` on an empty
   line opens this garden's history (`^r` searches it). Errors show in
   red on the right. A delete asks for a second `⏎`.

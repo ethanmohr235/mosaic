@@ -28,7 +28,8 @@ Mouse: click a pane to focus it; drag a divider to resize.
 | Key | Does |
 |---|---|
 | `⏎` | Run in the focused pane (a typed `delete` asks for a second `⏎`) |
-| `^⏎` | Run in a new pane |
+| `^⏎` | Run in a new pane below |
+| `⇧⏎` | Run in a new pane to the right |
 | `tab` | Take the completion |
 | `↑` `↓` | Move through completions; `↑` on an empty line opens history |
 | `^r` | Search history |
