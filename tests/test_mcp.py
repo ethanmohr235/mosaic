@@ -597,7 +597,7 @@ def test_sync_run_pushes_and_pulls_in_one_call(sync_dir):
 
 # ---- the worksheet and solve health ----
 
-FEA = "bd.x = 80 in\nbd.y = 60 in\n\nbd.l = sqrt(bd.x^2 + bd.y^2)"
+FEA = "bd.x = 80 in\nbd.y = 60 in\nbd.l = sqrt(bd.x^2 + bd.y^2)"
 
 
 def test_write_worksheet_creates_the_motes_rules_and_freedoms(garden):

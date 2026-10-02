@@ -689,7 +689,7 @@ def test_simulate_run_with_strict_constraints_fails(conn, capsys):
 
 # ---- worksheet ----
 
-FEA = "bd.x = 80 in\nbd.y = 60 in\n\nbd.l = sqrt(bd.x^2 + bd.y^2)"
+FEA = "bd.x = 80 in\nbd.y = 60 in\nbd.l = sqrt(bd.x^2 + bd.y^2)"
 
 
 def test_worksheet_apply_reads_a_file_and_says_what_it_wrote(conn, capsys, tmp_path):

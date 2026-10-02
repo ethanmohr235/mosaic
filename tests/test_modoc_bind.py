@@ -299,7 +299,7 @@ def test_a_reference_that_fails_twice_is_reported_at_both_lines(conn, garden):
 
 # ---- the calc macros, resolved ----
 
-PYTHAGORAS = "bd.x = 80 in\nbd.y = 60 in\n\nbd.l = sqrt(bd.x^2 + bd.y^2)"
+PYTHAGORAS = "bd.x = 80 in\nbd.y = 60 in\nbd.l = sqrt(bd.x^2 + bd.y^2)"
 
 
 def on_a_new_note(conn, source: str):

@@ -930,7 +930,10 @@ lines into ordinary motes, rules, `applies_to` and freedoms. That is
 separate store" — taken at its word, and what it costs is real:
 **comments, blank lines and the order you typed in are not recoverable.** A
 line's `! name` survives because it becomes the rule's `name`; nothing else
-about the text does.
+about the text does. `read()` gives back its own order instead: one block
+per independent calculation (equations that share a mote), a blank line
+between blocks, each block's givens and unknowns first and every equation
+after the ones that work out what it reads.
 
 `read()` is **complete** for what it covers, which is what makes the round
 trip safe: applying what it returns deletes nothing and widens nothing. Two

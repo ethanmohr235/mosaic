@@ -21,6 +21,9 @@ motes, rules, `applies_to` and freedoms. That is `philosophy.md`'s rule --
 its word, and what it costs is real: **comments, blank lines and the order
 you typed in are not recoverable.** A line's trailing `! name` survives
 because it becomes the rule's `name`; nothing else about the text does.
+What `read()` gives back instead is its own order: one block per
+independent calculation, inputs first, each equation after the ones it
+reads.
 
 **Applying replaces.** The lines are the whole set of this garden's
 `once`-scoped equations, so a rule whose line is gone is deleted. That is
@@ -538,8 +541,14 @@ def _shown(properties: dict, key: str) -> str:
 
 
 def read(conn: sqlite3.Connection) -> str:
-    """The garden's calculation as a worksheet: its givens, a blank line,
-    then its equations.
+    """The garden's calculation as a worksheet: one block per independent
+    calculation, a blank line between them.
+
+    A block is the equations that share a mote, with the givens and
+    unknowns of those motes above them, and its equations in dependency
+    order: a line comes after the lines that work out what it reads. In a
+    garden of many unrelated calculations that is what keeps one of them
+    on one screen.
 
     Complete for what it covers, which is what makes the round trip safe to
     apply: every `once`-scoped rule is rendered, so applying what this
@@ -554,12 +563,69 @@ def read(conn: sqlite3.Connection) -> str:
     # written elsewhere carries bare names, and which mote those belong to
     # is exactly what rendering has just decided.
     referenced = {name for _line, relation in rendered for name in _bases(relation)}
-    equations = [line for line, _relation in rendered]
     inputs = [
         *_render_givens(motes, referenced, free),
         *_render_unknowns(motes, referenced, free, rendered),
     ]
-    return "\n".join([*inputs, *([""] if inputs and equations else []), *equations])
+    blocks = []
+    for names, equations in _calculations(rendered):
+        block = [line for name, line in inputs if name in names]
+        blocks.append("\n".join([*block, *_in_order(equations)]))
+    return "\n\n".join(blocks)
+
+
+def _calculations(rendered: list[tuple[str, str]]) -> list[tuple[set[str], list[tuple[str, str]]]]:
+    """The rendered equations split into independent calculations: two
+    share one when they mention a mote in common. In the order their first
+    rule was made."""
+    groups: list[tuple[set[str], list[int]]] = []
+    for index, (_line, relation) in enumerate(rendered):
+        names = set(_bases(relation))
+        joined = [g for g in groups if g[0] & names]
+        groups = [g for g in groups if not any(g is j for j in joined)]
+        members = [index, *(i for g in joined for i in g[1])]
+        groups.append((names.union(*(g[0] for g in joined)), sorted(members)))
+    groups.sort(key=lambda g: g[1][0])
+    return [(names, [rendered[i] for i in members]) for names, members in groups]
+
+
+def _in_order(equations: list[tuple[str, str]]) -> list[str]:
+    """Equation lines ordered so each comes after the ones that head what
+    it reads. Ties, and a simultaneous system (which has no such order),
+    keep the order the rules were made in."""
+    heads = [_head(relation) for _line, relation in equations]
+    needs = [
+        {j for j, head in enumerate(heads) if head is not None and j != i and head in _refs(relation)}
+        for i, (_line, relation) in enumerate(equations)
+    ]
+    pending, placed, out = list(range(len(equations))), set(), []
+    while pending:
+        ready = next((i for i in pending if needs[i] <= placed), pending[0])
+        pending.remove(ready)
+        placed.add(ready)
+        out.append(equations[ready][0])
+    return out
+
+
+def _head(relation: str) -> tuple[str, str] | None:
+    """`(mote, key)` an equality's left side names, when it is one property."""
+    match = _RELATION_RE.match(relation)
+    if not match or match.group("op") != "==":
+        return None
+    target = _TARGET_RE.match(match.group("lhs"))
+    return (target.group(1), target.group(2)) if target else None
+
+
+def _refs(relation: str) -> set[tuple[str, str]]:
+    """Every `Name.property` a relation mentions, as `(name, property)`."""
+    try:
+        tree = ast.parse(relation, mode="eval")
+    except SyntaxError:
+        return set()
+    return {
+        (node.value.id, node.attr) for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+    }
 
 
 def calculation_mote_ids(conn: sqlite3.Connection) -> set[str]:
@@ -635,7 +701,7 @@ def _as_check(relation: str) -> str:
 
 def _render_givens(
     motes: dict[str, Mote], referenced: set[str], free: dict[str, set[str]]
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """Every number an equation reads and is not free to determine.
 
     A freedom is deliberately left out: a mote's own answer is not an
@@ -661,7 +727,7 @@ def _render_givens(
             if spread is not None:
                 pm = (f" {SPREAD_MARKER} {spread.absolute:g}" if spread.absolute is not None
                       else f" {SPREAD_MARKER} {spread.relative * 100:g}%")
-            lines.append(f"{name}.{key} {ASSIGN} {value}{pm}{f' {unit}' if unit else ''}")
+            lines.append((name, f"{name}.{key} {ASSIGN} {value}{pm}{f' {unit}' if unit else ''}"))
     return lines
 
 
@@ -670,19 +736,14 @@ def _render_unknowns(
     referenced: set[str],
     free: dict[str, set[str]],
     rendered: list[tuple[str, str]],
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """`bd.Ax = ?` for every freedom no equation line already heads.
 
     Without this the projection would be incomplete in the one place it
     matters: a residual's unknowns appear in no assignment, so applying
     what `read()` returned would leave the system underdetermined even
     though the garden it came from was not."""
-    headed = set()
-    for _line, relation in rendered:
-        match = _RELATION_RE.match(relation)
-        target = _TARGET_RE.match(match.group("lhs")) if match else None
-        if target is not None and match.group("op") == "==":
-            headed.add((target.group(1), target.group(2)))
+    headed = {head for _line, relation in rendered if (head := _head(relation)) is not None}
 
     lines = []
     for mote in sorted(motes.values(), key=lambda m: str(m.properties.get("name") or "")):
@@ -691,7 +752,7 @@ def _render_unknowns(
             continue
         for key in sorted(free.get(mote.id, set())):
             if (name, key) not in headed:
-                lines.append(f"{name}.{key} {ASSIGN} {UNKNOWN_MARKER}")
+                lines.append((name, f"{name}.{key} {ASSIGN} {UNKNOWN_MARKER}"))
     return lines
 
 

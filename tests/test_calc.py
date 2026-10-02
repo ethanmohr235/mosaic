@@ -16,7 +16,7 @@ from core.rules import APPLIES_TO, EQUATION_KEY
 from core.simulation import FAIL, NOT_CHECKED, PASS, run_simulation
 from core.units import UNITS_KEY
 
-PYTHAGORAS = "bd.x = 80 in\nbd.y = 60 in\n\nbd.l = sqrt(bd.x^2 + bd.y^2)"
+PYTHAGORAS = "bd.x = 80 in\nbd.y = 60 in\nbd.l = sqrt(bd.x^2 + bd.y^2)"
 
 
 def named(conn, name: str):

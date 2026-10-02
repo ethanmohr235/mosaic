@@ -18,7 +18,6 @@ from core.units import UNITS_KEY, convert
 
 FEA = """bd.x = 80 in
 bd.y = 60 in
-
 bd.l = sqrt(bd.x^2 + bd.y^2)"""
 
 
@@ -244,7 +243,7 @@ def test_a_worksheet_round_trips_verbatim(conn):
 
 
 def test_a_named_rule_round_trips_with_its_comment(conn):
-    text = "bd.Ax = ?\nbd.Bx = ?\n\nbd.Ax + bd.Bx == 0  ! ΣFx"
+    text = "bd.Ax = ?\nbd.Bx = ?\nbd.Ax + bd.Bx == 0  ! ΣFx"
     worksheet.apply(conn, text)
     assert worksheet.read(conn) == text
 
@@ -284,9 +283,40 @@ def test_an_equation_written_elsewhere_comes_back_as_a_line(conn):
         "R1.resistance = 100\n"
         "R1.voltage = 12\n"
         "R1.current = ?\n"
-        "\n"
         "R1.voltage == R1.current * R1.resistance"
     )
+
+
+def test_independent_calculations_read_as_separate_blocks(conn):
+    """A big garden is many small calculations; each one's inputs sit with
+    its equations rather than in one list of every given in the garden."""
+    worksheet.apply(conn, "R1.v = 5\nR1.r = 100\nbd.x = 80\n\nR1.i = R1.v / R1.r\nbd.l = bd.x * 2")
+    assert worksheet.read(conn) == (
+        "R1.r = 100\n"
+        "R1.v = 5\n"
+        "R1.i = R1.v / R1.r\n"
+        "\n"
+        "bd.x = 80\n"
+        "bd.l = bd.x * 2"
+    )
+
+
+def test_equations_sharing_a_mote_are_one_calculation(conn):
+    worksheet.apply(conn, "a.x = 1\nb.y = 2\n\na.z = a.x * 2\nb.w = a.z + b.y")
+    assert "\n\n" not in worksheet.read(conn)
+
+
+def test_an_equation_reads_after_the_one_that_works_out_its_input(conn):
+    """Top to bottom like a hand calculation, whatever order the rules were
+    made in."""
+    worksheet.apply(conn, "bd.x = 80\n\nbd.F = bd.l * 3\nbd.l = bd.x * 2")
+    assert worksheet.read(conn).splitlines()[1:] == ["bd.l = bd.x * 2", "bd.F = bd.l * 3"]
+
+
+def test_a_simultaneous_system_keeps_the_order_its_rules_were_made_in(conn):
+    text = "s.a = ?\ns.b = ?\ns.a + s.b == 4\ns.a - s.b == 2"
+    worksheet.apply(conn, text)
+    assert worksheet.read(conn) == text
 
 
 def test_a_rendered_assignment_only_ever_heads_a_real_freedom(conn):
