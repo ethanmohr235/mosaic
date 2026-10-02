@@ -127,23 +127,20 @@ Each one was a separate act of filing. That lesson became a rule in
   revisions.
 
 ### Surfaces
-- **One tiled window (the console).** Apps become panes in one
-  keyboard-first, all-monospace window. It gets built in parallel with
-  the other phases as steps U1–U9. The design, architecture, view
-  contract and step order are in `console.md`. Once U1 lands, new UI is
-  built only there.
-- **Momentum:** remove it. Keep `status` and `estimate` as plain
-  properties.
-- **Monastery:** becomes the agenda that launches work: project bars
-  (start → due), plan-my-week (auto-placed work blocks as ordinary dated
-  motes), click-to-open (a lecture opens its note, a work block opens its
-  project), and planned vs. actual time.
-- **Monarch:** freeze it as a structure-debugger tile. No new
-  investment. **Done:** the console's `graph` pane (U8), annotations
-  removed.
-- **Monolith:** keep the general table, and add a project variables pane
+- **One tiled window (the console).** Every surface is panes in one
+  keyboard-first, all-monospace window, built as steps U1–U9 (all done).
+  There are no apps: views are named for their verbs, and built-in
+  layouts group them by task (`console.md` → *Polish and unification*).
+- **Momentum:** removed. `status` and `estimate` stay plain properties.
+- **Agenda** (`agenda`, `week`, `month`): becomes the agenda that
+  launches work: project bars (start → due), plan-my-week (auto-placed
+  work blocks as ordinary dated motes), click-to-open (a lecture opens
+  its note, a work block opens its project), and planned vs. actual time.
+- **Graph:** frozen as a structure debugger. No new investment.
+  **Done:** the `graph` pane (U8), annotations removed.
+- **Table:** keep the general table, and add a project variables pane
   (value, unit, given/solved/external, ±).
-- **Moxie:** add publication-quality export (SVG/PDF, unit-labelled
+- **Plots:** add publication-quality export (SVG/PDF, unit-labelled
   axes, log axes), CSV data overlaid on theory curves, and error bars.
 
 ### Across gardens
@@ -205,3 +202,6 @@ asking.
 ## Open questions
 
 - **Renaming to Mosaic** in code, packages, and MCP: when, and how much.
+  Since 2026-10-02 the UI shows no app names, so this would also cover
+  the app-named modules and API namespaces (`console/motion.py`,
+  `api.moxie`, `core/motion.py`, …).

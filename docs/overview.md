@@ -86,22 +86,26 @@ every feature built on it must still work when it's absent.
 
 ## Surfaces
 
-The app is moving from separate windows to **one tiled window**: each
-app becomes a tile in a single workspace, with a compact, minimal,
-terminal-like look. `console.md` has the decided design (with the
-visual reference in `docs/design/mosaic-console/`), the architecture
-and the port order.
+Everything happens in **one tiled window**, the console: one workspace
+of panes, each a command and its output, with a compact, minimal,
+terminal-like look. There are no separate apps; panes are grouped by
+task, and a built-in layout opens each group (`layout calc`).
+`console.md` has the design (with the visual reference in
+`docs/design/mosaic-console/`), the architecture and the view contract.
 
-| Surface | Role in the new direction |
-|---|---|
-| **Motion** | Main calc surface: model, runs, scenarios, solve health. One of several editors, alongside a planned worksheet. |
-| **Mora** | Engineering documents: shown work, given/answers, LaTeX export, submit and revisions. |
-| **Moxie** | Plots, heading toward publication-quality export. |
-| **Monolith** | The general table, plus a project variables pane (value, unit, given/solved/external, ±). |
-| **Monastery** | The agenda that launches work: project bars, plan-my-week, click-to-open, planned vs. actual time. |
-| **Gardens → Home** | `layout gardens`: the garden tree (owners → owned gardens) plus loose and archived gardens, and every garden act as a command. Health indicators come later. |
-| **Monarch** | A structure debugger: the console's `graph` pane, for seeing plumbing (edits are commands). No annotations. |
-| **CLI / MCP** | Scriptable and agent access to the same core. MCP is a side door, not the product. |
+| Surface | Panes | Role |
+|---|---|---|
+| **Calc** | `sim`, `rule`, `scenarios`, `worksheet`; `layout calc` | The model: runs, scenarios, solve health, the worksheet editor. |
+| **Documents** | `notes`, `edit`, `read`; `layout docs` | Engineering documents: shown work, given/answers, LaTeX export, submit and revisions. |
+| **Plots** | `plot`, `fit` | Plots and fits, heading toward publication-quality export. |
+| **Table** | `find`, `open` (props) | The general table and a mote's properties, plus a planned project variables pane (value, unit, given/solved/external, ±). |
+| **Agenda** | `agenda`, `week`, `month`; `layout plan` | The agenda that launches work: project bars, plan-my-week, click-to-open, planned vs. actual time. |
+| **Gardens** | `gardens`, `garden`; `layout gardens` | The garden tree (owners → owned gardens) plus loose and archived gardens, and every garden act as a command. Health indicators come later. |
+| **Graph** | `graph`; `layout graph` | A structure debugger for seeing plumbing (edits are commands). |
+| **CLI / MCP** | — | Scriptable and agent access to the same core. MCP is a side door, not the product. |
+
+Code still uses the old app names for packages and API namespaces
+(`console/motion.py`, `api.moxie`); see `roadmap.md` → *Open questions*.
 
 `core/` holds all logic. Every surface is a thin adapter over it, and
 an adapter that holds logic of its own is a bug.
@@ -111,12 +115,11 @@ an adapter that holds logic of its own is a bug.
 ## Current architecture
 
 - Python, with SQLite per garden.
-- pywebview windows with hand-written HTML/JS frontends (no framework).
+- One pywebview window with a hand-written HTML/JS frontend (no framework).
 - `core/` holds the domain: motes, relationships, species, rules,
   solvers (linear, Newton), units, providers, scenarios, sweeps, modoc,
   and sync.
-- Adapters: `cli/`, `mcp_server/`, `console/` (the one tiled window,
-  where apps are being ported), and `monarch/`, the one old window left.
+- Adapters: `cli/`, `mcp_server/` and `console/` (the one tiled window).
 - `sync_server/` provides optional sync between machines.
 
 The project favors readability, maintainability, and correctness over
