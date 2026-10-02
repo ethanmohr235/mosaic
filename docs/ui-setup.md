@@ -538,7 +538,8 @@ the open garden's motes.
 
 `^w` is the prefix: `v`/`s` split side by side or stacked, `h j k l`
 move focus, `<`/`>` resize, `o` only this pane, `=` equalize, `x`
-swap. `1`–`9` switch saved layouts, `e` (or a click on a header)
+swap. `1`–`9` switch to the layout in that slot and `^1`–`^9` save
+the layout into it, `e` (or a click on a header)
 loads a pane's command into the command line, and `x` closes the
 pane. A new pane is blank and asks for an ordinary command: the
 command line takes the caret, `⏎` runs the line into the new pane, and

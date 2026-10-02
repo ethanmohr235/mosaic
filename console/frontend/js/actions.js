@@ -46,9 +46,9 @@ export function createActions({ store, panes, api }) {
     store.setTree(T.setCommand(tree(), id, command), id);
   }
 
-  /** Switch to saved layout number `n` (1-based, save order). */
+  /** `1`–`9`: switch to the saved layout in slot `n`. */
   async function switchLayout(n) {
-    const saved = store.state.layouts[n - 1];
+    const saved = store.state.layouts.find((l) => l.slot === n);
     if (!saved) return false;
     try {
       const layoutTree = (await api.layout_get(saved.name)) || saved.tree;
@@ -62,8 +62,21 @@ export function createActions({ store, panes, api }) {
     return true;
   }
 
+  /** `^1`–`^9`: save the working tree into slot `n`; the layout there
+   * keeps its name, an empty slot's is `n` (console/state.py). */
+  async function saveSlot(n) {
+    try {
+      const saved = await api.layout_put_slot(n, T.toJSON(tree()));
+      store.setLayouts(saved.layouts, saved.active);
+      store.log("result", `saved layout ${n}:${saved.name}`, { level: "ok" });
+    } catch (err) {
+      store.log("result", `saving layout ${n}: ${err && err.message ? err.message : err}`, { level: "fault" });
+    }
+  }
+
   return {
     split,
+    saveSlot,
     close,
     resize,
     focusDir,

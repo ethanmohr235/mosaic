@@ -100,6 +100,71 @@ def test_bad_layout_names_are_refused(name):
         ConsoleState().layout_put(name, TREE)
 
 
+# ---- slots -------------------------------------------------------------------
+
+def _slots(state: ConsoleState) -> dict:
+    return {layout["name"]: layout["slot"] for layout in state.layouts}
+
+
+def test_a_new_layout_takes_the_lowest_free_slot():
+    state = ConsoleState()
+    for name in "abc":
+        state.layout_put(name, TREE)
+    state.layout_delete("b")
+    state.layout_put("d", TREE)
+    assert _slots(state) == {"a": 1, "c": 3, "d": 2}
+
+
+def test_overwriting_a_layout_keeps_its_slot():
+    state = ConsoleState()
+    state.layout_put("a", TREE)
+    state.layout_put("b", TREE)
+    state.layout_put("a", {"command": "log"})
+    assert _slots(state) == {"a": 1, "b": 2}
+
+
+def test_a_tenth_layout_has_no_slot():
+    state = ConsoleState()
+    for i in range(10):
+        state.layout_put(f"l{i}", TREE)
+    assert state.layouts[-1]["slot"] is None
+
+
+def test_saving_into_a_taken_slot_keeps_its_name():
+    state = ConsoleState()
+    state.layout_put("calc", TREE)
+    assert state.layout_put_slot(1, {"command": "log"}) == "calc"
+    assert state.layout_get("calc") == {"command": "log"}
+    assert state.active == "calc"
+
+
+def test_saving_into_an_empty_slot_names_the_layout_after_it():
+    state = ConsoleState()
+    assert state.layout_put_slot(5, TREE) == "5"
+    assert _slots(state) == {"5": 5}
+    assert state.layout_in_slot(5)["name"] == "5"
+
+
+@pytest.mark.parametrize("slot", [0, 10, "3", True])
+def test_bad_slots_are_refused(slot):
+    with pytest.raises(ValueError):
+        ConsoleState().layout_put_slot(slot, TREE)
+
+
+def test_a_sidecar_from_before_slots_gets_them_in_save_order(garden):
+    layouts = [{"name": n, "tree": TREE} for n in ("a", "b")]
+    layouts.append({"name": "c", "tree": TREE, "slot": 1})
+    console_state_path(garden).write_text(json.dumps({"version": 1, "layouts": layouts}))
+    assert _slots(state_repo.load(garden)) == {"a": 2, "b": 3, "c": 1}
+
+
+def test_duplicate_or_bad_slots_are_dropped_on_load(garden):
+    layouts = [{"name": "a", "tree": TREE, "slot": 2}, {"name": "b", "tree": TREE, "slot": 2},
+               {"name": "c", "tree": TREE, "slot": 12}]
+    console_state_path(garden).write_text(json.dumps({"version": 1, "layouts": layouts}))
+    assert _slots(state_repo.load(garden)) == {"a": 2, "b": None, "c": None}
+
+
 # ---- the sidecar follows its garden ----------------------------------------
 
 def _saved(garden: str) -> ConsoleState:

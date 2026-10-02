@@ -16,11 +16,13 @@ export function createTopbar({ root, store, panes, actions, components, onRun = 
     return (pane && pane.view && pane.view.app) || "saic";
   }
 
+  /** One tab per slotted layout, in slot order; `layout load` reaches the rest. */
   function tabs(dirty) {
-    return store.state.layouts.map((layout, i) => {
+    const slotted = store.state.layouts.filter((l) => l.slot).sort((a, b) => a.slot - b.slot);
+    return slotted.map((layout) => {
       const active = layout.name === store.state.active;
-      const tab = h("span", `tab${active ? " active" : ""}`, `${i + 1}:${layout.name}${active && dirty ? "*" : ""}`);
-      tab.addEventListener("click", () => actions.switchLayout(i + 1));
+      const tab = h("span", `tab${active ? " active" : ""}`, `${layout.slot}:${layout.name}${active && dirty ? "*" : ""}`);
+      tab.addEventListener("click", () => actions.switchLayout(layout.slot));
       return tab;
     });
   }

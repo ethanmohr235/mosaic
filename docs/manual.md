@@ -14,7 +14,8 @@ the same change.
 | `e` / click a pane header | Load the pane's command into the command line |
 | `x` | Close the pane |
 | `p` | Props float for the selection (`p`/`esc` closes) |
-| `1`–`9` | Switch to saved layout N |
+| `1`–`9` | Switch to the layout in slot N |
+| `^1`–`^9` | Save the layout into slot N (keeps the slot's name; an empty slot's layout is named `N`) |
 | `^z`, `^⇧z` / `^y` | Undo, redo |
 | `^w v` / `^w s` | Split side by side / stacked |
 | `^w h j k l` | Focus the pane in that direction |
@@ -83,7 +84,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
 | `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
 | `project start @sel [‹garden›]`, `project stop @sel` | Give a mote its own garden / drop its claim (undoable) |
-| `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts |
+| `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts (a new one takes the lowest free slot 1–9) |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |
 | `undo`, `redo` | Undo / redo the last write |
 | `log` | Command and error log |

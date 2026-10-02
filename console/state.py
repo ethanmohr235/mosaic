@@ -29,11 +29,13 @@ HISTORY_LIMIT = 500
 MAX_TREE_BYTES = 64 * 1024
 MAX_LAYOUT_NAME = 64
 MAX_PINS = 5000
+SLOTS = range(1, 10)  # `1`-`9` switch to a slot, `^1`-`^9` save into one
 
 
 @dataclass
 class ConsoleState:
-    layouts: list[dict] = field(default_factory=list)  # [{"name", "tree"}], save order
+    # [{"name", "tree", "slot"}], save order; slot is 1-9 or None
+    layouts: list[dict] = field(default_factory=list)
     active: str | None = None
     working: Any = None
     history: list[dict] = field(default_factory=list)  # [{"time", "command"}], oldest first
@@ -67,16 +69,39 @@ class ConsoleState:
 
     def layout_put(self, name: str, tree: Any) -> None:
         """Save `tree` as `name` and make it active. Overwriting keeps
-        the layout's original position; a new name appends."""
+        the layout's position and slot; a new name appends and takes the
+        lowest free slot (none when all nine are taken)."""
         validate_layout_name(name)
         validate_tree(tree, allow_none=False)
-        for layout in self.layouts:
-            if layout["name"] == name:
-                layout["tree"] = tree
-                break
+        layout = self._named(name)
+        if layout is None:
+            self.layouts.append({"name": name, "tree": tree, "slot": self._free_slot()})
         else:
-            self.layouts.append({"name": name, "tree": tree})
+            layout["tree"] = tree
         self.active = name
+
+    def layout_put_slot(self, slot: int, tree: Any) -> str:
+        """`^N`: save `tree` into slot N and make it active. The layout
+        already there keeps its name; an empty slot gets a layout named
+        `N` (which takes the slot from wherever that name had one).
+        Returns the layout's name."""
+        if isinstance(slot, bool) or slot not in SLOTS:
+            raise ValueError(f"a layout slot is 1 to 9, got {slot!r}")
+        holder = self.layout_in_slot(slot)
+        name = holder["name"] if holder else str(slot)
+        self.layout_put(name, tree)
+        self._named(name)["slot"] = slot
+        return name
+
+    def layout_in_slot(self, slot: int) -> dict | None:
+        return next((layout for layout in self.layouts if layout["slot"] == slot), None)
+
+    def _named(self, name: str) -> dict | None:
+        return next((layout for layout in self.layouts if layout["name"] == name), None)
+
+    def _free_slot(self) -> int | None:
+        taken = {layout["slot"] for layout in self.layouts}
+        return next((n for n in SLOTS if n not in taken), None)
 
     def layout_delete(self, name: str) -> bool:
         before = len(self.layouts)
@@ -162,7 +187,7 @@ def save(garden: str, state: ConsoleState) -> None:
 def from_json(data: Any) -> ConsoleState:
     if not isinstance(data, dict) or data.get("version") != VERSION:
         raise ValueError("not a version-1 console state object")
-    layouts = [_checked_layout(layout) for layout in data.get("layouts") or []]
+    layouts = _slotted([_checked_layout(layout) for layout in data.get("layouts") or []])
     names = [layout["name"] for layout in layouts]
     active = data.get("active")
     working = data.get("working")
@@ -179,9 +204,29 @@ def from_json(data: Any) -> ConsoleState:
 
 
 def _checked_layout(entry: Any) -> dict:
+    """A missing "slot" (a sidecar from before slots) is filled in by
+    _slotted; a bad one is dropped there too."""
     validate_layout_name(entry["name"])
     validate_tree(entry["tree"], allow_none=False)
-    return {"name": entry["name"], "tree": entry["tree"]}
+    return {"name": entry["name"], "tree": entry["tree"], "slot": entry.get("slot", ...)}
+
+
+def _slotted(layouts: list[dict]) -> list[dict]:
+    """Keep each valid, unique slot; then give a layout saved before slots
+    existed the lowest free one, in save order."""
+    taken: set[int] = set()
+    for layout in layouts:
+        slot = layout["slot"]
+        valid = isinstance(slot, int) and not isinstance(slot, bool) and slot in SLOTS
+        if slot is not ... and not (valid and slot not in taken):
+            layout["slot"] = None
+        elif valid:
+            taken.add(slot)
+    for layout in layouts:
+        if layout["slot"] is ...:
+            layout["slot"] = next((n for n in SLOTS if n not in taken), None)
+            taken.add(layout["slot"])
+    return layouts
 
 
 def _checked_xy(xy: Any) -> list[float]:

@@ -193,7 +193,8 @@ phase that builds them.
   focus to the command line, and `esc` returns it to the pane.
 - `^w` is the tiling prefix everywhere: `v`/`s` split, `h`/`j`/`k`/`l`
   focus, `<`/`>` resize, `o` only, `=` equalize, `x` swap. `1`–`9`
-  switch layouts when no text field has focus.
+  switch layouts when no text field has focus, and `^1`–`^9` save one
+  (see *Polish and unification*).
 - **Text-editing panes** (Mora, worksheet, inline cell edits) capture
   every key until `esc`, except the `^w` prefix.
 - The **key-hint bar** always reflects the current context: the focused
@@ -645,6 +646,13 @@ read as one tool rather than seven apps.
   pane below (a split, as `^w s`), `⇧⏎` into one to the right (a vsplit,
   as `^w v`). A view's own "open in a new pane" (`o` in the graph, a
   month day) still opens to the right.
+- **Layouts have slots.** A saved layout carries a `slot` (1–9) in the
+  sidecar: `1`–`9` switch to a slot, `^1`–`^9` save the working tree into
+  one, keeping the name of the layout there (an empty slot's is `N`).
+  `layout save ‹name›` keeps a layout's slot, and a new name takes the
+  lowest free one. A tenth layout has no slot and no tab, and is reached
+  with `layout load`. Sidecars from before slots get them in save order
+  on load.
 
 ### Visual system
 

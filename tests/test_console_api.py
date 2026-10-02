@@ -15,7 +15,7 @@ from core.gardens import create_garden, garden_exists
 TREE = {"split": "row", "sizes": [0.5, 0.5], "children": [{"command": "log"}, {"command": ""}]}
 
 BRIDGE = {
-    "boot", "run", "resolve", "complete", "history", "layout_put", "layout_get",
+    "boot", "run", "resolve", "complete", "history", "layout_put", "layout_put_slot", "layout_get",
     "layout_delete", "layout_set_active", "working_put", "undo", "redo",
     "refresh", "switch_garden", "shutdown",
 }
@@ -172,7 +172,7 @@ def test_undo_and_redo_use_the_session_stack(api):
 
 def test_layout_save_then_put(api):
     assert api.run("layout save two") == {"effect": "layout", "op": "save", "name": "two"}
-    assert api.layout_put("two", TREE) == {"layouts": [{"name": "two", "tree": TREE}],
+    assert api.layout_put("two", TREE) == {"layouts": [{"name": "two", "tree": TREE, "slot": 1}],
                                            "active": "two"}
     assert api.layout_get("two") == TREE
 
@@ -193,11 +193,19 @@ def test_layout_load_sets_active(api):
     assert api.boot()["active"] == "a"
 
 
+def test_layout_put_slot_names_an_empty_slot_after_it(api):
+    saved = api.layout_put_slot(3, TREE)
+    assert saved["name"] == "3"
+    assert saved["active"] == "3"
+    assert saved["layouts"] == [{"name": "3", "tree": TREE, "slot": 3}]
+    assert api.layout_put_slot(3, {"command": "log"})["layouts"][0]["tree"] == {"command": "log"}
+
+
 def test_layout_list_and_rm(api):
     api.layout_put("a", TREE)
     listed = api.run("layout list")
     assert listed == {"effect": "layout", "op": "list",
-                      "layouts": [{"name": "a", "tree": TREE}], "active": "a"}
+                      "layouts": [{"name": "a", "tree": TREE, "slot": 1}], "active": "a"}
     assert api.run("layout rm a") == {"effect": "layout", "op": "rm", "name": "a",
                                       "layouts": [], "active": None}
 
@@ -225,7 +233,7 @@ def test_working_tree_survives_a_restart(api):
     try:
         boot = restarted.boot()
         assert boot["working"] == TREE
-        assert boot["layouts"] == [{"name": "two", "tree": TREE}]
+        assert boot["layouts"] == [{"name": "two", "tree": TREE, "slot": 1}]
         assert boot["history"][-1]["command"] == "cd test"
     finally:
         restarted.shutdown()
@@ -250,7 +258,7 @@ def test_cd_switches_garden_state_and_undo(api):
     api.run("layout list")
     back = api.switch_garden("test")
     assert [h["command"] for h in back["history"]] == ["R1", "cd other"]
-    assert back["layouts"] == [{"name": "mine", "tree": TREE}]
+    assert back["layouts"] == [{"name": "mine", "tree": TREE, "slot": 1}]
     assert [h["command"] for h in state_repo.load("other").history] == ["layout list"]
 
 

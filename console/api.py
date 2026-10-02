@@ -153,6 +153,13 @@ class Api:
         return self._layouts_summary()
 
     @locked
+    def layout_put_slot(self, slot: int, tree: Any) -> dict:
+        """`^1`-`^9`: save the working tree into a slot (state.py)."""
+        name = self._state.layout_put_slot(slot, tree)
+        self._save_state()
+        return {"name": name, **self._layouts_summary()}
+
+    @locked
     def layout_get(self, name: str) -> Any:
         return self._state.layout_get(name)
 

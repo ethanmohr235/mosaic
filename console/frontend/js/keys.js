@@ -12,7 +12,9 @@
  *      the keys ahead of the focused pane.)
  *   6. Otherwise the shell: `:` or `/` to the command line, `e` edit the
  *      pane's command, `x` close the pane, `p` the props float, `1`–`9`
- *      switch layouts.
+ *      switch to the layout in that slot.
+ * `^1`–`^9` save the layout into that slot from anywhere, as `^w` works
+ * anywhere (text fields don't use them).
  *
  * After `^w`: v s split · h j k l focus · < > resize · o only · = equalize
  * · x swap. `esc` or any other key cancels the prefix. */
@@ -20,7 +22,7 @@
 const TILING_HINTS = [["^w v", "vsplit"], ["^w s", "split"], ["^w hjkl", "focus"], ["^w < >", "resize"],
   ["^w o", "only"], ["^w =", "equalize"], ["^w x", "swap"]];
 const SHELL_HINTS = [[":", "command"], ["e", "edit pane command"], ["x", "close pane"], ["p", "props"],
-  ["^w", "tile"], ["1–9", "layouts"]];
+  ["^w", "tile"], ["1–9", "layout"], ["^1–9", "save layout"]];
 const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"]);
 
 function isTextField(el) {
@@ -88,6 +90,11 @@ export function createKeys({ store, panes, actions, commandLine, runner, float }
       consume(event);
       if (event.key !== "Escape") tiling(event.key);
       store.emit("hints");
+      return;
+    }
+    if (event.ctrlKey && !event.shiftKey && !event.altKey && /^[1-9]$/.test(event.key)) {
+      consume(event);
+      actions.saveSlot(Number(event.key));
       return;
     }
     if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "w") {

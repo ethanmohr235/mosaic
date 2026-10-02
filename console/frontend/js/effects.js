@@ -57,7 +57,7 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
       text = `layout ${e.name}`;
     } else {
       store.setLayouts(e.layouts, e.active);
-      const names = (e.layouts || []).map((l) => l.name).join(", ");
+      const names = (e.layouts || []).map((l) => (l.slot ? `${l.slot}:${l.name}` : l.name)).join(", ");
       text = e.op === "rm" ? `removed layout ${e.name}` : names || "no saved layouts";
     }
     store.log("result", text, { level: "ok" });
