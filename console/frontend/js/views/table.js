@@ -2,7 +2,7 @@
  * dense table. The query, sort, grouping and columns all live in the
  * pane's command; api.monolith.table(command) answers it (the U2 bridge
  * contract) and api.monolith.rewrite() turns a gesture (a header click,
- * `s`, `g`) into the new command, so JS never builds find syntax.
+ * `s`, `S`) into the new command, so JS never builds find syntax.
  *
  * Selection is the shell's (store.state.selection), never a copy: rows
  * are highlighted from it, and every gesture writes it back in drawn
@@ -17,8 +17,8 @@
 import { createPalette } from "../palette.js";
 
 const NAME = "builtin:name";
-const HINTS = [["j k", "row"], ["h l", "column"], ["space", "toggle"], ["V", "range"], ["a", "all"],
-  ["esc", "clear"], ["s", "sort"], ["g", "group"], ["i ⏎", "edit"]];
+const HINTS = [["j k", "row"], ["h l", "column"], ["g G", "top / end"], ["space", "toggle"], ["V", "range"],
+  ["^a", "all"], ["esc", "clear"], ["s", "sort"], ["S", "group"], ["i ⏎", "edit"]];
 const EDIT_HINTS = [["⏎", "set"], ["⏎ empty", "clear"], ["esc", "cancel"]];
 
 /* ---------- pure helpers ---------- */
@@ -325,15 +325,20 @@ function create(ctx) {
     ArrowRight: () => moveTo(st.cursor.index, st.cursor.col + 1),
     " ": () => st.cursorId && toggle(st.cursorId),
     V: () => st.drawn.length && selectRange(st.cursor.index),
-    a: () => select(st.drawn.map((r) => r.id)),
+    g: () => moveTo(0),
+    G: () => moveTo(st.drawn.length - 1),
     s: () => st.columns[st.cursor.col] && rewrite({ sort: st.columns[st.cursor.col].key }),
-    g: groupByCursor,
+    S: groupByCursor,
     i: () => startEdit(),
     Enter: () => startEdit(),
   };
 
   function onKey(event) {
     if (st.editing) return editorKey(event);
+    if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "a" && st.payload) {
+      select(st.drawn.map((r) => r.id));
+      return true;
+    }
     if (event.ctrlKey || event.metaKey || event.altKey || !st.payload) return false;
     if (event.key === "Escape") {
       if (!store.state.selection.length) return false;

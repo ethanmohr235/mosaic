@@ -106,14 +106,33 @@ Find conditions: `status:todo` is · `name~truss` contains ·
 
 ## Pane keys
 
+Across panes a key means one thing:
+
+| Key | Means |
+|---|---|
+| `j` `k` / `h` `l` | Move down/up, left/right |
+| `g` `G` | Top / end |
+| `[` `]` | Step the pane's own dimension (depth, series, page, ten ticks) |
+| `-` `+` | Less / more |
+| `⏎` | Act on the row (select; `cd` in gardens; run under in scenarios) |
+| `o` | Open / follow in a new pane |
+| `i` | Edit |
+| `n` | New |
+| `r` | Rename |
+| `a` | Add |
+| `v` | Compare |
+| `d` `d` | Delete |
+| `space` | Toggle (play in the sim panes) |
+| `esc` | Back / clear |
+
 **Table** (`find`)
 
 | Key | Does |
 |---|---|
-| `j` `k` / `h` `l` | Row / column |
-| `space`, `V`, `a`, `esc` | Toggle row, select range, select all, clear |
+| `j` `k` / `h` `l`, `g` `G` | Row / column, first / last row |
+| `space`, `V`, `^a`, `esc` | Toggle row, select range, select all, clear |
 | `s` / header click | Sort by column (again: reverse) |
-| `g` | Group by column (again: ungroup) |
+| `S` | Group by column (again: ungroup) |
 | `i` `⏎` / double-click | Edit cell (`⏎` save, empty clears, `esc` cancel) |
 
 Click selects, shift-click a range, ctrl-click toggles.
@@ -138,16 +157,16 @@ Click selects, shift-click a range, ctrl-click toggles.
 | `z` then `z` / drag | Zoom to the marked range |
 | `Z` / double-click | Zoom out ×2 |
 | `y` | Log y |
-| `[` `]`, `t` / legend click | Pick series, show/hide it |
+| `[` `]`, `space` / legend click | Pick series, show/hide it |
 | `j` `k`, `-` `+` / drag knob bar | Pick knob, move it 1/20 of its range |
-| `r` | Show/hide the side column (hidden automatically in a narrow pane; knobs then show in the status line) |
+| `R` | Show/hide the side column (hidden automatically in a narrow pane; knobs then show in the status line) |
 | `esc` | Clear cursor |
 
 **Fit** (`fit`)
 
 | Key | Does |
 |---|---|
-| `a` / click *apply* | Apply the fit (runs the line with `--apply`) |
+| `A` / click *apply* | Apply the fit (runs the line with `--apply`) |
 | `h` `l` / click | Step through the points; status line shows point vs fit |
 | `esc` | Clear cursor |
 
@@ -160,7 +179,7 @@ Click selects, shift-click a range, ctrl-click toggles.
 | `[` `]` | Ten ticks back / on |
 
 Sim pane: `j` `k` `g` `G` row (the timeline draws it) · `⏎` / click
-select its mote · `d` toggle `--vs garden` · click/drag the timeline to
+select its mote · `v` toggle `--vs garden` · click/drag the timeline to
 scrub.
 
 Rule pane: `j` `k` binding · `⏎` select its mote · `w` why (`esc`
@@ -227,9 +246,9 @@ zooms · ctrl+drag node → node prefills `A ->  -> B`.
 | `⏎` | `cd` there |
 | `n`, `r` | New, rename (prefills `garden …`) |
 | `d` `d` | Remove (`garden rm`; `garden restore` brings it back) |
-| `a` | Archive / unarchive |
-| `s`, `e`, `i` | Sync (prefills), export (file dialog), import (prefills) |
-| `z` | Show / fold archived |
+| `z` | Archive / unarchive |
+| `s`, `E`, `I` | Sync (prefills), export (file dialog), import (prefills) |
+| `Z` | Show / fold archived |
 
 `garden` pane: `⏎` or a click on a garden named there `cd`s.
 

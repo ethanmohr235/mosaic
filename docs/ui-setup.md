@@ -130,10 +130,11 @@ survives a layout save and a restart.
 | `j` `k` / `h` `l` | Move the cursor by row / column |
 | `space` | Toggle the row in the selection |
 | `V` | Select from the anchor to the cursor |
-| `a` | Select every row |
+| `^a` | Select every row |
+| `g` `G` | First / last row |
 | `esc` | Clear the selection |
 | `s` / a header click | Sort by the cursor's column; again to reverse |
-| `g` | Group by the cursor's column; again to ungroup |
+| `S` | Group by the cursor's column; again to ungroup |
 | `i` / `⏎` / double-click | Edit the cell |
 
 Click selects a row, shift-click a range, ctrl-click toggles one. A
@@ -176,9 +177,9 @@ cancels the older one between points.
 | `z` then `z` / drag across the plot | Zoom to the range between the two ends |
 | `Z` / double-click | Zoom out twice as wide |
 | `y` | Log y |
-| `[` `]`, `t` / a legend click | Pick a series; show or hide it |
+| `[` `]`, `space` / a legend click | Pick a series; show or hide it |
 | `j` `k`, `-` `+` / drag a knob's bar | Pick a knob; move it a twentieth of its range |
-| `r` | Show or hide the side column. It hides by itself when the pane is narrower than 640px, and the knobs and the strongest sensitivity move to the status line under the plot |
+| `R` | Show or hide the side column. It hides by itself when the pane is narrower than 640px, and the knobs and the strongest sensitivity move to the status line under the plot |
 | `esc` | Clear the cursor |
 
 With knobs set, the rail ranks them by **sensitivity** at the cursor:
@@ -224,7 +225,7 @@ undo step.
 
 | Key | Does |
 |---|---|
-| `a` / click *apply* | Apply the fit |
+| `A` / click *apply* | Apply the fit |
 | `h` `l` / click | Step through the points; the status line shows the point and the fit there |
 | `esc` | Clear the cursor |
 
@@ -277,7 +278,7 @@ scenarios scrub together.
 |---|---|
 | `j` `k`, `g` `G` | Move the row cursor (the timeline draws its row) |
 | `⏎` / click | Select the row's mote (`rule @sel` follows) |
-| `d` | Toggle `--vs garden` |
+| `v` | Toggle `--vs garden` |
 
 **The rule pane** (`rule @sel`, `rule series`) shows the rule's equation
 and every value it binds, at the playhead's tick when a sim pane owns
@@ -516,10 +517,10 @@ bar's breadcrumb is the open garden's ownership path
 | `⏎` | `cd` there |
 | `n`, `r` | `garden new …`, `garden rename ‹garden› …` on the command line |
 | `d` `d` | `garden rm ‹garden›` (runs; `garden restore` brings it back) |
-| `a` | Archive / unarchive |
+| `z` | Archive / unarchive |
 | `s` | `garden sync ‹garden› …` on the command line |
-| `e`, `i` | Export (asks where), `garden import …` |
-| `z` | Show / fold the archived gardens |
+| `E`, `I` | Export (asks where), `garden import …` |
+| `Z` | Show / fold the archived gardens |
 
 **Garden commands.** None is on `undo` -- they act on gardens, not on
 the open garden's motes.
@@ -581,11 +582,11 @@ Boots on a seeded temp garden and checks the following:
 - `p` opens the float on the selection and `esc` closes it
 - an `open @sel` pane survives a relaunch
 - `plot` opens a plot pane; a `plot` line draws the solved curve and the
-  cursor reads it; zoom, `y` and `t` rewrite the line; a knob moves the
+  cursor reads it; zoom, `y` and `space` rewrite the line; a knob moves the
   curve and never writes; `plot save` writes a saved plot that one `undo`
   removes; `plot export csv` and `png` write files
 - a `fit` pane shows the four measured points, the fitted curve and
-  `r_a = 50` without writing; `a` applies it with `source: fitted` and one
+  `r_a = 50` without writing; `A` applies it with `source: fitted` and one
   `undo` takes it back
 - a plot pane survives a relaunch
 - `layout graph` opens find | graph | props and the graph draws the

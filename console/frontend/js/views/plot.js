@@ -22,11 +22,11 @@
 
 import { render as draw, fmt, seriesStyle } from "../plot.js";
 
-const HINTS = [["h l", "cursor"], ["[ ]", "series"], ["t", "show/hide"], ["z", "zoom"], ["Z", "zoom out"],
+const HINTS = [["h l", "cursor"], ["[ ]", "series"], ["space", "show/hide"], ["z", "zoom"], ["Z", "zoom out"],
   ["y", "log y"]];
 const KNOB_HINTS = [["j k", "knob"], ["- +", "move knob"]];
 // Below this pane width the side column hides (its knobs and sensitivity
-// move to the status line) so the plot keeps the room; `r` overrides.
+// move to the status line) so the plot keeps the room; `R` overrides.
 const NARROW = 640;
 const NUDGE = 1 / 20; // one `-`/`+` press moves a knob this share of its range
 
@@ -519,14 +519,14 @@ function create(ctx) {
     l: () => moveCursor(1), ArrowRight: () => moveCursor(1),
     H: () => moveCursor(-10), L: () => moveCursor(10),
     "[": () => pickSeries(-1), "]": () => pickSeries(1),
-    t: toggleSeries,
+    " ": toggleSeries,
     j: () => pickKnob(1), ArrowDown: () => pickKnob(1),
     k: () => pickKnob(-1), ArrowUp: () => pickKnob(-1),
     "-": () => nudgeKnob(-1), "+": () => nudgeKnob(1), "=": () => nudgeKnob(1),
     z: zoomKey,
     Z: zoomOut,
     y: () => st.payload.figure && rewrite({ log: st.payload.figure.yScale !== "log" }),
-    r: () => { st.rail = !railShown(); drawPlot(); },
+    R: () => { st.rail = !railShown(); drawPlot(); },
   };
 
   function onKey(event) {
@@ -662,7 +662,7 @@ function create(ctx) {
     hints: () => {
       if (!st.payload || st.payload.empty || !st.payload.figure) return [];
       const knobs = (st.payload.knobs || []).length ? KNOB_HINTS : [];
-      const rail = [["r", "side column"]];
+      const rail = [["R", "side column"]];
       if (st.payload.figure.mode === "sweep") return [...HINTS, ...knobs, ...rail];
       return st.payload.figure.mode === "correlate" ? [["y", "log y"], ...knobs, ...rail] : [...knobs, ...rail];
     },

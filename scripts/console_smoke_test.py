@@ -662,10 +662,10 @@ def u4_checks(window):
         press(window, "y")
         assert wait_until(lambda: plot_command(window).endswith("--log")), plot_command(window)
         press(window, "y")
-        press(window, "t")
+        press(window, " ")
         assert wait_until(lambda: "--hide C1.current" in plot_command(window)), plot_command(window)
         assert wait_until(lambda: count(window, ".view-plot path.plot-series") == 0)
-        press(window, "t")
+        press(window, " ")
         assert wait_until(lambda: "--hide" not in plot_command(window) and count(window, ".view-plot path.plot-series") >= 1)
         no_errors(window)
 
@@ -720,8 +720,8 @@ def fit_checks(window):
     check("fit: a fit line shows the points, the fitted curve and r_a = 50", fit_pane)
 
     def apply_and_undo():
-        press(window, "a")
-        assert wait_until(lambda: abs((prop(ids["C1"], "r_a") or 0) - 50) < 1e-6), "`a` should apply the fit"
+        press(window, "A", shift=True)
+        assert wait_until(lambda: abs((prop(ids["C1"], "r_a") or 0) - 50) < 1e-6), "`A` should apply the fit"
         assert prop(ids["C1"], "source") == {"r_a": {"kind": "fitted", "note": FIT}}
         type_command(window, "undo")
         assert wait_until(lambda: prop(ids["C1"], "r_a") == 100), "undo should take the fit back"
@@ -770,13 +770,13 @@ def u5_checks(window):
             "the scenarios pane should list hot"
         type_command(window, "sim --scenario hot")
         assert wait_until(lambda: "varied" in sim_text(window)), sim_text(window)
-        press(window, "d")
+        press(window, "v")
         assert wait_until(lambda: "sim --scenario hot --vs garden" in headers(window)), headers(window)
         assert wait_until(lambda: "varied" in sim_text(window) and "0.1" in sim_text(window)
                           and "0.0333" in sim_text(window)), sim_text(window)
         no_errors(window)
 
-    check("U5: `set --scenario` writes an override; `d` compares against the garden", scenario_and_vs)
+    check("U5: `set --scenario` writes an override; `v` compares against the garden", scenario_and_vs)
 
     def rule_follows_the_row():
         press(window, "g")
@@ -1280,6 +1280,23 @@ def polish_checks(window):
         no_errors(window)
 
     check("dragging the focused pane's header docks it at an edge or swaps it", header_drag)
+
+    def remapped_keys():
+        focus_pane(window, "find")
+        press(window, "a", ctrl=True)
+        assert wait_until(lambda: count(window, ".pane.focused .c-table-row.selected") >= 3), \
+            "^a should select every row of the table"
+        press(window, "Escape")
+        press(window, "S", shift=True)
+        assert wait_until(lambda: any(h.startswith("find") and "--group" in h for h in headers(window))), \
+            f"S should group by the cursor's column, got {headers(window)}"
+        focus_pane(window, "gardens")
+        press(window, "Z", shift=True)
+        assert wait_until(lambda: "gardens --archived" in headers(window)), \
+            f"Z should show the archived gardens, got {headers(window)}"
+        no_errors(window)
+
+    check("^a selects all and S groups in the table; Z shows archived gardens", remapped_keys)
 
 
 def drive(first, first_loaded):

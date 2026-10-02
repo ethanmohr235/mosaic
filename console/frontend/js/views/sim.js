@@ -12,12 +12,12 @@
  * playhead scrubs without asking again. The playhead is the store's: this
  * pane claims it when it runs (unless another sim pane holds it) and when
  * it is focused, publishing its tick count and run for the rule pane.
- * Nothing here writes; `d` rewrites the line (`--vs garden`). */
+ * Nothing here writes; `v` rewrites the line (`--vs garden`). */
 
 import { fmt } from "../plot.js";
 import { PLAYHEAD_HINTS, playheadKey, at } from "../playhead.js";
 
-const HINTS = [["j k", "row"], ["⏎", "select mote"], ["d", "vs garden"], ...PLAYHEAD_HINTS];
+const HINTS = [["j k", "row"], ["⏎", "select mote"], ["v", "vs garden"], ...PLAYHEAD_HINTS];
 const STATE_LEVEL = { solved: "ok", pinned: "warn", varied: null, given: "idle" };
 const SVG = "http://www.w3.org/2000/svg";
 const PAD = 10;
@@ -269,7 +269,7 @@ function create(ctx) {
     k: () => moveTo(st.cursor - 1), ArrowUp: () => moveTo(st.cursor - 1),
     g: () => moveTo(0), G: () => moveTo(st.payload.rows.length - 1),
     Enter: () => { const row = st.payload.rows[st.cursor]; if (row) select(row); },
-    d: () => rewrite({ vs: st.payload.vs ? null : "garden" }),
+    v: () => rewrite({ vs: st.payload.vs ? null : "garden" }),
   };
 
   function onKey(event) {

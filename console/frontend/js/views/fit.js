@@ -3,13 +3,13 @@
  *
  * The pane is its command. api.moxie.fit(command) answers it -- core/fit.py
  * reads the garden under the session lock and solves outside it -- and
- * nothing is written: `a` (or clicking *apply*) runs the same line with
+ * nothing is written: `A` (or clicking *apply*) runs the same line with
  * `--apply` on the command line, so the write is in the history, the log
  * and undo like any other. */
 
 import { render as draw, fmt, seriesStyle } from "../plot.js";
 
-const HINTS = [["a", "apply the fit"], ["h l", "cursor"], ["esc", "clear cursor"]];
+const HINTS = [["A", "apply the fit"], ["h l", "cursor"], ["esc", "clear cursor"]];
 
 function message(err) {
   return String(err && err.message ? err.message : err);
@@ -185,7 +185,7 @@ function create(ctx) {
   }
 
   const KEYS = {
-    a: applyFit,
+    A: applyFit,
     h: () => moveCursor(-1), ArrowLeft: () => moveCursor(-1),
     l: () => moveCursor(1), ArrowRight: () => moveCursor(1),
   };

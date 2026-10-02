@@ -685,6 +685,18 @@ read as one tool rather than seven apps.
   commands, not ids, so saved layouts are untouched. The sections above
   were updated to the new ids. The Python namespaces (`api.moxie`,
   `console/motion.py`, …) keep the old names until the code rename.
+- **A key means one thing in every pane.** `j k` / `h l` move, `g G`
+  top and end, `[ ]` step the pane's own dimension, `- +` less and more,
+  `⏎` acts on the row, `o` opens or follows, `i` edits, `n` new, `r`
+  rename, `a` add, `v` compare, `d d` delete, `space` toggles (plays in
+  the sim panes), `esc` backs out. The clashes were remapped: in the table
+  `^a` selects all and `S` groups (`g G` move to the ends); in the plot
+  `space` shows or hides a series and `R` the side column; in the fit `A`
+  applies; in the sim `v` toggles `--vs garden`; in the gardens tree `z`
+  archives, `Z` shows the archived, and `E` / `I` export and import (so
+  `e` is the shell's again). `s` is still sort in the table and sync in
+  the gardens tree, and `t` / `s` answer the calendar's "this one or the
+  series?". The sections above record the keys as they were built.
 
 ### Visual system
 

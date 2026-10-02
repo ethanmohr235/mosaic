@@ -3,17 +3,17 @@
  *
  * Owned gardens sit under their owner's garden, labelled with the cover
  * (name, due, status); then the loose gardens; then the archived ones,
- * folded unless the line says `--archived` (`z` rewrites it). The cursor
+ * folded unless the line says `--archived` (`Z` rewrites it). The cursor
  * hands its garden to the `garden` pane (ctx.paneAction), which shows it.
  *
  * Every act is a command:
- *   ⏎  cd ‹garden›            a  garden archive|unarchive ‹garden›
+ *   ⏎  cd ‹garden›            z  garden archive|unarchive ‹garden›
  *   n  garden new …           r  garden rename ‹garden› …
  *   d d  garden rm ‹garden› (runs) s  garden sync ‹garden› …
- *   e  garden export ‹garden› (a file dialog)   i  garden import … */
+ *   E  garden export ‹garden› (a file dialog)   I  garden import … */
 
 const HINTS = [["j k", "move"], ["⏎", "open (cd)"], ["n", "new"], ["r", "rename"], ["d d", "remove"],
-  ["a", "archive"], ["s", "sync"], ["e i", "export, import"], ["z", "archived"]];
+  ["z", "archive"], ["s", "sync"], ["E I", "export, import"], ["Z", "show archived"]];
 
 function message(err) {
   return String(err && err.message ? err.message : err);
@@ -100,11 +100,11 @@ function create(ctx) {
     n: () => ctx.prefill("garden new "),
     r: on((r) => ctx.prefill(`garden rename ${arg(r.garden)} `)),
     d: remove,
-    a: on((r) => ctx.runCommand(`garden ${r.archived ? "unarchive" : "archive"} ${arg(r.garden)}`)),
+    z: on((r) => ctx.runCommand(`garden ${r.archived ? "unarchive" : "archive"} ${arg(r.garden)}`)),
     s: on((r) => ctx.prefill(`garden sync ${arg(r.garden)} `)),
-    e: on((r) => ctx.runCommand(`garden export ${arg(r.garden)}`)),
-    i: () => ctx.prefill("garden import "),
-    z: () => ctx.setCommand(st.command.includes("--archived") ? "gardens" : "gardens --archived"),
+    E: on((r) => ctx.runCommand(`garden export ${arg(r.garden)}`)),
+    I: () => ctx.prefill("garden import "),
+    Z: () => ctx.setCommand(st.command.includes("--archived") ? "gardens" : "gardens --archived"),
   };
 
   function onKey(event) {
