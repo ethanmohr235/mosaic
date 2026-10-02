@@ -204,6 +204,7 @@ phase that builds them.
   - click a header to edit its command
   - click a pane to focus it
   - drag a divider to resize
+  - drag the focused pane's header onto another pane to move it there
   - click a row or node to select it, with shift or ctrl to extend the
     selection
   - right-click for a context menu (`menu.js`)
@@ -653,6 +654,12 @@ read as one tool rather than seven apps.
   lowest free one. A tenth layout has no slot and no tab, and is reached
   with `layout load`. Sidecars from before slots get them in save order
   on load.
+- **A pane moves by its header.** Dragging the focused pane's header
+  (past 4px; less is still a click that edits the command) onto another
+  pane docks it against that pane's nearest edge when the pointer is in
+  its outer quarter, and swaps the two in the middle. An outline in
+  `--bright` shows where it lands; `esc`, its own pane or no pane cancel.
+  The moved pane keeps its view (`tree.js` `move`, `swapLeaves`).
 
 ### Visual system
 

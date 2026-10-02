@@ -135,7 +135,8 @@ def tile(window, key):
 
 
 def type_command(window, line, new_pane=False):
-    """`:` to the command line, type `line`, ⏎ (`^⏎` for a new pane)."""
+    """`:` to the command line, type `line`, ⏎ (`^⏎` for a new pane
+    below, which new_pane=True also means; `⇧⏎` for new_pane="right")."""
     press(window, ":")
     assert wait_until(lambda: js(window, "document.activeElement.classList.contains('c-input-native')"
                                          " && !!document.activeElement.closest('#cmdline')")), \
@@ -151,7 +152,7 @@ def type_command(window, line, new_pane=False):
           input.dispatchEvent(new Event('input', {{bubbles: true}}));
         }})();
     """)
-    press(window, "Enter", ctrl=new_pane)
+    press(window, "Enter", ctrl=new_pane in (True, "below"), shift=new_pane == "right")
     # The line runs asynchronously, and the command line keeps focus until
     # it has finished (it blurs then). A key pressed sooner lands in the
     # command line and is lost when it blurs -- so wait for the run to end.
@@ -619,6 +620,12 @@ def plot_status(window):
     return js(window, "(() => { const s = document.querySelector('.plot-status'); return s ? s.textContent : ''; })()")
 
 
+def plot_summary(window):
+    """The plot pane's header summary: what its run produced."""
+    return js(window, """(() => { const v = document.querySelector('.view-plot');
+        const s = v && v.closest('.pane').querySelector('.c-head-summary'); return s ? s.textContent : ''; })()""")
+
+
 def saved_plots():
     conn = get_connection(GARDEN)
     try:
@@ -640,7 +647,8 @@ def u4_checks(window):
         type_command(window, PLOT)
         assert wait_until(lambda: plot_command(window) == PLOT), f"header should be the line, got {headers(window)}"
         assert wait_until(lambda: count(window, ".view-plot path.plot-series") >= 1), "no curve drawn"
-        assert wait_until(lambda: "31 solves" in plot_status(window)), f"status: {plot_status(window)!r}"
+        assert wait_until(lambda: "31 solves" in plot_summary(window)), f"header: {plot_summary(window)!r}"
+        assert "solves" not in plot_status(window), f"the status line repeats the header: {plot_status(window)!r}"
         # The cursor reads the curve: x = 0 then ten steps on, x = 100 -> current 1/3.
         press(window, "l")
         press(window, "L")
@@ -1209,6 +1217,77 @@ def reload(window):
     install_collector(window)
 
 
+def drag_header(window, command, target, fx, fy):
+    """Press the header of the pane showing `command`, drag it to the
+    point (fx, fy) -- fractions of the pane showing `target` -- and let go."""
+    return js(window, f"""
+        (() => {{
+          const pane = (c) => [...document.querySelectorAll('.pane')]
+            .find((p) => p.querySelector('.c-head-command').textContent === c);
+          const head = pane({json.dumps(command)}).querySelector('.c-head');
+          const h = head.getBoundingClientRect();
+          const t = pane({json.dumps(target)}).getBoundingClientRect();
+          const x = t.left + t.width * {fx}, y = t.top + t.height * {fy};
+          const opts = (cx, cy) => ({{clientX: cx, clientY: cy, button: 0, bubbles: true}});
+          head.dispatchEvent(new MouseEvent('mousedown', opts(h.left + 20, h.top + 5)));
+          window.dispatchEvent(new MouseEvent('mousemove', opts(x, y)));
+          const shown = !document.querySelector('.dock-target').hidden;
+          window.dispatchEvent(new MouseEvent('mouseup', opts(x, y)));
+          return shown;
+        }})()
+    """)
+
+
+def polish_checks(window):
+    """2026-10-02: ^⏎ below and ⇧⏎ right, a blank pane with no text, ^N
+    saving a layout slot, and docking a pane by dragging its header."""
+    def split_keys():
+        tile(window, "o")
+        type_command(window, "log")
+        type_command(window, "find", new_pane="below")
+        type_command(window, "gardens", new_pane="right")
+        assert wait_until(lambda: headers(window) == ["log", "find", "gardens"]), headers(window)
+        assert count(window, ".split.col") == 1 and count(window, ".split.row") == 1, \
+            "^⏎ should stack the new pane below and ⇧⏎ put it to the right"
+        tile(window, "v")
+        assert wait_until(lambda: count(window, ".pane.focused .blank") == 1), "no blank pane"
+        assert js(window, "document.querySelector('.pane.focused .pane-body').textContent") == "", \
+            "the blank pane should draw no text"
+        press(window, "Escape")
+        assert wait_until(lambda: count(window, ".pane") == 3), "esc should close the blank pane"
+        no_errors(window)
+
+    check("^⏎ splits below, ⇧⏎ to the right; the blank pane is empty", split_keys)
+
+    def slot_save():
+        press(window, "3", ctrl=True)
+        assert wait_until(lambda: "3:3" in texts(window, "#topbar .tab.active")), texts(window, "#topbar .tab")
+        tile(window, "o")
+        assert wait_until(lambda: count(window, ".pane") == 1)
+        press(window, "3")
+        assert wait_until(lambda: headers(window) == ["log", "find", "gardens"]), \
+            f"`3` should restore slot 3, got {headers(window)}"
+        no_errors(window)
+
+    check("^3 saves the layout into slot 3 and `3` restores it", slot_save)
+
+    def header_drag():
+        js(window, """[...document.querySelectorAll('.pane')].find((p) =>
+            p.querySelector('.c-head-command').textContent === 'log')
+            .dispatchEvent(new MouseEvent('mousedown', {button: 0, bubbles: true}))""")
+        assert drag_header(window, "log", "gardens", 0.95, 0.5) is True, "no dock outline while dragging"
+        assert wait_until(lambda: headers(window) == ["find", "gardens", "log"]), \
+            f"dropping on the right edge should dock there, got {headers(window)}"
+        assert count(window, ".split.col") == 0, "the emptied stack should collapse"
+        drag_header(window, "log", "find", 0.5, 0.5)
+        assert wait_until(lambda: headers(window) == ["log", "gardens", "find"]), \
+            f"dropping in the middle should swap, got {headers(window)}"
+        assert count(window, ".pane.focused") == 1 and headers(window)[0] == "log"
+        no_errors(window)
+
+    check("dragging the focused pane's header docks it at an edge or swaps it", header_drag)
+
+
 def drive(first, first_loaded):
     opened = [first]
     first_loaded.wait(timeout=15)
@@ -1253,6 +1332,7 @@ def drive(first, first_loaded):
         u2_restored_checks(third)
         u3_restored_checks(third)
         u4_restored_checks(third)
+        polish_checks(third)
     finally:
         for window in opened:
             window.destroy()

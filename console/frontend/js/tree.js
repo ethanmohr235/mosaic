@@ -145,23 +145,61 @@ export function replaceLeaf(tree, id, json, focusCommand = null) {
  * of the leaf's share. Returns {tree, id} of the new pane.
  */
 export function split(tree, id, dir, command = "") {
+  const fresh = leaf(command);
+  const next = insertBeside(tree, id, dir, fresh, true);
+  return next ? { tree: next, id: fresh.id } : { tree, id: null };
+}
+
+/** Put leaf `node` beside leaf `id` along `dir`, after it or before it,
+ * taking half of its share. Null when `id` isn't in the tree. */
+function insertBeside(tree, id, dir, node, after) {
   const next = clone(tree);
   const path = pathTo(next, id);
-  if (!path) return { tree, id: null };
-  const fresh = leaf(command);
+  if (!path) return null;
   const parent = path.length ? nodeAt(next, path.slice(0, -1)) : null;
   const index = path[path.length - 1];
   if (parent && parent.split === dir) {
     const half = parent.sizes[index] / 2;
-    parent.children.splice(index + 1, 0, fresh);
+    parent.children.splice(after ? index + 1 : index, 0, node);
     parent.sizes.splice(index, 1, half, half);
-    return { tree: next, id: fresh.id };
+    return next;
   }
   const old = nodeAt(next, path);
-  const node = { split: dir, sizes: [0.5, 0.5], children: [old, fresh] };
-  if (!parent) return { tree: node, id: fresh.id };
-  parent.children[index] = node;
-  return { tree: next, id: fresh.id };
+  const pair = { split: dir, sizes: [0.5, 0.5], children: after ? [old, node] : [node, old] };
+  if (!parent) return pair;
+  parent.children[index] = pair;
+  return next;
+}
+
+const EDGE_DIR = { left: "row", right: "row", top: "col", bottom: "col" };
+
+/**
+ * Dock leaf `fromId` against an edge ("left" | "right" | "top" |
+ * "bottom") of leaf `toId`: it leaves its place, which closes as `close`
+ * does, and splits `toId` that way. The moved leaf keeps its id, so its
+ * pane isn't re-mounted. Unchanged when the two are the same leaf.
+ */
+export function move(tree, fromId, toId, edge) {
+  const moving = findLeaf(tree, fromId);
+  if (!moving || fromId === toId || !findLeaf(tree, toId) || !EDGE_DIR[edge]) return tree;
+  const without = close(tree, fromId).tree;
+  const after = edge === "right" || edge === "bottom";
+  return insertBeside(without, toId, EDGE_DIR[edge], { ...moving }, after) || tree;
+}
+
+/** Leaves `a` and `b` trade places, each keeping its id. */
+export function swapLeaves(tree, a, b) {
+  const pa = pathTo(tree, a);
+  const pb = pathTo(tree, b);
+  if (!pa || !pb || a === b) return tree;
+  const next = clone(tree);
+  const at = (path) => [nodeAt(next, path.slice(0, -1)), path[path.length - 1]];
+  const [parentA, ia] = at(pa);
+  const [parentB, ib] = at(pb);
+  const leafA = parentA.children[ia];
+  parentA.children[ia] = parentB.children[ib];
+  parentB.children[ib] = leafA;
+  return next;
 }
 
 /**

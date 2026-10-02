@@ -316,6 +316,15 @@ body {
 
 body.dragging-row { cursor: col-resize; }
 body.dragging-col { cursor: row-resize; }
+body.dragging-pane, body.dragging-pane * { cursor: grabbing; user-select: none; }
+
+/* Where a pane dragged by its header will land (panes.js). */
+.dock-target {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  border: var(--border) solid var(--bright);
+}
 
 .pane {
   position: relative;

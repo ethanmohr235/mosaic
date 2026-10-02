@@ -20,6 +20,8 @@ import { viewById } from "./views/index.js";
 import { createBlank } from "./blank.js";
 
 const GUIDE_LINGER_MS = 1000;
+const DRAG_START_PX = 4;  // a header press that moves less is a click
+const DOCK_EDGE = 0.25;   // the outer quarter of a pane docks; the middle swaps
 
 export function createPanes({ root, store, api, components, onEdit, onPrompt, onCancel, onRun,
   onPrefill, isCommandLineActive }) {
@@ -27,6 +29,8 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
   const panes = new Map();
   const splitEls = new Map();
   const guide = createGuide(h);
+  const dockTarget = h("div", "dock-target");
+  dockTarget.hidden = true;
   let guideTimer = 0;
 
   /** The ctx a view instance gets (views/index.js): shared, plus two per-pane calls. */
@@ -55,15 +59,22 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
   /* ---------- pane records ---------- */
 
   function createPane(id) {
-    const header = components.paneHeader({ onClick: () => onEdit(id) });
+    const header = components.paneHeader({ onClick: () => {
+      if (!pane.dragged) onEdit(id);
+    } });
     const body = h("div", "pane-body");
     const el = h("section", "pane", [header.el, body]);
     el.dataset.pane = id;
+    // Before the pane's own mousedown focuses it: only a pane that was
+    // already focused drags by its header.
+    header.el.addEventListener("mousedown", (event) => {
+      if (event.button === 0 && store.state.focusedId === id && panes.size > 1) startPaneDrag(event, pane);
+    });
     el.addEventListener("mousedown", (event) => {
       if (event.button !== 1) store.focus(id);
     });
     const pane = { id, el, header, body, instance: null, view: null, command: null,
-      runCommand: "", summary: "", level: "idle", token: 0 };
+      runCommand: "", summary: "", level: "idle", token: 0, dragged: false };
     panes.set(id, pane);
     return pane;
   }
@@ -178,7 +189,7 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
     const seen = new Set();
     const top = build(store.state.tree, [], seen);
     top.style.flex = "1 1 0px";
-    root.replaceChildren(top, guide.el);
+    root.replaceChildren(top, guide.el, dockTarget);
     for (const [id, pane] of panes) {
       if (seen.has(id)) continue;
       pane.token += 1;
@@ -251,6 +262,86 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
+  }
+
+  /* ---------- dragging a pane by its header ---------- */
+
+  /** Press on the focused pane's header: past DRAG_START_PX it drags.
+   * Over another pane, its outer quarter on a side docks the pane there
+   * and its middle swaps the two (T.move, T.swapLeaves); the outline
+   * shows where it will land. Off the panes, on itself or on `esc`,
+   * nothing changes. A press that never moved stays a click. */
+  function startPaneDrag(event, pane) {
+    const x0 = event.clientX;
+    const y0 = event.clientY;
+    let dragging = false;
+    let drop = null;
+
+    const move = (e) => {
+      if (!dragging) {
+        if (Math.hypot(e.clientX - x0, e.clientY - y0) < DRAG_START_PX) return;
+        dragging = true;
+        pane.dragged = true;
+        document.body.classList.add("dragging-pane");
+      }
+      drop = dropAt(e.clientX, e.clientY, pane.id);
+      showDock(drop);
+    };
+    const end = (apply) => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("keydown", key, true);
+      document.body.classList.remove("dragging-pane");
+      dockTarget.hidden = true;
+      // The header's click (if the press ends on it) comes right after
+      // this mouseup and must not edit; after it, clicks edit again.
+      if (dragging) setTimeout(() => { pane.dragged = false; }, 0);
+      if (apply && drop) {
+        const tree = drop.edge === "center" ? T.swapLeaves(store.state.tree, pane.id, drop.id)
+          : T.move(store.state.tree, pane.id, drop.id, drop.edge);
+        store.setTree(tree, pane.id);
+      }
+    };
+    const up = () => end(dragging);
+    const key = (e) => {
+      if (e.key !== "Escape" || !dragging) return;
+      e.preventDefault();
+      e.stopPropagation();
+      end(false);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("keydown", key, true);
+  }
+
+  /** The pane under (x, y) other than `fromId`, and which part of it:
+   * {id, edge: "left"|"right"|"top"|"bottom"|"center", rect}, or null. */
+  function dropAt(x, y, fromId) {
+    const hit = document.elementFromPoint(x, y);
+    const el = hit && hit.closest(".pane");
+    const id = el && el.dataset.pane;
+    if (!id || id === fromId || !panes.has(id)) return null;
+    const rect = el.getBoundingClientRect();
+    const fx = (x - rect.left) / rect.width;
+    const fy = (y - rect.top) / rect.height;
+    const edges = [["left", fx], ["right", 1 - fx], ["top", fy], ["bottom", 1 - fy]];
+    const [edge, near] = edges.reduce((a, b) => (b[1] < a[1] ? b : a));
+    return { id, rect, edge: near < DOCK_EDGE ? edge : "center" };
+  }
+
+  function showDock(drop) {
+    dockTarget.hidden = !drop;
+    if (!drop) return;
+    const origin = root.getBoundingClientRect();
+    const { left, top, width, height } = drop.rect;
+    const half = { left: [0, 0, 0.5, 1], right: [0.5, 0, 0.5, 1], top: [0, 0, 1, 0.5],
+      bottom: [0, 0.5, 1, 0.5], center: [0, 0, 1, 1] }[drop.edge];
+    Object.assign(dockTarget.style, {
+      left: `${left - origin.left + half[0] * width}px`,
+      top: `${top - origin.top + half[1] * height}px`,
+      width: `${half[2] * width}px`,
+      height: `${half[3] * height}px`,
+    });
   }
 
   /* ---------- the resize guide ---------- */

@@ -22,7 +22,7 @@ the same change.
 | `^w <` / `^w >` | Shrink / grow the pane |
 | `^w o`, `^w =`, `^w x` | Only this pane, equalize, swap |
 
-Mouse: click a pane to focus it; drag a divider to resize.
+Mouse: click a pane to focus it; drag a divider to resize; drag the focused pane's header onto another pane to dock it at that edge (outer quarter) or swap the two (middle).
 
 ## Command line
 
