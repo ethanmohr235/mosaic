@@ -136,7 +136,6 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
 
   function blankFor(pane) {
     return createBlank({
-      components,
       onPrompt: (text = null) => onPrompt(text),
       onCancel: () => onCancel(pane.id),
     });

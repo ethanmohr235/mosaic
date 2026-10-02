@@ -39,7 +39,7 @@ function create(ctx) {
     const p = st.payload;
     const groups = p.groups.map((g) => ({
       key: g.key, rows: g.rows, labelled: true, count: g.key === "archived" ? g.count : g.rows.length,
-      label: g.key === "archived" && g.folded && g.count ? "archived -- z unfolds" : g.label,
+      label: g.key === "archived" && g.folded && g.count ? "archived" : g.label,
     })).filter((g) => g.count);
     const grid = components.table({
       columns: [
@@ -60,7 +60,7 @@ function create(ctx) {
     });
     grid.querySelectorAll(".c-group-all").forEach((n) => n.remove());
     const parts = [grid];
-    if (!st.rows.length) parts.push(h("div", "c-table-empty", "no gardens -- `n` makes one"));
+    if (!st.rows.length) parts.push(h("div", "c-table-empty", "no gardens"));
     if (p.problems.length) parts.push(h("div", "home-problems lvl-warn", p.problems.join("\n")));
     body.replaceChildren(...parts);
     const line = grid.querySelector(`.c-table-row[data-index="${st.cursor}"]`);

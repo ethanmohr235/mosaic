@@ -89,16 +89,9 @@ function create(ctx) {
     drawStatus();
   }
 
+  /** Only what is at the cursor: the fit's own numbers are the header's. */
   function drawStatus() {
-    const p = st.payload;
-    const parts = [h("span", null, [h("span", `plot-dot-status lvl-${level()}`, "●"),
-      ` ${p.solves} solves ${p.seconds}s`])];
-    if (p.rms !== null) parts.push(h("span", null, `RMS ${fmt(p.rms)}`));
-    if (p.r2 !== null && p.r2 !== undefined) parts.push(h("span", null, `R² ${p.r2.toFixed(4)}`));
-    if (railEl && railEl.hidden) {
-      parts.push(h("span", null, p.params.map((x) => `${x.ref}=${fmt(x.value)}`).join(" ")));
-    }
-    parts.push(h("span", "plot-status-fill"));
+    const parts = [h("span", "plot-status-fill")];
     const at = cursorPoint();
     if (at) parts.push(h("span", null, `${at.name}: x ${fmt(at.x)} · y ${fmt(at.y)} · fit ${fmt(at.fitted)}`));
     statusEl.replaceChildren(...parts);
@@ -163,7 +156,8 @@ function create(ctx) {
     render();
     if (p.empty) return { summary: "", level: "idle" };
     const values = p.params.map((x) => `${x.ref.split(".").pop()} ${fmt(x.value)}`).join(", ");
-    return { summary: p.rms === null ? p.message : `${values} · RMS ${fmt(p.rms)}`, level: level() === "ok" ? "ok" : "warn" };
+    const r2 = p.r2 !== null && p.r2 !== undefined ? ` · R² ${p.r2.toFixed(4)}` : "";
+    return { summary: p.rms === null ? p.message : `${values} · RMS ${fmt(p.rms)}${r2}`, level: level() === "ok" ? "ok" : "warn" };
   }
 
   async function applyFit() {

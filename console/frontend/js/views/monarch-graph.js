@@ -63,8 +63,7 @@ function create(ctx) {
     if (!p || p.error) {
       // An empty @sel is a state, not a fault: say what to do, as props does.
       st.empty = /@sel is empty/.test((p && p.error) || "");
-      st.error = st.empty ? "nothing selected -- click a mote in any pane, or `graph` for the whole garden"
-        : (p && p.error) || "no answer";
+      st.error = st.empty ? "nothing selected" : (p && p.error) || "no answer";
       st.payload = null;
       draw();
       return { summary: st.empty ? "nothing selected" : st.error, level: st.empty ? "idle" : "fault" };
@@ -85,7 +84,7 @@ function create(ctx) {
   /** The DOM around the canvas: the error, and the corner notes. */
   function draw() {
     if (!root) return;
-    errorBox.hidden = !st.error;
+    errorBox.hidden = !st.error || st.empty;  // the header already says so
     errorBox.textContent = st.error || "";
     errorBox.className = `pane-error ${st.empty ? "dim" : "lvl-fault"}`;
     canvas.hidden = !!st.error;

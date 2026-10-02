@@ -82,7 +82,7 @@ function create(ctx) {
 
   function statusText() {
     const item = cal.current();
-    if (!item) return cal.st.slot ? `new at ${iso(cal.st.slot.start).replace("T", " ")} -- n` : "";
+    if (!item) return cal.st.slot ? `slot ${iso(cal.st.slot.start).replace("T", " ")}` : "";
     const span = item.allDay || item.bar ? `${item.start.slice(0, 10)} → ${item.end.slice(0, 10)}`
       : `${dayLabel(parse(item.start))} ${hhmm(parse(item.start))}–${hhmm(parse(item.end))}`;
     return `${item.name} · ${item.binding} · ${span}${item.recurring ? " · repeats" : ""}`;

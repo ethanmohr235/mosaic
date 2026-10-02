@@ -47,7 +47,7 @@ class MoteApi:
         try:
             target = target_of(command)
             if target == SEL and not selection:
-                return {"empty": "nothing selected -- click a mote in any pane"}
+                return {"empty": "nothing selected"}
             (mote_id,) = commands.one_target(self._session.conn, target, selection)
             payload = inspect_repo.inspect(self._session.conn, mote_id)
         except (CommandError, ValueError) as e:

@@ -134,8 +134,8 @@ function create(ctx) {
       },
     });
     const notes = [];
-    if (!p.rows.length) notes.push(h("div", "c-table-empty", "nothing to watch -- no rule solves anything here yet"));
-    if (p.hidden) notes.push(h("div", "c-table-empty", `${p.hidden} more values -- narrow with find conditions`));
+    if (!p.rows.length) notes.push(h("div", "c-table-empty", "nothing to watch"));
+    if (p.hidden) notes.push(h("div", "c-table-empty", `${p.hidden} more values`));
     p.problems.forEach((text) => notes.push(h("div", "c-table-empty lvl-warn", text)));
     tableEl.replaceChildren(grid, ...notes);
     const line = grid.querySelector(`.c-table-row[data-index="${st.cursor}"]`);
@@ -197,14 +197,11 @@ function create(ctx) {
     }
   }
 
+  /** Only the cursor row: the tick is the top bar's, the run's facts the header's. */
   function drawStatus() {
     const p = st.payload;
     const row = p.rows[st.cursor];
-    const parts = [h("span", null, `tick ${Math.min(tick(), Math.max(p.count - 1, 0))}/${p.ticks - 1}`)];
-    if (p.scenario) parts.push(h("span", null, `under ${p.scenario}`));
-    if (p.error) parts.push(h("span", "lvl-fault", `failed at tick ${p.failedAt}: ${p.error}`));
-    if (p.vsError) parts.push(h("span", "lvl-fault", `${p.vs}: ${p.vsError}`));
-    parts.push(h("span", "plot-status-fill"));
+    const parts = [h("span", "plot-status-fill")];
     if (row) {
       const lo = row.minTick === null ? "" : ` · min ${fmt(row.series[row.minTick])} @${row.minTick}`;
       const hi = row.maxTick === null ? "" : ` · max ${fmt(row.series[row.maxTick])} @${row.maxTick}`;
@@ -330,11 +327,12 @@ function create(ctx) {
     render();
     const breaks = p.markers.filter((m) => m.kind === "constraint").length;
     const pinned = p.rows.filter((r) => r.state === "pinned").length;
-    const parts = [`${p.rows.length} value${p.rows.length === 1 ? "" : "s"}`, `${p.ticks} ticks`];
+    const parts = [`${p.rows.length} value${p.rows.length === 1 ? "" : "s"}`];
     if (breaks) parts.push(`${breaks} break${breaks === 1 ? "" : "s"}`);
     if (pinned) parts.push(`${pinned} pinned`);
-    if (p.error) parts.push(`failed @${p.failedAt}`);
-    return { summary: parts.join(" · "), level: p.error ? "fault" : breaks || pinned ? "warn" : "ok" };
+    if (p.error) parts.push(`failed @${p.failedAt}: ${p.error}`);
+    if (p.vsError) parts.push(`${p.vs}: ${p.vsError}`);
+    return { summary: parts.join(" · "), level: p.error || p.vsError ? "fault" : breaks || pinned ? "warn" : "ok" };
   }
 
   return {

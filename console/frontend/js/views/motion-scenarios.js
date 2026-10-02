@@ -77,7 +77,7 @@ function create(ctx) {
     });
     const parts = [grid];
     if (st.rows.length === 1) {
-      parts.push(h("div", "c-table-empty", "no scenarios -- `n` or `set --scenario ‹name› ‹m.k› ‹value›` makes one"));
+      parts.push(h("div", "c-table-empty", "no scenarios"));
     }
     body.replaceChildren(...parts);
   }

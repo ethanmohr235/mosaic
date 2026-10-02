@@ -626,6 +626,22 @@ The user's first list of small fixes after the rework.
   equations in dependency order (a simultaneous system keeps creation
   order). The user chose this over blocks per mote and over `#` headings.
 
+### Polish and unification (2026-10-02)
+
+The user's second list of fixes, and the pass that makes the console
+read as one tool rather than seven apps.
+
+- **Header holds the result, footer holds the cursor.** A pane's header
+  summary is what its run produced (counts, timing, problems, level); a
+  status line under a plot or a sim holds only what is at the cursor or
+  playhead (the x/y readout, a row's value with its min and max, knobs
+  when the rail is hidden). Shell state (the tick, `live`) is only in the
+  top bar. Nothing is said in two strips.
+- **No filler text.** The blank pane draws nothing (the hint bar says `⏎`
+  and `esc`). Empty states say the fact (`no scenarios`, `no gardens`,
+  `nothing to verify`) and leave how-to to the hint bar and the manual. A
+  pane whose header already says `nothing selected` draws an empty body.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and

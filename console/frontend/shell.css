@@ -509,17 +509,6 @@ body.dragging-col { cursor: row-resize; }
   overflow: hidden;
 }
 
-/* ---------- the blank pane ---------- */
-
-.blank {
-  display: flex;
-  gap: var(--bar-gap);
-  padding: var(--picker-pad-y) var(--pad-x);
-}
-
-.blank-prompt { color: var(--bright); }
-.blank-hint { color: var(--dim); }
-
 /* ---------- resize guide ---------- */
 
 .resize-guide {
@@ -580,7 +569,6 @@ body.dragging-col { cursor: row-resize; }
 .props-note,
 .props-section { padding-top: var(--table-head-pad); }
 
-.props-empty { padding: var(--table-head-pad) 0; }
 
 .props-grid { display: flex; flex-direction: column; }
 
@@ -674,7 +662,6 @@ body.dragging-col { cursor: row-resize; }
   border-top: var(--border) solid var(--line); color: var(--dim); white-space: nowrap; overflow: hidden;
 }
 .plot-status-fill { flex: 1; }
-.plot-dot-status.lvl-ok { color: var(--ok); }
 .plot-rail {
   flex: 0 1 var(--plot-rail); min-width: 0; border-left: var(--border) solid var(--line);
   overflow: auto; min-height: 0;

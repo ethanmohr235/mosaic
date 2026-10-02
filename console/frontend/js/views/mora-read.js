@@ -142,7 +142,7 @@ function create(ctx) {
         h("td", null, c.external), h("td", c.error === null ? "doc-note" : Math.abs(c.error) > 5 ? "lvl-warn" : null,
           c.error === null ? (c.problem || "—") : `${c.error >= 0 ? "+" : ""}${c.error.toFixed(2)}%`)]));
       parts.push(rows.length ? h("table", "doc-table", [h("tr", null, ["", "hand", "external", "error"].map((t) => h("th", null, t))), ...rows])
-        : h("div", "doc-note", "nothing to verify -- mark an external value with `checks`"));
+        : h("div", "doc-note", "nothing to verify"));
     } else {
       const rows = (b.rows || []).map((r) => h("tr", null, [h("td", null, r.ref), h("td", "doc-num", r.value),
         h("td", "doc-note", r.source)]));
@@ -170,7 +170,7 @@ function create(ctx) {
     figures.length = 0;
     const top = page ? page.scrollTop : 0;
     const blocks = st.payload.blocks.map(block);
-    if (!blocks.length) blocks.push(h("p", "doc-note", st.note && st.note.exists ? "(an empty note)" : "(a new note -- nothing written yet)"));
+    if (!blocks.length) blocks.push(h("p", "doc-note", st.note && st.note.exists ? "(empty)" : "(new)"));
     const problems = st.payload.problems;
     if (problems.length) {
       blocks.push(h("div", "doc-problems", [h("div", "doc-section-head", `${problems.length} problem${problems.length === 1 ? "" : "s"}`),

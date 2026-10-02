@@ -163,19 +163,10 @@ function create(ctx) {
     const p = st.payload;
     const f = p.figure;
     const parts = [];
-    const dot = h("span", `plot-dot-status lvl-${level()}`, "●");
-    parts.push(h("span", null, [dot, ` ${f.solves} solve${f.solves === 1 ? "" : "s"} ${p.seconds}s${p.coarse ? " · refining" : ""}`]));
-    if (f.mode === "sweep") {
-      const drawn = (p.series || []).filter((s) => !s.hidden).length;
-      parts.push(h("span", null, `${drawn} of ${(p.series || []).length} series`));
-    }
     if (f.mode === "surface" && f.lo !== null) {
       const what = ((p.series || [])[0] || {}).ref || "value";
       parts.push(h("span", null, `${what} ${fmt(f.lo)} – ${fmt(f.hi)}, dark to light`));
     }
-    if (p.xPinned) parts.push(h("span", "lvl-warn", "x pinned"));
-    if ((f.broken || []).length) parts.push(h("span", "lvl-fault", `breaks ${f.broken.join(", ")}`));
-    if (f.failed && f.failed.length) parts.push(h("span", "lvl-fault", `${f.failed.length} span${f.failed.length === 1 ? "" : "s"} unsolved`));
     if (!railShown()) {
       const knobs = (p.knobs || []).map((k, i) => `${k.ref}=${fmt(knobValue(i))}`);
       if (knobs.length) parts.push(h("span", null, knobs.join(" ")));
@@ -224,9 +215,6 @@ function create(ctx) {
         h("span", "plot-ref", r.ref), h("span", "plot-num", `${r.value >= 0 ? "+" : ""}${r.value.toFixed(2)}`),
       ])), `at x ${fmt(st.cursor)}`));
     }
-    if (!sections.length) {
-      sections.push(h("div", "plot-rail-note", "no knobs -- add one with --set ‹m.k›=‹v›"));
-    }
     railEl.replaceChildren(...sections);
   }
 
@@ -256,13 +244,22 @@ function create(ctx) {
     return "ok";
   }
 
+  /** The header: what the run produced. The status line under the plot
+   * holds only what is at the cursor (docs/console.md → *Header and footer*). */
   function summary() {
     const p = st.payload;
     if (p.empty) return "";
     const f = p.figure;
-    const what = p.name ? `${p.name} · ` : "";
-    if (f.error) return `${what}${f.error}`;
-    return `${what}${f.solves} solves · ${p.seconds}s`;
+    const parts = p.name ? [p.name] : [];
+    if (f.error) return [...parts, f.error].join(" · ");
+    parts.push(`${f.solves} solve${f.solves === 1 ? "" : "s"}`, `${p.seconds}s${p.coarse ? " refining" : ""}`);
+    if (f.mode === "sweep" && (p.series || []).some((s) => s.hidden)) {
+      parts.push(`${(p.series || []).filter((s) => !s.hidden).length} of ${p.series.length} series`);
+    }
+    if (p.xPinned) parts.push("x pinned");
+    if ((f.broken || []).length) parts.push(`breaks ${f.broken.join(", ")}`);
+    if ((f.failed || []).length) parts.push(`${f.failed.length} span${f.failed.length === 1 ? "" : "s"} unsolved`);
+    return parts.join(" · ");
   }
 
   /* ---- running ---- */
@@ -310,6 +307,7 @@ function create(ctx) {
     adopt(coarse);
     render();
     if (coarse.empty) return { summary: "", level: "idle" };
+    ctx.setSummary({ summary: summary(), level: level() === "ok" ? "ok" : "warn" });
     const full = await ask(command, false);
     if (seq !== st.seq || !root) return { summary: "", level: "idle" };
     if (full && !full.error && !full.cancelled) {

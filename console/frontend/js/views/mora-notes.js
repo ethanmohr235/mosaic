@@ -39,7 +39,7 @@ function create(ctx) {
     if (at && at.first) parts.push(h("div", "c-table-empty", at.first));
     if (!st.notes.length) {
       parts.push(h("div", "c-table-empty", st.query ? `no note contains "${st.query}"`
-        : "no notes yet -- `edit ‹name›` starts one"));
+        : "no notes"));
     }
     body.replaceChildren(...parts);
   }

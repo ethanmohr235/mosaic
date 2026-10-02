@@ -149,7 +149,7 @@ A value against another, with the whole garden re-solved at every point
 of the range, in memory. **Nothing is written** -- not a value, not a
 run -- which is what makes it safe to redraw on every drag of a knob.
 Either side can be any numeric property of any mote, given or solved;
-sweeping one the solver would determine is allowed, and the status line
+sweeping one the solver would determine is allowed, and the pane header
 says **x pinned**, because the answer is then "what if this were so".
 
 | Line | Draws |
@@ -178,7 +178,7 @@ cancels the older one between points.
 | `y` | Log y |
 | `[` `]`, `t` / a legend click | Pick a series; show or hide it |
 | `j` `k`, `-` `+` / drag a knob's bar | Pick a knob; move it a twentieth of its range |
-| `r` | Show or hide the side column. It hides by itself when the pane is narrower than 640px, and the knobs and the strongest sensitivity move to the status line |
+| `r` | Show or hide the side column. It hides by itself when the pane is narrower than 640px, and the knobs and the strongest sensitivity move to the status line under the plot |
 | `esc` | Clear the cursor |
 
 With knobs set, the rail ranks them by **sensitivity** at the cursor:

@@ -142,7 +142,7 @@ function create(ctx) {
       return;
     }
     if (st.empty) {
-      body.replaceChildren(h("div", "props-empty dim", st.empty));
+      body.replaceChildren();  // the header says "nothing selected"
       return;
     }
     const p = st.payload;

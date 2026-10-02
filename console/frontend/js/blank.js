@@ -11,16 +11,17 @@
 
 const HINTS = [["⏎", "type a command"], ["esc", "close pane"]];
 
-/** {h} from components; onPrompt(text?) focuses the command line; onCancel(). */
-export function createBlank({ components, onPrompt, onCancel }) {
-  const { h } = components;
+/** onPrompt(text?) focuses the command line; onCancel(). */
+export function createBlank({ onPrompt, onCancel }) {
   let prompted = false;
 
   return {
     blank: true,
+    // An empty marker, no text: the hint bar says ⏎ and esc.
     mount(el) {
-      el.appendChild(h("div", "blank", [h("span", "blank-prompt", "$"),
-        h("span", "blank-hint", "type a command -- it runs here · esc closes this pane")]));
+      const marker = document.createElement("div");
+      marker.className = "blank";
+      el.appendChild(marker);
     },
     run: () => ({ summary: "", level: "idle" }),
     unmount() {},

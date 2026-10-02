@@ -64,7 +64,7 @@ function create(ctx) {
     // count here would go stale; the rows carry their own levels.
     run() {
       render();
-      return { summary: "this session", level: "idle" };
+      return { summary: "", level: "idle" };
     },
     unmount() {
       offs.splice(0).forEach((off) => off());
