@@ -122,7 +122,7 @@ export function setCommand(tree, id, command) {
 }
 
 /**
- * Put the subtree `json` (bridge JSON, e.g. `mo tion`'s three panes) where
+ * Put the subtree `json` (bridge JSON, e.g. `layout calc`'s three panes) where
  * leaf `id` was, taking its share. Returns {tree, focusId}: the first new
  * leaf whose command is `focusCommand`, else the first new leaf.
  */

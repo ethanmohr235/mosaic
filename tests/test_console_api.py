@@ -41,21 +41,12 @@ def api():
 
 def test_boot_shape(api):
     boot = api.boot()
-    assert set(boot) == {"garden", "gardens", "apps", "verbs", "layouts",
+    assert set(boot) == {"garden", "gardens", "verbs", "layouts",
                          "active", "working", "history", "live", "crumbs"}
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
-    assert boot["apps"][2] == {"suffix": "xie", "name": "Moxie",
-                               "defaultView": "moxie:plot", "layout": None}
-    tion = boot["apps"][3]
-    assert tion["defaultView"] == "motion:state"
-    assert [c["command"] for c in tion["layout"]["children"]] == ["scenarios", "sim", "rule @sel"]
-    assert [a["suffix"] for a in boot["apps"]] == [
-        "nolith", "te", "xie", "tion", "ra", "nastery", "narch", "saic"]
-    assert boot["apps"][0] == {"suffix": "nolith", "name": "Monolith",
-                               "defaultView": "monolith:table", "layout": None}
     assert boot["crumbs"] == ["test"]
-    assert boot["verbs"][29] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][28] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -131,7 +122,7 @@ def test_a_failed_line_is_still_in_history(api):
     assert api.history()[-1]["command"] == "layout frob"
 
 
-# ---- verbs and apps ----------------------------------------------------------
+# ---- verbs and built-in layouts ----------------------------------------------
 
 def test_log_opens_its_view(api):
     assert api.run("log") == {"effect": "open_view", "view": "log", "command": "log"}
@@ -142,8 +133,8 @@ def test_an_argumentless_verb_with_arguments_says_to_quote(api):
     assert effect["effect"] == "error" and '"log"' in effect["message"]
 
 
-def test_te_opens_the_props_pane_on_the_selection(api):
-    assert api.run("mo te") == {"effect": "open_view", "view": "mote:props", "command": "open @sel"}
+def test_open_sel_opens_the_props_pane_on_the_selection(api):
+    assert api.resolve("open @sel") == {"view": "mote:props", "command": "open @sel"}
 
 
 def test_resolve(api):
@@ -205,7 +196,8 @@ def test_layout_list_and_rm(api):
     api.layout_put("a", TREE)
     listed = api.run("layout list")
     assert listed == {"effect": "layout", "op": "list",
-                      "layouts": [{"name": "a", "tree": TREE, "slot": 1}], "active": "a"}
+                      "layouts": [{"name": "a", "tree": TREE, "slot": 1}], "active": "a",
+                      "builtins": ["calc", "docs", "plan", "graph", "gardens"]}
     assert api.run("layout rm a") == {"effect": "layout", "op": "rm", "name": "a",
                                       "layouts": [], "active": None}
 
@@ -286,7 +278,8 @@ def test_complete_shape(api):
 
 def test_complete_layout_names(api):
     api.layout_put("two", TREE)
-    assert [r["value"] for r in api.complete("layout load ")["rows"]] == ["two"]
+    assert [r["value"] for r in api.complete("layout rm ")["rows"]] == ["two"]
+    assert [r["value"] for r in api.complete("layout load ")["rows"]][:2] == ["two", "calc"]
 
 
 # ---- U2: find and set (api.monolith) -----------------------------------------
@@ -314,8 +307,7 @@ def test_find_opens_the_table_with_the_whole_line_as_its_command(api):
                       "command": "find status:open --sort rank"}
     assert api.resolve("find status:open") == {"view": "monolith:table",
                                                "command": "find status:open"}
-    assert api.run("mo nolith") == {"effect": "open_view", "view": "monolith:table",
-                                 "command": "find"}
+    assert api.run("find") == {"effect": "open_view", "view": "monolith:table", "command": "find"}
 
 
 def test_table_answers_a_find_line(api, chores):
@@ -483,18 +475,34 @@ def test_mote_inspect_follows_the_selection_or_a_named_mote(api, chores):
 
 
 @pytest.mark.parametrize("line, message", [
-    ("mo", "usage: mo"),
-    ("mo nope", "no app mo nope"),
-    ("mo tion now", "takes nothing after the app"),
+    ("layout nope", "no layout named 'nope'"),
+    ("layout calc now", "usage: layout"),
 ])
-def test_mo_says_what_is_wrong(api, line, message):
+def test_layout_says_what_is_wrong(api, line, message):
     effect = api.run(line)
     assert effect["effect"] == "error" and message in effect["message"]
 
 
-def test_a_bare_suffix_is_a_statement_now(api):
-    effect = api.run("tion")
-    assert effect["effect"] == "statement" and effect["moteName"] == "tion"
+def test_mo_is_a_statement_now(api):
+    effect = api.run("mo")
+    assert effect["effect"] == "statement" and effect["moteName"] == "mo"
+
+
+def test_layout_name_opens_a_built_in_layout(api):
+    effect = api.run("layout calc")
+    assert effect["effect"] == "open_layout" and effect["name"] == "calc"
+    assert [c["command"] for c in effect["tree"]["children"]] == ["scenarios", "sim", "rule @sel"]
+    assert effect["focus"] == "sim"
+    assert api.run("layout load docs")["effect"] == "open_layout"
+
+
+def test_a_saved_layout_shadows_a_built_in_one(api):
+    api.layout_put("calc", TREE)
+    assert api.run("layout calc") == {"effect": "layout", "op": "load", "name": "calc", "tree": TREE}
+
+
+def test_layout_list_names_the_built_ins(api):
+    assert api.run("layout list")["builtins"] == ["calc", "docs", "plan", "graph", "gardens"]
 
 
 # ---- plot (U4) ---------------------------------------------------------------
@@ -516,8 +524,9 @@ def divider(api):
 LINE = "plot C1.current vs C1.voltage 0:300 --steps 30"
 
 
-def test_mo_xie_opens_the_plot_pane(api):
-    assert api.run("mo xie") == {"effect": "open_view", "view": "moxie:plot", "command": "plot"}
+def test_plot_opens_the_plot_pane(api):
+    assert api.run("plot")["effect"] == "open_view"
+    assert api.resolve("plot") == {"view": "moxie:plot", "command": "plot"}
     assert api.resolve(LINE) == {"view": "moxie:plot", "command": LINE}
     assert "error" in api.resolve("plot export csv")
 
@@ -661,9 +670,9 @@ def _current(api):
     return c1.properties.get("current")
 
 
-def test_mo_tion_opens_its_three_panes(api):
-    effect = api.run("mo tion")
-    assert effect["effect"] == "open_layout" and effect["app"] == "tion"
+def test_layout_calc_opens_the_three_calc_panes(api):
+    effect = api.run("layout calc")
+    assert effect["effect"] == "open_layout" and effect["name"] == "calc"
     assert effect["tree"]["split"] == "row" and effect["focus"] == "sim"
 
 
@@ -723,8 +732,8 @@ def test_the_motion_panes_answer(api):
 
 # ---- Mora (U6) ---------------------------------------------------------------
 
-def test_mo_ra_opens_its_three_panes(api):
-    effect = api.run("mo ra")
+def test_layout_docs_opens_the_three_document_panes(api):
+    effect = api.run("layout docs")
     assert effect["effect"] == "open_layout" and effect["focus"] == "edit @sel"
     assert [c["command"] for c in effect["tree"]["children"]] == ["notes", "edit @sel", "read @sel"]
     assert api.run("edit Homework")["view"] == "mora:edit"
@@ -767,8 +776,8 @@ def test_the_worksheet_previews_and_applies_as_one_step(api):
 
 # ---- Monastery (U7) ----------------------------------------------------------
 
-def test_mo_nastery_opens_agenda_and_week(api):
-    effect = api.run("mo nastery")
+def test_layout_plan_opens_agenda_and_week(api):
+    effect = api.run("layout plan")
     assert effect["effect"] == "open_layout" and effect["focus"] == "agenda"
     assert [c["command"] for c in effect["tree"]["children"]] == ["agenda", "week"]
     assert api.run("week 2026-10-05")["view"] == "monastery:week"
@@ -805,8 +814,8 @@ def test_detach_is_a_write_verb(api):
 
 # ---- Monarch (U8) ------------------------------------------------------------
 
-def test_mo_narch_opens_find_graph_and_props(api):
-    effect = api.run("mo narch")
+def test_layout_graph_opens_find_graph_and_props(api):
+    effect = api.run("layout graph")
     assert effect["effect"] == "open_layout"
     assert [c["command"] for c in effect["tree"]["children"]] == ["find", "graph @sel --depth 2", "open @sel"]
     assert api.run("graph @sel --depth 3") == {"effect": "open_view", "view": "monarch:graph",
@@ -842,8 +851,8 @@ def test_pins_live_in_the_console_state_not_the_garden(api):
 
 # ---- Home (U9) ---------------------------------------------------------------
 
-def test_mo_saic_opens_gardens_and_garden(api):
-    effect = api.run("mo saic")
+def test_layout_gardens_opens_gardens_and_garden(api):
+    effect = api.run("layout gardens")
     assert effect["effect"] == "open_layout"
     assert [c["command"] for c in effect["tree"]["children"]] == ["gardens", "garden"]
     assert api.run("gardens --archived") == {"effect": "open_view", "view": "mosaic:gardens",

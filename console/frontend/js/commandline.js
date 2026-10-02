@@ -32,9 +32,8 @@ function splitFor(event) {
 
 export function createCommandLine({ root, popupEl, store, api, components, onSubmit, onLeave }) {
   const { h } = components;
-  // `$` like a pane header's command; `mo ` typed at the start of the line
-  // is drawn as the [mo] box, so `mo tion` reads as the app's lockup.
-  const field = components.promptInput({ lockup: true });
+  // `$` like a pane header's command.
+  const field = components.promptInput();
   const status = h("span", "cmd-status");
   root.replaceChildren(h("span", "cmd-prompt", "$"), field.el, status);
 
@@ -102,18 +101,14 @@ export function createCommandLine({ root, popupEl, store, api, components, onSub
 
   function completionPopup() {
     const { comp } = st;
-    const apps = new Set(store.state.apps.map((a) => a.suffix));
-    const appMode = (comp.hint || "").startsWith("mo ");
     const rows = comp.rows.map((row) => {
       const describe = `${row.description || ""}${row.current ? " · current" : ""}`;
-      const cells = appMode ? [apps.has(row.value) ? "mo" : "", row.value, describe] : [row.value, describe];
-      return { cells, dim: row.dim, current: row.current };
+      return { cells: [row.value, describe], dim: row.dim, current: row.current };
     });
     const sel = store.primary();
-    const footer = appMode ? "tab complete · ⏎ open · ^⏎ ⇧⏎ open below / right"
-      : `tab complete · ⏎ run · ↑ history${sel ? ` · @sel = ${store.label(sel)}` : ""}`;
+    const footer = `tab complete · ⏎ run · ↑ history${sel ? ` · @sel = ${store.label(sel)}` : ""}`;
     return components.popupList({
-      hint: comp.hint || "", rows, layout: appMode ? "app" : "key",
+      hint: comp.hint || "", rows, layout: "key",
       highlighted: comp.highlighted, footer,
       onPick: (i) => applyCompletion(i),
     });

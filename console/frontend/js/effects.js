@@ -9,7 +9,7 @@
  *              re-booted on the new garden
  *   undo/redo  log what was undone; every pane re-runs
  *   refresh    every pane re-runs
- *   open_layout  an app that opens several panes (`mo tion`): they take
+ *   open_layout  a built-in layout (`layout calc`): its panes take
  *              the focused pane's place (^⏎ / ⇧⏎: a new split's)
  *   live       `solve --live on|off`: the top bar's `live`
  *   playhead   `step`, `play`, `pause`: the shared playhead
@@ -58,7 +58,8 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
     } else {
       store.setLayouts(e.layouts, e.active);
       const names = (e.layouts || []).map((l) => (l.slot ? `${l.slot}:${l.name}` : l.name)).join(", ");
-      text = e.op === "rm" ? `removed layout ${e.name}` : names || "no saved layouts";
+      const builtins = (e.builtins || []).length ? ` · built in: ${e.builtins.join(", ")}` : "";
+      text = e.op === "rm" ? `removed layout ${e.name}` : `${names || "no saved layouts"}${builtins}`;
     }
     store.log("result", text, { level: "ok" });
     return { message: text, level: "ok" };
@@ -93,7 +94,7 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
 
   function openLayout(e, { newPane }) {
     actions.openLayout(e.tree, { newPane, focusCommand: e.focus || null });
-    store.log("result", `mo ${e.app}`, { level: "ok" });
+    store.log("result", `layout ${e.name}`, { level: "ok" });
     return { message: "", level: "ok" };
   }
 

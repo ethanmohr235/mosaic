@@ -6,7 +6,7 @@ import pytest
 from core import commands
 from core import motes as motes_repo
 from core.command_bar import CommandError
-from core.commands import APP, STATEMENT, VERB, complete, expand_sel, parse
+from core.commands import STATEMENT, VERB, complete, expand_sel, parse
 from core.reserved import RESERVED_VERBS, reserved_words
 
 
@@ -17,14 +17,11 @@ def test_a_verb_first_token_is_a_verb():
     assert (parsed.kind, parsed.head, parsed.args) == (VERB, "layout", ("save", "two"))
 
 
-def test_mo_and_a_suffix_is_an_app():
-    parsed = parse("  mo tion  ")
-    assert (parsed.kind, parsed.head, parsed.args, parsed.text) == (APP, "tion", (), "mo tion")
-    assert parse("mo").head == ""
-
-
-def test_a_bare_suffix_is_an_ordinary_name():
-    assert parse("tion").kind == STATEMENT
+@pytest.mark.parametrize("line", ["mo tion", "mo", "tion"])
+def test_mo_and_old_app_suffixes_are_ordinary_names(line):
+    # The apps are gone (docs/console.md -> Polish and unification):
+    # `layout calc` opens what `mo tion` did.
+    assert parse(line).kind == STATEMENT
 
 
 def test_a_verb_wins_over_a_mote_of_the_same_name():
@@ -53,10 +50,10 @@ def test_verb_arguments_tokenize_like_a_shell():
         parse('cd "unclosed')
 
 
-def test_reserved_words_are_the_verbs_and_mo():
+def test_reserved_words_are_the_verbs():
     assert reserved_words() == set(RESERVED_VERBS)
     assert list(RESERVED_VERBS) == [
-        "mo", "find", "set", "open", "rename", "unlink", "template",
+        "find", "set", "open", "rename", "unlink", "template",
         "plot", "fit", "sim", "rule", "scenarios", "solve", "why", "step", "play", "pause",
         "edit", "read", "notes", "worksheet", "agenda", "week", "month", "detach", "graph", "gardens", "garden", "project", "cd", "layout", "refresh", "undo", "redo", "log"]
 
@@ -65,7 +62,7 @@ def test_resolve_view():
     assert commands.resolve_view("") == ("", "")
     assert commands.resolve_view("log") == ("log", "log")
     with pytest.raises(CommandError):
-        commands.resolve_view("tion")  # not ported yet: no view answers it
+        commands.resolve_view("mo tion")  # a statement: no view answers it
     with pytest.raises(CommandError):
         commands.resolve_view("R1.x = 1")
 
@@ -96,9 +93,9 @@ def test_creating_a_mote_named_like_a_verb_warns(conn):
     assert f"#{result.mote_id[:8]}" in result.message
 
 
-def test_creating_a_mote_named_like_a_verb_warns_but_a_suffix_does_not(conn):
-    assert "console word" in commands.run_statement(conn, "'mo'").message
-    assert "console word" not in commands.run_statement(conn, "tion").message
+def test_creating_a_mote_named_like_a_verb_warns_but_mo_does_not(conn):
+    assert "console word" in commands.run_statement(conn, "'find'").message
+    assert "console word" not in commands.run_statement(conn, "mo").message
 
 
 def test_ordinary_or_existing_motes_get_no_warning(conn):
@@ -120,35 +117,27 @@ def test_first_token_lists_verbs(conn):
     assert (result.ghost, result.replace_from) == ("ename", 0)
 
 
-def test_after_mo_lists_matching_apps_then_dim_apps(conn):
-    result = complete(conn, "mo r")
-    rows = result.rows
-    assert [r.value for r in rows if not r.dim] == ["ra"]
-    dim = [r.value for r in rows if r.dim]
-    assert dim == ["nolith", "te", "xie", "tion", "nastery", "narch", "saic"]
-    assert rows[0].description == "Mora — mora:edit"
-    assert result.hint == "mo ‹app›"
-    assert (result.ghost, result.replace_from) == ("a", 3)
-
-
-def test_an_app_you_can_open_outranks_one_that_is_not_available(conn, monkeypatch):
-    from core import commands as commands_module
-    monkeypatch.setattr(commands_module, "CONSOLE_APPS", (
-        commands_module.ConsoleApp("te", "Inspector"),
-        commands_module.ConsoleApp("tion", "Motion", default_view="motion:state"),
-    ))
-    result = complete(conn, "mo t")
-    assert [r.value for r in result.rows if not r.dim][:2] == ["tion", "te"]
-    assert result.ghost == "ion"
-
-
-def test_an_empty_line_lists_every_verb_and_mo_lists_every_app(conn):
+def test_an_empty_line_lists_every_verb(conn):
     result = complete(conn, "")
     assert _values(result) == list(RESERVED_VERBS)
     assert result.ghost == ""
-    apps = [a.suffix for a in commands.CONSOLE_APPS if a.default_view]
-    apps += [a.suffix for a in commands.CONSOLE_APPS if not a.default_view]
-    assert _values(complete(conn, "mo ")) == apps
+
+
+def test_layout_offers_its_ops_then_saved_then_built_in_layouts(conn):
+    builtins = [b.name for b in commands.BUILTIN_LAYOUTS]
+    assert builtins == ["calc", "docs", "plan", "graph", "gardens"]
+    assert _values(complete(conn, "layout ", layouts=["mine"])) == [*commands.LAYOUT_OPS, "mine", *builtins]
+    # A saved layout named like a built-in shadows it, so it is listed once.
+    assert _values(complete(conn, "layout load ", layouts=["calc"])) == ["calc", *builtins[1:]]
+    assert _values(complete(conn, "layout rm ", layouts=["mine"])) == ["mine"]
+
+
+def test_builtin_layouts_open_ordinary_commands():
+    for layout in commands.BUILTIN_LAYOUTS:
+        commands_in = [c["command"] for c in layout.tree["children"]]
+        assert layout.focus in commands_in
+        for command in commands_in:
+            commands.resolve_view(command)  # every pane is a view
 
 
 def test_first_token_also_offers_mote_names_but_not_reserved_ones(conn):
@@ -187,8 +176,8 @@ def test_cd_completes_garden_names(conn):
 
 def test_layout_completes_ops_then_names(conn):
     ops = complete(conn, "layout ", layouts=["two", "three"])
-    assert _values(ops) == ["save", "load", "list", "rm"]
-    assert ops.hint == "layout save|load|list|rm ‹name›"
+    assert _values(ops)[:6] == ["save", "load", "list", "rm", "two", "three"]
+    assert ops.hint == "layout ‹name› | layout save|load|list|rm ‹name›"
     assert ops.replace_from == 7
 
     names = complete(conn, "layout load t", layouts=["two", "three", "one"])

@@ -1,4 +1,4 @@
-/* `mora:edit` (`edit @sel|#id|‹name›`, `mo ra`): a note's .modoc source
+/* `mora:edit` (`edit @sel|#id|‹name›`, `layout docs`): a note's .modoc source
  * (docs/console.md → Settled for U6).
  *
  * The editor (js/editor.js) is modal: `i` or ⏎ starts typing, `esc` stops.

@@ -1,4 +1,4 @@
-/* `monastery:week` (`week [date] …`, `mo nastery`): the week as an hour
+/* `monastery:week` (`week [date] …`, `layout plan`): the week as an hour
  * grid on the --line grid (docs/console.md → Settled for U7).
  *
  * Above the hours, the all-day strip: bars (multi-day values, a start

@@ -1,20 +1,15 @@
-/* The top bar. Left: the `[mo]` box flush to the edge, the focused
- * pane's app suffix (`saic` for shell views), and the garden's ownership
- * path in --dim (`/ college-fall-2026 / hw4`); a crumb above the open
- * garden `cd`s there (docs/console.md → Settled for U9).
- * Right: the saved layouts as `1:name` tabs (the active one inverted,
+/* The top bar. Left: the `[mo]saic` wordmark flush to the edge (the
+ * same whatever is focused), and the garden's ownership path in --dim
+ * (`/ college-fall-2026 / hw4`); a crumb above the open garden `cd`s
+ * there (docs/console.md → Settled for U9).
+ * Right: the slotted layouts as `1:name` tabs (the active one inverted,
  * with `*` when the tree has drifted from it), the playhead (`tick 12/49
- * ▶`) and `live` when Motion has them, then `unsaved layout` in
+ * ▶`) and `live` when a sim pane has them, then `unsaved layout` in
  * --warn, and `sel X +N · linked in N panes` or the pane count. A tab
  * click switches layout, like its number key. */
 
 export function createTopbar({ root, store, panes, actions, components, onRun = () => {} }) {
   const { h } = components;
-
-  function suffix() {
-    const pane = panes.focused();
-    return (pane && pane.view && pane.view.app) || "saic";
-  }
 
   /** One tab per slotted layout, in slot order; `layout load` reaches the rest. */
   function tabs(dirty) {
@@ -71,7 +66,7 @@ export function createTopbar({ root, store, panes, actions, components, onRun = 
     const dirty = store.dirty();
     root.replaceChildren(
       h("span", "mo-box", "mo"),
-      h("span", "app-suffix", suffix()),
+      h("span", "wordmark", "saic"),
       breadcrumb(),
       h("span", "grow"),
       h("span", "tabs", tabs(dirty)),

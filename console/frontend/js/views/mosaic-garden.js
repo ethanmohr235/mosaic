@@ -1,4 +1,4 @@
-/* `mosaic:garden` (`garden [‹name›]`, `mo saic`): one garden's details
+/* `mosaic:garden` (`garden [‹name›]`, `layout gardens`): one garden's details
  * (docs/console.md → Settled for U9) -- its ownership path, its cover and
  * owner, what it owns, counts and size, when it last changed, how it
  * syncs, why it is archived, and what is wrong with its ownership.

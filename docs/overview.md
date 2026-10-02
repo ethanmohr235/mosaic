@@ -99,7 +99,7 @@ and the port order.
 | **Moxie** | Plots, heading toward publication-quality export. |
 | **Monolith** | The general table, plus a project variables pane (value, unit, given/solved/external, ±). |
 | **Monastery** | The agenda that launches work: project bars, plan-my-week, click-to-open, planned vs. actual time. |
-| **Gardens → Home** | `mo saic`: the garden tree (owners → owned gardens) plus loose and archived gardens, and every garden act as a command. Health indicators come later. |
+| **Gardens → Home** | `layout gardens`: the garden tree (owners → owned gardens) plus loose and archived gardens, and every garden act as a command. Health indicators come later. |
 | **Monarch** | A structure debugger: the console's `graph` pane, for seeing plumbing (edits are commands). No annotations. |
 | **CLI / MCP** | Scriptable and agent access to the same core. MCP is a side door, not the product. |
 

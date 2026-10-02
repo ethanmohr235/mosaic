@@ -175,8 +175,7 @@ export function kvGrid(pairs, { wide = false } = {}) {
  *
  *   hint, hintRight, footer   strings
  *   rows      [{cells: [string|Node, ...], dim?, current?}]
- *   layout    "key" (value | description), "app" (mo | suffix | description),
- *             "time" (HH:MM | command)
+ *   layout    "key" (value | description), "time" (HH:MM | command)
  *   highlighted  index drawn inverted, or -1
  *   onPick    (index, event) -> void, on click
  */
@@ -242,7 +241,7 @@ export function paneHeader({ onClick = null } = {}) {
  * the mirror.
  *   {el, input, value(), set(text, caret?), setGhost(text), refresh(), destroy()}
  */
-export function promptInput({ placeholder = "", lockup = false } = {}) {
+export function promptInput({ placeholder = "" } = {}) {
   const input = h("input", "c-input-native");
   input.type = "text";
   input.spellcheck = false;
@@ -258,8 +257,7 @@ export function promptInput({ placeholder = "", lockup = false } = {}) {
     const start = input.selectionStart ?? text.length;
     const end = input.selectionEnd ?? start;
     const focused = document.activeElement === input;
-    const marks = lockup && LOCKUP.test(text) ? [{ from: 0, to: 2, cls: "c-input-mo" }] : [];
-    const parts = mirrorParts(text, start, end, focused, marks);
+    const parts = mirrorParts(text, start, end, focused);
     const showGhost = ghost && focused && start === end && start === text.length;
     if (showGhost) parts.push(h("span", "c-input-ghost", ghost));
     else if (!text && placeholder) parts.push(h("span", "c-input-ghost", placeholder));
@@ -299,20 +297,9 @@ export function promptInput({ placeholder = "", lockup = false } = {}) {
   };
 }
 
-/* `mo ` opening the line: the verb that opens an app, drawn as the [mo]
- * box (docs/console.md → *Command line and grammar*). */
-const LOCKUP = /^mo /;
-
-/**
- * The mirror's spans: the text cut at the selection or cursor, and at
- * each mark ({from, to, cls}: a range drawn with an extra class, e.g. the
- * [mo] box). A mark only restyles its characters -- it never adds width,
- * so the invisible native input's caret and clicks stay on the same
- * character as what is drawn.
- */
-function mirrorParts(text, start, end, focused, marks = []) {
+/** The mirror's spans: the text cut at the selection or cursor. */
+function mirrorParts(text, start, end, focused) {
   const cuts = new Set([0, text.length]);
-  marks.forEach((m) => { cuts.add(m.from); cuts.add(m.to); });
   if (focused) {
     cuts.add(start);
     cuts.add(end);
@@ -322,7 +309,7 @@ function mirrorParts(text, start, end, focused, marks = []) {
   const parts = [];
   for (let i = 0; i < points.length - 1; i++) {
     const [a, b] = [points[i], points[i + 1]];
-    const classes = marks.filter((m) => m.from <= a && b <= m.to).map((m) => m.cls);
+    const classes = [];
     if (focused && start !== end && start <= a && b <= end) classes.push("c-input-sel");
     if (focused && start === end && a === start) classes.push("c-input-cursor", "on-char");
     parts.push(h("span", classes.join(" "), text.slice(a, b)));

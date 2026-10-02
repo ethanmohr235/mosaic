@@ -25,12 +25,12 @@ view, the `find` table, the props pane and plots.
 
 ### The shell
 
-- **Top bar:** the `[mo]` box, the focused pane's app, and `/ garden`.
-  On the right, saved layouts as tabs (`1:two`) with `*` and
+- **Top bar:** the `[mo]saic` wordmark and `/ garden` (the ownership path).
+  On the right, slotted layouts as tabs (`1:two`) with `*` and
   *unsaved layout* once the panes drift from the active one, then the
   selection (`sel bd +2 · linked in N panes`) or, with nothing selected,
   the pane count.
-- **Command line** (`$` prompt; a typed `mo ` shows as the `[mo]` box): `:` or `/` focuses it and `esc`
+- **Command line** (`$` prompt): `:` or `/` focuses it and `esc`
   leaves. `⏎` runs in the focused pane, `^⏎` in a new pane below and `⇧⏎` in one to the right. `tab`
   completes, and the best match shows as ghost text. `↑` on an empty
   line opens this garden's history (`^r` searches it). Errors show in
@@ -42,13 +42,13 @@ view, the `find` table, the props pane and plots.
 
 | Line | Does |
 |---|---|
-| `mo tion`, `mo ra`, `mo xie`, `mo nolith`, … | Open that app (`mo` then `tab` lists them). `mo tion` and `mo ra` open three panes in the focused one's place. Unported apps open their old window. |
-| `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). `mo nolith` is `find` with no conditions. |
-| `open @sel\|#id\|<name>` | A mote's properties and links (below). `mo te` is `open @sel`. |
+| `layout calc`, `layout docs`, `layout plan`, `layout graph`, `layout gardens` | A built-in layout, in the focused pane's place (`layout ` then `tab` lists them with the saved ones). A saved layout of the same name wins. |
+| `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). |
+| `open @sel\|#id\|<name>` | A mote's properties and links (below). |
 | `rename <target> <old> <new>` | Rename a property, keeping its value and unit. Refuses to overwrite a key that exists. |
 | `unlink <target> <type> <other>` or `unlink <target> #<rel>` | Remove a relationship (either direction). |
 | `template <mote> <species>` | Make a mote the one its species' new instances start from. |
-| `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `mo xie` is `plot` with nothing to plot yet. |
+| `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `plot` alone shows its grammar. |
 | `plot save <name>`, `plot export csv\|png [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
 | `fit <m.y> vs <m.x> --data <Y> vs <X> --free <m.k>…` | Fit inputs to measured points (below). `--apply` writes the result. |
 | `edit @sel\|<note>`, `read @sel\|<note>`, `notes [text]` | Write a note, read it rendered, list the notes (below). |
@@ -69,7 +69,7 @@ view, the `find` table, the props pane and plots.
 expected, except after `set`, where it is the whole selection. A mote
 named like a verb (`log`, `find`) is reached as `"log"` or `#id`.
 
-### Props (`open`, `mo te`, and `p`)
+### Props (`open`, and `p`)
 
 One mote: its name as the title with its species, a key/value grid with
 a typed value per property (a number shows its unit, a reference is a
@@ -102,7 +102,7 @@ Not in the console yet: the calendar picker for a date (dates edit as
 `2026-10-02` text until U7). A note is written with `edit ‹note›` and a
 solved value explained with `why ‹m.k›`.
 
-### The table (`find`, `mo nolith`)
+### The table (`find`)
 
 Every mote the line asks for, one row each. The query language is
 `core/findtext.py` over `core/query.py`:
@@ -143,7 +143,7 @@ unselected row it runs `set #id …` and writes that one. Either way it is
 a command: in the history, the log and undo. An empty value clears the
 key.
 
-### Plots (`plot`, `mo xie`)
+### Plots (`plot`)
 
 A value against another, with the whole garden re-solved at every point
 of the range, in memory. **Nothing is written** -- not a value, not a
@@ -232,9 +232,9 @@ Not ported from the old window: baselines (a scenario's curve drawn
 dashed beside each series) and the plot grid, which tiling replaces.
 `fit` is the step after U4.
 
-### Motion (`sim`, `rule`, `scenarios`, `mo tion`)
+### Sim (`sim`, `rule`, `scenarios`; `layout calc`)
 
-`mo tion` puts three panes where the focused one was:
+`layout calc` puts three panes where the focused one was:
 `scenarios | sim | rule @sel`. Each is also a command on its own.
 
 ```
@@ -314,9 +314,9 @@ Not ported from the old window: the node board (a graph of the model
 is the `graph` pane, U8), value lanes, the pre-flight role check
 and the impact view (both stay in the CLI and MCP).
 
-### Notes (`edit`, `read`, `notes`, `mo ra`)
+### Notes (`edit`, `read`, `notes`; `layout docs`)
 
-`mo ra` puts three panes where the focused one was:
+`layout docs` puts three panes where the focused one was:
 `notes | edit @sel | read @sel`. Each is also a command on its own.
 
 | Line | Pane |
@@ -370,9 +370,9 @@ The garden's reading is in **blocks**, one per independent calculation
 givens and unknowns, then its equations, each after the ones that work
 out what it reads.
 
-### Calendar (`agenda`, `week`, `month`, `mo nastery`)
+### Calendar (`agenda`, `week`, `month`; `layout plan`)
 
-`mo nastery` puts `agenda | week` where the focused pane was.
+`layout plan` puts `agenda | week` where the focused pane was.
 
 | Line | Pane |
 |---|---|
@@ -462,9 +462,9 @@ Not ported from the old window: the mini calendar, the draft popover's
 species picker (type `R1 : task` after creating), and polling -- the
 console re-reads on focus and after every write, like every pane.
 
-### The graph (`graph`, `mo narch`)
+### The graph (`graph`; `layout graph`)
 
-`mo narch` puts `find | graph @sel --depth 2 | open @sel` where the
+`layout graph` puts `find | graph @sel --depth 2 | open @sel` where the
 focused pane was.
 
 | Line | Pane |
@@ -499,9 +499,9 @@ Monarch's sticky notes, group boxes and pen strokes are gone, and the
 first open of a garden drops their stored data (`docs/architecture.md`
 -> *The graph*).
 
-### Home (`gardens`, `garden`, `mo saic`)
+### Gardens (`gardens`, `garden`; `layout gardens`)
 
-`mo saic` puts `gardens | garden` where the focused pane was. The top
+`layout gardens` puts `gardens | garden` where the focused pane was. The top
 bar's breadcrumb is the open garden's ownership path
 (`/ college-fall-2026 / hw4`); click a crumb to `cd` there.
 
@@ -580,7 +580,7 @@ Boots on a seeded temp garden and checks the following:
   `d d` delete and `⏎` on a link from the props pane
 - `p` opens the float on the selection and `esc` closes it
 - an `open @sel` pane survives a relaunch
-- `mo xie` opens a plot pane; a `plot` line draws the solved curve and the
+- `plot` opens a plot pane; a `plot` line draws the solved curve and the
   cursor reads it; zoom, `y` and `t` rewrite the line; a knob moves the
   curve and never writes; `plot save` writes a saved plot that one `undo`
   removes; `plot export csv` and `png` write files
@@ -588,11 +588,11 @@ Boots on a seeded temp garden and checks the following:
   `r_a = 50` without writing; `a` applies it with `source: fitted` and one
   `undo` takes it back
 - a plot pane survives a relaunch
-- `mo narch` opens find | graph | props and the graph draws the
+- `layout graph` opens find | graph | props and the graph draws the
   selection's neighbourhood; a walk, `⏎`, and `[` `]` rewriting the
   depth; ctrl+drag prefills a link and `d d` deletes; dragging pins a
   node beside the garden, `U` unpins and `o` opens
-- `mo saic` opens gardens | garden and the detail follows the cursor;
+- `layout gardens` opens gardens | garden and the detail follows the cursor;
   `garden new`, `garden rm` (a second ⏎) and `garden restore`; `project
   start @sel` makes a garden, and the breadcrumb shows and climbs its path
 

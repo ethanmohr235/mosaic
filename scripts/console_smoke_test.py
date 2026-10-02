@@ -20,7 +20,7 @@ selects three rows, `set @sel` writes them and one `undo` reverts them,
 a header click rewrites the pane's command, an inline edit writes, and
 the sorted find pane survives a relaunch. Without the namespace those
 checks are skipped (and say so). U3 drives the props pane and the `p`
-float; U4 drives the plot pane: `mo xie`, a solved curve the cursor
+float; U4 drives the plot pane: `plot`, a solved curve the cursor
 reads, zoom / log / hide rewriting the line, a knob that never writes,
 `plot save` + `undo`, `plot export csv|png`, and a relaunch. Everything is driven the way a person does it -- key
 events, clicks and drags -- because tests/test_console_api.py already
@@ -136,7 +136,7 @@ def tile(window, key):
 
 def type_command(window, line, new_pane=False):
     """`:` to the command line, type `line`, ⏎ (`^⏎` for a new pane
-    below, which new_pane=True also means; `⇧⏎` for new_pane="right")."""
+    below, which new_pane="right" also means; `⇧⏎` for new_pane="right")."""
     press(window, ":")
     assert wait_until(lambda: js(window, "document.activeElement.classList.contains('c-input-native')"
                                          " && !!document.activeElement.closest('#cmdline')")), \
@@ -475,7 +475,7 @@ def u3_checks(window):
         type_command(window, "find type:chore --sort name")
         assert wait_until(lambda: len(table_keys(window)) >= 4, timeout=8)
         click_row(window, 0)
-        type_command(window, "open @sel", new_pane=True)
+        type_command(window, "open @sel", new_pane="right")
         assert wait_until(lambda: props_title(window).startswith("chore0"), timeout=8), \
             f"the props pane should show the clicked row, got {props_title(window)!r}"
         # Select another row by clicking it in the table pane.
@@ -564,27 +564,21 @@ def u3_checks(window):
             f"the float should show the selection, {shown!r}, got {props_title(window, '.props-float')!r}"
         press(window, "Escape")
         assert wait_until(lambda: count(window, ".props-float:not([hidden])") == 0), "`esc` should close it"
-        type_command(window, "open @sel", new_pane=True)  # back, for the relaunch check
+        type_command(window, "open @sel", new_pane="right")  # back, for the relaunch check
         assert wait_until(lambda: count(window, ".pane .view-props") == 1)
         no_errors(window)
 
     check("U3: `p` opens the props float and `esc` closes it", float_toggles)
 
-    def mo_is_a_verb():
-        press(window, ":")
-        js(window, """
-            (() => { const i = document.activeElement; i.value = 'mo t';
-                     i.setSelectionRange(4, 4); i.dispatchEvent(new Event('input', {bubbles: true})); })();
-        """)
-        assert wait_until(lambda: texts(window, "#cmdline .c-input-mo") == ["mo"]), \
-            "typing `mo ` should draw the [mo] box"
+    def one_wordmark():
         assert texts(window, "#cmdline .cmd-prompt") == ["$"], "the command line's prompt is `$`"
-        press(window, "Escape")
-        type_command(window, "mo te", new_pane=True)
-        assert wait_until(lambda: "open @sel" in headers(window)), "`mo te` should open the props view"
+        assert texts(window, "#topbar .wordmark") == ["saic"], "the top bar's wordmark is [mo]saic"
+        type_command(window, "open @sel", new_pane="right")
+        assert wait_until(lambda: "open @sel" in headers(window)), "`open @sel` should open the props view"
+        assert texts(window, "#topbar .wordmark") == ["saic"], "the wordmark doesn't follow focus"
         no_errors(window)
 
-    check("U3: `mo` is the verb that opens an app, drawn as the [mo] box", mo_is_a_verb)
+    check("U3: the top bar is one [mo]saic wordmark whatever is focused", one_wordmark)
 
 
 def u3_restored_checks(window):
@@ -637,11 +631,11 @@ def saved_plots():
 
 def u4_checks(window):
     def mo_xie_opens():
-        type_command(window, "mo xie", new_pane=True)
-        assert wait_until(lambda: count(window, ".view-plot .plot-empty") == 1), "`mo xie` should open an empty plot pane"
+        type_command(window, "plot", new_pane="right")
+        assert wait_until(lambda: count(window, ".view-plot .plot-empty") == 1), "`plot` should open an empty plot pane"
         no_errors(window)
 
-    check("U4: `mo xie` opens the plot pane", mo_xie_opens)
+    check("U4: `plot` opens the plot pane", mo_xie_opens)
 
     def draws_a_curve():
         type_command(window, PLOT)
@@ -715,7 +709,7 @@ def rail_text(window):
 
 def fit_checks(window):
     def fit_pane():
-        type_command(window, FIT, new_pane=True)
+        type_command(window, FIT, new_pane="right")
         assert wait_until(lambda: FIT in headers(window)), f"headers: {headers(window)}"
         assert wait_until(lambda: count(window, ".view-plot circle.plot-point") == 4), "the four measured points"
         assert wait_until(lambda: count(window, ".view-plot path.plot-series") >= 1), "the fitted curve"
@@ -746,14 +740,14 @@ def sim_text(window):
 
 def u5_checks(window):
     def mo_tion_opens_three_panes():
-        type_command(window, "mo tion", new_pane=True)
+        type_command(window, "layout calc", new_pane="right")
         assert wait_until(lambda: {"scenarios", "sim", "rule @sel"} <= set(headers(window))), \
             f"headers: {headers(window)}"
         assert wait_until(lambda: "C1.current" in sim_text(window)), sim_text(window)
         assert wait_until(lambda: "tick 0/49" in topbar(window)), topbar(window)
         no_errors(window)
 
-    check("U5: `mo tion` opens scenarios | sim | rule @sel, and the sim pane owns the playhead",
+    check("U5: `layout calc` opens scenarios | sim | rule @sel, and the sim pane owns the playhead",
           mo_tion_opens_three_panes)
 
     def playhead_moves():
@@ -856,9 +850,9 @@ def u6_checks(window):
     def mo_ra_opens_three_panes():
         seed_note()
         type_command(window, "refresh")
-        type_command(window, "mo ra", new_pane=True)
+        type_command(window, "layout docs", new_pane="right")
         assert wait_until(lambda: {"notes", "edit @sel", "read @sel"} <= set(headers(window))), headers(window)
-        assert "edit @sel" in focused_head(window), "mo ra focuses the editor"
+        assert "edit @sel" in focused_head(window), "layout docs focuses the editor"
         focus_pane(window, "notes")
         assert wait_until(lambda: "Homework" in js(window, "document.querySelector('.pane.focused').textContent")), \
             "the notes pane should list Homework; focused: " + focused_head(window)
@@ -867,7 +861,7 @@ def u6_checks(window):
         assert wait_until(lambda: "The divider C1 runs at 10" in read_text(window)), read_text(window)
         no_errors(window)
 
-    check("U6: `mo ra` opens notes | edit @sel | read @sel, and ⏎ on a note shows it", mo_ra_opens_three_panes)
+    check("U6: `layout docs` opens notes | edit @sel | read @sel, and ⏎ on a note shows it", mo_ra_opens_three_panes)
 
     def typing_follows_and_saves_once():
         focus_pane(window, "edit @sel")
@@ -895,7 +889,7 @@ def u6_checks(window):
           typing_follows_and_saves_once)
 
     def worksheet_applies_on_esc():
-        type_command(window, "worksheet", new_pane=True)
+        type_command(window, "worksheet", new_pane="right")
         assert wait_until(lambda: focused_text(window) is not None)
         press(window, "i")
         type_into_editor(window, (focused_text(window) or "") + "\nzz.q = 7 m")
@@ -956,14 +950,14 @@ def u7_checks(window):
     def mo_nastery_opens_agenda_and_week():
         seed_calendar()
         type_command(window, "refresh")
-        type_command(window, "mo nastery", new_pane=True)
+        type_command(window, "layout plan", new_pane="right")
         assert wait_until(lambda: {"agenda", "week"} <= set(headers(window))), headers(window)
         assert wait_until(lambda: "Lab7" in js(window, "document.querySelector('.view-agenda').textContent")), \
             "the agenda should list Lab7"
         assert wait_until(lambda: count(window, ".view-week .wk-event") >= 2), "the week grid should draw events"
         no_errors(window)
 
-    check("U7: `mo nastery` opens agenda | week with today's events", mo_nastery_opens_agenda_and_week)
+    check("U7: `layout plan` opens agenda | week with today's events", mo_nastery_opens_agenda_and_week)
 
     def keys_move_through_set_and_undo():
         focus_pane(window, "agenda")
@@ -1026,7 +1020,7 @@ def u7_checks(window):
         click_agenda_row(window, "Lab7")
         press(window, "o")
         assert wait_until(lambda: f"open #{CAL['lab']}" in headers(window)), headers(window)
-        type_command(window, "month", new_pane=True)
+        type_command(window, "month", new_pane="right")
         assert wait_until(lambda: count(window, ".view-month .mo-cell") == 42)
         no_errors(window)
 
@@ -1067,7 +1061,7 @@ def u8_checks(window):
     graph_pane = "graph @sel --depth 2"
 
     def mo_narch_follows_the_selection():
-        type_command(window, "mo narch", new_pane=True)
+        type_command(window, "layout graph", new_pane="right")
         assert wait_until(lambda: {"find", graph_pane, "open @sel"} <= set(headers(window))), headers(window)
         type_command(window, "chore0")
         assert wait_until(lambda: graph_has(window, ids["c0"], ids["chore"], ids["c1"])), \
@@ -1075,7 +1069,7 @@ def u8_checks(window):
         assert not graph_has(window, ids["R1"]), "R1 is not two hops from chore0"
         no_errors(window)
 
-    check("U8: `mo narch` opens find | graph | props, and the graph follows the selection",
+    check("U8: `layout graph` opens find | graph | props, and the graph follows the selection",
           mo_narch_follows_the_selection)
 
     def keys_walk_select_and_rewrite_depth():
@@ -1138,7 +1132,7 @@ def u9_checks(window):
     from core.gardens import garden_exists
 
     def mo_saic_lists_and_follows():
-        type_command(window, "mo saic", new_pane=True)
+        type_command(window, "layout gardens", new_pane="right")
         assert wait_until(lambda: {"gardens", "garden"} & set(headers(window)) == {"gardens", "garden"}
                           or any(h.startswith("garden ") for h in headers(window))), headers(window)
         assert wait_until(lambda: {GARDEN, OTHER_GARDEN} <= set(home_names(window))), home_names(window)
@@ -1149,7 +1143,7 @@ def u9_checks(window):
             f"the detail pane should follow the cursor, got {headers(window)}"
         no_errors(window)
 
-    check("U9: `mo saic` opens gardens | garden, and the detail follows the cursor", mo_saic_lists_and_follows)
+    check("U9: `layout gardens` opens gardens | garden, and the detail follows the cursor", mo_saic_lists_and_follows)
 
     def garden_verbs_make_remove_restore():
         type_command(window, "garden new labnine")

@@ -222,8 +222,6 @@ class Api:
         parsed = commands.parse(expanded)
         if parsed.kind == commands.VERB:
             return self._run_verb(parsed)
-        if parsed.kind == commands.APP:
-            return self._run_app(parsed)
         return self._run_statement(parsed.text, confirm)
 
     def _run_statement(self, text: str, confirm: bool) -> dict:
@@ -270,23 +268,6 @@ class Api:
         if parsed.head == "redo":
             return {"effect": "redo", "label": self._session.undo.redo()}
         return _error(f"{parsed.head} isn't available yet")
-
-    def _run_app(self, parsed: commands.ParsedLine) -> dict:
-        if not parsed.head:
-            return _error(f"usage: {RESERVED_VERBS['mo']['usage']}")
-        app = commands.find_app(parsed.head)
-        if app is None:
-            suffixes = ", ".join(a.suffix for a in commands.CONSOLE_APPS)
-            return _error(f"no app mo {parsed.head} -- try {suffixes}")
-        if parsed.args:
-            return _error(f"mo {parsed.head} takes nothing after the app")
-        if app.layout:
-            return {"effect": "open_layout", "app": app.suffix, "tree": app.layout,
-                    "focus": app.default_command}
-        if app.default_view:
-            return {"effect": "open_view", "view": app.default_view,
-                    "command": app.default_command or app.suffix}
-        return _error(f"{app.name} isn't available yet")
 
     def _verb_write(self, verb: str, args: tuple[str, ...], selection: list[str]) -> dict:
         result = commands.WRITE_VERBS[verb](self._session.conn, args, selection)
@@ -417,15 +398,21 @@ class Api:
         return {"effect": "garden", "boot": self._boot_payload()}
 
     def _verb_layout(self, args: tuple[str, ...]) -> dict:
+        if len(args) == 1 and args[0] not in commands.LAYOUT_OPS:
+            args = ("load", args[0])  # `layout calc`
         op = args[0] if args else None
         if op == "list" and len(args) == 1:
-            return {"effect": "layout", "op": "list", **self._layouts_summary()}
+            return {"effect": "layout", "op": "list", **self._layouts_summary(),
+                    "builtins": [b.name for b in commands.BUILTIN_LAYOUTS]}
         if op not in ("save", "load", "rm") or len(args) != 2:
             return _error(f"usage: {RESERVED_VERBS['layout']['usage']}")
         name = args[1]
         if op == "save":
             state_repo.validate_layout_name(name)
             return {"effect": "layout", "op": "save", "name": name}
+        builtin = commands.builtin_layout(name)
+        if op == "load" and builtin and self._state.layout_get(name) is None:
+            return {"effect": "open_layout", "name": name, "tree": builtin.tree, "focus": builtin.focus}
         if self._state.layout_get(name) is None:
             return _error(f"no layout named {name!r}")
         if op == "load":
@@ -462,11 +449,6 @@ class Api:
         return {
             "garden": self._session.garden,
             "gardens": gardens_repo.list_gardens(),
-            "apps": [
-                {"suffix": app.suffix, "name": app.name,
-                 "defaultView": app.default_view, "layout": app.layout}
-                for app in commands.CONSOLE_APPS
-            ],
             "verbs": [{"verb": verb, **meta} for verb, meta in RESERVED_VERBS.items()],
             "layouts": list(self._state.layouts),
             "active": self._state.active,

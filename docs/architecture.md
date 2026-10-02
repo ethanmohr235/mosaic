@@ -127,7 +127,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance`, `uncertainty` and `archived` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
-The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `mo`, `find`, `set`, `open`, `rename`, `unlink`, `template`, `plot`, `fit`, `sim`, `rule`, `scenarios`, `solve`, `why`, `step`, `play`, `pause`, `cd`, `layout`, `refresh`, `undo`, `redo`, `log` -- plus the app suffixes `nolith`, `te`, `xie`, `tion`, `ra`, `nastery`, `narch` and `saic` from `core/commands.py::CONSOLE_APPS`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
+The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `find`, `set`, `open`, `rename`, `unlink`, `template`, `plot`, `fit`, `sim`, `rule`, `scenarios`, `solve`, `why`, `step`, `play`, `pause`, `cd`, `layout`, `refresh`, `undo`, `redo`, `log`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 
 A reserved name is a **last resort**, not the normal way to give a property meaning. Where a value has a shape of its own, the engine recognizes the shape and the key is yours to name: when something happens is an ISO 8601 interval under any key at all (see Time below). The names above survive because their values genuinely cannot be told apart by looking -- `roles`, `units` and `configuration` are all plain dicts, and an `equation`-shaped false positive would silently join the solver.
 
@@ -894,7 +894,7 @@ What counts as a problem is answered once, in
 exists: it was briefly the CLI's own, and Mora promptly reported a note
 with a dangling `\mote{...}` in it as having no problems at all.
 
-Notes are written in the console (`mo ra`: `notes | edit @sel | read
+Notes are written in the console (`layout docs`: `notes | edit @sel | read
 @sel`, docs/console.md → *Settled for U6*). The read pane parses nothing
 itself: `core/document.py::render` hands it the whole document --
 every block `core/modoc.py` parsed, with what `core/modoc_bind.py`
@@ -1230,7 +1230,7 @@ layout (`console/state.py`), never in the garden. See `docs/ui-setup.md`.
 
 # Simulation
 
-Simulation is the console's Motion panes (`mo tion`, docs/console.md →
+Simulation is the console's sim panes (`layout calc`, docs/console.md →
 *Settled for U5*): `scenarios | sim | rule @sel`. It was a sixth window
 (`motion/`), and before that a settings popover, a scrub bar and a runs
 panel on Monarch, gating every graph edit behind "commit or discard
@@ -1270,7 +1270,7 @@ kept per garden in the console sidecar -- UI state, like layouts.
 
 # The graph
 
-The console's `graph` pane (`monarch:graph`, `mo narch`) is Monarch's
+The console's `graph` pane (`monarch:graph`, `layout graph`) is Monarch's
 canvas renderer kept and restyled, not Cytoscape (docs/console.md ->
 *Settled for U8*). `core/graphview.py` answers the line:
 
@@ -1311,7 +1311,7 @@ a model is a note (see Notes).
 
 # Home
 
-The console's Home (`mo saic`: `gardens | garden`, docs/console.md ->
+The console's gardens panes (`layout gardens`: `gardens | garden`, docs/console.md ->
 *Settled for U9*) is the ownership tree of `core/projects.py` drawn as a
 pane, and the garden manager the Gardens window used to be.
 

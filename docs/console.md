@@ -29,11 +29,11 @@ through plan mode, questions and approval before any code. Anything under
 |---|---|
 | Frontend in `ui/frontend/`, API in `ui/api.py` | Neither exists. The console is `console/` (`api.py` and a namespace module per app) with `console/frontend/`. See *Architecture*. |
 | Graph drawn with Cytoscape | Monarch's graph is a hand-written canvas, kept and restyled to the graph styling rules (`console/frontend/js/graph.js`, U8). |
-| Apps: Observatory (`mo rph`), Motion, Moxie, Monastery, Mote Inspector, Launcher | See *App names* below. Observatory is Monarch (`mo narch`), and there is no `mo rph`. Mora, Monolith and Home are missing from the handoff. Momentum is being removed and is never ported. |
+| Apps: Observatory (`mo rph`), Motion, Moxie, Monastery, Mote Inspector, Launcher | There are no apps, only views and built-in layouts (see *Views and built-in layouts*). Observatory is the `graph` pane. Momentum was removed and never ported. |
 | Fixed mote-type colors: task, note, event, source | Mosaic privileges no type. Motes are colored by **species**, using the existing probed palette retuned into the design's band. See *Color*. |
 | Motion *runs* list, `diff vs #0412`, Moxie `run #0414` | Saved run history and *commit tick* are cut (`roadmap.md`). Motion lists **scenarios**. A run is a curve you plot, not a record you diff. |
 | `hil disconnected` hardware row | Not a feature. Ignore it. |
-| The prompt is always `mo`; the first token is an app suffix or a command | The prompt is `$`. `mo` is the verb that opens an app (`mo tion`), drawn as the `[mo]` box once typed; a bare suffix is an ordinary word. The top bar keeps the `[mo]` box. |
+| The prompt is always `mo`; the first token is an app suffix or a command | The prompt is `$`, and the first token is a verb or a statement. The top bar keeps the `[mo]` box as the `[mo]saic` wordmark. |
 | Selection is one mote id | Selection is an **ordered set with a primary**. See *Selection*. |
 | Inspector is only the `mote:props` pane | The props pane plus a floating inspector on demand. See *Inspector*. |
 | Google Fonts for Geist Mono | Vendored, like the current fonts. Nothing is fetched at runtime. |
@@ -95,30 +95,28 @@ else.
 ### Command line and grammar
 
 - **One line, one merged grammar.** The prompt is `$`, as in a pane
-  header. The first token is one of three things:
-  1. **`mo` and an app suffix**, which opens that app's default view
-     (`mo tion`, `mo xie`). `mo` is the verb; once `mo ` is typed, the
-     command line draws those two letters as the `[mo]` box, so the line
-     reads as the app's lockup (`[mo]tion`). Decided 2026-09-30, replacing
-     the handoff's always-visible `[mo]` prompt.
-  2. a **verb** (`find`, `open`, `graph`, `plot`, `fit`, `new`, `link`,
-     `set`, `layout save`, …).
-  3. anything else, which falls through to the existing modeling
+  header. The first token is one of two things:
+  1. a **verb** (`find`, `open`, `graph`, `plot`, `fit`, `set`,
+     `layout calc`, `layout save`, …).
+  2. anything else, which falls through to the existing modeling
      statements in `core/command_bar.py` (`R1.x = 5 ohm`, `A -> B`,
      `R1 : Resistor`, `R1.x ?`, `delete R1`).
+
+  Until 2026-10-02 a third form, `mo` and an app suffix (`mo tion`),
+  opened an app; built-in layouts replaced it (*Polish and
+  unification*).
 
   Parsing lives in `core/commands.py`, never in JS, so the CLI and MCP
   can run the same commands.
 - **Verbs win, quoting escapes.** Verbs (`core/reserved.py` →
-  `RESERVED_VERBS`, `mo` among them) are reserved words; an app suffix
-  is not, since it is only ever `mo`'s argument. A line whose
+  `RESERVED_VERBS`) are reserved words. A line whose
   first token is one of them is that word. A mote with a reserved name
   is still reachable as `"find"` (quoted) or `#id`, and creating one
   from the command line warns about exactly that. Each port step adds
   its own verbs to `RESERVED_VERBS`.
-- **Every app is ported** (U2-U9): each has a default view in
-  `CONSOLE_APPS` (`core/commands.py`). The old windows, and the
-  console's way of launching them, are gone.
+- **Every app is ported** (U2-U9), and the old windows are gone. Since
+  2026-10-02 there are no apps either: views, and the built-in layouts
+  that group them (`core/commands.py::BUILTIN_LAYOUTS`).
 - **`cd <garden>`** switches the workspace's garden.
 - `find` query syntax (`type:task due:<7d`) builds on `core/query.py`,
   which Monolith already uses. Don't write a second query language.
@@ -128,35 +126,34 @@ else.
 - Errors show in `--fault` on the right of the command line, and in the
   pane header's summary when a pane's command failed.
 
-### App names
+### Views and built-in layouts
 
-An app is opened with the verb `mo` and its suffix, `mo tion`, which the
-command line draws as the lockup `[mo]tion`; the top bar shows the
-focused pane's app the same way.
-These are user-facing names. Python packages keep their current names
-(see *Rename*).
+There are no apps (since 2026-10-02, *Polish and unification*): a pane
+is a verb's view, and a built-in layout groups a few of them by task.
+Python packages keep their old app names (see *Rename*).
 
-| Suffix | App | Views (proposed ids) | Notes |
-|---|---|---|---|
-| `mo nolith` | Monolith | `monolith:table`, `monolith:vars` | General table. Project variables pane per roadmap. |
-| `mo te` | Inspector | `mote:props` | `open @sel` follows the selection; `open #id` is pinned. |
-| `mo xie` | Moxie | `moxie:plot` (`plot …`), `moxie:fit` (`fit …`) | |
-| `mo tion` | Motion | `motion:scenarios`, `motion:state`, `motion:rule` | Timeline sits under state. No runs list. |
-| `mo ra` | Mora | `mora:notes`, `mora:edit`, `mora:read`, `mora:worksheet` | `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
-| `mo nastery` | Monastery | `monastery:agenda`, `monastery:week`, `monastery:month` | Table and grid panes on the `--line` grid. |
-| `mo narch` | Monarch | `monarch:graph` (`graph …`) | Graph only, a structure debugger. Opens `find \| graph @sel --depth 2 \| open @sel`. |
-| `mo saic` | Home | `mosaic:gardens` (`gardens`), `mosaic:garden` (`garden`) | Ownership tree, loose gardens, garden management. Replaced the Gardens window. |
-| — | shell | `log` | Command and error log. |
+| Verb | View | What it shows |
+|---|---|---|
+| `find …` | `monolith:table` | The general table. A project variables pane per the roadmap is still to come. |
+| `open @sel\|#id\|‹name›` | `mote:props` | One mote's properties and links; `@sel` follows the selection, `#id` is pinned. |
+| `plot …`, `fit …` | `moxie:plot`, `moxie:fit` | Plots re-solved at every point; a model fitted to data. |
+| `scenarios`, `sim …`, `rule …`, `why …` | `motion:scenarios`, `motion:state`, `motion:rule` | Scenarios, a run as a watch list over a timeline, the rules on a mote. |
+| `notes`, `edit …`, `read …`, `worksheet` | `mora:notes`, `mora:edit`, `mora:read`, `mora:worksheet` | Notes, a note's source and its rendered document, the worksheet. `edit` and `worksheet` are text-editing panes (see *Keyboard*). |
+| `agenda`, `week`, `month` | `monastery:agenda`, `monastery:week`, `monastery:month` | Dated motes and project bars, on the `--line` grid. |
+| `graph …` | `monarch:graph` | The structure graph, a debugger. |
+| `gardens`, `garden …` | `mosaic:gardens`, `mosaic:garden` | The ownership tree with loose and archived gardens; one garden's details. |
+| `log` | `log` | Command and error log. |
 
-Worksheet, checks and V&V views are added to this table by the roadmap
-phase that builds them.
+The built-in layouts (`calc`, `docs`, `plan`, `graph`, `gardens`) are in
+*Polish and unification*. Worksheet, checks and V&V views are added to
+this table by the roadmap phase that builds them.
 
 ### Workspace context
 
 - **One garden per workspace.** The whole window is on one garden. The
   top-bar breadcrumb shows its ownership path (`/ college-fall-2026 /
   hw4`, per `roadmap.md` → *Structure*).
-- Switching garden (from `mo saic`, the breadcrumb, or a command) swaps
+- Switching garden (from the `gardens` pane, the breadcrumb, or a command) swaps
   in that garden's layouts, history and selection.
 - Cross-garden search is a view whose results open a project by
   switching the context. It never shows two gardens live at once
@@ -660,6 +657,26 @@ read as one tool rather than seven apps.
   its outer quarter, and swaps the two in the middle. An outline in
   `--bright` shows where it lands; `esc`, its own pane or no pane cancel.
   The moved pane keeps its view (`tree.js` `move`, `swapLeaves`).
+- **No apps: built-in layouts replace `mo`.** One window made the seven
+  app brands pointless. `mo` is no longer a verb (a mote may be called
+  `mo`), and `layout ‹name›` opens a layout in the focused pane's place
+  (`^⏎` / `⇧⏎`: a new split's). Every garden has five built in, named by
+  task:
+
+  | Layout | Panes |
+  |---|---|
+  | `calc` | `scenarios \| sim \| rule @sel` |
+  | `docs` | `notes \| edit @sel \| read @sel` |
+  | `plan` | `agenda \| week` |
+  | `graph` | `find \| graph @sel --depth 2 \| open @sel` |
+  | `gardens` | `gardens \| garden` |
+
+  `layout load ‹name›` is the same; a garden's own saved layout of that
+  name wins over the built-in. `layout list` names the built-ins after the
+  saved ones. The table and the plot are one verb each (`find`, `plot`).
+- **One top bar.** Its left end is the `[mo]saic` wordmark and the
+  ownership path, whatever is focused; the focused pane's app suffix is
+  gone. The command line no longer draws a typed `mo ` as a box.
 
 ### Visual system
 

@@ -1,4 +1,4 @@
-/* `monastery:agenda` (`agenda [from] [to] …`, `mo nastery`): every dated
+/* `monastery:agenda` (`agenda [from] [to] …`, `layout plan`): every dated
  * mote in the range, a row per occurrence, grouped by day -- the calendar's
  * keyboard home (docs/console.md → Settled for U7).
  *

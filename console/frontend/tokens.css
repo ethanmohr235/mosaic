@@ -113,7 +113,7 @@
   --prompt-h: 25px;          /* the [mo] box: full bar height minus its 1px border */
   --prompt-pad-x: 7px;
   --prompt-gap: 6px;         /* [mo] box → typed text */
-  --suffix-gap: 5px;         /* [mo] box → app suffix in the top bar */
+  --suffix-gap: 5px;         /* [mo] box → `saic`: the wordmark in the top bar */
   --bar-gap: 8px;
   --hint-gap: 14px;
   --tab-pad-x: 6px;
@@ -142,8 +142,6 @@
   --popup-pad-x: 8px;
   --popup-pad-y: 2px;
   --popup-key: 110px;
-  --popup-mo: 36px;          /* app-switch rows: `mo` | suffix | description */
-  --popup-app: 90px;
   --popup-time: 48px;
   --popup-rows: 12;          /* rows shown before the list scrolls */
 

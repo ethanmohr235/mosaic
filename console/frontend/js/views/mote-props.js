@@ -1,4 +1,4 @@
-/* `mote:props` (`mo te`, `open @sel|#id|name`): one mote's properties and
+/* `mote:props` (`open @sel|#id|name`): one mote's properties and
  * links -- the console's inspector (docs/console.md → *Inspector*, U3).
  *
  * The handoff's layout: the name as a title, a key/value grid with a

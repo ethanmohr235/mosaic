@@ -1,4 +1,4 @@
-/* `moxie:plot` (`mo xie`, `plot …`): a value against another, re-solved
+/* `moxie:plot` (`plot …`): a value against another, re-solved
  * from the garden at every point and never written back
  * (docs/console.md → Settled for U4).
  *

@@ -1,4 +1,4 @@
-/* `monarch:graph` (`graph [@sel|#id|name] [--depth N] …`, `mo narch`): a
+/* `monarch:graph` (`graph [@sel|#id|name] [--depth N] …`, `layout graph`): a
  * mote's neighbourhood, or the whole garden, on the canvas graph
  * (js/graph.js; docs/console.md → Settled for U8).
  *

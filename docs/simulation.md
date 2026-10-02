@@ -2,8 +2,8 @@
 
 MonOSS can solve for unknown mote properties from equations you write yourself. The engine knows nothing about circuits, thermodynamics, or any other domain -- all of that lives in ordinary motes.
 
-Simulation lives in the console's Motion panes (`mo tion`,
-`docs/ui-setup.md` → *Motion*). `sim` previews a time-based run -- every
+Simulation lives in the console's sim panes (`layout calc`,
+`docs/ui-setup.md` → *Sim*). `sim` previews a time-based run -- every
 tick is solved in memory and nothing is written to the garden -- as a
 table of the values that matter, scrubbed with one shared playhead.
 `solve` solves the garden once and writes the answer back, one undo
@@ -24,7 +24,7 @@ preview.
 A third question -- how one value moves as another changes -- has an
 answer shaped like a curve rather than like a state, and so has its own
 module and its own console pane: `core.sweep.run_sweep()`, and **Moxie**
-(`plot …`, `mo xie`). See "Sweeping" below.
+(`plot …`). See "Sweeping" below.
 
 ## The three pieces
 

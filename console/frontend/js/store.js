@@ -32,7 +32,6 @@ export function createStore() {
   const state = {
     garden: "",
     gardens: [],
-    apps: [],
     verbs: [],
     selection: [],
     labels: new Map(),
@@ -146,7 +145,6 @@ function sessionOps(state, emit) {
     applyBoot(boot) {
       state.garden = boot.garden;
       state.gardens = boot.gardens || [];
-      state.apps = boot.apps || [];
       state.verbs = boot.verbs || [];
       state.layouts = boot.layouts || [];
       state.active = boot.active ?? null;

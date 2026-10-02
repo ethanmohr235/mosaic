@@ -450,7 +450,7 @@ same list `monoss modoc check` prints and the console's read pane lists.
 
 ### The console
 
-`mo ra` opens `notes | edit @sel | read @sel`: write the source in the
+`layout docs` opens `notes | edit @sel | read @sel`: write the source in the
 editor and the read pane renders it as you type -- every macro below,
 problems listed at the end. See `docs/ui-setup.md` → *Notes*.
 

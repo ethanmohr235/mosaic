@@ -1,4 +1,4 @@
-/* `mosaic:gardens` (`gardens [--archived]`, `mo saic`): every garden as
+/* `mosaic:gardens` (`gardens [--archived]`, `layout gardens`): every garden as
  * the ownership tree (docs/console.md → Settled for U9).
  *
  * Owned gardens sit under their owner's garden, labelled with the cover

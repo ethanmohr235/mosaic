@@ -267,9 +267,6 @@ PROPERTY_MODEL_PROVIDERS: dict[str, dict] = describe_providers()
 # its own verbs here (`find` in U2, ...). Ordered as the completion popup
 # lists them, and kept in sync by hand with docs/architecture.md.
 RESERVED_VERBS: dict[str, dict[str, str]] = {
-    # `mo` is the verb that opens an app, its suffix the argument
-    # (`mo tion`); the command line draws the typed `mo ` as the [mo] box.
-    "mo": {"usage": "mo ‹app›", "describe": "open an app (mo tion, mo xie, …)"},
     "find": {"usage": "find ‹key:value …› [--sort k] [--group k] [--cols a,b]",
              "describe": "table of motes"},
     "set": {"usage": "set [--scenario ‹s›] @sel|#id|‹name› ‹key› ‹value›|--clear  (or ‹m.k› ‹value›)",
@@ -322,8 +319,8 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
     "project": {"usage": "project start @sel|#id|‹name› [‹garden›] | project stop @sel|#id|‹name›",
                 "describe": "give a mote its own garden, or drop its claim"},
     "cd": {"usage": "cd ‹garden›", "describe": "switch this workspace's garden"},
-    "layout": {"usage": "layout save|load|list|rm ‹name›",
-               "describe": "save or restore pane layouts"},
+    "layout": {"usage": "layout ‹name› | layout save|load|list|rm ‹name›",
+               "describe": "open, save or restore pane layouts (calc, docs, plan, graph, gardens built in)"},
     "refresh": {"usage": "refresh",
                 "describe": "re-read the garden (picks up MCP/CLI/sync edits)"},
     "undo": {"usage": "undo", "describe": "undo the last edit"},
@@ -334,6 +331,5 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
 
 def reserved_words() -> set[str]:
     """Every word the console reads as its own when it opens a line: the
-    verbs above. An app suffix is not one -- it is `mo`'s argument
-    (`mo tion`), so a mote named `tion` is an ordinary name."""
+    verbs above."""
     return set(RESERVED_VERBS)

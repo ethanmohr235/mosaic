@@ -1,4 +1,4 @@
-/* `motion:state` (`sim …`, `mo tion`): a run of the garden, tick by tick,
+/* `motion:state` (`sim …`, `layout calc`): a run of the garden, tick by tick,
  * as a watch list (docs/console.md → Settled for U5).
  *
  * One row per watched value: its state (solved, varied, pinned, given),

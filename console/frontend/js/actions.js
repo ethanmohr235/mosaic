@@ -88,7 +88,7 @@ export function createActions({ store, panes, api }) {
     /** ^⏎ / ⇧⏎: split the focused pane and run `command` in the new one,
      * below ("col") or to the right ("row"; also what `true` means). */
     openInNewPane: (command, dir = "row") => split(splitDir(dir), command),
-    /** An app that opens several panes (`mo tion`): they take the focused
+    /** A built-in layout (`layout calc`): its panes take the focused
      * pane's place (^⏎ / ⇧⏎: a new split's), focus on `focusCommand`'s pane. */
     openLayout(json, { newPane = false, focusCommand = null } = {}) {
       // One tree change: a split drawn on its own would be a blank pane,

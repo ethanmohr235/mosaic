@@ -132,6 +132,14 @@ updates it in the same commit. Keep it compact: tables, no prose.
   is `api.home`; `project start|stop` is a write verb; the top bar shows
   the ownership path. `gardens_app/`, `run_gardens.py`, `api_common.py`
   and `frontend_shared/` are deleted: the console is the only window.
+- **Polish and unification (2026-10-02)**, `console.md` → *Polish and
+  unification*: there are no apps any more. `mo` is gone, and `layout
+  calc|docs|plan|graph|gardens` are built-in layouts
+  (`core/commands.py::BUILTIN_LAYOUTS`). The top bar is a fixed
+  `[mo]saic` wordmark. Layouts have slots (`^1`–`^9` save). `^⏎` opens
+  a new pane below and `⇧⏎` one to the right. A pane can be dragged by
+  its header. Headers hold a run's result and footers what is at the
+  cursor. The older status lines above still use the app names.
 
 ## Split of work: cloud backend, local frontend
 

@@ -1,4 +1,4 @@
-/* `motion:scenarios` (`scenarios`, `mo tion`): the garden's scenarios and
+/* `motion:scenarios` (`scenarios`, `layout calc`): the garden's scenarios and
  * what each overrides, beside the garden's own value (docs/console.md →
  * Settled for U5).
  *

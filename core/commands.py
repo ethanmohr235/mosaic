@@ -3,9 +3,6 @@
 grammar). One line typed at the `$` prompt opens with one of three
 things, decided by its first token alone:
 
-    mo tion             `mo` and an app suffix: open that app (CONSOLE_APPS
-                        below). The command line draws the typed `mo ` as
-                        the [mo] box, so the line reads as the lockup.
     layout save two     a verb (core/reserved.py::RESERVED_VERBS)
     R1.x = 5 ohm        anything else: a modeling statement, handed to
                         core/command_bar.py::run_command unchanged
@@ -39,42 +36,37 @@ from core.reserved import RESERVED_VERBS, reserved_words
 
 
 @dataclass(frozen=True)
-class ConsoleApp:
-    """One app the console can open by suffix (`mo tion`).
-
-    Every app is ported (console steps U2-U9), so each has a default
-    view; an entry without one would be offered dimmed, as not available
-    yet. This table is the single source of truth for the apps."""
-    suffix: str
+class BuiltinLayout:
+    """A layout every garden has, opened by `layout ‹name›` (docs/console.md
+    -> Polish and unification). It takes the focused pane's place (^⏎ /
+    ⇧⏎: a new split's), and `focus` is the command whose pane gets focus.
+    A garden's own saved layout of the same name comes first."""
     name: str
-    default_view: str | None = None
-    default_command: str | None = None  # canonical command for default_view
-    # An app that opens several panes at once (`mo tion`): a layout tree
-    # in the shell's JSON shape (console/frontend/js/tree.js) that takes
-    # the focused pane's place. None opens `default_command` alone.
-    layout: dict | None = None
+    describe: str
+    tree: dict  # the shell's JSON shape (console/frontend/js/tree.js)
+    focus: str
 
 
-CONSOLE_APPS: tuple[ConsoleApp, ...] = (
-    ConsoleApp("nolith", "Monolith", default_view="monolith:table", default_command="find"),
-    ConsoleApp("te", "Inspector", default_view="mote:props", default_command="open @sel"),
-    ConsoleApp("xie", "Moxie", default_view="moxie:plot", default_command="plot"),
-    ConsoleApp("tion", "Motion", default_view="motion:state", default_command="sim",
-               layout={"split": "row", "sizes": [0.24, 0.46, 0.3], "children": [
-                   {"command": "scenarios"}, {"command": "sim"}, {"command": "rule @sel"}]}),
-    ConsoleApp("ra", "Mora", default_view="mora:edit", default_command="edit @sel",
-               layout={"split": "row", "sizes": [0.22, 0.39, 0.39], "children": [
-                   {"command": "notes"}, {"command": "edit @sel"}, {"command": "read @sel"}]}),
-    ConsoleApp("nastery", "Monastery", default_view="monastery:agenda", default_command="agenda",
-               layout={"split": "row", "sizes": [0.4, 0.6], "children": [
-                   {"command": "agenda"}, {"command": "week"}]}),
-    ConsoleApp("narch", "Monarch", default_view="monarch:graph", default_command="graph @sel --depth 2",
-               layout={"split": "row", "sizes": [0.26, 0.48, 0.26], "children": [
-                   {"command": "find"}, {"command": "graph @sel --depth 2"}, {"command": "open @sel"}]}),
-    ConsoleApp("saic", "Home", default_view="mosaic:gardens", default_command="gardens",
-               layout={"split": "row", "sizes": [0.55, 0.45], "children": [
-                   {"command": "gardens"}, {"command": "garden"}]}),
+def _row(sizes: list[float], *commands: str) -> dict:
+    return {"split": "row", "sizes": sizes, "children": [{"command": c} for c in commands]}
+
+
+BUILTIN_LAYOUTS: tuple[BuiltinLayout, ...] = (
+    BuiltinLayout("calc", "scenarios | sim | rule @sel",
+                  _row([0.24, 0.46, 0.3], "scenarios", "sim", "rule @sel"), focus="sim"),
+    BuiltinLayout("docs", "notes | edit @sel | read @sel",
+                  _row([0.22, 0.39, 0.39], "notes", "edit @sel", "read @sel"), focus="edit @sel"),
+    BuiltinLayout("plan", "agenda | week", _row([0.4, 0.6], "agenda", "week"), focus="agenda"),
+    BuiltinLayout("graph", "find | graph @sel --depth 2 | open @sel",
+                  _row([0.26, 0.48, 0.26], "find", "graph @sel --depth 2", "open @sel"),
+                  focus="graph @sel --depth 2"),
+    BuiltinLayout("gardens", "gardens | garden", _row([0.55, 0.45], "gardens", "garden"), focus="gardens"),
 )
+
+
+def builtin_layout(name: str) -> BuiltinLayout | None:
+    return next((layout for layout in BUILTIN_LAYOUTS if layout.name == name), None)
+
 
 # Verbs a view answers directly, rather than the root API acting on them.
 VERB_VIEWS: dict[str, str] = {"log": "log", "scenarios": "motion:scenarios",
@@ -95,13 +87,12 @@ SCENARIO_FLAG = "--scenario"
 
 LAYOUT_OPS: dict[str, str] = {
     "save": "save the current panes as ‹name›",
-    "load": "restore a saved layout",
+    "load": "restore a saved or built-in layout",
     "list": "list saved layouts",
     "rm": "delete a saved layout",
 }
 
-APP, VERB, STATEMENT = "app", "verb", "statement"
-APP_VERB = "mo"
+VERB, STATEMENT = "verb", "statement"
 
 _ESCAPE_CHARS = ("'", '"', "#")
 _FIRST_TOKEN_RE = re.compile(r"(\S*)(\s*)(.*)", re.DOTALL)
@@ -109,29 +100,19 @@ _WORD_PREFIX_RE = re.compile(r"[a-z]*")
 _SEL = "@sel"
 
 
-def find_app(suffix: str) -> ConsoleApp | None:
-    return next((app for app in CONSOLE_APPS if app.suffix == suffix), None)
-
-
-def app_description(app: ConsoleApp) -> str:
-    if app.default_view:
-        return f"{app.name} — {app.default_view}"
-    return f"{app.name} — not available yet"
-
-
 # ---- parsing ------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ParsedLine:
-    kind: str  # APP, VERB or STATEMENT
+    kind: str  # VERB or STATEMENT
     head: str  # the reserved word; "" for a statement
     args: tuple[str, ...]  # shlex tokens after `head`; () for a statement
     text: str  # the whole line, stripped
 
 
 def parse(line: str) -> ParsedLine:
-    """Which of the three forms `line` is. Raises CommandError only for
-    a verb or app line whose arguments don't tokenize (an unclosed
+    """Which of the two forms `line` is. Raises CommandError only for
+    a verb line whose arguments don't tokenize (an unclosed
     quote); a statement is never judged here -- run_command does that."""
     text = (line or "").strip()
     word, _sep, rest = _FIRST_TOKEN_RE.match(text).groups()
@@ -143,9 +124,6 @@ def parse(line: str) -> ParsedLine:
         args = tuple(shlex.split(rest))
     except ValueError as e:
         raise CommandError(f"{word}: {e}") from None
-    if word == APP_VERB:
-        # `mo tion`: the suffix is the head, anything after it the args.
-        return ParsedLine(APP, args[0] if args else "", args[1:], text)
     return ParsedLine(VERB, word, args, text)
 
 
@@ -191,10 +169,6 @@ def resolve_view(command: str) -> tuple[str, str]:
         if parsed.head == "fit" and "--apply" in parsed.args:
             raise CommandError(f"{parsed.text!r} is a write, not a pane")
         return ARG_VIEWS[parsed.head], parsed.text
-    if parsed.kind == APP and not parsed.args:
-        app = find_app(parsed.head)
-        if app is not None and app.default_view:
-            return app.default_view, app.default_command or app.suffix
     raise CommandError(f"no view answers {parsed.text!r}")
 
 
@@ -564,7 +538,7 @@ def complete(
     current_garden: str | None = None,
 ) -> Completion:
     """Completion for the token ending at `cursor` (end of line by
-    default). The first token offers app suffixes, verbs and mote names;
+    default). The first token offers verbs and mote names;
     after `cd` and `layout` their own arguments; anything else is
     core/command_bar.py::suggest."""
     line = line or ""
@@ -576,11 +550,6 @@ def complete(
         if _WORD_PREFIX_RE.fullmatch(word):
             return _complete_first(conn, line, cursor, word, lead)
         return _complete_statement(conn, line, cursor)
-    if word == APP_VERB:
-        done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
-        if done:
-            return Completion(replace_from=cursor)
-        return _complete_app("" if not rest or rest[-1].isspace() else rest.split()[-1], cursor)
     if word == "find":
         return _complete_from(RESERVED_VERBS[word]["usage"], _find_choices(conn, rest), rest, cursor)
     if word == SET_VERB:
@@ -628,8 +597,6 @@ def complete(
 
 
 def _complete_first(conn, line: str, cursor: int, partial: str, lead: int) -> Completion:
-    # An app you can open outranks one that isn't available yet, so `t`
-    # offers `tion` before `te` (3e) and the ghost never suggests a dead end.
     verbs = [
         CompletionRow(verb, meta["describe"])
         for verb, meta in RESERVED_VERBS.items() if verb.startswith(partial)
@@ -643,36 +610,24 @@ def _complete_first(conn, line: str, cursor: int, partial: str, lead: int) -> Co
     return Completion("", rows, _ghost(rows, partial), lead)
 
 
-def _complete_app(partial: str, cursor: int) -> Completion:
-    """After `mo `: the apps. One you can open outranks one that isn't
-    available yet, so `mo t` offers `tion` before a dead end (3e), and the
-    apps that don't match stay listed, dimmed."""
-    matching = [app for app in CONSOLE_APPS if app.suffix.startswith(partial)]
-    apps = [_app_row(app) for app in sorted(matching, key=_unavailable)]
-    dim = [
-        _app_row(app, dim=True) for app in CONSOLE_APPS if not app.suffix.startswith(partial)
-    ]
-    rows = tuple(apps + dim)
-    return Completion("mo ‹app›", rows, _ghost(rows, partial), cursor - len(partial))
-
-
-def _unavailable(app: ConsoleApp) -> bool:
-    return not app.default_view
-
-
-def _app_row(app: ConsoleApp, dim: bool = False) -> CompletionRow:
-    return CompletionRow(app.suffix, app_description(app), dim=dim)
-
-
 def _verb_choices(verb, rest, gardens, layouts, current_garden) -> list[CompletionRow]:
     done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
     if verb == "cd" and not done:
         return [CompletionRow(g, current=g == current_garden) for g in gardens]
     if verb == "layout" and not done:
-        return [CompletionRow(op, desc) for op, desc in LAYOUT_OPS.items()]
-    if verb == "layout" and len(done) == 1 and done[0] in ("save", "load", "rm"):
+        return [CompletionRow(op, desc) for op, desc in LAYOUT_OPS.items()] + _layout_rows(layouts)
+    if verb == "layout" and len(done) == 1 and done[0] in ("save", "rm"):
         return [CompletionRow(name) for name in layouts]
+    if verb == "layout" and len(done) == 1 and done[0] == "load":
+        return _layout_rows(layouts)
     return []
+
+
+def _layout_rows(layouts: Sequence[str]) -> list[CompletionRow]:
+    """The garden's saved layouts, then the built-ins none of them shadows."""
+    shadowed = set(layouts)
+    return [CompletionRow(name) for name in layouts] + [
+        CompletionRow(b.name, b.describe) for b in BUILTIN_LAYOUTS if b.name not in shadowed]
 
 
 def _schema(conn):

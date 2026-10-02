@@ -43,7 +43,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 
 | Command | Does |
 |---|---|
-| `mo ‹app›` | Open an app: `mo nolith`, `mo te`, `mo xie`, `mo tion` (three panes: `scenarios \| sim \| rule @sel`), `mo ra` (`notes \| edit @sel \| read @sel`), `mo nastery` (`agenda \| week`), `mo narch` (`find \| graph @sel --depth 2 \| open @sel`), `mo saic` (`gardens \| garden`) |
+| `layout ‹name›` | Open a layout in the focused pane's place. Built in: `calc` (`scenarios \| sim \| rule @sel`), `docs` (`notes \| edit @sel \| read @sel`), `plan` (`agenda \| week`), `graph` (`find \| graph @sel --depth 2 \| open @sel`), `gardens` (`gardens \| garden`); a saved layout of the same name wins |
 | `find ‹conditions› [--sort k] [--group k] [--cols a,b] [--view name]` | Table of motes |
 | `open @sel\|#id\|name` | A mote's properties and links (`@sel` follows the selection) |
 | `set ‹target› ‹key› ‹value›` / `… --clear` | Set / remove a property (`5 mm` records the unit); `set C1.voltage 30` also works |
@@ -106,7 +106,7 @@ Find conditions: `status:todo` is · `name~truss` contains ·
 
 ## Pane keys
 
-**Table** (`find`, `mo nolith`)
+**Table** (`find`)
 
 | Key | Does |
 |---|---|
@@ -118,7 +118,7 @@ Find conditions: `status:todo` is · `name~truss` contains ·
 
 Click selects, shift-click a range, ctrl-click toggles.
 
-**Props** (`open`, `mo te`, and the `p` float)
+**Props** (`open`, and the `p` float)
 
 | Key | Does |
 |---|---|
@@ -130,7 +130,7 @@ Click selects, shift-click a range, ctrl-click toggles.
 | `d` `d` | Delete property or link |
 | `l` | Link: `type target` |
 
-**Plot** (`plot`, `mo xie`)
+**Plot** (`plot`)
 
 | Key | Does |
 |---|---|
@@ -151,7 +151,7 @@ Click selects, shift-click a range, ctrl-click toggles.
 | `h` `l` / click | Step through the points; status line shows point vs fit |
 | `esc` | Clear cursor |
 
-**Motion** (`sim`, `rule`, `why`, `scenarios`, `mo tion`) — every Motion pane
+**Sim** (`sim`, `rule`, `why`, `scenarios`; `layout calc`) — every one of these panes
 
 | Key | Does |
 |---|---|
@@ -184,7 +184,7 @@ Read pane: `j` `k` `g` `G` `space` scroll · click a link to select its mote.
 Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
 `n` new note (prefills `edit `).
 
-**Calendar** (`agenda`, `week`, `month`, `mo nastery`)
+**Calendar** (`agenda`, `week`, `month`; `layout plan`)
 
 | Key | Does |
 |---|---|
@@ -202,7 +202,7 @@ Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
 Week grid: drag to move, drag the bottom edge to resize, click a slot
 for `n`, double-click to create. Month: `+N more` opens that week.
 
-**Graph** (`graph`, `mo narch`)
+**Graph** (`graph`; `layout graph`)
 
 | Key | Does |
 |---|---|
@@ -219,7 +219,7 @@ for `n`, double-click to create. Month: `+N more` opens that week.
 Mouse: drag a node to move and pin it · drag empty space to pan · wheel
 zooms · ctrl+drag node → node prefills `A ->  -> B`.
 
-**Home** (`gardens`, `mo saic`)
+**Gardens** (`gardens`; `layout gardens`)
 
 | Key | Does |
 |---|---|

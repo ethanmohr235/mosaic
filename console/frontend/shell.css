@@ -70,7 +70,7 @@ body {
   border-bottom: var(--border) solid var(--line);
 }
 
-.topbar .app-suffix {
+.topbar .wordmark {
   margin-left: calc(var(--suffix-gap) - var(--bar-gap));
   color: var(--bright);
   font-weight: var(--w-bold);
@@ -113,15 +113,6 @@ body {
   padding-left: var(--pad-x);
   margin-right: var(--prompt-gap);
   color: var(--dim);
-}
-
-/* `mo ` typed at the start of the command line: the two letters inverted
- * like the top bar's [mo] box, the space after them the lockup's gap.
- * Restyled in place -- no padding -- so the text keeps its metrics. */
-.c-input-mo {
-  background: var(--bright);
-  color: var(--bg);
-  font-weight: var(--w-bold);
 }
 
 .cmd-status {
@@ -247,7 +238,6 @@ body {
 }
 
 .layout-key .c-popup-row { grid-template-columns: var(--popup-key) 1fr; }
-.layout-app .c-popup-row { grid-template-columns: var(--popup-mo) var(--popup-app) 1fr; }
 .layout-time .c-popup-row { grid-template-columns: var(--popup-time) 1fr; }
 
 .c-popup-cell {
@@ -257,11 +247,7 @@ body {
 }
 
 .layout-key .col-1,
-.layout-app .col-0,
-.layout-app .col-2,
 .layout-time .col-0 { color: var(--dim); }
-
-.layout-app .col-1 { font-weight: var(--w-bold); }
 
 .c-popup-row.dim { color: var(--dim); }
 .c-popup-row:hover { background: var(--bg-bar); }
@@ -274,9 +260,7 @@ body {
 .c-popup-row.highlighted .c-popup-cell { color: var(--bg); }
 
 .c-popup-row.highlighted.layout-key .col-1,
-.layout-key .c-popup-row.highlighted .col-1,
-.layout-app .c-popup-row.highlighted .col-0,
-.layout-app .c-popup-row.highlighted .col-2 { color: var(--line); }
+.layout-key .c-popup-row.highlighted .col-1 { color: var(--line); }
 
 /* ---------- workspace and panes ---------- */
 

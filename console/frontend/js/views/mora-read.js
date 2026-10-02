@@ -1,4 +1,4 @@
-/* `mora:read` (`read @sel|#id|‹name›`, `mo ra`): a note, rendered
+/* `mora:read` (`read @sel|#id|‹name›`, `layout docs`): a note, rendered
  * (docs/console.md → Settled for U6).
  *
  * Drawn on its own surface -- the dark gray paper tokens (--paper-*) --
