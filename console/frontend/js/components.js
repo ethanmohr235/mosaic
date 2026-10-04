@@ -66,8 +66,62 @@ export function table({ columns, rows = [], groups = null, rowKey = (r) => r.id,
       index += 1;
     }
   }
+  sizeColumns(root, columns);
+  if (header) {
+    root.querySelectorAll(":scope > .c-table-head > .c-cell").forEach((node, i) => addGrip(node, root, columns, columns[i]));
+  }
   markTable(root, { selected, primary, cursor });
   return root;
+}
+
+/* Column widths the user dragged, kept for the session: "<column keys>|<key>" -> px. */
+const dragged = new Map();
+const widthKey = (columns, c) => `${columns.map((x) => x.key).join(",")}|${c.key}`;
+
+/* Every row is its own grid, so a `max-content` column would be as wide as
+ * that row's own text and the columns after it would drift from row to row.
+ * Size it once, to the widest cell in the column, in ch. A width the user
+ * dragged wins over both. */
+function sizeColumns(root, columns) {
+  const lines = [...root.querySelectorAll(":scope > .c-table-head, :scope > .c-table-row")];
+  const sizes = columns.map((c) => {
+    const px = dragged.get(widthKey(columns, c));
+    if (px) return `${px}px`;
+    if (c.width !== "max-content") return c.width || "1fr";
+    let chars = 0;
+    const i = columns.indexOf(c);
+    for (const line of lines) chars = Math.max(chars, [...(line.children[i]?.textContent || "")].length);
+    return `${chars}ch`;
+  });
+  const fitted = sizes.join(" ");
+  for (const line of lines) line.style.gridTemplateColumns = fitted;
+}
+
+/* A grip on a header cell's right edge: drag to resize, double-click to reset. */
+function addGrip(node, root, columns, c) {
+  const grip = h("span", "c-grip");
+  grip.addEventListener("click", (event) => event.stopPropagation());
+  grip.addEventListener("dblclick", (event) => {
+    event.stopPropagation();
+    dragged.delete(widthKey(columns, c));
+    sizeColumns(root, columns);
+  });
+  grip.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const x0 = event.clientX, w0 = node.getBoundingClientRect().width;
+    const move = (e) => {
+      dragged.set(widthKey(columns, c), Math.max(24, Math.round(w0 + e.clientX - x0)));
+      sizeColumns(root, columns);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+  node.appendChild(grip);
 }
 
 /** Re-mark a table()'s selected, primary and cursor rows in place. */

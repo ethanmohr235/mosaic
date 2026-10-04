@@ -23,6 +23,7 @@ the same change.
 | `^w o`, `^w =`, `^w x` | Only this pane, equalize, swap |
 
 Mouse: click a pane to focus it; drag a divider to resize; drag the focused pane's header onto another pane to dock it at that edge (outer quarter) or swap the two (middle).
+Tables: drag the right edge of a column header to resize that column; double-click the edge to reset. Widths last until the console closes.
 
 ## Command line
 

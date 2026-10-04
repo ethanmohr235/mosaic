@@ -415,6 +415,17 @@ body.dragging-pane, body.dragging-pane * { cursor: grabbing; user-select: none; 
 }
 
 .c-cell.right { text-align: right; }
+
+.c-table-head .c-cell { position: relative; }
+.c-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+.c-grip:hover { box-shadow: inset -1px 0 0 var(--dim); }
 .c-cell.lvl-ok { color: var(--ok); }
 
 .c-table-row.clickable { cursor: pointer; }
