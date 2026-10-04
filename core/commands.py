@@ -435,8 +435,42 @@ def run_project(conn: sqlite3.Connection, args: Sequence[str], selection: Sequen
     return SetResult(f"{name} no longer owns {garden!r}; the garden stays, loose", 1, command)
 
 
+def run_image(conn: sqlite3.Connection, args: Sequence[str], selection: Sequence[str]) -> SetResult:
+    """`image add ‹path› [name]` stores a file as an image mote (an
+    automatic `shot-NNN` name when none is given); `image rename ‹old›
+    ‹new›` renames one and every `\\image{old}` in every note. One undo
+    step each (core/images.py). A pasted screenshot takes the same road,
+    through console/mora.py."""
+    from pathlib import Path
+    from core import images
+    usage = f"usage: {RESERVED_VERBS['image']['usage']}"
+    if not args or args[0] not in ("add", "rename"):
+        raise CommandError(usage)
+    try:
+        if args[0] == "add":
+            if not 2 <= len(args) <= 3:
+                raise CommandError(usage)
+            path = Path(args[1]).expanduser()
+            try:
+                data = path.read_bytes()
+            except OSError as e:
+                raise CommandError(f"can't read {path}: {e.strerror or e}") from e
+            shot, command = images.add_undoable(conn, data, args[2] if len(args) == 3 else None)
+            return SetResult(f"stored {shot.name} ({len(shot.data) // 1024} KB) -- "
+                             f"\\image{{{shot.name}}} shows it", 1, command)
+        if len(args) != 3:
+            raise CommandError(usage)
+        notes, command = images.rename_undoable(conn, args[1], args[2])
+        if command is None:
+            return SetResult(f"{args[1]} is already called that", 0)
+        return SetResult(f"renamed {args[1]} to {args[2]}; rewrote {len(notes)} "
+                         f"note{'' if len(notes) == 1 else 's'}", 1 + len(notes), command)
+    except images.ImageError as e:
+        raise CommandError(str(e)) from e
+
+
 WRITE_VERBS = {"set": run_set, "rename": run_rename, "unlink": run_unlink, "template": run_template,
-               "detach": run_detach, "project": run_project}
+               "detach": run_detach, "project": run_project, "image": run_image}
 
 
 def one_target(conn, target: str, selection: Sequence[str]) -> list[str]:
@@ -582,6 +616,15 @@ def complete(
         rows = ([CompletionRow("start", "give a mote its own garden"), CompletionRow("stop", "drop its claim")]
                 if not done else [CompletionRow(_SEL, "the selection")] + [CompletionRow(n) for n in names]
                 if len(done) == 1 else [])
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word == "image":
+        from core import images
+        done = rest.split() if not rest or rest[-1].isspace() else rest.split()[:-1]
+        shots = [CompletionRow(str(m.properties.get("name") or m.id))
+                 for m in images.list_images(motes_repo.list_motes(conn))]
+        rows = ([CompletionRow("add", "store a PNG or SVG file"),
+                 CompletionRow("rename", "rename one, and every note that shows it")] if not done
+                else shots if done == ["rename"] else [])
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
     if word == "graph":
         from core import graphview

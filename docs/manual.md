@@ -84,6 +84,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `garden archive\|unarchive ‹name›` | Archive with everything it owns / undo that |
 | `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
 | `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
+| `image add ‹path› [‹name›]`, `image rename ‹old› ‹new›` | Store a PNG/SVG for notes (`\image{name}`; auto-named `shot-NNN`), or rename one and every note that shows it (undoable) |
 | `project start @sel [‹garden›]`, `project stop @sel` | Give a mote its own garden / drop its claim (undoable) |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts (a new one takes the lowest free slot 1–9) |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |
@@ -198,6 +199,7 @@ against it · `a` / `n` add override / new scenario (prefills `set
 | `esc` | Stop: a note saves (one undo step per session), the worksheet applies |
 | `^f` | Find / replace: `⏎` `⇧⏎` next/prev · `tab` field · `⏎` in replace: one · `^⏎` all · `esc` close |
 | `^z` | Undo typing (the text box's own) |
+| `^v` | In a note: paste a clipboard image as `\image{shot-NNN}` on its own line (one undo step; rename it with `image rename`) |
 | `j` `k`, `g` `G` | Scroll (not typing) |
 
 Read pane: `j` `k` `g` `G` `space` scroll · click a link to select its mote.

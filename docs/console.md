@@ -428,6 +428,14 @@ What the build decided within the settled plan above.
   by note id (or `new:‹name›`); a read pane re-renders 0.18 s after one.
 - **Problems** come from rendering the draft and underline their lines in
   the editor (hover for the message).
+- **Images** (2026-10-04): `^v` with an image on the clipboard stores it
+  (`api.mora.paste_image` -> `core/images.py`, auto-named `shot-NNN`, one
+  undo step of its own) and inserts `\image{shot-NNN}` on a line of its
+  own; text still pastes natively. The read pane draws an `image` block
+  as an `<img>` from the payload's data URI, with a caption and number
+  inside a `figure`. The `image add ‹path› [name]` and `image rename
+  ‹old› ‹new›` verbs are write verbs like `rename`; a rename rewrites
+  every note that names the image and is one undo step.
 - **Worksheet:** previews 0.15 s after typing; margin marks `=` `?` `ƒ`
   `≡` `✓` `!`; an unknown or equation shows the garden's value after it.
   After `esc`, a clean sheet is replaced by the garden's reading of it;

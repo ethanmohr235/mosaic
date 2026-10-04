@@ -32,9 +32,12 @@ function escapeHtml(text) {
  *                       a class on the line, --ghost text after it, and with
  *                       `gutter`, a mark in the margin column
  *   onInput(text)  every change; onStart() / onLeave() entering / leaving edit mode
+ *   onPasteImage(base64, mime) -> text|null   an image on the clipboard: the
+ *                       text to put at the caret in its place (null: paste
+ *                       nothing). Without it, an image paste does nothing.
  */
 export function createEditor({ h, className = "", wrap = true, highlight = () => [], decorate = () => null,
-  gutter = false, onInput = () => {}, onStart = () => {}, onLeave = () => {} }) {
+  gutter = false, onInput = () => {}, onStart = () => {}, onLeave = () => {}, onPasteImage = null }) {
   const textarea = h("textarea", "c-editor-text");
   textarea.spellcheck = false;
   textarea.setAttribute("autocapitalize", "off");
@@ -220,6 +223,41 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
     findMatches();
   }
 
+  /* ---- pasted images ---- */
+
+  /** The clipboard's image, if it holds one, as base64 (no data: prefix). */
+  function clipboardImage(event) {
+    const items = (event.clipboardData && event.clipboardData.items) || [];
+    for (const item of items) {
+      if (item.kind === "file" && item.type.startsWith("image/")) return item.getAsFile();
+    }
+    return null;
+  }
+
+  function readBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /** Text pastes natively; an image is handed to the view, which stores it
+   * and answers with the line to insert -- on a line of its own, since
+   * `\image` is a block command. */
+  async function onPaste(event) {
+    const file = onPasteImage && clipboardImage(event);
+    if (!file) return;
+    event.preventDefault();
+    const text = await onPasteImage(await readBase64(file), file.type);
+    if (!text) return;
+    const { selectionStart: from, selectionEnd: to, value } = textarea;
+    const lead = from > 0 && value[from - 1] !== "\n" ? "\n" : "";
+    const tail = value[to] === "\n" ? "" : "\n";
+    insert(from, to, `${lead}${text}${tail}`);
+  }
+
   /* ---- keys (the view hands them over; true = handled) ---- */
 
   function onKey(event) {
@@ -260,6 +298,7 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
       onInput(textarea.value);
     }],
     [textarea, "focus", () => { if (!st.editing) start(); }],
+    [textarea, "paste", onPaste],
     [textarea, "keyup", revealCaret],
     [textarea, "click", revealCaret],
     [findInput, "input", () => { st.current = -1; findMatches(); }],

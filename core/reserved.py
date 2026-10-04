@@ -319,6 +319,8 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
                "describe": "move one occurrence out of its series"},
     "graph": {"usage": "graph [@sel|#id|‹name›] [--depth N] [--hide-rel a,b] [--view ‹saved›] [‹conditions›]",
               "describe": "a mote's neighbourhood, or the whole garden, as a graph"},
+    "image": {"usage": "image add ‹path› [‹name›] | image rename ‹old› ‹new›",
+              "describe": "store a PNG or SVG for notes (\\image{name}), or rename one everywhere it is used"},
     "gardens": {"usage": "gardens [--archived]", "describe": "every garden: the ownership tree, loose and archived"},
     "garden": {"usage": "garden [‹name›] | garden new|rename|rm|restore|archive|unarchive|export|import|sync …",
                "describe": "a garden's details, or manage gardens"},

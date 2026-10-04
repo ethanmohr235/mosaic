@@ -141,6 +141,13 @@ updates it in the same commit. Keep it compact: tables, no prose.
   its header. Headers hold a run's result and footers what is at the
   cursor. The older status lines above still use the app names.
 
+- **Images in modocs (2026-10-04)**: `\image{name}{width=N}` shows a
+  stored PNG/SVG (`core/images.py`, a mote with the reserved `image`
+  property, base64, 4 MB cap, one seam for side files later). `^v` in the
+  `edit` pane pastes a screenshot as `shot-NNN`; `image add|rename`
+  verbs; `monoss image …` and MCP `add_image`/`list_images`/`rename_image`.
+  `.tex` export of images waits for the Output phase.
+
 ## Split of work: cloud backend, local frontend
 
 Two sessions work in parallel:

@@ -2,6 +2,8 @@
 """`api.mora`: the note and worksheet panes' bridge (docs/console.md ->
 Settled for U6).
 
+    paste_image(data_base64)     store a pasted screenshot as an image mote
+                                 (auto-named shot-NNN), one undo step
     open(command, selection)     which note an `edit …`/`read …` line names,
                                  and its stored source
     render(note_id, source)      the document a draft says (core/document.py)
@@ -17,12 +19,15 @@ The one place a view writes through its namespace rather than a command
 line: a note's text is too long for a line, and saving it on a pause is
 the user's decision (Settled for U6). Every write here is still one undo
 step on the session's stack, and `apply` honours `live`."""
+import base64
+import binascii
 import logging
 import shlex
 from typing import Any, Callable
 
 from console.session import Session, locked
 from core import document
+from core import images
 from core import modoc
 from core import motion as motion_repo
 from core import worksheet as worksheet_repo
@@ -30,7 +35,7 @@ from core.command_bar import CommandError
 
 logger = logging.getLogger(__name__)
 
-_ERRORS = (CommandError, ValueError, LookupError)
+_ERRORS = (CommandError, ValueError, LookupError)  # ImageError is a ValueError
 # Every backslash-word the parser reads outside maths, for the editor's
 # highlighter: anything else is coloured as a typo.
 COMMANDS = sorted({*modoc.INLINE_COMMANDS, *modoc.BLOCK_COMMANDS})
@@ -60,6 +65,22 @@ class MoraApi:
             return {"noteId": found.mote_id, "name": found.name, "source": source,
                     "exists": found.mote_id is not None, "commands": COMMANDS}
         return self._answer(command, answer)
+
+    @locked
+    def paste_image(self, data_base64: str, name: str = "") -> dict[str, Any]:
+        """A screenshot from the clipboard, stored like `image add` does
+        and named `shot-NNN` unless `name` says otherwise. The editor
+        inserts `\\image{name}` at the caret from the answer."""
+        def answer():
+            try:
+                data = base64.b64decode(data_base64 or "", validate=True)
+            except (binascii.Error, ValueError) as e:
+                raise CommandError(f"the pasted image is not valid base64: {e}") from e
+            shot, command = images.add_undoable(self._session.conn, data, name or None)
+            self._session.undo.push(command)
+            return {"name": shot.name, "moteId": shot.mote_id, "bytes": len(shot.data),
+                    "mime": shot.mime}
+        return self._answer("paste_image", answer)
 
     @locked
     def render(self, note_id: str | None, source: str) -> dict[str, Any]:

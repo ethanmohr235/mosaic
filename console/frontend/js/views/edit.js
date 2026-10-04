@@ -17,7 +17,7 @@
 import { createEditor, modocRanges } from "../editor.js";
 
 const HINTS = [["i ⏎", "edit"], ["j k", "scroll"], ["g G", "top / end"], ["^f", "find"]];
-const EDIT_HINTS = [["esc", "stop editing"], ["^f", "find / replace"], ["^z", "undo typing"]];
+const EDIT_HINTS = [["esc", "stop editing"], ["^f", "find / replace"], ["^z", "undo typing"], ["^v", "paste a screenshot"]];
 const AUTOSAVE_MS = 900;
 const CHECK_MS = 400;
 
@@ -100,6 +100,27 @@ function create(ctx) {
     }
   }
 
+  /* ---- pasted screenshots ---- */
+
+  /** An image on the clipboard becomes an image mote (api.mora.paste_image,
+   * auto-named shot-NNN, one undo step) and the line that shows it. */
+  async function onPasteImage(base64) {
+    let r;
+    try {
+      r = await api.mora.paste_image(base64);
+    } catch (err) {
+      r = { error: message(err) };
+    }
+    if (r.error) {
+      store.log("result", `couldn't paste the image: ${r.error}`, { level: "fault" });
+      return null;
+    }
+    store.log("result", `stored ${r.name} (${Math.ceil(r.bytes / 1024)} KB) -- rename it with: image rename ${r.name} ‹new›`,
+      { level: "ok" });
+    store.emit("write");
+    return `\\image{${r.name}}`;
+  }
+
   /* ---- problems ---- */
 
   function scheduleCheck() {
@@ -172,7 +193,7 @@ function create(ctx) {
     }
     if (!editor) {
       editor = createEditor({ h, className: "editor-note", wrap: true,
-        highlight: (text) => modocRanges(text, st.known), decorate, onInput, onStart, onLeave });
+        highlight: (text) => modocRanges(text, st.known), decorate, onInput, onStart, onLeave, onPasteImage });
       root.replaceChildren(editor.el);
     }
   }

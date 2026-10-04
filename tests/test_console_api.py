@@ -23,7 +23,7 @@ BRIDGE = {
 MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
 MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "fit"}  # U4
 MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
-MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply"}  # U6
+MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply", "paste_image"}  # U6
 MONASTERY_BRIDGE = {"view", "rewrite", "edit", "skip", "slot", "follow"}  # U7
 MONARCH_BRIDGE = {"view", "rewrite", "pins", "pin", "unpin"}  # U8
 HOME_BRIDGE = {"gardens", "garden"}  # U9
@@ -46,7 +46,7 @@ def test_boot_shape(api):
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
     assert boot["crumbs"] == ["test"]
-    assert boot["verbs"][28] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][29] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -926,3 +926,52 @@ def test_lifecycle_sync_respects_auto_sync_and_refresh_does_not(monkeypatch):
     assert len(ran) == 2
     session_module.best_effort_sync("test")  # no sync dir: nothing to do
     assert len(ran) == 2
+
+
+# ---- images ----
+
+def _png_bytes():
+    from tests.test_images import png
+    return png()
+
+
+def test_pasting_a_screenshot_stores_it_named_and_undoable(api):
+    import base64
+    pasted = api.mora.paste_image(base64.b64encode(_png_bytes()).decode())
+    assert pasted["name"] == "shot-001" and pasted["mime"] == "image/png"
+    again = api.mora.paste_image(base64.b64encode(_png_bytes()).decode())
+    assert again["name"] == "shot-002"
+    rendered = api.mora.render(None, "\\image{shot-001}")
+    assert rendered["blocks"][0]["error"] is None
+    api.run("undo")
+    assert "no image named" in api.mora.render(None, "\\image{shot-002}")["blocks"][0]["error"]
+    assert api.mora.render(None, "\\image{shot-001}")["blocks"][0]["error"] is None
+
+
+def test_pasting_something_that_is_not_an_image_is_an_error_not_a_crash(api):
+    import base64
+    assert "PNG or SVG" in api.mora.paste_image(base64.b64encode(b"hello").decode())["error"]
+    assert "base64" in api.mora.paste_image("***")["error"]
+
+
+def test_image_verb_adds_renames_and_undoes(api, tmp_path):
+    shot = tmp_path / "wing.png"
+    shot.write_bytes(_png_bytes())
+    note = api.mora.save(None, "Report", "\\image{wing}", "s1")["noteId"]
+    added = api.run(f"image add {shot} wing")
+    assert added["ok"] and "wing" in added["message"]
+    renamed = api.run("image rename wing airfoil")
+    assert renamed["ok"] and "1 note" in renamed["message"]
+    assert api.mora.open("read Report")["source"] == "\\image{airfoil}"
+    api.run("undo")
+    assert api.mora.open("read Report")["source"] == "\\image{wing}"
+    api.run("undo")
+    assert "no image named" in api.mora.render(note, "\\image{wing}")["blocks"][0]["error"]
+
+
+def test_image_verb_reports_problems_as_errors(api, tmp_path):
+    assert "usage" in api.run("image")["message"]
+    assert "can't read" in api.run(f"image add {tmp_path}/missing.png")["message"]
+    junk = tmp_path / "a.png"
+    junk.write_bytes(b"nope")
+    assert "PNG or SVG" in api.run(f"image add {junk}")["message"]

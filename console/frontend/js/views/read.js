@@ -6,7 +6,7 @@
  * comes from core/document.py through api.mora.render: what a `\val` is,
  * what `\ref` reads as, which rows `\given` lists. This only typesets:
  * KaTeX for maths (the global `katex`, vendor/katex), js/plot.js for a
- * `\graph`.
+ * `\graph`, an <img> for an `\image` (its data URI comes in the payload).
  *
  * It renders the store's draft for its note when an `edit` pane is
  * typing in it (store "draft"), else the stored text, so it follows
@@ -25,7 +25,7 @@ function message(err) {
 function create(ctx) {
   const { api, store, components } = ctx;
   const { h } = components;
-  const st = { command: "", seq: 0, note: null, payload: null, error: null, empty: false };
+  const st = { command: "", seq: 0, drawSeq: 0, note: null, payload: null, error: null, empty: false };
   let root = null, page = null, resize = null, draftTimer = 0;
   const figures = [];
   const offs = [];
@@ -78,6 +78,7 @@ function create(ctx) {
       case "equation": return numbered(math(b.tex, true), b.number);
       case "cited": return cited(b);
       case "graph": return graph(b);
+      case "image": return picture(b);
       case "table": return table(b);
       case "work": return work(b);
       case "section": return section(b);
@@ -107,6 +108,15 @@ function create(ctx) {
     if (f.error) area.replaceChildren(h("div", "doc-broken", `\\graph{${b.view}}: ${f.error}`));
     else figures.push({ area, figure: f });
     return node;
+  }
+
+  function picture(b) {
+    if (b.error) return h("div", "doc-broken", `\\image{${b.ref}}: ${b.error}`);
+    const img = h("img", "doc-image");
+    img.src = b.src;
+    img.alt = b.alt;
+    if (b.width) img.style.width = `${b.width}%`;
+    return h("figure", "doc-figure", [img, caption(b)]);
   }
 
   function table(b) {
@@ -191,7 +201,9 @@ function create(ctx) {
   }
 
   async function draw() {
-    const seq = ++st.seq;
+    // Its own counter: a draft redraw must not cancel a `run` that is still
+    // fetching the note's fresher source (and they share no other state).
+    const seq = ++st.drawSeq;
     const draft = store.draft(key());
     let p;
     try {
@@ -199,7 +211,7 @@ function create(ctx) {
     } catch (err) {
       p = { error: message(err) };
     }
-    if (seq !== st.seq || !root) return null;
+    if (seq !== st.drawSeq || !root) return null;
     if (p.error) {
       st.error = p.error;
       render();
@@ -275,6 +287,7 @@ function create(ctx) {
       clearTimeout(draftTimer);
       if (resize) resize.disconnect();
       st.seq += 1;
+      st.drawSeq += 1;
       root = page = resize = null;
     },
     hints: () => (st.payload ? HINTS : []),

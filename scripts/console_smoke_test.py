@@ -846,6 +846,9 @@ def type_into_editor(window, text):
         t.value = {json.dumps(text)}; t.dispatchEvent(new Event('input', {{bubbles: true}})); }})()""")
 
 
+PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAADElEQVR4nGNgGIwAAACWAAGzNRKNAAAAAElFTkSuQmCC"
+
+
 def u6_checks(window):
     def mo_ra_opens_three_panes():
         seed_note()
@@ -887,6 +890,37 @@ def u6_checks(window):
 
     check("U6: the read pane follows typing; find/replace; esc saves one undoable session",
           typing_follows_and_saves_once)
+
+    def pasting_a_screenshot_inserts_and_shows_it():
+        focus_pane(window, "edit @sel")
+        press(window, "i")
+        type_into_editor(window, "Before.")
+        js(window, """(() => {
+            const t = document.querySelector('.pane.focused textarea.c-editor-text');
+            const bytes = Uint8Array.from(atob(%s), c => c.charCodeAt(0));
+            const file = new File([bytes], 'shot.png', {type: 'image/png'});
+            const event = new Event('paste', {bubbles: true, cancelable: true});
+            Object.defineProperty(event, 'clipboardData', {value: {
+                items: [{kind: 'file', type: 'image/png', getAsFile: () => file}]}});
+            t.focus();
+            t.setSelectionRange(t.value.length, t.value.length);
+            t.dispatchEvent(event);
+        })()""" % json.dumps(PNG_B64))
+        assert wait_until(lambda: "\\image{shot-001}" in (focused_text(window) or "")), focused_text(window)
+        assert wait_until(lambda: js(window, "(() => { const i = document.querySelector('.view-doc img.doc-image');"
+                                             " return !!i && i.naturalWidth > 0; })()")), \
+            "the read pane should draw the pasted picture"
+        press(window, "Escape")
+        assert wait_until(lambda: "\\image{shot-001}" in (prop(NOTE_ID["Homework"], "modoc") or ""))
+        type_command(window, "image rename shot-001 wing")
+        assert wait_until(lambda: "\\image{wing}" in (prop(NOTE_ID["Homework"], "modoc") or "")), \
+            "renaming rewrites the note"
+        assert wait_until(lambda: js(window, "!!document.querySelector('.view-doc img.doc-image')")), \
+            "the picture survives the rename: " + read_text(window)
+        no_errors(window)
+
+    check("U6: a pasted screenshot becomes shot-001 in the text and the read pane; rename follows",
+          pasting_a_screenshot_inserts_and_shows_it)
 
     def worksheet_applies_on_esc():
         type_command(window, "worksheet", new_pane="right")

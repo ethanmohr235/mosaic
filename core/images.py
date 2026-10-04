@@ -25,7 +25,8 @@ import struct
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
-from core.motes import Mote, create_mote, list_motes, update_mote
+from core import undo
+from core.motes import Mote, create_mote, get_mote, list_motes, update_mote
 
 IMAGE_KEY = "image"
 NAME_KEY = "name"
@@ -174,6 +175,17 @@ def add(
     return create_mote(conn, {NAME_KEY: name, IMAGE_KEY: spec})
 
 
+def add_undoable(
+    conn: sqlite3.Connection, data: bytes, name: str | None = None, alt: str | None = None
+) -> tuple[Picture, undo.Command]:
+    """`add`, with the one undo step that takes it back out: what the
+    console pushes for `image add` and for a pasted screenshot."""
+    mote_id = add(conn, data, name, alt)
+    mote = get_mote(conn, mote_id)
+    shot = picture(mote)
+    return shot, undo.for_create_mote(conn, mote_id, mote.properties, f"add image {shot.name}")
+
+
 def find(ref: str, motes: list[Mote]) -> tuple[Mote | None, str | None]:
     """The image a reference names: an exact id, else a unique name among
     the images only (so a note called `wing` does not make `wing` the
@@ -219,6 +231,14 @@ def rename(conn: sqlite3.Connection, ref: str, new_name: str) -> list[str]:
     """Give an image a new name and carry every `\\image{old}` in every
     note with it, so a rename cannot orphan a figure. Returns the ids of
     the notes rewritten."""
+    return rename_undoable(conn, ref, new_name)[0]
+
+
+def rename_undoable(
+    conn: sqlite3.Connection, ref: str, new_name: str
+) -> tuple[list[str], undo.Command | None]:
+    """`rename`, plus the one undo step covering the image and every note
+    it rewrote (None when the name did not change)."""
     new_name = (new_name or "").strip()
     if not new_name:
         raise ImageError("an image needs a name")
@@ -228,11 +248,15 @@ def rename(conn: sqlite3.Connection, ref: str, new_name: str) -> list[str]:
         raise ImageError(error)
     old = mote.properties.get(NAME_KEY)
     if old == new_name:
-        return []
+        return [], None
     if any(m.id != mote.id and m.properties.get(NAME_KEY) == new_name
            for m in list_images(motes)):
         raise ImageError(f"an image named {new_name!r} already exists")
+    label = f"rename image {_name(mote)}"
+    steps = []
+    before = {NAME_KEY: old} if old is not None else {}
     update_mote(conn, mote.id, {NAME_KEY: new_name})
+    steps.append(undo.for_update_mote(conn, mote.id, before, {NAME_KEY: new_name}, label))
 
     changed = []
     if isinstance(old, str) and old:
@@ -243,8 +267,10 @@ def rename(conn: sqlite3.Connection, ref: str, new_name: str) -> list[str]:
                 rewritten = pattern.sub(lambda m: m.group(1) + new_name + m.group(2), source)
                 if rewritten != source:
                     update_mote(conn, note.id, {MODOC_KEY: rewritten})
+                    steps.append(undo.for_update_mote(
+                        conn, note.id, {MODOC_KEY: source}, {MODOC_KEY: rewritten}, label))
                     changed.append(note.id)
-    return changed
+    return changed, undo.combine(label, steps)
 
 
 def _name(mote: Mote) -> str:

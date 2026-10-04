@@ -808,6 +808,8 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .doc-caption { color: var(--paper-dim); margin-top: var(--table-head-pad); }
 .doc-figure { margin: 0 0 var(--lh-body); }
 .doc-figure-area { position: relative; overflow: hidden; }
+.doc-image { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.doc-figure:has(.doc-image) .doc-caption { text-align: center; }
 .doc-table-wrap { margin: 0 0 var(--lh-body); }
 .doc-table { border-collapse: collapse; }
 .doc-table th { color: var(--paper-dim); font-weight: var(--w-regular); text-align: left; border-bottom: var(--border) solid var(--paper-rule); }

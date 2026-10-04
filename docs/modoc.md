@@ -407,6 +407,10 @@ gap.
     monoss image rename <image> <new>    also rewrites every \image{old}
     monoss image export <image> [path]
 
+In the console: `^v` in the `edit` pane pastes a clipboard image as
+`\image{shot-NNN}`; `image add ‹path› [name]` and `image rename ‹old›
+‹new›` do the same by command, each one undo step.
+
 With no `--name` an image is called `shot-001`, `shot-002`, ... and can be
 renamed later; `rename` carries every note that names it. An SVG is cleaned
 of scripts, event handlers and external references on the way in.
