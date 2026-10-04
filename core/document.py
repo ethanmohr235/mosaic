@@ -17,10 +17,12 @@ core/modoc_bind.py. Typography is the pane's.
 A draft is rendered, not the stored note: the source comes in with every
 call, so the read pane shows unsaved typing. `\\include`d notes are read
 as stored."""
+import base64
 import sqlite3
 from dataclasses import dataclass
 
 from core import calc
+from core import images as images_repo
 from core import modoc
 from core import modoc_bind
 from core import motes as motes_repo
@@ -191,6 +193,8 @@ class _Shaper:
                       else plotview.figure_json(drawn))
             return {"type": "graph", "view": b.view, "figure": figure,
                     **self.caption(modoc.FIGURE_LABEL, b)}
+        if isinstance(b, modoc.Image):
+            return self.image(self.resolution.images.get(modoc.image_key(b)), b)
         if isinstance(b, modoc.Table):
             return {"type": "table", "header": [self.inline(c) for c in b.header],
                     "rows": [[self.inline(c) for c in row] for row in b.rows],
@@ -206,6 +210,17 @@ class _Shaper:
             return {"number": 0, "caption": []}
         word = modoc.LABEL_WORDS.get(kind, kind)
         return {"number": b.number, "word": word, "caption": self.inline(b.caption)}
+
+    def image(self, found, node: modoc.Image) -> dict:
+        """A stored picture as the data URI a webview can show directly.
+        One that cannot be found is a visible error block, never a gap."""
+        out = {"type": "image", "ref": node.ref, "width": node.width,
+               **self.caption(modoc.FIGURE_LABEL, node)}
+        if not isinstance(found, images_repo.Picture):
+            return {**out, "error": found or "unresolved image"}
+        uri = f"data:{found.mime};base64,{base64.b64encode(found.data).decode('ascii')}"
+        return {**out, "name": found.name, "moteId": found.mote_id, "mime": found.mime,
+                "src": uri, "alt": found.alt or found.name, "error": None}
 
     def work(self, shown: calc.Work | None, node: modoc.Work) -> dict:
         if shown is None:

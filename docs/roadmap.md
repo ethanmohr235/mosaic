@@ -119,6 +119,13 @@ Each one was a separate act of filing. That lesson became a rule in
   only a `figure` environment numbers one; a table's first row is its
   header; a cited rule's own name is its label; `\include` splices and
   the whole assembled document is numbered as one. See `modoc.md`.
+- **Images:** `\image{name}` shows a stored PNG or SVG (a mote with the
+  reserved `image` property), bare or in a captioned `figure`.
+  **Decided:** base64 in the mote, 4 MB cap, behind `core/images.py` so
+  side files can replace it; auto-named `shot-NNN`, renamed later with
+  `monoss image rename`. Backend done; paste-a-screenshot is console
+  work. `.tex` export writes the file and emits `\includegraphics`
+  (SVG needs converting for LaTeX).
 - **Output:** export `.tex` with every value frozen and graphs written as
   figure files. **Bundle tectonic** so real PDFs work everywhere. This
   was approved in principle; confirm packaging in its phase.

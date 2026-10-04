@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core import calc
 from core import csv_import
+from core import images
 from core import materials_provider
 from core import uncertainty
 from core import fit as fit_repo
@@ -339,6 +340,27 @@ def build_parser() -> argparse.ArgumentParser:
     import_csv.add_argument(
         "--dry-run", action="store_true", help="Show what would be imported, and write nothing"
     )
+
+    ### Image
+    image_parser = subparsers.add_parser(
+        "image", help="Pictures for notes: PNG or SVG, shown with \\image{name}"
+    )
+    image_sub = image_parser.add_subparsers(dest="action")
+    image_add = image_sub.add_parser(
+        "add", help="Store a picture (up to 4 MB); `-` reads it from stdin"
+    )
+    image_add.add_argument("file", help="A PNG or SVG file, or - for stdin")
+    image_add.add_argument("--name", help="Defaults to the next shot-NNN")
+    image_add.add_argument("--alt", help="Alt text")
+    image_sub.add_parser("list", help="Every image in the garden")
+    image_rename = image_sub.add_parser(
+        "rename", help="Rename an image and every \\image{...} that names it"
+    )
+    image_rename.add_argument("image", help="Name or id")
+    image_rename.add_argument("new_name")
+    image_export = image_sub.add_parser("export", help="Write an image back out as a file")
+    image_export.add_argument("image", help="Name or id")
+    image_export.add_argument("path", nargs="?", help="Defaults to <name>.<png|svg>")
 
     ### Project
     project_parser = subparsers.add_parser(
@@ -886,6 +908,32 @@ def _handle_import(conn, args) -> None:
     print(f"Imported {len(imported.row_ids)} row(s) under {imported.import_id}.")
 
 
+def _handle_image(conn, args) -> None:
+    if args.action == "add":
+        data = sys.stdin.buffer.read() if args.file == "-" else Path(args.file).read_bytes()
+        mote_id = images.add(conn, data, args.name, args.alt)
+        shot = images.get_bytes(conn, mote_id)
+        print(f"Stored {shot.name} ({shot.mime}, {len(shot.data) // 1024} KB) id={mote_id}")
+        print(f"Use it in a note with \\image{{{shot.name}}}")
+    elif args.action == "list":
+        found = images.list_images(list_motes(conn))
+        if not found:
+            print("No images.")
+        for mote in found:
+            shot = images.picture(mote)
+            print(f"{shot.mote_id}  {shot.name}  {shot.mime}  {len(shot.data) // 1024} KB")
+    elif args.action == "rename":
+        notes = images.rename(conn, args.image, args.new_name)
+        print(f"Renamed to {args.new_name}; rewrote \\image in {len(notes)} note(s).")
+    elif args.action == "export":
+        shot = images.get_bytes(conn, args.image)
+        path = Path(args.path or f"{shot.name}.{images.EXTENSIONS[shot.mime]}")
+        path.write_bytes(shot.data)
+        print(f"Image written to {path}")
+    else:
+        print("Specify an image action: add, list, rename, export")
+
+
 def _handle_project(args) -> None:
     """tree and check read every garden, so they take no --garden; start
     and stop write one mote, in the garden --garden names."""
@@ -946,6 +994,7 @@ _WRITES = {
     ("rel", "create"), ("rel", "update"), ("rel", "delete"),
     ("species", "set"), ("species", "template"), ("species", "new"),
     ("modoc", "import"), ("worksheet", "apply"), ("import", "csv"),
+    ("image", "add"), ("image", "rename"),
     ("project", "start"), ("project", "stop"),
 }
 
@@ -1065,6 +1114,8 @@ def main() -> None:
                 _handle_fit(conn, args)
             elif args.command == "import":
                 _handle_import(conn, args)
+            elif args.command == "image":
+                _handle_image(conn, args)
             elif args.command == "why":
                 _handle_why(conn, args)
             elif args.command in ("impact", "requires", "producers", "consumers"):

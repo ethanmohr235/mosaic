@@ -59,8 +59,10 @@ CALC_COMMANDS = (WORK_COMMAND, *SECTION_COMMANDS)
 
 # Block commands with one braced argument, and what each makes.
 _BLOCK_HANDLERS = ("section", "subsection", "graph", "rule", "include")
+IMAGE_COMMAND = "image"
 BLOCK_COMMANDS = (
-    *_BLOCK_HANDLERS, "item", "begin", "end", *META_COMMANDS, *CALC_COMMANDS,
+    *_BLOCK_HANDLERS, IMAGE_COMMAND, "item", "begin", "end", *META_COMMANDS,
+    *CALC_COMMANDS,
 )
 
 _ESCAPABLE = "\\{}%$"
@@ -90,6 +92,12 @@ _META_RE = re.compile(
 # A `\graph{...}` line, wherever it is -- used both as a block of its own
 # and to find the one inside a `figure` environment.
 _FIGURE_RE = re.compile(r"^\\graph\{(?P<arg>[^{}]*)\}$")
+# `\image{shot-001}` or `\image{shot-001}{width=60}`. Non-greedy braces for
+# the same reason as _CALC_RE: the second brace is options, not more name.
+_IMAGE_RE = re.compile(
+    r"^\\image\{(?P<arg>[^{}]*)\}(?:\{(?P<opts>[^{}]*)\})?$"
+)
+_WIDTH_RE = re.compile(r"^width\s*=\s*(\d{1,3})$")
 # A calc block: `\work{bd.l}`, `\work{bd.l}{in, 3}`, `\given`, `\checks{3}`.
 # Braces are non-greedy here, unlike _BLOCK_RE's, because a calc argument
 # holds a reference or a format spec rather than inline macros -- so the
@@ -266,6 +274,25 @@ class Graph:
 
 
 @dataclass(frozen=True)
+class Image:
+    """`\\image{shot-001}`: a stored picture (core/images.py), named.
+
+    `ref` is an image mote's name or id; which one it finds is
+    core/modoc_bind.py's business, as with `\\graph`. `width` is a percentage
+    of the text width (written without a `%`, which starts a comment), 0
+    meaning the picture's own size up to the column.
+    Numbered exactly as a `\\graph` is: bare it is an unnumbered
+    illustration, inside `\\begin{figure}` it takes a caption and a number
+    from the same counter."""
+    ref: str
+    line: int
+    width: int = 0
+    caption: list[Inline] = field(default_factory=list)
+    label: str = ""
+    number: int = 0
+
+
+@dataclass(frozen=True)
 class Table:
     """`\\begin{tabular}`: rows of cells, `&` between them.
 
@@ -345,8 +372,8 @@ class Section:
 
 
 Block = (
-    Heading | Paragraph | ItemList | Equation | Graph | Table | Cited | Include
-    | Work | Section
+    Heading | Paragraph | ItemList | Equation | Graph | Image | Table | Cited
+    | Include | Work | Section
 )
 
 # What a `\label` can point at, and which counter numbers it.
@@ -399,6 +426,7 @@ _COUNTERS: dict[type, str] = {
     Equation: EQUATION_LABEL,
     Cited: EQUATION_LABEL,
     Graph: FIGURE_LABEL,
+    Image: FIGURE_LABEL,
     Table: TABLE_LABEL,
 }
 
@@ -447,10 +475,10 @@ def numbered(document: Document) -> Document:
 
 
 def _is_numbered(block: Block) -> bool:
-    """A `\\graph` earns a number by being a figure -- captioned or labelled
+    """A `\\graph` or `\\image` earns a number by being a figure -- captioned or labelled
     -- rather than by being a graph. Everything else in the counter table is
     numbered always."""
-    if isinstance(block, Graph):
+    if isinstance(block, (Graph, Image)):
         return bool(block.caption or block.label)
     return True
 
@@ -610,26 +638,56 @@ class _Parser:
         ))
 
     def _close_figure(self, _name: str, body: list[list], line: int) -> None:
-        """A figure is a `\\graph` with a caption and a number around it, so
-        the environment only has to find the graph inside itself."""
-        views = [
-            match.group("arg").strip()
-            for _at, text in body
-            if (match := _FIGURE_RE.match(text)) is not None
-        ]
-        if len(views) != 1:
+        """A figure is a `\\graph` or an `\\image` with a caption and a number
+        around it, so the environment only has to find the one inside
+        itself."""
+        found = []
+        for at, text in body:
+            if (match := _FIGURE_RE.match(text)) is not None:
+                found.append(Graph(
+                    match.group("arg").strip(), line,
+                    self._inline(line, self._caption), self._label,
+                ))
+            elif (match := _IMAGE_RE.match(text)) is not None:
+                found.append(self._image(
+                    at, match, self._inline(line, self._caption), self._label,
+                ))
+        if len(found) != 1:
             self.diagnostics.append(Diagnostic(
                 line, "bad_figure",
-                f"\\begin{{figure}} holds {len(views)} \\graph lines -- it needs "
-                f"exactly one, since a figure has one caption and one number",
+                f"\\begin{{figure}} holds {len(found)} \\graph or \\image lines -- "
+                f"it needs exactly one, since a figure has one caption and one number",
             ))
-            if not views:
+            if not found:
                 return
-        self.blocks.append(Graph(
-            views[0], line, self._inline(line, self._caption), self._label,
-        ))
+        self.blocks.append(found[0])
 
+    def _image(
+        self, number: int, match: re.Match, caption: list[Inline] | None = None,
+        label: str = "",
+    ) -> Image:
+        ref = match.group("arg").strip()
+        if not ref:
+            self.diagnostics.append(Diagnostic(
+                number, "bad_image",
+                "\\image{} needs the name of a stored image (`monoss image add`)",
+            ))
+        return Image(
+            ref, number, self._width(number, match.group("opts")), caption or [], label,
+        )
 
+    def _width(self, number: int, opts: str | None) -> int:
+        if not opts or not opts.strip():
+            return 0
+        found = _WIDTH_RE.match(opts.strip())
+        if found is None or not 0 < int(found.group(1)) <= 100:
+            self.diagnostics.append(Diagnostic(
+                number, "bad_image_option",
+                f"\\image option {opts.strip()!r} -- the only one is width=N, "
+                f"N being a percent of the text width from 1 to 100",
+            ))
+            return 0
+        return int(found.group(1))
 
     def _feed_command(self, number: int, line: str) -> None:
         environment = _ENVIRONMENT_RE.match(line)
@@ -642,6 +700,11 @@ class _Parser:
         if calc is not None:
             self._flush()
             self._feed_calc(number, calc)
+            return
+        image = _IMAGE_RE.match(line)
+        if image is not None:
+            self._flush()
+            self.blocks.append(self._image(number, image))
             return
         meta = _META_RE.match(line)
         if meta is not None:
@@ -868,6 +931,10 @@ def graphs(document: Document) -> list[Graph]:
     return [b for b in document.blocks if isinstance(b, Graph)]
 
 
+def images(document: Document) -> list[Image]:
+    return [b for b in document.blocks if isinstance(b, Image)]
+
+
 def works(document: Document) -> list[Work]:
     return [b for b in document.blocks if isinstance(b, Work)]
 
@@ -897,6 +964,10 @@ def graph_key(node: Graph) -> str:
     return node.view
 
 
+def image_key(node: Image) -> str:
+    return node.ref
+
+
 def work_key(node: Work) -> str:
     return f"{node.target}\u241f{_format_key(node.format)}"
 
@@ -919,7 +990,7 @@ def _inlines(document: Document):
                 for cell in row:
                     yield from cell
             yield from block.caption
-        elif isinstance(block, Graph):
+        elif isinstance(block, (Graph, Image)):
             yield from block.caption
         elif isinstance(block, (Heading, Paragraph)):
             yield from block.content

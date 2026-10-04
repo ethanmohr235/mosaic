@@ -28,6 +28,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from core import calc
+from core import images as images_repo
 from core.calc import format_value  # noqa: F401 -- re-exported
 from core import modoc
 from core import kinds as kinds_repo
@@ -125,6 +126,7 @@ class Resolution:
     links: dict[str, LinkTarget] = field(default_factory=dict)
     values: dict[str, ValueResult] = field(default_factory=dict)
     graphs: dict[str, plotview.Figure] = field(default_factory=dict)
+    images: dict[str, images_repo.Picture | str] = field(default_factory=dict)
     works: dict[str, calc.Work] = field(default_factory=dict)
     sections: dict[str, SectionResult] = field(default_factory=dict)
     rules: dict[str, CitedRule] = field(default_factory=dict)
@@ -287,6 +289,10 @@ def resolve(
         key: drawing(conn, key, motes=motes)
         for key in dict.fromkeys(modoc.graph_key(n) for n in modoc.graphs(document))
     }
+    pictures = {
+        modoc.image_key(node): _picture(node.ref, motes)
+        for node in modoc.images(document)
+    }
     works = {
         modoc.work_key(node): _work(conn, node, anchor_id, motes)
         for node in modoc.works(document)
@@ -302,7 +308,8 @@ def resolve(
         for node in modoc.sections(document)
     }
     return Resolution(
-        anchor_id, links, values, graphs, works, sections, rules, diagnostics
+        anchor_id, links, values, graphs, pictures, works, sections, rules,
+        diagnostics,
     )
 
 
@@ -463,6 +470,12 @@ def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Dia
             found.append(modoc.Diagnostic(
                 node.line, "unresolved_graph", f"\\graph{{{node.view}}}: {drawn.error}"
             ))
+    for node in modoc.images(document):
+        found_picture = resolution.images.get(modoc.image_key(node))
+        if isinstance(found_picture, str):
+            found.append(modoc.Diagnostic(
+                node.line, "unresolved_image", f"\\image{{{node.ref}}}: {found_picture}"
+            ))
     for node in modoc.works(document):
         shown = resolution.works.get(modoc.work_key(node))
         if shown is not None and shown.error:
@@ -491,6 +504,14 @@ def _link(ref: str, motes: list[Mote], relationships: list[Relationship]) -> Lin
     if mote is None:
         return LinkTarget(ref, None, ref, [], error)
     return LinkTarget(ref, mote.id, _name(mote), kinds_repo.kinds_of(mote, relationships))
+
+
+def _picture(ref: str, motes: list[Mote]) -> "images_repo.Picture | str":
+    """The stored image a `\\image` names, or the reason it cannot be
+    found -- a string, so one dangling figure is a message in the note and
+    not an exception."""
+    mote, error = images_repo.find(ref, motes)
+    return error if mote is None else images_repo.picture(mote)
 
 
 def _find(ref: str, motes: list[Mote]) -> tuple[Mote | None, str | None]:

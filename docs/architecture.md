@@ -125,7 +125,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance`, `uncertainty` and `archived` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance`, `uncertainty`, `archived` and `image` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `find`, `set`, `open`, `rename`, `unlink`, `template`, `plot`, `fit`, `sim`, `rule`, `scenarios`, `solve`, `why`, `step`, `play`, `pause`, `cd`, `layout`, `refresh`, `undo`, `redo`, `log`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 
@@ -812,6 +812,14 @@ it is computed (`core/sweep.py`), and one figure payload
 (`plotview.figure_json`) that the console's renderer
 (`console/frontend/js/plot.js`) draws in a plot pane and in a note's
 read pane alike. The note refers.
+
+`\image{...}` is the other figure: a picture rather than a computation. It
+names a mote carrying the reserved `image` property (`core/images.py`:
+PNG or SVG, base64 in the mote, 4 MB cap, SVG cleaned on the way in), so
+it rides sync, export and undo with no machinery of its own. Everything
+that reads or writes the bytes goes through `core/images.py`, which is the
+seam where side-file storage would replace base64 if it ever has to.
+`core/document.py` ships the picture to the read pane as a data URI.
 
 **A document can span several notes, and is numbered as one.**
 `\include{Method}` is the only macro that changes the *document* rather

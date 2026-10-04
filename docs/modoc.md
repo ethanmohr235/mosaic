@@ -62,6 +62,7 @@ Each on its own line.
 | `\rule{ΣFx}` | a rule's equation, cited -- see below |
 | `\include{Method}` | another note's blocks, spliced in |
 | `\graph{...}` | a saved Moxie view, drawn here -- see below |
+| `\image{name}` `\image{name}{width=60}` | a stored picture (PNG or SVG) -- see below |
 | `\work{bd.l}` | the shown work for one value -- see below |
 | `\given` `\answers` `\assumptions` `\checks` `\verification` | a calc section -- see below |
 | blank line | paragraph break |
@@ -378,8 +379,40 @@ illustration dropped between two paragraphs. Wrapped in a `figure` it
 becomes something a reader can be sent to. Those are two different things
 to want, and the figure itself is identical either way.
 
-A `figure` needs exactly one `\graph` in it, since it has one caption and
-one number.
+A `figure` needs exactly one `\graph` *or* `\image` in it, since it has one
+caption and one number. Graphs and images draw on the same figure counter.
+
+### `\image` -- a stored picture
+
+    \image{shot-001}
+    \image{shot-001}{width=60}
+
+    \begin{figure}
+    \image{wing}
+    \caption{Wing geometry}
+    \label{fig:wing}
+    \end{figure}
+
+An image is a mote with the reserved `image` property (PNG or SVG, 4 MB at
+most, bytes in base64), so it syncs, exports and undoes like anything else.
+`\image{name}` finds one by its `name` or id, among images only. Bare, it is
+an unnumbered illustration; in a `figure` it takes a caption, a label and a
+number exactly as a `\graph` does. `width=N` is a percent of the text width
+(1-100) and is written without a `%`, which starts a comment. A name that
+finds no image renders as a visible error block and a problem, never a
+gap.
+
+    monoss image add <file|-> [--name N] [--alt TEXT]   (`-` reads stdin)
+    monoss image list
+    monoss image rename <image> <new>    also rewrites every \image{old}
+    monoss image export <image> [path]
+
+With no `--name` an image is called `shot-001`, `shot-002`, ... and can be
+renamed later; `rename` carries every note that names it. An SVG is cleaned
+of scripts, event handlers and external references on the way in.
+MCP: `add_image`, `list_images`, `rename_image`; mote dumps leave the pixels
+out. Storage is all behind `core/images.py`, so keeping the bytes in side
+files instead would not touch the macro or the renderer.
 
 ### `\rule` -- cite a rule
 

@@ -47,7 +47,7 @@ absolute path.
 ## Tools
 
 56 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `propagate_uncertainty`, `fit_model`, `list_materials`, motes (`list_motes`, `search_motes`, `get_mote`,
+`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `add_image`, `list_images`, `rename_image`, `propagate_uncertainty`, `fit_model`, `list_materials`, motes (`list_motes`, `search_motes`, `get_mote`,
 `create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
 (`list_relationships`, `mote_relationships`, `create_relationship`,
 `update_relationship`, `delete_relationship`), species (`list_species`,
@@ -212,6 +212,11 @@ row; `load [kN]` in the header gives a column its unit, and each value is
 marked `source: measured`. Any problem refuses the whole file, and
 `dry_run` shows the columns and row count without writing. See
 `docs/architecture.md` -> *Importing measured data*.
+
+`add_image` stores a PNG or SVG (base64, 4 MB at most) as an image mote;
+a note shows it with `\image{name}`. `get_mote`, `list_motes` and the
+rest return an image's size but not its pixels. See `docs/modoc.md` ->
+*`\image`*.
 
 ## Reaching it from other machines
 

@@ -30,6 +30,7 @@ from core import derivations as derivations_repo
 from core import garden_io
 from core import health as health_repo
 from core import csv_import as csv_import_repo
+from core import images as images_repo
 from core import uncertainty as uncertainty_repo
 from core import fit as fit_repo
 from core import projects as projects_repo
@@ -169,11 +170,23 @@ def sync_status(garden: str | None = None) -> dict[str, Any]:
 # ---- motes ----
 
 
+def _mote_dict(mote) -> dict[str, Any]:
+    """A mote as a plain dict, with an image's pixels left out: base64 of a
+    screenshot is megabytes of tokens no tool caller can read. The size is
+    kept, and `list_images` is the way to see what images exist."""
+    out = dataclasses.asdict(mote)
+    spec = out["properties"].get(images_repo.IMAGE_KEY)
+    if isinstance(spec, dict) and "data" in spec:
+        out["properties"][images_repo.IMAGE_KEY] = {
+            **spec, "data": f"<{len(spec['data']) * 3 // 4} bytes omitted>"}
+    return out
+
+
 def list_motes(garden: str | None = None) -> list[dict[str, Any]]:
     """Every mote in the garden with its properties. Can be large --
     neighborhood() is usually the better way to explore."""
     with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in motes_repo.list_motes(conn)]
+        return [_mote_dict(m) for m in motes_repo.list_motes(conn)]
 
 
 def search_motes(
@@ -186,14 +199,14 @@ def search_motes(
     "key =" with nothing after the '=' matches any mote that has that
     key at all. An empty query matches everything, capped by `limit`."""
     with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in motes_repo.search_motes(conn, query, limit)]
+        return [_mote_dict(m) for m in motes_repo.search_motes(conn, query, limit)]
 
 
 def get_mote(mote_id: str, garden: str | None = None) -> dict[str, Any] | None:
     """One mote's id and properties, or null if no mote has that id."""
     with _connect(garden) as conn:
         mote = motes_repo.get_mote(conn, mote_id)
-        return dataclasses.asdict(mote) if mote is not None else None
+        return _mote_dict(mote) if mote is not None else None
 
 
 def create_mote(properties: dict[str, Any], garden: str | None = None) -> dict[str, Any]:
@@ -204,7 +217,7 @@ def create_mote(properties: dict[str, Any], garden: str | None = None) -> dict[s
     reserved_names()."""
     with _connect(garden, write=True) as conn:
         mote_id = motes_repo.create_mote(conn, properties)
-        return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
+        return _mote_dict(motes_repo.get_mote(conn, mote_id))
 
 
 def update_mote(
@@ -215,7 +228,7 @@ def update_mote(
     delete_property() to remove one."""
     with _connect(garden, write=True) as conn:
         motes_repo.update_mote(conn, mote_id, properties)
-        return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
+        return _mote_dict(motes_repo.get_mote(conn, mote_id))
 
 
 def delete_property(mote_id: str, key: str, garden: str | None = None) -> bool:
@@ -298,14 +311,14 @@ def list_species(garden: str | None = None) -> list[dict[str, Any]]:
     least one instance_of or template_of relationship. Species are how
     MonOSS expresses "is-a"; nothing else marks them structurally."""
     with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in species_repo.list_species(conn)]
+        return [_mote_dict(m) for m in species_repo.list_species(conn)]
 
 
 def species_of(mote_id: str, garden: str | None = None) -> list[dict[str, Any]]:
     """The species this mote is declared an instance of. A mote may
     belong to more than one."""
     with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in species_repo.species_of(conn, mote_id)]
+        return [_mote_dict(m) for m in species_repo.species_of(conn, mote_id)]
 
 
 def instances_of(species_id: str, garden: str | None = None) -> list[dict[str, Any]]:
@@ -313,7 +326,7 @@ def instances_of(species_id: str, garden: str | None = None) -> list[dict[str, A
     species' template, which holds placeholder values rather than real
     data."""
     with _connect(garden) as conn:
-        return [dataclasses.asdict(m) for m in species_repo.instances_of(conn, species_id)]
+        return [_mote_dict(m) for m in species_repo.instances_of(conn, species_id)]
 
 
 def set_species(mote_id: str, species_id: str, garden: str | None = None) -> dict[str, Any]:
@@ -337,7 +350,7 @@ def template_for(species_id: str, garden: str | None = None) -> dict[str, Any] |
     """This species' template mote, or null if it has none."""
     with _connect(garden) as conn:
         template = species_repo.template_for(conn, species_id)
-        return dataclasses.asdict(template) if template is not None else None
+        return _mote_dict(template) if template is not None else None
 
 
 def create_instance(
@@ -349,7 +362,7 @@ def create_instance(
     relationship."""
     with _connect(garden, write=True) as conn:
         mote_id = species_repo.create_instance(conn, species_id, overrides or {})
-        return dataclasses.asdict(motes_repo.get_mote(conn, mote_id))
+        return _mote_dict(motes_repo.get_mote(conn, mote_id))
 
 
 # ---- graph ----
@@ -363,7 +376,7 @@ def neighborhood(mote_id: str, hops: int = 2, garden: str | None = None) -> dict
     with _connect(garden) as conn:
         motes, rels = graph_repo.neighborhood(conn, mote_id, hops)
         return {
-            "motes": [dataclasses.asdict(m) for m in motes],
+            "motes": [_mote_dict(m) for m in motes],
             "relationships": [dataclasses.asdict(r) for r in rels],
         }
 
@@ -374,7 +387,7 @@ def whole_garden(garden: str | None = None) -> dict[str, Any]:
     with _connect(garden) as conn:
         motes, rels = graph_repo.whole_garden(conn)
         return {
-            "motes": [dataclasses.asdict(m) for m in motes],
+            "motes": [_mote_dict(m) for m in motes],
             "relationships": [dataclasses.asdict(r) for r in rels],
         }
 
@@ -869,6 +882,46 @@ def import_csv(
             "rowIds": list(imported.row_ids)}
 
 
+def add_image(
+    data_base64: str,
+    name: str | None = None,
+    alt: str | None = None,
+    garden: str | None = None,
+) -> dict[str, Any]:
+    """Store a PNG or SVG (base64 in `data_base64`, 4 MB at most) as an image
+    mote and return its `id` and `name`. Without a `name` it is called the
+    next `shot-NNN`. A note shows it with `\\image{name}` on a line of its
+    own, optionally `\\image{name}{width=60}` (percent of the text width);
+    inside `\\begin{figure}` with `\\caption{...}` and `\\label{...}` it is a
+    numbered figure. An SVG is cleaned of scripts and external references."""
+    import base64
+    try:
+        data = base64.b64decode(data_base64, validate=True)
+    except ValueError as error:
+        raise ValueError(f"data_base64 is not valid base64: {error}") from error
+    with _connect(garden, write=True) as conn:
+        mote_id = images_repo.add(conn, data, name, alt)
+        shot = images_repo.get_bytes(conn, mote_id)
+    return {"id": mote_id, "name": shot.name, "mime": shot.mime, "bytes": len(shot.data)}
+
+
+def list_images(garden: str | None = None) -> list[dict[str, Any]]:
+    """Every image in the garden: id, name, mime type and size in bytes. The
+    pixels are not returned; reference one in a note with `\\image{name}`."""
+    with _connect(garden) as conn:
+        shots = [images_repo.picture(m) for m in images_repo.list_images(motes_repo.list_motes(conn))]
+    return [{"id": s.mote_id, "name": s.name, "mime": s.mime, "bytes": len(s.data)}
+            for s in shots]
+
+
+def rename_image(image: str, new_name: str, garden: str | None = None) -> dict[str, Any]:
+    """Rename an image (by name or id) and rewrite every `\\image{old}` in
+    every note to match, so no figure is orphaned."""
+    with _connect(garden, write=True) as conn:
+        notes = images_repo.rename(conn, image, new_name)
+    return {"name": new_name, "notesRewritten": notes}
+
+
 def read_worksheet(garden: str | None = None) -> str:
     """This garden's calculation as lines of text -- its givens, then its
     equations -- the form `write_worksheet` takes back.
@@ -1038,6 +1091,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
+    add_image, list_images, rename_image,
     project_tree, start_project, import_csv, propagate_uncertainty, fit_model,
     search_gardens, archive_garden, list_materials,
     calc_sections, shown_work,
