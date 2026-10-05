@@ -27,7 +27,9 @@ from mcp.server.auth.settings import AuthSettings
 
 from core import calc as calc_repo
 from core import derivations as derivations_repo
+from core import flowview as flowview_repo
 from core import garden_io
+from core import graphview as graphview_repo
 from core import health as health_repo
 from core import csv_import as csv_import_repo
 from core import images as images_repo
@@ -712,6 +714,34 @@ def solve_health(garden: str | None = None) -> dict[str, Any]:
         }
 
 
+def solve_flow(
+    root: str | None = None, depth: int | None = None, scenario: str | None = None,
+    garden: str | None = None,
+) -> dict[str, Any]:
+    """The solve as the console's `graph --flow` pane lays it out: what
+    determined what, step by step, left to right.
+
+    Read off one in-memory solve (nothing is written). `columns` run from
+    the givens, through one column per solve step, to the answers (values
+    nothing else reads); each holds `groups` -- one step the solve took: a
+    single equation that determined one value, or a `coupled` set the
+    solver found together -- and `relays` (a wire passing through). A
+    group's `cards` are its equations (with `tex`, and a residual or a
+    check's margin) and its `stubs` the values it determined, per mote.
+    `segments` are the wires. A failing solve still answers: `solve.state`
+    is `partial` and the unsolved equations are `fault` groups carrying
+    solve_health's wording.
+
+    `root` (a mote name, `#id`, or one value `m.k`) keeps `depth` steps
+    (default 2) either side of it; none draws the whole solve. `scenario`
+    solves under that scenario's overrides."""
+    words = ["graph", *([root] if root else []), "--flow",
+             *(["--depth", str(depth)] if depth is not None and root else [])]
+    with _connect(garden) as conn:
+        line = graphview_repo.parse(words[1:])
+        return flowview_repo.run(conn, line, (), {"scenario": scenario} if scenario else None)
+
+
 def _owner_json(owner: "projects_repo.Owner | None") -> dict[str, Any] | None:
     if owner is None:
         return None
@@ -1213,7 +1243,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     preview_simulation,
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,
-    solve_health, read_worksheet, write_worksheet,
+    solve_health, solve_flow, read_worksheet, write_worksheet,
     add_image, list_images, rename_image,
     export_document, export_plot, plan_week, log_time, time_budget, submit_project, list_revisions, diff_revisions,
     project_tree, start_project, import_csv, propagate_uncertainty, fit_model,

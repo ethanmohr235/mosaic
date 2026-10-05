@@ -2,6 +2,7 @@
 """The graph pane's grammar and answer (docs/console.md -> Settled for U8).
 
     graph [@sel|#id|‹name›] [--depth N] [--hide-rel a,b] [--view ‹saved›] [‹find conditions›]
+    graph [@sel|#id|‹name›|‹m.k›] --flow [--depth N] [--view ‹saved›] [‹find conditions›]
 
 With a root, the pane draws that mote's neighbourhood: every mote within
 `--depth` hops (default 2), relationships counted in either direction.
@@ -13,7 +14,10 @@ every instance it has.
 
 A pane is its command, so `[` and `]` rewrite `--depth` (rewrite()), and
 a layout reopens on the same neighbourhood. Edits are never answered
-here: a gesture in the pane puts a statement on the command line."""
+here: a gesture in the pane puts a statement on the command line.
+
+`--flow` draws the solve instead of the relationships: core/flowview.py
+answers it, and there `--depth` counts solve steps both ways."""
 import shlex
 from dataclasses import dataclass, replace
 from typing import Sequence
@@ -29,7 +33,8 @@ from core.entities import Mote, Relationship
 
 VERB = "graph"
 DEPTH_FLAG, HIDE_FLAG, VIEW_FLAG = "--depth", "--hide-rel", findtext.VIEW_FLAG
-FLAGS = (DEPTH_FLAG, HIDE_FLAG, VIEW_FLAG)
+FLOW_FLAG = "--flow"  # takes no value
+FLAGS = (DEPTH_FLAG, HIDE_FLAG, VIEW_FLAG, FLOW_FLAG)
 DEFAULT_DEPTH = 2
 SEL = "@sel"
 
@@ -43,11 +48,14 @@ class GraphLine:
     hide: tuple[str, ...] = ()
     view: str | None = None
     conditions: tuple[str, ...] = ()
+    flow: bool = False
 
     def text(self) -> str:
         words = [VERB]
         if self.root:
             words.append(self.root)
+        if self.flow:
+            words.append(FLOW_FLAG)
         if self.depth is not None:
             words += [DEPTH_FLAG, str(self.depth)]
         if self.hide:
@@ -75,6 +83,10 @@ def parse(args: Sequence[str]) -> GraphLine:
     i = 0
     while i < len(args):
         word = args[i]
+        if word == FLOW_FLAG:
+            fields["flow"] = True
+            i += 1
+            continue
         if word.startswith("--"):
             if word not in FLAGS:
                 raise CommandError(f"graph takes {', '.join(FLAGS)} -- not {word}")
@@ -98,6 +110,8 @@ def parse(args: Sequence[str]) -> GraphLine:
             raise CommandError(f"graph has one root -- {root!r}, then {word!r} is not a condition")
     if "depth" in fields and root is None:
         raise CommandError("--depth needs a root: graph @sel --depth 2")
+    if fields.get("flow") and fields.get("hide"):
+        raise CommandError("--flow draws the solve, not relationships -- --hide-rel has nothing to hide")
     if conditions:
         findtext.parse_find(shlex.join(conditions))  # raises FindSyntaxError naming the word
     return GraphLine(root, conditions=tuple(conditions), **fields)
@@ -164,6 +178,9 @@ def root_id(conn, ref: str, selection=()) -> str:
 
 
 def run(conn, line: GraphLine, selection=()) -> dict:
+    if line.flow:
+        from core import flowview  # it reads this module's root and filters
+        return flowview.run(conn, line, selection)
     motes, relationships, index = table_repo.read(conn)
     problems: list[str] = []
     every_type = sorted({r.type for r in relationships})
@@ -250,7 +267,7 @@ def choices(conn, rest: str) -> list[tuple[str, str]]:
         return [(str(n), f"{n} hop{'s' if n > 1 else ''}") for n in (1, 2, 3, 4)]
     if partial.startswith("-"):
         return [(DEPTH_FLAG, "hops from the root"), (HIDE_FLAG, "leave out relationship types"),
-                (VIEW_FLAG, "start from a saved view")]
+                (VIEW_FLAG, "start from a saved view"), (FLOW_FLAG, "the solve, left to right")]
     names = sorted({m.properties["name"] for m in motes_repo.list_motes(conn)
                     if isinstance(m.properties.get("name"), str)})
     return [(SEL, "the selection")] + [(_quote(n), "root") for n in names]

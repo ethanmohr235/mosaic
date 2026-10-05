@@ -55,7 +55,7 @@ absolute path.
 `template_for`, `create_instance`), graph (`neighborhood`,
 `whole_garden`), simulation (`preview_simulation`, `why`),
 dependencies (`impact`, `requires`, `producers`, `consumers`),
-the worksheet (`read_worksheet`, `write_worksheet`), `solve_health`,
+the worksheet (`read_worksheet`, `write_worksheet`), `solve_health`, `solve_flow`,
 the calc sections (`calc_sections`, `shown_work`),
 `check_roles`, `list_scenarios`, notes (`resolve_modoc`), and
 `reserved_names`.
@@ -169,6 +169,22 @@ inconsistent equations (`unitProblems`). Read `verdict`, not the totals:
 `equations == unknowns` is neither necessary nor sufficient, since three of
 each can be two blocks with one short and one surplus. See
 `docs/simulation.md`.
+
+`solve_flow` is the solve as the console's `graph --flow` pane lays it out,
+read off one in-memory solve that writes nothing.
+- `columns` run from the givens, through one column per solve step, to
+  the answers (values nothing else reads).
+- Each step is a group: one equation that determined one value, or a
+  `coupled` set the solver found together. Its `cards` are the equations
+  (with `tex`, and a residual or a check's margin) and its `stubs` the
+  values it determined, per mote.
+- `segments` are the wires.
+- `root` (`m.k`, a name or `#id`) keeps `depth` steps either side of it.
+- A failing solve still answers: `solve.state` is `partial`, and the
+  unsolved equations are `fault` groups carrying `solve_health`'s
+  wording.
+
+See `core/flowview.py`.
 
 `project_tree` is every garden nested under the mote that owns it (a mote
 carrying `garden: <name>` owns that garden and is its cover), plus

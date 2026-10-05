@@ -38,6 +38,7 @@ from mcp_server.server import (
     set_template,
     shown_work,
     solve_health,
+    solve_flow,
     species_of,
     sync_init,
     sync_pull,
@@ -654,6 +655,15 @@ def test_solve_health_reports_a_balanced_model(garden):
     assert report["verdict"] == "balanced"
     assert report["solvable"]
     assert report["groups"] == []
+
+
+def test_solve_flow_lays_the_solve_out_in_steps(garden):
+    write_worksheet("bd.x = 3\nbd.y = bd.x * 2\nbd.z = bd.y + 1", garden=GARDEN)
+    flow = solve_flow(garden=GARDEN)
+    assert [c["kind"] for c in flow["columns"]] == ["givens", "step", "step", "answers"]
+    assert flow["solve"]["state"] == "solved"
+    rooted = solve_flow(root="bd.y", depth=1, garden=GARDEN)
+    assert rooted["rootName"] == "bd.y" and len(rooted["cards"]) == 2
 
 
 def test_solve_health_names_the_block_that_is_short_an_equation(garden):

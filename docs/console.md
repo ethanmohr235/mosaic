@@ -745,6 +745,28 @@ read as one tool rather than seven apps.
   the gardens tree, and `t` / `s` answer the calendar's "this one or the
   series?". The sections above record the keys as they were built.
 
+### Settled for `graph --flow` (2026-10-05)
+
+A mode of the graph for maths-heavy gardens. It lays itself out, with
+no pins, and draws what calculates what. Like Motion's old board, it
+shows equations and values.
+
+| Topic | Decision |
+|---|---|
+| Surface | `graph [@sel\|#id\|‹name›\|‹m.k›] --flow [--depth N] [conditions]`; `--hide-rel` is refused (flow draws no relationships) |
+| Structure | the solve's journal (`core/simulation.py::trace`), not `incidence.blocks()`, which would merge a chain into one block. Each step the solve took is a **group**: one equation that determined one value, or a coupled set the solver found together |
+| Columns | left to right: **givens**, one column per solve step (one right of the deepest step it reads), **answers** (solved values no other step reads; a check reading one does not count) |
+| Direction | the current solve's, under the playhead run's scenario: flip which value is given and the arrows flip |
+| Cards | rule cards (name, KaTeX equation via `core/formula_tex.py`, a coupled group's residual or a check's margin); mote stub cards, one per (mote, group), siblings linked; rows only for solve values (`+N more`), each with value, unit, ±, source mark, check mark |
+| Checks | a check (a limit, a `?=`, an equation already satisfied) sits after what it reads and marks those rows pass/fail |
+| Folding | a group of ≥4 equations starts folded to a header (vertical). A **sub-calculation** -- steps whose results are read only inside the set, so it has one way out -- folds sideways into one card, `S ← 3 steps`, starting open. Folding is done in `core/` (the folded set is contracted before ranking), so it really narrows the picture. Fold state is view state: sent with each run, not in the line |
+| Root/depth | `--depth` counts solve steps, upstream and downstream of the root's groups (default 2); a mote root means all its solve values |
+| Wires | right-angled, in the gaps between columns; a wire crossing columns rides a relay (one per value and column), and wires leaving one port share a trunk. The cursor's wires are full strength |
+| Follows | the playhead (its run's scenario and series), the live solve (a write re-runs every pane), and health: a failed solve draws as far as it got, with the unsolved equations as fault groups in `solve_health`'s words |
+| Keys | `h j k l` cursor, `⏎` select, `o` open, `e` prefill `set`, `z` fold under the cursor, `Z` all, `[ ]` depth, `f` fit; the playhead is `space , .` |
+| Renderer | HTML cards with SVG wires underneath (`js/flow.js`); the force graph's canvas is untouched |
+| Layout home | `core/flowview.py` (groups, ranks, folds, relays, barycenter order), tested; JS measures and draws wires. MCP `solve_flow` returns the same payload |
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and

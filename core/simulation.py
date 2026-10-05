@@ -360,6 +360,65 @@ def solve_view(
     )
 
 
+@dataclass(frozen=True)
+class Trace:
+    """One solve of the garden, with everything a picture of it needs:
+    the journal (what determined what, in order), every equation's
+    touches, and every relation checked against the answer.
+
+    `error` is set when the solve failed. The journal still holds the
+    substitution steps that came before the failure -- they really
+    happened -- so a picture can show how far the solve got."""
+    view: _GardenView
+    pairs: tuple[tuple[rules_repo.Rule, str], ...]
+    touches: dict[tuple[str, str], incidence_repo.EquationTouch]
+    journal: Journal
+    results: dict[tuple[str, str], ConstraintResult]
+    error: str | None = None
+    # A unit for each solved value that declares none, as a written solve
+    # would infer it (the value itself is then in that base unit).
+    inferred: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    @property
+    def values(self) -> dict[Unknown, float]:
+        """Every value the solve determined, in base units."""
+        return {v: x for d in self.journal.derivations for v, x in d.values.items()}
+
+
+def trace(
+    conn: sqlite3.Connection, scenario: str | None = None, solver: str = _DEFAULT_SOLVER
+) -> Trace:
+    """Solve once in memory with a journal, writing nothing (the
+    `graph --flow` pane's structure; core/flowview.py).
+
+    Keyed by (rule mote id, anchor mote id): one equation instance. Every
+    relation -- an equation solved by substitution, one the solver
+    finished, a check -- is checked against the values found, so its
+    residual or margin reads off `results`. A recurrence's prev() reads
+    the garden as it stands, as a first tick would."""
+    properties = {m.id: m.properties for m in list_motes(conn)}
+    view = _build_view(
+        scenarios_repo.apply(properties, _resolve_scenario(conn, scenario)),
+        list_relationships(conn),
+    )
+    pairs = tuple(_rule_instances(rules_repo.list_rules(conn), view))
+    model_cache: dict[str, PropertyProvider] = {}
+    touches = {(r.mote.id, m): _touch(view, r, m, model_cache) for r, m in pairs}
+    journal, error = Journal(), None
+    try:
+        solve_view(view, list(pairs), solver, previous=view.properties,
+                   log_constraints=False, model_cache=model_cache, journal=journal)
+    except (SimulationError, SolverError) as e:
+        error = str(e)
+    solved = {v: x for d in journal.derivations for v, x in d.values.items()}
+    checked = constraint_results(view, list(pairs), solved, previous=view.properties,
+                                 model_cache=model_cache)
+    results = {(r.mote.id, m): c for (r, m), c in zip(pairs, checked)}
+    equations = [(r, m) for r, m in pairs if _operator_of(r) == "==" and not r.is_check]
+    inferred = _infer_missing_units(view, equations, solved, model_cache)
+    return Trace(view, pairs, touches, journal, results, error, inferred)
+
+
 def garden_freedoms(conn: sqlite3.Connection) -> dict[str, set[str]]:
     """Every mote's resolved freedoms: what the solver is allowed to
     determine, per mote, after a mote's own declaration has replaced
