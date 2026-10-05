@@ -25,7 +25,7 @@ MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "e
 MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
 MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply", "paste_image"}  # U6
 MONASTERY_BRIDGE = {"view", "rewrite", "edit", "skip", "slot", "follow"}  # U7
-MONARCH_BRIDGE = {"view", "rewrite", "pins", "pin", "unpin"}  # U8
+MONARCH_BRIDGE = {"view", "flow", "rewrite", "pins", "pin", "unpin"}  # U8, graph --flow
 HOME_BRIDGE = {"gardens", "garden"}  # U9
 
 

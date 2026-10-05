@@ -767,6 +767,40 @@ shows equations and values.
 | Renderer | HTML cards with SVG wires underneath (`js/flow.js`); the force graph's canvas is untouched |
 | Layout home | `core/flowview.py` (groups, ranks, folds, relays, barycenter order), tested; JS measures and draws wires. MCP `solve_flow` returns the same payload |
 
+### Built for `graph --flow` (2026-10-05)
+
+What the build decided within the settled plan above.
+
+- **One verb, two views.** `views/graph.js` holds whichever instance the
+  line asks for: `views/graph_force.js` (the U8 view, moved unchanged)
+  or `views/flow.js`. A rewrite that adds or drops `--flow` swaps them.
+  The bridge is `api.monarch.flow(command, selection, run, folds)`.
+- **Fold ids are stable.** A fold's id is a hash of its values
+  (`block:…`, `cone:…`), so the pane's fold state survives a re-run and
+  an edit that leaves those values alone. `z` acts on the first of the
+  group's `folds`: its own fold, else the sub-calculation it ends, else
+  the smallest one it is inside. With nothing to fold, it says so.
+- **Wires.** There is one relay per value and column, so every wire
+  further right leaves from one trunk. Tracks are spread per gutter by
+  source port, in the order the sources sit.
+- **Cards say each thing once.**
+  - An unnamed worksheet rule shows only its equation (its name *is*
+    the equation).
+  - `+N more` appears once per mote, on its leftmost stub, counting the
+    numeric properties no stub shows.
+  - A solved value with no declared unit shows the unit a written
+    solve would infer, in the base unit it was solved in.
+  - A fault states its own counts in `solve_health`'s words. Health's
+    blocks would blame the steps that did solve.
+- **Limit: a rule that cannot be evaluated** (a name that resolves to
+  nothing) fails the solve before its first step, so the whole picture
+  is fault groups in one column. This is what `solve` itself reports.
+- **Cost.** Every run re-solves in memory. Medium gardens are bound by
+  the solve: an 84-equation, 81-step chain takes about 0.35 s.
+- **Smoke test:** `graph C1 --flow` draws the givens, the rule and the
+  answer, wired; `l` walks to the answer; `e` prefills `set`; `z` says
+  there is nothing to fold.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and

@@ -883,6 +883,52 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .graph-corner.bottom-left { bottom: 0; left: 0; }
 .graph-corner.bottom-right { bottom: 0; right: 0; }
 
+/* graph --flow -- HTML cards in flex columns, SVG wires under them
+ * (docs/console.md → Settled for `graph --flow`). Existing tokens only. */
+.flow-surface { position: absolute; inset: 0; overflow: hidden; }
+.flow-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.flow-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.flow-wires path { fill: none; stroke: var(--line-strong); stroke-width: 1; opacity: 0.5; }
+.flow-wires path.hot { stroke: var(--bright); opacity: 1; }
+.flow-cols { position: relative; display: flex; align-items: flex-start; gap: calc(var(--col-gap) * 5);
+  padding: var(--row-h) var(--pad-x); }
+.flow-col { display: flex; flex-direction: column; align-items: flex-start; gap: var(--group-gap); }
+.flow-relay { align-self: stretch; height: var(--table-head-pad); }
+.flow-group { display: flex; flex-direction: column; }
+.flow-group.framed { border: 1px solid var(--line); padding: var(--table-head-pad) var(--header-gap); }
+.flow-group.coupled { background: var(--bg-raised); }
+.flow-group.givens, .flow-group.answers { border-style: none none none solid; }
+.flow-group.lvl-fault { border-color: var(--fault); }
+.flow-group-head { color: var(--dim); white-space: nowrap; }
+.flow-group.lvl-fault .flow-group-head { color: var(--fault); white-space: normal; max-width: var(--col-max); }
+.flow-group-body { display: flex; align-items: flex-start; gap: calc(var(--col-gap) * 3); }
+.flow-cards, .flow-stubs { display: flex; flex-direction: column; gap: var(--header-gap); }
+.flow-card { border: 1px solid var(--line); background: var(--bg-raised); padding: var(--table-head-pad) var(--header-gap);
+  max-width: calc(var(--col-max) * 1.5); cursor: pointer; }
+.flow-card.constraint { border-style: dashed; }
+.flow-group.check.lvl-fault .flow-card { border-color: var(--fault); }
+.flow-card.folded { color: var(--fg); border-color: var(--line-strong); }
+.flow-card-name { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flow-card-title { white-space: nowrap; }
+.flow-eq { color: var(--bright); padding: var(--table-head-pad) 0; }
+.flow-eq.raw { white-space: pre-wrap; }
+.flow-card-foot { color: var(--dim); }
+.flow-card-foot.lvl-fault, .flow-marks .lvl-fault, .flow-row.problem .flow-key { color: var(--fault); }
+.flow-card-foot.lvl-warn, .flow-marks .lvl-warn { color: var(--warn); }
+.flow-marks .lvl-ok { color: var(--ok); }
+.flow-stub { border-left: 2px solid var(--dim); padding-left: var(--header-gap); }
+.flow-stub.sib { background: var(--track); }
+.flow-stub-head { font-weight: var(--w-bold); white-space: nowrap; }
+.flow-rows { display: grid; grid-template-columns: max-content max-content max-content; column-gap: var(--col-gap); }
+.flow-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; line-height: var(--row-h);
+  white-space: nowrap; cursor: pointer; }
+.flow-val { color: var(--bright); text-align: right; }
+.flow-marks { color: var(--dim); display: flex; gap: var(--table-head-pad); }
+.flow-more { color: var(--ghost); }
+.flow-card.selected, .flow-row.selected .flow-key { color: var(--bright); }
+.flow-card.selected { border-color: var(--line-strong); }
+.flow-card.cursor, .flow-row.cursor { outline: 1px solid var(--fg); outline-offset: 1px; }
+
 /* gardens and garden (U9) */
 .topbar .breadcrumb .crumb.up { cursor: pointer; }
 .topbar .breadcrumb .crumb.up:hover { color: var(--fg); }

@@ -76,6 +76,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `week [date]`, `month [date]` | Hour grid; six-week grid |
 | `graph [@sel\|#id\|‹name›] [--depth N]` | A mote's neighbourhood (default depth 2; `@sel` re-roots with the selection); no root: the whole garden |
 | `graph … --hide-rel a,b`, `--view ‹saved›`, `‹conditions›` | Leave out relationship types (not hopped either); keep what a saved view / conditions match |
+| `graph [@sel\|#id\|‹name›\|‹m.k›] --flow [--depth N]` | The solve, left to right: givens, one column per step, answers; `--depth` counts steps both ways; conditions keep steps touching what they match; follows the playhead's run |
 | `detach #id ‹key› ‹occurrence› ‹start› ‹end›` | Move one occurrence out of its series (what `t` runs) |
 | `cd ‹garden›` | Switch garden (or click a crumb in the top bar's path) |
 | `gardens [--archived]` | Every garden: the ownership tree, loose, archived (folded); `solve` and `checks` marks per model garden |
@@ -247,6 +248,23 @@ for `n`, double-click to create. Month: `+N more` opens that week.
 
 Mouse: drag a node to move and pin it · drag empty space to pan · wheel
 zooms · ctrl+drag node → node prefills `A ->  -> B`.
+
+**Flow** (`graph … --flow`)
+
+| Key | Does |
+|---|---|
+| `h` `j` `k` `l`, arrows | Cursor down/up a column, to the nearest in the next |
+| `⏎` / click | Select the row's mote, or the rule |
+| `o` / double-click | Open props in a new pane |
+| `e` | Prefill `set m.k ‹value› ‹unit›` (a row), `set #rule equation …` (a rule) |
+| `z`, `Z` | Fold / unfold under the cursor (a block of ≥4 equations, or a sub-calculation), all |
+| `[` `]` | Depth −1 / +1 |
+| `f`, `+` `-`, `0` | Fit, zoom, 100% |
+| `space`, `,` `.` | The playhead: play, tick back / on |
+
+Marks: `=` given · `←` solved · `~` assumed · `↗` external · `≈` fitted ·
+`?` unsolved · `✓` `✗` `–` checks · `·N` the mote's N stubs.
+Mouse: drag empty space to pan · wheel zooms · hover a stub lights its siblings.
 
 **Gardens** (`gardens`; `layout gardens`)
 

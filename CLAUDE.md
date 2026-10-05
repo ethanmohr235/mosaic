@@ -167,6 +167,16 @@ updates it in the same commit. Keep it compact: tables, no prose.
 - **Home health (2026-10-05)**: `core/home.py::health`; `solve` and `checks`
   marks on each `gardens` row, full lines in the `garden` pane. Document
   health and the submitted revision are deliberately not marked.
+- **`graph --flow` (2026-10-05)**: the solve drawn left to right.
+  - Givens, one column per solve step, then answers.
+  - Rule cards with typeset equations (`core/formula_tex.py`, which
+    `\rule`/`\work` and `.tex` export now use too); split mote stubs.
+  - Folds: blocks of ≥4 equations vertically, single-output
+    sub-calculations sideways.
+  - Follows the playhead, live solve and health.
+  - Code: `core/flowview.py` over `simulation.trace()`; `js/flow.js` +
+    `views/flow.js`, with `views/graph.js` switching modes; MCP
+    `solve_flow`. See `console.md` → *Settled/Built for `graph --flow`*.
 
 ## Split of work: cloud backend, local frontend
 

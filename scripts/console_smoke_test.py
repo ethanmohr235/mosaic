@@ -1157,6 +1157,44 @@ def u8_checks(window):
     check("U8: dragging a node pins it (beside the garden), U unpins, o opens", dragging_pins_and_u_unpins)
 
 
+FLOW = ".view-flow"
+FLOW_BOARD = "document.querySelector('.view-flow .flow-surface').flow"
+
+
+def flow_checks(window):
+    pane = "graph C1 --flow"
+
+    def draws_the_solve():
+        type_command(window, pane, new_pane="right")
+        assert wait_until(lambda: count(window, f"{FLOW} .flow-card") >= 1), headers(window)
+        assert wait_until(lambda: count(window, f"{FLOW} .flow-wires path") > 0), "wires are drawn"
+        keys = set(texts(window, f"{FLOW} .flow-key"))
+        assert {"voltage", "r_a", "r_b", "current"} <= keys, keys
+        assert count(window, f"{FLOW} .flow-eq .katex") >= 1, "the rule's equation is typeset"
+        no_errors(window)
+
+    check("flow: `graph C1 --flow` draws the givens, the rule and the answer, wired", draws_the_solve)
+
+    def keys_walk_prefill_and_fold():
+        focus_pane(window, pane)
+        for _ in range(4):
+            press(window, "l")
+        assert wait_until(lambda: (js(window, f"{FLOW_BOARD}.cursor") or "").endswith(":current")), \
+            js(window, f"{FLOW_BOARD}.cursor")
+        press(window, "e")
+        assert wait_until(lambda: command_line_text(window).startswith("set C1.current ")), \
+            command_line_text(window)
+        press(window, "Escape")
+        focus_pane(window, pane)
+        press(window, "z")
+        assert wait_until(lambda: any(t.endswith("nothing to fold here") for t in log_texts(window))), \
+            log_texts(window)[-3:]
+        no_errors(window)
+
+    check("flow: l walks to the answer, e prefills `set`, z with nothing to fold says so",
+          keys_walk_prefill_and_fold)
+
+
 def home_names(window):
     """The garden names in the tree, without the `└ ` an owned one is drawn with."""
     return [t.lstrip("└ ").strip() for t in texts(window, ".view-gardens .c-table-row .home-garden")]
@@ -1366,6 +1404,7 @@ def drive(first, first_loaded):
         u6_checks(second)
         u7_checks(second)
         u8_checks(second)
+        flow_checks(second)
         u9_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")

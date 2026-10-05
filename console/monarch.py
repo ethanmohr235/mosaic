@@ -3,6 +3,11 @@
 U8).
 
     view(command, selection)     what a `graph …` line draws
+    flow(command, selection, run, folds)
+                                 what a `graph … --flow` line draws: the
+                                 solve under the playhead's run
+                                 ({ticks, scenario, solver}), with the
+                                 pane's fold state ({fold id: folded})
     rewrite(command, change)     that line one hop deeper or shallower, or re-rooted
     pins()                       the garden's pinned node positions {id: [x, y]}
     pin(positions)               pin (or move) nodes: {id: [x, y]}
@@ -17,6 +22,7 @@ from typing import Any, Callable
 
 from console import state as state_repo
 from console.session import Session, locked
+from core import flowview
 from core import graphview
 from core.command_bar import CommandError
 
@@ -36,6 +42,13 @@ class MonarchApi:
     def view(self, command: str, selection: list[str] | None = None) -> dict[str, Any]:
         return self._answer(command, lambda: graphview.run(
             self._session.conn, graphview.parse_text(command), selection or []))
+
+    @locked
+    def flow(self, command: str, selection: list[str] | None = None,
+             run: dict | None = None, folds: dict | None = None) -> dict[str, Any]:
+        return self._answer(command, lambda: flowview.run(
+            self._session.conn, graphview.parse_text(command), selection or [],
+            dict(run or {}), dict(folds or {})))
 
     @locked
     def rewrite(self, command: str, change: dict) -> dict[str, Any]:

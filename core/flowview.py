@@ -562,13 +562,14 @@ class _Payload:
         return {**g.fold, "title": title, "equations": len(g.equations), "card": f"fold:{g.id}"}
 
     def health_text(self, g: Group) -> str | None:
-        if g.kind != FAULT or self.r.health is None:
+        if g.kind != FAULT:
             return None
-        labels = {_health_label(v, self.r.garden) for v in g.values}
-        for found in self.r.health.groups:
-            if labels & set(found.labels):
-                return found.message
-        return f"could not determine {', '.join(sorted(labels))}"
+        # health.py's own blocks join every value an equation could
+        # determine, so they would blame the steps that did solve: say the
+        # same thing about this group's own counts instead.
+        labels = tuple(sorted(_health_label(v, self.r.garden) for v in g.values))
+        return health_repo.Group(labels, tuple(_card_id(k) for k in g.equations),
+                                 len(g.values) - len(g.equations)).message
 
     def group_level(self, g: Group) -> str:
         if g.kind == FAULT:
@@ -599,7 +600,8 @@ class _Payload:
         anchor = key[1] if self.instances[key[0]] > 1 else None
         return {
             "id": _card_id(key), "fold": False, "group": g.id,
-            "ruleMoteId": key[0], "name": rule.name, "anchorId": anchor,
+            "ruleMoteId": key[0], "name": "" if rule.name == rule.equation else rule.name,
+            "anchorId": anchor,
             "anchor": self.r.garden.text_of(anchor, "")[:-1] if anchor else None,
             "equation": rule.equation, "tex": formula_tex.to_tex(rule.equation, rule.is_check),
             "check": rule.is_check, "constraint": g.kind == CHECK,
@@ -610,14 +612,17 @@ class _Payload:
 
     def stub_payloads(self) -> dict[str, dict]:
         siblings: dict[str, list[str]] = defaultdict(list)
-        for s in self.stubs.values():
+        shown: dict[str, set[str]] = defaultdict(set)
+        for s in sorted(self.stubs.values(), key=lambda s: self.stub_column(s["id"])):
             siblings[s["moteId"]].append(s["id"])
+            shown[s["moteId"]] |= set(s["keys"])
         out = {}
         for s in self.stubs.values():
             mote = self.r.garden.by_id.get(s["moteId"])
-            shown = set(s["keys"])
+            first = siblings[s["moteId"]][0] == s["id"]
             more = sum(1 for k, v in (mote.properties if mote else {}).items()
-                       if k not in shown and isinstance(v, (int, float)) and not isinstance(v, bool))
+                       if k not in shown[s["moteId"]] and isinstance(v, (int, float))
+                       and not isinstance(v, bool)) if first else 0
             out[s["id"]] = {
                 "id": s["id"], "moteId": s["moteId"],
                 "name": self.r.garden.text_of(s["moteId"], "")[:-1],
@@ -626,6 +631,10 @@ class _Payload:
                 "rows": [self.row(s["moteId"], k) for k in s["keys"]], "more": more,
             }
         return out
+
+    def stub_column(self, stub_id: str) -> int:
+        head = stub_id.split("/")[0]
+        return 0 if head == GIVENS else self.last if head == ANSWERS else self.column[head]
 
     def row(self, mote_id: str, key: str) -> dict:
         r, v = self.r, (mote_id, key)
