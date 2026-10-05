@@ -93,7 +93,8 @@ function create(ctx) {
 
   function cited(b) {
     if (b.error) return h("div", "doc-broken", `\\rule{${b.rule}}: ${b.error}`);
-    return numbered(h("div", "doc-math display doc-code", b.equation), b.number, h("div", "doc-caption", `— ${b.name}`));
+    const body = b.tex ? math(b.tex, true) : h("div", "doc-math display doc-code", b.equation);
+    return numbered(body, b.number, h("div", "doc-caption", `— ${b.name}`));
   }
 
   function caption(b) {
@@ -131,7 +132,8 @@ function create(ctx) {
       return h("div", "doc-work", [h("div", null, `${b.label} = ${b.result}`), b.note ? h("div", "doc-note", b.note) : ""]);
     }
     const lines = b.steps.map((s) => h("div", `doc-work-step ${s.kind}`, [
-      s.kind === "result" ? `${b.label} = ${s.text}` : s.text, s.note ? h("span", "doc-note", `  ${s.note}`) : ""]));
+      s.kind === "result" ? `${b.label} = ${s.text}` : s.tex ? math(s.tex, false) : s.text,
+      s.note ? h("span", "doc-note", `  ${s.note}`) : ""]));
     if (b.alsoDetermined.length) lines.push(h("div", "doc-note", `found together with ${b.alsoDetermined.join(", ")}`));
     return h("div", "doc-work", lines);
   }

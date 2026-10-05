@@ -235,6 +235,9 @@ Three things about the middle line are worth knowing:
 - **A quantity is bracketed** where it needs to be: `sqrt(80 in^2)` would
   read as eighty square inches, so it is written `(80 in)^2`.
 
+The first line is **typeset** (`core/formula_tex.py`, below); the middle
+line stays text, since a value with a unit in it is not a formula.
+
 The figure count applies to the **result**, not to the givens. Padding
 `80 in` to `80.00 in` would claim precision the given never stated.
 
@@ -434,6 +437,20 @@ asking twice. A rule a worksheet left unnamed is labelled by its equation
 (`core/rules.py::label_of`), so `\rule{bd.l == bd.x * 2}` cites it too --
 though naming it with a trailing `! ΣFx` on the worksheet line reads better.
 
+The equation is **typeset**, not shown as code. `core/formula_tex.py` turns
+a rule's formula into LaTeX, parsing it with `core/formula.py`'s own parser
+and covering every call its whitelist allows (a drift test holds the two
+together):
+- `/` becomes a fraction and `**`/`^` a superscript
+- Greek names become letters (`delta` → δ)
+- `a_b` and `R1` become subscripts
+- `bd.l` keeps its dot
+- `targets('load')` is an arrow over the role
+- `prev(x)` is set as `prev(x)`
+
+A formula the converter cannot set is shown as text, as before. The
+`graph --flow` pane draws rules with the same converter.
+
 Only a mote that really is a rule is citable: an `equation` **and** an
 `applies_to`. A mote with an equation and no `applies_to` is a half-built
 rule the solver skips, and quoting it as though it governed something would
@@ -496,8 +513,8 @@ frozen**: what the read pane shows, written for LaTeX
 | `\ref`, `\mote` | frozen as their text ("Equation 2"); LaTeX numbers equations, figures and tables itself, in the same order |
 | `\graph` | a pgfplots `axis` per unit band with the solved points inline; a failed point breaks the line. Surface and correlation figures are reported as a problem and left out |
 | `\image` | a file under `images/`, drawn with `\includegraphics`. PNG only: an SVG is reported as a problem |
-| `\work` | its three lines, set in `\texttt` |
-| `\rule` | the rule's equation, numbered |
+| `\work` | the equation typeset, the substituted line and result in `\texttt` |
+| `\rule` | the rule's equation, typeset and numbered (`\texttt` if it cannot be set) |
 
 Anything that did not resolve is printed as a visible marker and returned
 in `problems`; a clean export has none.

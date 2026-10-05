@@ -22,6 +22,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from core import calc
+from core import formula_tex
 from core import images as images_repo
 from core import modoc
 from core import modoc_bind
@@ -186,6 +187,7 @@ class _Shaper:
                     "name": rule.name if rule else b.rule,
                     "moteId": rule.mote_id if rule else None,
                     "equation": rule.equation if rule else "",
+                    "tex": formula_tex.to_tex(rule.equation) if rule and rule.equation else None,
                     "error": (rule.error if rule else "unresolved rule")}
         if isinstance(b, modoc.Graph):
             drawn = self.resolution.graphs.get(modoc.graph_key(b))
@@ -228,7 +230,9 @@ class _Shaper:
         return {
             "type": "work", "target": node.target, "label": shown.label,
             "result": shown.quantity.text(node.format.figures),
-            "steps": [{"kind": s.kind, "text": s.text, "note": s.note} for s in shown.steps],
+            "steps": [{"kind": s.kind, "text": s.text, "note": s.note,
+                       "tex": formula_tex.to_tex(s.text) if s.kind == calc.SYMBOLIC else None}
+                      for s in shown.steps],
             "alsoDetermined": list(shown.also_determined),
             "note": shown.note, "error": shown.error,
         }

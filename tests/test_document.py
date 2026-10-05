@@ -54,6 +54,8 @@ def test_numbered_equations_and_refs(conn, bar):
 def test_work_and_the_calc_sections(conn, bar):
     work, given, answers, checks = blocks(conn, "\\work{bd.l}\n\n\\given\n\n\\answers\n\n\\checks")
     assert work["type"] == "work" and work["steps"] and work["result"].startswith("5")
+    assert work["steps"][0]["tex"] == r"\mathrm{bd}.l = \sqrt{\mathrm{bd}.x^{2} + \mathrm{bd}.y^{2}}"
+    assert all(s["tex"] is None for s in work["steps"][1:])
     assert {r["ref"] for r in given["rows"]} == {"bd.x", "bd.y"}
     assert [r["ref"] for r in answers["rows"]] == ["bd.l"]
     assert checks["heading"] == "Checks" and checks["checks"][0]["passed"]
@@ -63,6 +65,7 @@ def test_a_cited_rule_and_a_table(conn, bar):
     cited, table = blocks(conn, "\\rule{short enough}\n\n\\begin{table}\n\\caption{Sizes}\n"
                                 "\\begin{tabular}\nkey & value \\\\\nx & 3\n\\end{tabular}\n\\end{table}")
     assert cited["type"] == "cited" and cited["number"] == 1 and "bd.l" in cited["equation"]
+    assert cited["tex"] == r"\mathrm{bd}.l \le 10"
     assert table["type"] == "table" and table["word"] == "Table" and table["number"] == 1
     assert [c[0]["text"] for c in table["header"]] == ["key", "value"]
 

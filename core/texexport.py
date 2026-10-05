@@ -216,8 +216,8 @@ def _block(b: dict, files: dict[str, bytes], problems: list[str]) -> str:
         if b.get("error"):
             problems.append(f"\\rule{{{b['rule']}}}: {b['error']}")
             return rf"\textbf{{[{escape(b['rule'])}: {escape(str(b['error']))}]}}"
-        return (f"\\begin{{equation}}\n\\texttt{{{escape(b['equation'])}}}\n"
-                f"\\end{{equation}}")
+        body = b.get("tex") or rf"\texttt{{{escape(b['equation'])}}}"
+        return f"\\begin{{equation}}\n{body}\n\\end{{equation}}"
     if kind == "graph":
         return _graph(b, problems)
     if kind == "image":
@@ -280,10 +280,18 @@ def _work(b: dict, problems: list[str]) -> str:
     if not b["steps"]:
         return f"{escape(b['label'])}: {quantity(b['result'])}" + (
             f" ({escape(b['note'])})" if b.get("note") else "")
-    lines = [rf"\texttt{{{escape(s['text'])}}} \\" for s in b["steps"][:-1]]
-    lines.append(rf"\texttt{{{escape(b['steps'][-1]['text'])}}}")
+    lines = [_work_step(s) + r" \\" for s in b["steps"][:-1]]
+    lines.append(_work_step(b["steps"][-1]))
     return ("\\begin{flushleft}\n" + f"\\textbf{{{escape(b['label'])}}} \\\\\n"
             + "\n".join(lines) + "\n\\end{flushleft}")
+
+
+def _work_step(step: dict) -> str:
+    """A symbolic step the converter could set is maths; the rest (values
+    with units in them) stay the monospace line they were."""
+    if step.get("tex"):
+        return f"${step['tex']}$"
+    return rf"\texttt{{{escape(step['text'])}}}"
 
 
 def _section(b: dict, problems: list[str]) -> str:

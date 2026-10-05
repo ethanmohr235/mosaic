@@ -62,7 +62,13 @@ def test_calc_sections_and_work(conn, bar):
     out = export(conn, "\\work{bd.l}\n\n\\given\n\n\\answers\n\n\\checks")
     assert r"\subsection*{" in out.tex and "bd.l" in out.tex
     assert r"$3\,\mathrm{m}$" in out.tex
+    assert r"$\mathrm{bd}.l = \sqrt{\mathrm{bd}.x^{2} + \mathrm{bd}.y^{2}}$" in out.tex
     assert out.problems == ()
+
+
+def test_a_cited_rule_is_typeset(conn, bar):
+    out = export(conn, "\\rule{short enough}")
+    assert "\\begin{equation}\n\\mathrm{bd}.l \\le 10\n\\end{equation}" in out.tex
 
 
 def test_list_table_and_caption(conn, bar):
