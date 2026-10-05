@@ -8,6 +8,7 @@ from pathlib import Path
 from core import calc
 from core import csv_import
 from core import images
+from core import submit as submit_repo
 from core import materials_provider
 from core import uncertainty
 from core import fit as fit_repo
@@ -389,6 +390,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     ### Calc
+    export_parser = subparsers.add_parser(
+        "export", help="Write the project's document as .tex (with figure files) or a PDF"
+    )
+    export_parser.add_argument("action", choices=["tex", "pdf"])
+    export_parser.add_argument("--note", help="Which note (default: the garden's root note)")
+    export_parser.add_argument("--out", help="Path (default: <note>.tex/.pdf; tex also writes images/)")
+
+    submit_parser = subparsers.add_parser(
+        "submit", help="Freeze the document as the next revision (PDF, .tex, values) and mark the owner submitted"
+    )
+    submit_parser.add_argument("--note", help="Which note (default: the garden's root note)")
+    submit_parser.add_argument("--force", action="store_true",
+                               help="Freeze even with failed checks or unresolved values")
+
+    revisions_parser = subparsers.add_parser("revisions", help="Frozen submissions of this project")
+    revisions_sub = revisions_parser.add_subparsers(dest="action")
+    revisions_sub.add_parser("list", help="Every revision")
+    revisions_diff = revisions_sub.add_parser("diff", help="Values that changed between two revisions")
+    revisions_diff.add_argument("a")
+    revisions_diff.add_argument("b")
+    revisions_get = revisions_sub.add_parser("export", help="Write a revision's PDF back out")
+    revisions_get.add_argument("revision")
+    revisions_get.add_argument("path", nargs="?", help="Defaults to <revision>.pdf")
+    revisions_get.add_argument("--tex", action="store_true", help="Write the .tex instead")
+
     calc_parser = subparsers.add_parser(
         "calc", help="A calculation's givens, answers, assumptions, checks and shown work"
     )
@@ -908,6 +934,57 @@ def _handle_import(conn, args) -> None:
     print(f"Imported {len(imported.row_ids)} row(s) under {imported.import_id}.")
 
 
+def _handle_export(conn, garden, args) -> None:
+    if args.action == "tex":
+        bundle = submit_repo.export(conn, garden, args.note)
+        path = Path(args.out or "document.tex")
+        path.write_text(bundle.tex, encoding="utf-8")
+        for relative, data in bundle.files.items():
+            target = path.parent / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        print(f"Wrote {path}" + (f" and {len(bundle.files)} file(s)" if bundle.files else ""))
+    else:
+        data, bundle = submit_repo.pdf(conn, garden, args.note)
+        path = Path(args.out or "document.pdf")
+        path.write_bytes(data)
+        print(f"Wrote {path}")
+    for problem in bundle.problems:
+        print(f"  warning: {problem}")
+
+
+def _handle_submit(conn, garden, args) -> None:
+    try:
+        frozen, _ = submit_repo.submit(conn, garden, args.note, args.force)
+    except submit_repo.SubmitError as error:
+        print(f"Error: {error}")
+        return
+    print(f"Submitted {frozen.revision} ({frozen.date}){' [forced]' if frozen.forced else ''}; "
+          f"{len(frozen.values)} value(s) frozen.")
+
+
+def _handle_revisions(conn, args) -> None:
+    if args.action in (None, "list"):
+        found = submit_repo.revisions(conn)
+        if not found:
+            print("No revisions.")
+        for r in found:
+            print(f"{r.revision}  {r.date}  {len(r.values)} values{'  forced' if r.forced else ''}")
+    elif args.action == "diff":
+        changes = submit_repo.diff(submit_repo.find(conn, args.a), submit_repo.find(conn, args.b))
+        if not changes:
+            print("No values changed.")
+        for c in changes:
+            print(f"{c.ref}: {c.before if c.before is not None else '-'} -> "
+                  f"{c.after if c.after is not None else '-'}  ({c.kind})")
+    elif args.action == "export":
+        found = submit_repo.find(conn, args.revision)
+        name = submit_repo.TEX_NAME if args.tex else submit_repo.PDF_NAME
+        path = Path(args.path or f"{found.revision}{Path(name).suffix}")
+        path.write_bytes(found.files[name])
+        print(f"Wrote {path}")
+
+
 def _handle_image(conn, args) -> None:
     if args.action == "add":
         data = sys.stdin.buffer.read() if args.file == "-" else Path(args.file).read_bytes()
@@ -995,7 +1072,7 @@ _WRITES = {
     ("species", "set"), ("species", "template"), ("species", "new"),
     ("modoc", "import"), ("worksheet", "apply"), ("import", "csv"),
     ("image", "add"), ("image", "rename"),
-    ("project", "start"), ("project", "stop"),
+    ("project", "start"), ("project", "stop"), ("submit", None),
 }
 
 
@@ -1116,6 +1193,12 @@ def main() -> None:
                 _handle_import(conn, args)
             elif args.command == "image":
                 _handle_image(conn, args)
+            elif args.command == "export":
+                _handle_export(conn, garden, args)
+            elif args.command == "submit":
+                _handle_submit(conn, garden, args)
+            elif args.command == "revisions":
+                _handle_revisions(conn, args)
             elif args.command == "why":
                 _handle_why(conn, args)
             elif args.command in ("impact", "requires", "producers", "consumers"):

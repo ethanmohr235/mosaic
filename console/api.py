@@ -40,6 +40,9 @@ from core import motes as motes_repo
 from core import fit as fit_repo
 from core import motion as motion_repo
 from core import plotcmd
+from core import projects as projects_repo
+from core import submit as submit_repo
+from core import tectonic as tectonic_repo
 from core.command_bar import CommandError
 from core.reserved import RESERVED_VERBS
 
@@ -202,6 +205,8 @@ class Api:
         literal = commands.parse(text)
         if literal.kind == commands.VERB and literal.head in commands.WRITE_VERBS:
             return self._verb_write(literal.head, literal.args, selection)
+        if literal.kind == commands.VERB and literal.head in submit_repo.OUTPUT_VERBS:
+            return self._verb_output(literal)
         if literal.kind == commands.VERB and literal.head == plotcmd.PLOT_VERB:
             return self._verb_plot(literal)
         if literal.kind == commands.VERB and literal.head == fit_repo.FIT_VERB:
@@ -275,6 +280,20 @@ class Api:
         return {"effect": "statement", "ok": True, "message": result.message + live,
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": result.count > 0}
+
+    def _verb_output(self, parsed: commands.ParsedLine) -> dict:
+        """`export`, `submit` and `revisions`. Compiling a PDF can take a
+        while the first time (tectonic fetches its packages), and holds the
+        session while it does."""
+        try:
+            message, count, command = submit_repo.run_verb(
+                self._session.conn, self._session.garden, parsed.head, parsed.args)
+        except (submit_repo.SubmitError, tectonic_repo.TectonicError, projects_repo.ArchivedGarden) as e:
+            return _error(str(e))
+        live = self._push(command) if command is not None else ""
+        return {"effect": "statement", "ok": True, "message": message + live,
+                "moteId": None, "moteName": None, "created": False,
+                "needsConfirm": False, "choices": [], "wrote": count > 0}
 
     def _verb_plot(self, parsed: commands.ParsedLine) -> dict:
         """`plot …` opens (or re-points) a plot pane with the literal

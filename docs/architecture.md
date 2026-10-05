@@ -125,7 +125,7 @@ Which of a mote's properties the solver may determine -- its **freedoms** -- com
 
 `freedoms` was called `unknowns` while it could only live on a species; gardens are migrated on open. `freedoms` is the modelling word, and the solver's own vocabulary is deliberately left alone: `core/formula.py`'s `Unknown` and both solver backends still say unknown, because at that layer it is correct. `core/simulation.py`'s `_context()` is the single translation point.
 
-`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance`, `uncertainty`, `archived` and `image` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
+`instance_of`, `template_of`, `applies_to`, `uses_model`, `overrides`, `varies` and `about` are reserved relationship types; `equation`, `freedoms`, `roles`, `url`, `provider`, `configuration`, `units`, `modoc`, `query`, `plot`, `source`, `garden`, `check`, `tolerance`, `uncertainty`, `archived`, `image` and `submission` are reserved property names. Everything else is ordinary user data. Reserved property names are still just ordinary, editable/deletable properties -- nothing in the schema enforces them, they're only recognized by convention (the UI/engine looks for that exact key).
 
 The console reserves a third kind of name: the words that open a command line (`core/reserved.py::RESERVED_VERBS` -- `find`, `set`, `open`, `rename`, `unlink`, `template`, `plot`, `fit`, `sim`, `rule`, `scenarios`, `solve`, `why`, `step`, `play`, `pause`, `cd`, `layout`, `refresh`, `undo`, `redo`, `log`). They read verb-first: a line starting with one of them is that verb, even if a mote shares the name. Such a mote is still ordinary and reachable as `"log"` (quoted) or `#<id>`, and the statement that creates one says so. Each console port step adds its own verbs to the list.
 
@@ -820,6 +820,15 @@ it rides sync, export and undo with no machinery of its own. Everything
 that reads or writes the bytes goes through `core/images.py`, which is the
 seam where side-file storage would replace base64 if it ever has to.
 `core/document.py` ships the picture to the read pane as a data URI.
+
+**Output is a projection, and a frozen copy of one.** `core/texexport.py`
+writes a note's resolved blocks (the read pane's own, `core/document.py`) as
+`.tex`; `core/tectonic.py` compiles it; `core/submit.py` freezes the result
+as a `submission` mote (reserved property: `.tex`, PDF, figure files and the
+quoted values, base64 like an image) and stamps the project's owner mote
+with `status: submitted` and the revision. Nothing is stored that cannot be
+re-derived except the frozen revision itself -- which is the point of
+freezing it. See `modoc.md` -> *Output*.
 
 **A document can span several notes, and is numbered as one.**
 `\include{Method}` is the only macro that changes the *document* rather

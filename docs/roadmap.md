@@ -126,12 +126,20 @@ Each one was a separate act of filing. That lesson became a rule in
   `monoss image rename`. Backend done; paste-a-screenshot is console
   work. `.tex` export writes the file and emits `\includegraphics`
   (SVG needs converting for LaTeX).
-- **Output:** export `.tex` with every value frozen and graphs written as
-  figure files. **Bundle tectonic** so real PDFs work everywhere. This
-  was approved in principle; confirm packaging in its phase.
-- **Submit / revisions:** freeze the PDF and `.tex`, record the revision
-  and date on the cover (owning mote), and diff values between
-  revisions.
+- **Output (done 2026-10-05):** `.tex` with every value frozen; graphs
+  written as pgfplots from the solved data; units as `\mathrm`;
+  `article` with a title block from the cover. **Decided:** tectonic is
+  downloaded on first use (a pinned release, SHA-256 checked) into a
+  per-user cache, a `tectonic` on PATH wins, and `.tex` export never
+  needs it. PNG images export; an SVG is a reported problem until a
+  converter is approved.
+- **Submit / revisions (done 2026-10-05):** a `submission` mote per
+  revision holds the `.tex`, PDF, figures and the quoted values;
+  the owner gets `status: submitted`, `revision` and `submitted`.
+  **Decided:** revisions count `r1`, `r2`...; the document is the named
+  note or the garden's one root note; a failed check or unresolved value
+  refuses unless `--force` (recorded as `forced`). `revisions diff` lists
+  changed values. See `modoc.md` -> *Output*.
 
 ### Surfaces
 - **One tiled window (the console).** Every surface is panes in one
@@ -170,7 +178,7 @@ alongside all of them.
 | 3 | **Backend done.** Mora calc macros and LaTeX basics | A gradeable homework document |
 | 4 | **Done** (UI: console U9). Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
 | 5 | **Bars and click-to-open done (console U7).** Monastery agenda: plan-my-week, planned vs. actual | Time view that routes into projects |
-| 6 | tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
+| 6 | **Done** (2026-10-05). tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
 | 7 | **Backend done except Moxie export.** Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
 | 8 | **Backend done.** Uncertainty propagation | Lab reports |
 | 9 | **Backend done.** Cross-garden search, archive, materials provider | Payoff of many small gardens |

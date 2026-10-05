@@ -22,7 +22,7 @@ written down."""
 from core.calc import SOURCE_KEY
 from core.images import IMAGE_KEY
 from core.links import URL_PROPERTY
-from core.projects import ARCHIVED_KEY, GARDEN_KEY
+from core.projects import ARCHIVED_KEY, GARDEN_KEY, SUBMISSION_KEY
 from core.uncertainty import UNCERTAINTY_KEY
 from core.model_resolver import CONFIGURATION_KEY, PROVIDER_KEY, USES_MODEL
 from core.modoc import ABOUT, MODOC_KEY
@@ -39,7 +39,7 @@ RESERVED_PROPERTIES = {
     URL_PROPERTY,
     EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
     ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY, GARDEN_KEY,
-    CHECK_KEY, TOLERANCE_KEY, UNCERTAINTY_KEY, ARCHIVED_KEY, IMAGE_KEY,
+    CHECK_KEY, TOLERANCE_KEY, UNCERTAINTY_KEY, ARCHIVED_KEY, IMAGE_KEY, SUBMISSION_KEY,
 }
 RESERVED_RELATIONSHIP_TYPES = {
     INSTANCE_OF, TEMPLATE_OF, APPLIES_TO, USES_MODEL, ABOUT,
@@ -130,6 +130,11 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "image; a note shows it with `\\image{name}`. Add one with `monoss "
         "image add` or `add_image` rather than by hand -- those sniff the "
         "format, cap the size and clean an SVG.",
+    SUBMISSION_KEY: "A frozen revision of a project's document, as {'revision': "
+        "'r2', 'date', 'note', 'forced', 'values': {name: text}, 'files': {path: "
+        "<base64>}} -- the .tex, the PDF and any figures. Written by `submit` "
+        "(`monoss submit`, `submit_project`), never by hand; the project's "
+        "owner mote carries the matching `revision` and `status: submitted`.",
     UNCERTAINTY_KEY: "A given's ±, as a per-property map in exactly the "
         "shape `units` has: {'x': 0.5} is ± 0.5 in x's own unit, {'x': '2%'} "
         "is ± 2% of its value. The value stays a plain number. A result's ± is "
@@ -321,6 +326,12 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
               "describe": "a mote's neighbourhood, or the whole garden, as a graph"},
     "image": {"usage": "image add ‹path› [‹name›] | image rename ‹old› ‹new›",
               "describe": "store a PNG or SVG for notes (\\image{name}), or rename one everywhere it is used"},
+    "export": {"usage": "export tex|pdf [‹path›] [--note ‹name›]",
+               "describe": "write the project's document as .tex (with its figure files) or a PDF -- a draft, nothing is frozen"},
+    "submit": {"usage": "submit [--force] [--note ‹name›]",
+               "describe": "freeze the document as the next revision (PDF, .tex, values); the owner becomes submitted"},
+    "revisions": {"usage": "revisions | revisions diff ‹a› ‹b› | revisions export ‹rN› [‹path›] [--tex]",
+                  "describe": "frozen submissions: list them, diff their values, write one out"},
     "gardens": {"usage": "gardens [--archived]", "describe": "every garden: the ownership tree, loose and archived"},
     "garden": {"usage": "garden [‹name›] | garden new|rename|rm|restore|archive|unarchive|export|import|sync …",
                "describe": "a garden's details, or manage gardens"},

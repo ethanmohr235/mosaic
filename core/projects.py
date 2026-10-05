@@ -81,6 +81,11 @@ class Owner:
 # `revision` is written by Submit (phase 6), not by hand.
 COVER_FIELDS = ("due", "status", "author", "revision")
 
+# The reserved property on a frozen revision (core/submit.py). Declared here,
+# beside the cover it stamps, because core/reserved.py reads it and
+# core/submit.py reaches core/reserved.py through core/table.py.
+SUBMISSION_KEY = "submission"
+
 
 @dataclass(frozen=True)
 class Cover:

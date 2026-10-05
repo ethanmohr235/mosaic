@@ -483,6 +483,50 @@ reference, an expression that wouldn't evaluate -- is collected as a
 diagnostic (`core/modoc_bind.py::problems`) and reported in one list, the
 same list `monoss modoc check` prints and the console's read pane lists.
 
+## Output: `.tex`, PDF and Submit
+
+A note leaves the console as a **self-contained `.tex` with every value
+frozen**: what the read pane shows, written for LaTeX
+(`core/texexport.py`, over the same resolved blocks as `core/document.py`).
+
+| | in the `.tex` |
+| --- | --- |
+| class | `article`, 11pt, 1in margins; the owner's cover (name, author, due, revision) is the title block |
+| `\val`, `\given`, `\answers` | `$4.00\,\mathrm{in}$` -- no siunitx; ± is `\pm`, `e-5` is `\times 10^{-5}` |
+| `\ref`, `\mote` | frozen as their text ("Equation 2"); LaTeX numbers equations, figures and tables itself, in the same order |
+| `\graph` | a pgfplots `axis` per unit band with the solved points inline; a failed point breaks the line. Surface and correlation figures are reported as a problem and left out |
+| `\image` | a file under `images/`, drawn with `\includegraphics`. PNG only: an SVG is reported as a problem |
+| `\work` | its three lines, set in `\texttt` |
+| `\rule` | the rule's equation, numbered |
+
+Anything that did not resolve is printed as a visible marker and returned
+in `problems`; a clean export has none.
+
+A **PDF** is that `.tex` compiled by [tectonic](https://tectonic-typesetting.github.io),
+one binary with no TeX Live. `core/tectonic.py` uses a `tectonic` on PATH,
+else a copy in `~/.cache/monoss/tectonic/`, else downloads the pinned
+release once (SHA-256 checked) -- so the first PDF needs network, and
+tectonic itself fetches its TeX packages the first time. `.tex` export
+never needs it.
+
+**Submit** freezes a revision (`core/submit.py`): a `submission` mote in
+the project's garden holding the `.tex`, the PDF, the figure files and every
+given and answer as text, named `r1`, `r2`, ... per project. The owner mote
+gets `status: submitted`, `revision` and `submitted` (the date). Which
+note is the document: the one named, else the garden's one *root* note (the
+one no other note `\include`s); several roots ask which. A failed or
+unchecked `check`, an unresolved macro or a model with a unit fault refuses
+the submission and lists why; `--force` freezes anyway and records
+`forced: true`. Undo removes the submission and restores the owner's cover.
+`revisions diff` lists the values that changed between two revisions.
+
+    monoss export tex|pdf [--note N] [--out PATH]
+    monoss submit [--note N] [--force]
+    monoss revisions [list | diff A B | export R [path] [--tex]]
+
+Console: `export`, `submit`, `revisions` (same arguments). MCP:
+`export_document`, `submit_project`, `list_revisions`, `diff_revisions`.
+
 ## Using it
 
 ### The console
@@ -530,6 +574,7 @@ it is, ask `preview_simulation`.
 | `core/plotview.py` | a saved Moxie view, re-solved for a `\graph` |
 | `core/simulation.py::expression_context` | the evaluation context a `\val` gets |
 | `cli/render.py::print_modoc` | the terminal's renderer |
+| `core/texexport.py`, `core/tectonic.py`, `core/submit.py` | `.tex` export, the PDF compiler, frozen revisions |
 | `core/document.py` | the whole document as the console's read pane draws it |
 | `console/mora.py`, `console/frontend/js/views/mora-*.js` | the console's notes panes (`edit`, `read`, `notes`) |
 

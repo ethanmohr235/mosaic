@@ -55,7 +55,7 @@ def test_reserved_words_are_the_verbs():
     assert list(RESERVED_VERBS) == [
         "find", "set", "open", "rename", "unlink", "template",
         "plot", "fit", "sim", "rule", "scenarios", "solve", "why", "step", "play", "pause",
-        "edit", "read", "notes", "worksheet", "agenda", "week", "month", "detach", "graph", "image", "gardens", "garden", "project", "cd", "layout", "refresh", "undo", "redo", "log"]
+        "edit", "read", "notes", "worksheet", "agenda", "week", "month", "detach", "graph", "image", "export", "submit", "revisions", "gardens", "garden", "project", "cd", "layout", "refresh", "undo", "redo", "log"]
 
 
 def test_resolve_view():
@@ -113,7 +113,7 @@ def _values(completion):
 
 def test_first_token_lists_verbs(conn):
     result = complete(conn, "r")
-    assert [r.value for r in result.rows] == ["rename", "rule", "read", "refresh", "redo"]
+    assert [r.value for r in result.rows] == ["rename", "rule", "read", "revisions", "refresh", "redo"]
     assert (result.ghost, result.replace_from) == ("ename", 0)
 
 

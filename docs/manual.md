@@ -85,6 +85,9 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
 | `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
 | `image add ‹path› [‹name›]`, `image rename ‹old› ‹new›` | Store a PNG/SVG for notes (`\image{name}`; auto-named `shot-NNN`), or rename one and every note that shows it (undoable) |
+| `export tex\|pdf [‹path›] [--note ‹name›]` | Write the project's document as `.tex` (+ `images/`) or a PDF: a draft, nothing frozen |
+| `submit [--force] [--note ‹name›]` | Freeze the document as the next revision `r1`, `r2`…; the owner becomes `submitted` (undoable; refused if a check fails or a value is unresolved) |
+| `revisions`, `revisions diff ‹a› ‹b›`, `revisions export ‹rN› [‹path›] [--tex]` | List frozen revisions / values that changed / write one's PDF (or `.tex`) |
 | `project start @sel [‹garden›]`, `project stop @sel` | Give a mote its own garden / drop its claim (undoable) |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts (a new one takes the lowest free slot 1–9) |
 | `refresh` | Re-read the garden (MCP/CLI/sync edits) |

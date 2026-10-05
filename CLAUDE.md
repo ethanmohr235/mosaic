@@ -148,6 +148,15 @@ updates it in the same commit. Keep it compact: tables, no prose.
   verbs; `monoss image …` and MCP `add_image`/`list_images`/`rename_image`.
   `.tex` export of images waits for the Output phase.
 
+- **Output and Submit (2026-10-05, roadmap phase 6)**: `core/texexport.py`
+  (frozen `.tex`, pgfplots figures), `core/tectonic.py` (downloaded on
+  first use, pinned and checksummed), `core/submit.py` (the `submission`
+  mote, `r1`/`r2` revisions, the gate, the owner's cover, `revisions
+  diff`); `export`, `submit` and `revisions` verbs; `monoss export|submit|
+  revisions`; MCP `export_document`, `submit_project`, `list_revisions`,
+  `diff_revisions`. SVG images and surface plots are not exported yet.
+  Moxie's SVG/PDF export, plan-my-week and Home health are next.
+
 ## Split of work: cloud backend, local frontend
 
 Two sessions work in parallel:

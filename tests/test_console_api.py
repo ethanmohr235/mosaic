@@ -46,7 +46,7 @@ def test_boot_shape(api):
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
     assert boot["crumbs"] == ["test"]
-    assert boot["verbs"][29] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][32] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -975,3 +975,31 @@ def test_image_verb_reports_problems_as_errors(api, tmp_path):
     junk = tmp_path / "a.png"
     junk.write_bytes(b"nope")
     assert "PNG or SVG" in api.run(f"image add {junk}")["message"]
+
+
+# ---- output: export, submit, revisions ----
+
+def test_export_submit_and_revisions_verbs(api, tmp_path, monkeypatch):
+    from core import tectonic
+    monkeypatch.setattr(tectonic, "compile_pdf", lambda tex, files=None, fetch=None: b"%PDF-fake")
+    api.mora.save(None, "Report", "\\section{Hi}\n\nBody.", "s1")
+    tex = tmp_path / "out.tex"
+    assert api.run(f"export tex {tex}")["ok"] and "\\section*{Hi}" in tex.read_text()
+    pdf = tmp_path / "out.pdf"
+    api.run(f"export pdf {pdf}")
+    assert pdf.read_bytes() == b"%PDF-fake"
+    done = api.run("submit")
+    assert done["ok"] and "submitted r1" in done["message"] and done["wrote"]
+    assert "r1" in api.run("revisions")["message"]
+    assert "no values changed" in api.run("revisions diff r1 r1")["message"]
+    out = tmp_path / "r1.pdf"
+    api.run(f"revisions export r1 {out}")
+    assert out.read_bytes() == b"%PDF-fake"
+    api.run("undo")
+    assert "no revisions" in api.run("revisions")["message"]
+
+
+def test_submit_with_no_note_is_an_error_not_a_crash(api):
+    result = api.run("submit")
+    assert result["effect"] == "error" and "no note" in result["message"]
+    assert api.run("export")["effect"] == "error"

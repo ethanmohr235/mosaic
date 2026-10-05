@@ -31,6 +31,7 @@ from core import garden_io
 from core import health as health_repo
 from core import csv_import as csv_import_repo
 from core import images as images_repo
+from core import submit as submit_repo
 from core import uncertainty as uncertainty_repo
 from core import fit as fit_repo
 from core import projects as projects_repo
@@ -922,6 +923,63 @@ def rename_image(image: str, new_name: str, garden: str | None = None) -> dict[s
     return {"name": new_name, "notesRewritten": notes}
 
 
+def export_document(
+    note: str | None = None, pdf: bool = False, garden: str | None = None
+) -> dict[str, Any]:
+    """The project's document as a self-contained LaTeX source with every
+    value frozen: `tex`, the figure `files` it includes (path -> base64),
+    and `problems` (macros that did not resolve; empty means clean). `note`
+    names which note, default the garden's one root note (the one no other
+    note `\\include`s). With `pdf=True` it is also compiled with tectonic
+    (downloaded once, checksum-verified) and returned as `pdf_base64`. Writes
+    nothing -- `submit_project` is what freezes a revision."""
+    import base64
+    name = gardens_repo.resolve_garden(garden)
+    with _connect(garden) as conn:
+        if pdf:
+            data, bundle = submit_repo.pdf(conn, name, note)
+        else:
+            data, bundle = None, submit_repo.export(conn, name, note)
+    out = {"tex": bundle.tex, "problems": list(bundle.problems),
+           "files": {p: base64.b64encode(b).decode("ascii") for p, b in bundle.files.items()}}
+    if data is not None:
+        out["pdf_base64"] = base64.b64encode(data).decode("ascii")
+    return out
+
+
+def submit_project(
+    note: str | None = None, force: bool = False, garden: str | None = None
+) -> dict[str, Any]:
+    """Freeze the project's document as its next revision (`r1`, `r2`, ...):
+    a `submission` mote holding the .tex, the PDF, figures and every quoted
+    value, and the owner mote gets `status: submitted` and the revision.
+    Refused when a check failed, a macro did not resolve or the model has a
+    unit fault -- the error lists them; `force=True` freezes anyway and
+    records it. Archived gardens are refused."""
+    name = gardens_repo.resolve_garden(garden)
+    with _connect(garden, write=True) as conn:
+        frozen, _ = submit_repo.submit(conn, name, note, force)
+    return {"revision": frozen.revision, "date": frozen.date, "forced": frozen.forced,
+            "submissionId": frozen.mote_id, "values": frozen.values}
+
+
+def list_revisions(garden: str | None = None) -> list[dict[str, Any]]:
+    """Every frozen revision of the project's document, oldest first:
+    revision, date, whether it was forced, and the values it quoted."""
+    with _connect(garden) as conn:
+        return [{"revision": r.revision, "date": r.date, "forced": r.forced,
+                 "submissionId": r.mote_id, "values": r.values}
+                for r in submit_repo.revisions(conn)]
+
+
+def diff_revisions(a: str, b: str, garden: str | None = None) -> list[dict[str, Any]]:
+    """The values that differ between two revisions (`r1`, `r2`): name,
+    before, after, and whether it was added, removed or changed."""
+    with _connect(garden) as conn:
+        changes = submit_repo.diff(submit_repo.find(conn, a), submit_repo.find(conn, b))
+    return [{"name": c.ref, "before": c.before, "after": c.after, "kind": c.kind} for c in changes]
+
+
 def read_worksheet(garden: str | None = None) -> str:
     """This garden's calculation as lines of text -- its givens, then its
     equations -- the form `write_worksheet` takes back.
@@ -1092,6 +1150,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
     add_image, list_images, rename_image,
+    export_document, submit_project, list_revisions, diff_revisions,
     project_tree, start_project, import_csv, propagate_uncertainty, fit_model,
     search_gardens, archive_garden, list_materials,
     calc_sections, shown_work,
