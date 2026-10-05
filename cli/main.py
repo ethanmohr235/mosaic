@@ -9,6 +9,7 @@ from pathlib import Path
 from core import calc
 from core import csv_import
 from core import images
+from core import planner as planner_repo
 from core import submit as submit_repo
 from core import materials_provider
 from core import uncertainty
@@ -391,6 +392,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     ### Calc
+    plan_parser = subparsers.add_parser(
+        "plan", help="Place work blocks for open motes with an estimate and a due (preview; --apply writes)"
+    )
+    plan_parser.add_argument("words", nargs=argparse.REMAINDER,
+                             help="[--days N] [--hours 9-17] [--block 2h] [--from DATE] [--apply]")
+    worked_parser = subparsers.add_parser("worked", help="Log time actually spent on a mote")
+    worked_parser.add_argument("words", nargs="+", metavar="MOTE DURATION [DATE]")
+    budget_parser = subparsers.add_parser("budget", help="Estimate vs. done vs. planned hours")
+    budget_parser.add_argument("words", nargs="*", metavar="MOTE")
+
     plot_parser = subparsers.add_parser(
         "plot", help="Export a plot as a publication figure (svg, pdf, tex) or its points (csv)"
     )
@@ -945,6 +956,15 @@ def _handle_import(conn, args) -> None:
     print(f"Imported {len(imported.row_ids)} row(s) under {imported.import_id}.")
 
 
+def _handle_planner(conn, args) -> None:
+    try:
+        message, _wrote, _command = planner_repo.run_verb(conn, args.command, args.words)
+    except (planner_repo.CommandError, ValueError) as error:
+        print(f"Error: {error}")
+        return
+    print(message.replace(" | ", "\n  "))
+
+
 def _handle_plot(conn, args) -> None:
     import csv as csv_module
     from core import plotexport
@@ -1119,13 +1139,15 @@ _WRITES = {
     ("species", "set"), ("species", "template"), ("species", "new"),
     ("modoc", "import"), ("worksheet", "apply"), ("import", "csv"),
     ("image", "add"), ("image", "rename"),
-    ("project", "start"), ("project", "stop"), ("submit", None),
+    ("project", "start"), ("project", "stop"), ("submit", None), ("worked", None),
 }
 
 
 def _writes(args) -> bool:
     action = getattr(args, "action", None)
     if args.command == "fit":
+        return "--apply" in (args.words or [])
+    if args.command == "plan":
         return "--apply" in (args.words or [])
     if args.command == "simulate":
         return action in (None, "run") and not getattr(args, "scenario", None)
@@ -1240,6 +1262,8 @@ def main() -> None:
                 _handle_import(conn, args)
             elif args.command == "image":
                 _handle_image(conn, args)
+            elif args.command in planner_repo.VERBS:
+                _handle_planner(conn, args)
             elif args.command == "plot":
                 _handle_plot(conn, args)
             elif args.command == "export":

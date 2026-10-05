@@ -21,6 +21,8 @@ from core import agenda
 from core import calendar as calendar_repo
 from core import modoc
 from core import motes as motes_repo
+from core import planner as planner_repo
+from core import relationships as rel_repo
 from core import projects as projects_repo
 from core.command_bar import CommandError
 
@@ -67,12 +69,19 @@ class MonasteryApi:
             mote = motes_repo.get_mote(self._session.conn, mote_id)
             if mote is None:
                 raise CommandError("that mote no longer exists")
+            target_id = mote_id
+            if planner_repo.is_block(mote):
+                # A work block opens what the time is for.
+                target = next((r.to_id for r in rel_repo.list_relationships(
+                    self._session.conn, type_=planner_repo.FOR) if r.from_id == mote_id), None)
+                mote = (motes_repo.get_mote(self._session.conn, target) if target else None) or mote
+                target_id = mote.id
             garden = projects_repo.garden_named_by(mote.properties)
             if garden:
                 return {"command": f"cd {garden}", "newPane": False}
             if modoc.has_modoc(mote.properties):
-                return {"command": f"read #{mote_id}", "newPane": True}
-            return {"command": f"open #{mote_id}", "newPane": True}
+                return {"command": f"read #{target_id}", "newPane": True}
+            return {"command": f"open #{target_id}", "newPane": True}
         return self._answer("follow", answer)
 
     def _answer(self, what: str, compute) -> dict[str, Any]:

@@ -39,6 +39,7 @@ from core import home as home_repo
 from core import motes as motes_repo
 from core import fit as fit_repo
 from core import motion as motion_repo
+from core import planner as planner_repo
 from core import plotcmd
 from core import projects as projects_repo
 from core import submit as submit_repo
@@ -207,6 +208,8 @@ class Api:
             return self._verb_write(literal.head, literal.args, selection)
         if literal.kind == commands.VERB and literal.head in submit_repo.OUTPUT_VERBS:
             return self._verb_output(literal)
+        if literal.kind == commands.VERB and literal.head in planner_repo.VERBS:
+            return self._verb_plan(literal)
         if literal.kind == commands.VERB and literal.head == plotcmd.PLOT_VERB:
             return self._verb_plot(literal)
         if literal.kind == commands.VERB and literal.head == fit_repo.FIT_VERB:
@@ -289,6 +292,19 @@ class Api:
             message, count, command = submit_repo.run_verb(
                 self._session.conn, self._session.garden, parsed.head, parsed.args)
         except (submit_repo.SubmitError, tectonic_repo.TectonicError, projects_repo.ArchivedGarden) as e:
+            return _error(str(e))
+        live = self._push(command) if command is not None else ""
+        return {"effect": "statement", "ok": True, "message": message + live,
+                "moteId": None, "moteName": None, "created": False,
+                "needsConfirm": False, "choices": [], "wrote": count > 0}
+
+    def _verb_plan(self, parsed: commands.ParsedLine) -> dict:
+        """`plan`, `worked`, `budget`: the planner (core/planner.py). `plan`
+        alone previews; `plan --apply` and `worked` write, one undo step."""
+        try:
+            message, count, command = planner_repo.run_verb(
+                self._session.conn, parsed.head, parsed.args)
+        except (CommandError, ValueError) as e:
             return _error(str(e))
         live = self._push(command) if command is not None else ""
         return {"effect": "statement", "ok": True, "message": message + live,

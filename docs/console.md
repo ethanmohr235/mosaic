@@ -450,8 +450,8 @@ What the build decided within the settled plan above.
 
 - **Scope:** port the calendar (every binding, recurrence, move/resize
   with "this one or the series", new events) and add **project bars**.
-  Plan-my-week and planned vs. actual (roadmap phase 5) are **not in
-  this pass**.
+  Plan-my-week and planned vs. actual (roadmap phase 5) were not in this
+  pass; they are built (below, *Plan my week*).
 - **Three panes, each its own command:** `agenda [from] [to]`, a dense
   table with a row per occurrence grouped by day (the keyboard home);
   `week [date]`, the hour grid; `month [date]`, the six-week grid.
@@ -473,6 +473,31 @@ What the build decided within the settled plan above.
 - **Filters live in the command:** `agenda --keys due,date --type task`,
   and find conditions (`agenda status!:done`). The default is every
   binding found; `b` cycles a key by rewriting the line.
+
+
+### Plan my week (2026-10-05)
+
+Roadmap phase 5's last two parts, as verbs over `core/planner.py` (the
+calendar panes need nothing new: a block is an ordinary dated mote):
+
+- **`plan [--days N] [--hours 9-17] [--block 2h] [--from ‹date›]
+  [--apply]`.** Open work is a mote with an `estimate` (hours: `3`, `2h`,
+  `90m`) and a future `due` whose `status` is not done or submitted. Its
+  remaining hours (estimate, less logged and already-planned time) are cut
+  into blocks of at most `--block` and placed earliest deadline first in the
+  earliest free slot inside the work hours, never after the due. A mote with
+  a `due` and no estimate is listed as skipped, one past due as overdue,
+  and what does not fit as short by so many hours. Alone it only previews;
+  `--apply` writes, as one undo step.
+- **A block** is an instance of the species `Work block` (made on first
+  use) with `when` (the slot), `kind: planned`, `status: planned` and a
+  `for` relationship to the mote the time is for. `o` on a block follows
+  `for`. Doing the work is `set` ing the block's `status` to `done`.
+- **`worked ‹mote› ‹duration› [‹date›]`** logs an unplanned stretch as a
+  `kind: actual` block (ending now, or at the work day's start on `date`).
+- **`budget [‹mote›]`** is planned vs. actual: estimate, done (logged plus
+  planned blocks marked done), planned ahead, left.
+- Settings are flags, not stored: 9:00-17:00, 2 h blocks, 7 days.
 
 ### Built for U7 (2026-10-01)
 

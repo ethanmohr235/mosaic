@@ -151,6 +151,12 @@ Each one was a separate act of filing. That lesson became a rule in
   launches work: project bars (start → due), plan-my-week (auto-placed
   work blocks as ordinary dated motes), click-to-open (a lecture opens
   its note, a work block opens its project), and planned vs. actual time.
+  **Done 2026-10-05, decided:** `plan` places open motes (`due` +
+  `estimate`) earliest deadline first into free work hours (flags, default
+  9-17, 2 h blocks, 7 days) and only previews until `--apply`; a block is a
+  `Work block` mote with `when`, `kind: planned` and a `for` link; `worked`
+  logs `kind: actual` blocks; `budget` sums estimate / done / planned. See
+  `console.md` -> *Plan my week*.
 - **Graph:** frozen as a structure debugger. No new investment.
   **Done:** the `graph` pane (U8), annotations removed.
 - **Table:** keep the general table, and add a project variables pane
@@ -182,7 +188,7 @@ alongside all of them.
 | 2 | **Backend done.** Garden-scope names, worksheet editor, solve health | Rebuild `FEA-Homework-4` in about 8 lines |
 | 3 | **Backend done.** Mora calc macros and LaTeX basics | A gradeable homework document |
 | 4 | **Done** (UI: console U9). Garden ownership, *Start project*, one-owner check, Home tree | The owner ↔ project loop without filing |
-| 5 | **Bars and click-to-open done (console U7).** Monastery agenda: plan-my-week, planned vs. actual | Time view that routes into projects |
+| 5 | **Done** (2026-10-05). Monastery agenda: bars, click-to-open, plan-my-week, planned vs. actual | Time view that routes into projects |
 | 6 | **Done** (2026-10-05). tectonic, `.tex` export, Submit and revisions | Real PDFs and frozen submissions |
 | 7 | **Backend done except Moxie export.** Checks, external values / V&V, CSV import, Moxie publication export | The FEA V&V workflow |
 | 8 | **Backend done.** Uncertainty propagation | Lab reports |

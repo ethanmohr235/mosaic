@@ -160,6 +160,10 @@ updates it in the same commit. Keep it compact: tables, no prose.
   `plot export svg|pdf|tex`, `monoss plot export`, MCP `export_plot`; a
   note's `\graph` in `.tex` uses the same pgfplots writer. Plan-my-week,
   planned vs. actual and Home health are next.
+- **Plan my week (2026-10-05, roadmap phase 5)**: `core/planner.py`; `plan
+  [--apply]`, `worked`, `budget` verbs; `monoss plan|worked|budget`; MCP
+  `plan_week`, `log_time`, `time_budget`. Blocks are `Work block` motes with
+  `when`, `kind`, and a `for` relationship. Home health is next.
 
 ## Split of work: cloud backend, local frontend
 

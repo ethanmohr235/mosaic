@@ -46,7 +46,7 @@ def test_boot_shape(api):
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
     assert boot["crumbs"] == ["test"]
-    assert boot["verbs"][32] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][35] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)

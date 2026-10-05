@@ -31,6 +31,7 @@ from core import garden_io
 from core import health as health_repo
 from core import csv_import as csv_import_repo
 from core import images as images_repo
+from core import planner as planner_repo
 from core import submit as submit_repo
 from core import uncertainty as uncertainty_repo
 from core import fit as fit_repo
@@ -968,6 +969,49 @@ def export_plot(line: str, format: str = "svg", garden: str | None = None) -> di
     return out
 
 
+def plan_week(
+    apply: bool = False, days: int = 7, hours: str = "9-17", block: str = "2h",
+    start: str | None = None, garden: str | None = None,
+) -> dict[str, Any]:
+    """Plan the week's work: for every open mote (a `due` in the future,
+    `status` not done/submitted) with an `estimate` (hours, `3` or `90m`),
+    cut what is left (estimate minus logged and already-planned time) into
+    blocks of at most `block` and place them in free `hours` on or before the
+    due, earliest deadline first. Motes with a due but no estimate are
+    listed as skipped, never guessed. With `apply=False` it only previews;
+    `apply=True` writes the blocks as ordinary `Work block` motes (`when`,
+    `kind: planned`, linked to their mote by a `for` relationship) in one
+    undoable step. Archived gardens are refused."""
+    words = ["--days", str(days), "--hours", hours, "--block", block]
+    if start:
+        words += ["--from", start]
+    if apply:
+        words.append("--apply")
+    with _connect(garden, write=apply) as conn:
+        message, wrote, _ = planner_repo.run_verb(conn, "plan", words)
+    return {"summary": message, "written": wrote // 2 if apply else 0, "applied": apply}
+
+
+def log_time(mote: str, duration: str, date: str | None = None, garden: str | None = None) -> dict[str, Any]:
+    """Log time actually spent on a mote (`duration` like `90m` or `1.5h`;
+    `date` an ISO day, else it ends now) as a `kind: actual` work block, so
+    `time_budget` shows done vs. estimated."""
+    words = [mote, duration] + ([date] if date else [])
+    with _connect(garden, write=True) as conn:
+        message, _wrote, _ = planner_repo.run_verb(conn, "worked", words)
+    return {"logged": message}
+
+
+def time_budget(mote: str | None = None, garden: str | None = None) -> list[dict[str, Any]]:
+    """Estimate vs. done vs. planned vs. left, in hours, for every mote
+    with an `estimate` or any work block (or just `mote`)."""
+    with _connect(garden) as conn:
+        rows = planner_repo.report(conn, mote)
+    hours = lambda span: None if span is None else round(span.total_seconds() / 3600, 2)  # noqa: E731
+    return [{"mote": r.name, "id": r.mote_id, "estimate": hours(r.estimate), "done": hours(r.done),
+             "planned": hours(r.planned), "left": hours(r.left)} for r in rows]
+
+
 def submit_project(
     note: str | None = None, force: bool = False, garden: str | None = None
 ) -> dict[str, Any]:
@@ -1171,7 +1215,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
     add_image, list_images, rename_image,
-    export_document, export_plot, submit_project, list_revisions, diff_revisions,
+    export_document, export_plot, plan_week, log_time, time_budget, submit_project, list_revisions, diff_revisions,
     project_tree, start_project, import_csv, propagate_uncertainty, fit_model,
     search_gardens, archive_garden, list_materials,
     calc_sections, shown_work,

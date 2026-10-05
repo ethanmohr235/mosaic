@@ -86,6 +86,9 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
 | `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
 | `image add ‹path› [‹name›]`, `image rename ‹old› ‹new›` | Store a PNG/SVG for notes (`\image{name}`; auto-named `shot-NNN`), or rename one and every note that shows it (undoable) |
+| `plan [--days N] [--hours 9-17] [--block 2h] [--from ‹date›] [--apply]` | Place work blocks for open motes (`due` + `estimate`, not done), earliest deadline first, in free work hours. Alone it previews; `--apply` writes them (one undo step) |
+| `worked ‹mote› ‹duration› [‹date›]` | Log time spent (`90m`, `1.5h`) as an actual work block (undoable) |
+| `budget [‹mote›]` | Estimate / done / planned / left hours per mote |
 | `export tex\|pdf [‹path›] [--note ‹name›]` | Write the project's document as `.tex` (+ `images/`) or a PDF: a draft, nothing frozen |
 | `submit [--force] [--note ‹name›]` | Freeze the document as the next revision `r1`, `r2`…; the owner becomes `submitted` (undoable; refused if a check fails or a value is unresolved) |
 | `revisions`, `revisions diff ‹a› ‹b›`, `revisions export ‹rN› [‹path›] [--tex]` | List frozen revisions / values that changed / write one's PDF (or `.tex`) |
