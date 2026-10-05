@@ -62,6 +62,17 @@ function create(ctx) {
     const parts = [h("div", "props-title", [p.garden, p.current ? h("span", "dim", "  · open here") : ""]),
       components.kvGrid(pairs)];
     if (p.problems.length) parts.push(h("div", "home-problems lvl-warn", p.problems.join("\n")));
+    if (p.health) {
+      const { solve, checks } = p.health;
+      parts.push(components.kvGrid([
+        ["model", h("span", `lvl-${solve.state}`, solve.summary)],
+        ...(checks ? [["checks", h("span", `lvl-${checks.state}`,
+          `${checks.total - checks.failing - checks.unchecked}/${checks.total} passing`
+          + `${checks.failing ? ` · ${checks.failing} failing` : ""}${checks.unchecked ? ` · ${checks.unchecked} not checked` : ""}`)]] : []),
+      ]));
+      const lines = [...(solve.lines || []), ...((checks && checks.lines) || [])];
+      if (lines.length) parts.push(h("div", "home-problems lvl-warn", lines.join("\n")));
+    }
     body.replaceChildren(...parts);
   }
 

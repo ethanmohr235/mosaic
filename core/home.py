@@ -32,7 +32,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
+from core import calc
 from core import garden_io
+from core import health as health_repo
 from core import gardens as gardens_repo
 from core import projects
 from core import sync as sync_repo
@@ -82,6 +84,53 @@ def counts(name: str) -> dict:
         conn.close()
 
 
+def health(name: str, detail: bool = False) -> dict | None:
+    """What a garden's model says about itself, cheaply and without
+    solving: `solve` (structure and units, core/health.py) and `checks`
+    (the garden's `check` rules against the values it stores). None for a
+    garden with no equations and no checks -- nothing to be healthy about
+    -- or one that can't be read.
+
+    `detail` adds the sentences the `garden` pane lists: what is
+    under-determined, each unit problem, each check that is not passing.
+    The tree asks without it, so opening Home stays as cheap as counting
+    motes."""
+    try:
+        conn = get_connection(name)
+    except Exception:
+        return None
+    try:
+        found = conn.execute(
+            "SELECT 1 FROM mote_properties WHERE key = 'equation' LIMIT 1").fetchone()
+        if found is None:
+            return None
+        report = health_repo.check(conn)
+        results = calc.checks(conn)
+    except Exception:
+        logger.exception("could not read the health of %r", name)
+        return None
+    finally:
+        conn.close()
+    failing = [r for r in results if r.status == "fail"]
+    unchecked = [r for r in results if r.status == "not checked"]
+    problems = len(report.culprits) + len(report.unit_problems)
+    out = {
+        "solve": {"state": "warn" if problems or not report.solvable else "ok",
+                  "problems": problems, "summary": report.summary},
+        "checks": ({"total": len(results), "failing": len(failing), "unchecked": len(unchecked),
+                    "state": "fault" if failing else "warn" if unchecked else "ok"}
+                   if results else None),
+    }
+    if detail:
+        out["solve"]["lines"] = [c.label + ": " + c.reason for c in report.culprits] + \
+            [f"units: {p}" for p in report.unit_problems] + \
+            [g.message for g in report.groups if g.shortfall > 0]
+        out["checks"] = out["checks"] and {**out["checks"], "lines": [
+            f"{r.status}: {r.label}" + (f" ({r.error or r.detail})" if r.error or r.detail else "")
+            for r in failing + unchecked]}
+    return out
+
+
 def gardens_view(show_archived: bool = False, current: str | None = None) -> dict:
     """The `gardens` pane: one row per garden, depth-first under its
     owner, in three groups -- trees that own something, loose gardens,
@@ -124,6 +173,7 @@ def _rows(node: projects.Node, depth: int, troubled: dict, current: str | None) 
         "syncing": gardens_repo.get_sync_dir(node.garden) is not None,
         "current": node.garden == current,
         "problems": troubled.get(node.garden, []),
+        "health": None if node.archived else health(node.garden),
         **counts(node.garden),
     }
     out = [row]
@@ -171,6 +221,7 @@ def detail(name: str) -> dict:
         "owns": sorted(g for g, found in claims.items() if any(o.garden == name for o in found)),
         "archivedBy": projects.archived_by(name, known),
         "problems": [p.message for p in projects.check(known) if p.garden == name],
+        "health": health(name, detail=True),
     }
 
 

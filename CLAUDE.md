@@ -163,7 +163,10 @@ updates it in the same commit. Keep it compact: tables, no prose.
 - **Plan my week (2026-10-05, roadmap phase 5)**: `core/planner.py`; `plan
   [--apply]`, `worked`, `budget` verbs; `monoss plan|worked|budget`; MCP
   `plan_week`, `log_time`, `time_budget`. Blocks are `Work block` motes with
-  `when`, `kind`, and a `for` relationship. Home health is next.
+  `when`, `kind`, and a `for` relationship.
+- **Home health (2026-10-05)**: `core/home.py::health`; `solve` and `checks`
+  marks on each `gardens` row, full lines in the `garden` pane. Document
+  health and the submitted revision are deliberately not marked.
 
 ## Split of work: cloud backend, local frontend
 

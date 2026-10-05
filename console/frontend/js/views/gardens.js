@@ -48,6 +48,11 @@ function create(ctx) {
         { key: "cover", label: "cover", width: "minmax(10ch, 1fr)", render: (r) => h("span", "dim", r.cover ? r.cover.name : "") },
         { key: "due", label: "due", width: "11ch", render: (r) => (r.cover && r.cover.due ? r.cover.due.slice(0, 10) : "") },
         { key: "status", label: "status", width: "9ch", render: (r) => (r.cover && r.cover.status) || "" },
+        { key: "solve", label: "solve", width: "6ch", render: (r) => (r.health
+          ? h("span", `lvl-${r.health.solve.state}`, r.health.solve.problems ? `!${r.health.solve.problems}` : "ok") : "") },
+        { key: "checks", label: "checks", width: "7ch", render: (r) => (r.health && r.health.checks
+          ? h("span", `lvl-${r.health.checks.state}`,
+            `${r.health.checks.total - r.health.checks.failing - r.health.checks.unchecked}/${r.health.checks.total}`) : "") },
         { key: "motes", label: "motes", width: "7ch", align: "right",
           render: (r) => (r.motes === null ? h("span", "lvl-warn", "?") : String(r.motes)) },
         { key: "marks", label: "", width: "4ch", render: (r) => h("span", r.problems.length ? "lvl-warn" : "dim",

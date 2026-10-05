@@ -78,8 +78,8 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `graph … --hide-rel a,b`, `--view ‹saved›`, `‹conditions›` | Leave out relationship types (not hopped either); keep what a saved view / conditions match |
 | `detach #id ‹key› ‹occurrence› ‹start› ‹end›` | Move one occurrence out of its series (what `t` runs) |
 | `cd ‹garden›` | Switch garden (or click a crumb in the top bar's path) |
-| `gardens [--archived]` | Every garden: the ownership tree, loose, archived (folded) |
-| `garden [‹name›]` | A garden's details (none: the open one) |
+| `gardens [--archived]` | Every garden: the ownership tree, loose, archived (folded); `solve` and `checks` marks per model garden |
+| `garden [‹name›]` | A garden's details (none: the open one), with model health and any failing checks |
 | `garden new ‹name›`, `garden rename ‹old› ‹new›` | Make / rename a garden (renaming the open one follows it) |
 | `garden rm ‹name›` / `garden restore ‹name›` | Move aside (a typed one asks for a second ⏎; not the open one) / bring back |
 | `garden archive\|unarchive ‹name›` | Archive with everything it owns / undo that |

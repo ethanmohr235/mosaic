@@ -602,8 +602,21 @@ What the build decided within the settled plan above.
   doesn't, since the post-U9 fixes); `garden restore` brings it back. Not on `undo`, which belongs to the open garden.
 - **Also in:** the top bar's breadcrumb is the ownership path, and a
   crumb `cd`s there.
-- **Not in:** cross-garden search, health indicators, a default-garden
-  setting.
+- **Not in:** a default-garden setting. (Cross-garden search is
+  `monoss search`; health marks came on 2026-10-05, below.)
+
+### Home health (2026-10-05)
+
+- Each `gardens` row has a **solve** mark (`ok`, or `!n` for n culprits
+  and unit problems) and a **checks** mark (`passing/total`, red when one
+  fails, amber when one could not be checked). A garden with no equations
+  has neither. Both come from `core/home.py::health` (core/health.py and
+  `calc.checks`): no solve and no note rendering, so Home opens as fast as
+  counting motes.
+- The `garden ‹name›` pane adds the sentences: what is under-determined,
+  each unit problem, each failing or unchecked check.
+- **Decided:** document health (unresolved macros) and the submitted
+  revision are *not* marked; the revision is already on the cover.
 
 ### Built for U9 (2026-10-01)
 

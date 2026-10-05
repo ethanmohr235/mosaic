@@ -202,3 +202,45 @@ def test_completion(semester):
     assert "new" in values and "hw4" in values
     assert [v for v, _ in home.choices("sync hw4 ")] == ["now", "off", "auto"]
     assert home.choices("new ") == []
+
+
+# ---- health marks ----
+
+def _model(name, sheet):
+    from core import worksheet
+    from core.simulation import run_simulation
+    create_garden(name)
+    conn = get_connection(name)
+    try:
+        worksheet.apply(conn, sheet)
+        run_simulation(conn)
+    finally:
+        conn.close()
+
+
+def test_a_garden_with_no_equations_has_no_health():
+    create_garden("plain")
+    assert home.health("plain") is None
+    assert home.health("missing") is None
+
+
+def test_a_healthy_model_with_passing_checks_is_green():
+    _model("bar", "bd.x = 3 m\nbd.y = 4 m\nbd.l = sqrt(bd.x^2 + bd.y^2)\nbd.l <= 10 ! short enough")
+    h = home.health("bar")
+    assert h["solve"]["state"] == "ok" and h["solve"]["problems"] == 0
+    assert h["checks"] == {"total": 1, "failing": 0, "unchecked": 0, "state": "ok"}
+
+
+def test_a_failing_check_is_marked_with_its_reason():
+    _model("bad", "bd.x = 3 m\nbd.y = 4 m\nbd.l = sqrt(bd.x^2 + bd.y^2)\nbd.l <= 2 ! too long")
+    h = home.health("bad", detail=True)
+    assert h["checks"]["failing"] == 1 and h["checks"]["state"] == "fault"
+    assert any("too long" in line for line in h["checks"]["lines"])
+
+
+def test_the_tree_and_detail_carry_health():
+    _model("bar", "bd.x = 3 m\nbd.l = sqrt(bd.x^2)\nbd.l <= 10 ! ok")
+    view = home.gardens_view()
+    row = next(r for g in view["groups"] for r in g["rows"] if r["garden"] == "bar")
+    assert row["health"]["checks"]["state"] == "ok" and "lines" not in row["health"]["solve"]
+    assert "lines" in home.detail("bar")["health"]["solve"]

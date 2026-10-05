@@ -31,8 +31,9 @@ Each one was a separate act of filing. That lesson became a rule in
   explicit (sets `status` and adds a link to the frozen output).
 - Home replaces the Gardens window's list (**done**, console U9: `mo
   saic`, with `project start|stop` and the breadcrumb). It shows the ownership tree
-  plus loose gardens, and opens them. Health indicators (solve and
-  document) come later.
+  plus loose gardens, and opens them. Health marks (solve and
+  checks) are done (2026-10-05); document health was left out. See
+  `console.md` -> *Home health*.
 - **Decided in building it:** `garden` is a reserved property. The
   one-owner check reports two claims, a claim on a missing garden and an
   ownership loop, and never refuses to open anything. A name *Start
