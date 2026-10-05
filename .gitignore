@@ -9,3 +9,8 @@ gardens/
 .credentials/
 .env
 .webview_data_console/
+.webview_data_momentum/
+.webview_data_monastery/
+.webview_data_mora/
+.webview_data_motion/
+.webview_data_moxie/
