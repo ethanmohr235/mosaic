@@ -19,8 +19,9 @@
  *
  * Each band (one independent calculation) is its own row of columns,
  * stacked; gutters and the cursor's h/l are per band, j/k run on into
- * the next band. A relay is drawn as the stretch of wire across its
- * column, so a long wire is one unbroken line.
+ * the next band. A relay's stretch of wire across its column is drawn
+ * with the elbows, in one pass, so a long wire is one unbroken line; the
+ * pass re-runs whenever a group or the sheet changes size.
  *
  * The cursor is a port id: a card or a row. Pan and zoom are a CSS
  * transform on the world, so cards and maths stay text at any zoom. */
@@ -75,6 +76,8 @@ export class FlowBoard {
       h("div", "flow-band", h("div", "flow-cols", band.columns.map((col, c) => this.column(col, `${b}.${c}`))))));
     if (this.cursor && !this.info.has(this.cursor)) this.cursor = null;
     this.markCursor();
+    this.watchLayout();
+    if (document.fonts) document.fonts.ready.then(() => this.payload === payload && this.drawWires());
     requestAnimationFrame(() => {
       if (!this.fitted) {
         this.fit();
@@ -226,14 +229,38 @@ export class FlowBoard {
     this.svg.replaceChildren();
     this.paths = ends.map((e) => {
       const x = tracks.get(e);
-      const path = document.createElementNS(SVG, "path");
-      path.setAttribute("d", `M${e.a.x},${e.a.y}H${x}V${e.b.y}H${e.b.x}`);
-      this.svg.append(path);
-      return { segment: e.segment, path };
+      return { segment: e.segment, path: this.path(`M${e.a.x},${e.a.y}H${x}V${e.b.y}H${e.b.x}`) };
     });
+    // A relay's run across its column, measured in the same pass as the
+    // elbows either side of it, so the two can never disagree.
+    this.runs = new Map();
+    for (const [id, el] of this.ports) {
+      if (!id.startsWith("y:")) continue;
+      const r = rect(el), y = (r.t + r.b) / 2;
+      this.runs.set(id, this.path(`M${r.l},${y}H${r.r}`));
+    }
     this.svg.setAttribute("width", this.sheet.scrollWidth);
     this.svg.setAttribute("height", this.sheet.scrollHeight);
     this.markWires();
+  }
+
+  path(d) {
+    const path = document.createElementNS(SVG, "path");
+    path.setAttribute("d", d);
+    this.svg.append(path);
+    return path;
+  }
+
+  /** Redraw once the layout has settled: fonts arriving, KaTeX setting a
+   *  card, a pane resizing -- anything that moves a port moves a group. */
+  watchLayout() {
+    if (this.resizes) this.resizes.disconnect();
+    this.resizes = new ResizeObserver(() => {
+      cancelAnimationFrame(this.redraw);
+      this.redraw = requestAnimationFrame(() => this.drawWires());
+    });
+    this.resizes.observe(this.sheet);
+    for (const el of this.sheet.querySelectorAll(".flow-group")) this.resizes.observe(el);
   }
 
   ends(segment, rect) {
@@ -297,7 +324,7 @@ export class FlowBoard {
       path.classList.toggle("hot", hot.has(i));
       if (hot.has(i)) [segment.from, segment.to].filter((p) => p.startsWith("y:")).forEach((p) => relays.add(p));
     });
-    for (const [id, el] of this.ports) if (id.startsWith("y:")) el.classList.toggle("hot", relays.has(id));
+    for (const [id, run] of this.runs || []) run.classList.toggle("hot", relays.has(id));
   }
 
   /* ---- cursor ---- */
@@ -411,6 +438,8 @@ export class FlowBoard {
   }
 
   destroy() {
+    if (this.resizes) this.resizes.disconnect();
+    cancelAnimationFrame(this.redraw);
     this.root.removeEventListener("wheel", this.onWheel);
     this.root.removeEventListener("pointerdown", this.onDown);
     this.world.remove();

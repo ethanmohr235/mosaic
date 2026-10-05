@@ -800,7 +800,11 @@ What the build decided within the settled plan above.
   but it wired one rule to the whole garden. Re-read at the values the
   solve found, the record is exact; the probe stays as the fallback.
 - **Relays are drawn** as the wire's run across the column they pass, so
-  a long wire is one line, not segments ending at column edges.
+  a long wire is one line, not segments ending at column edges. The run
+  is an SVG path measured in the same pass as the elbows, and the pass
+  re-runs whenever a group or the sheet resizes (fonts arriving, KaTeX
+  setting a card). An HTML run measured once drifted a few pixels from
+  its elbows.
 - **Products**: a thin space between single-letter factors (`48 E I`), a
   `·` when either is a word or a dotted reference (`density · n.v`).
 - **Limit: a rule that cannot be evaluated** (a name that resolves to

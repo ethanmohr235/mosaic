@@ -896,9 +896,9 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .flow-band:first-child { border-top: none; padding-top: 0; }
 .flow-cols { display: flex; align-items: flex-start; gap: calc(var(--col-gap) * 5); }
 .flow-col { display: flex; flex-direction: column; align-items: flex-start; gap: var(--group-gap); }
-/* A relay is the wire's run across a column it passes through. */
-.flow-relay { align-self: stretch; height: 1px; background: var(--line-strong); opacity: 0.5; }
-.flow-relay.hot { background: var(--bright); opacity: 1; }
+/* A relay holds a wire's place in a column it passes through; js/flow.js
+ * draws the run across it in the SVG with the rest of the wire. */
+.flow-relay { align-self: stretch; height: 1px; }
 .flow-group { display: flex; flex-direction: column; }
 .flow-group.framed { border: 1px solid var(--line); padding: var(--table-head-pad) var(--header-gap); }
 .flow-group.coupled { background: var(--bg-raised); }
