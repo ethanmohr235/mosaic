@@ -59,8 +59,32 @@ def test_a_chain_is_one_step_per_equation(beam):
     p = flow(beam)
     assert [column_of(p, r) for r in ("bm.I", "bm.S", "bm.sigma")] == [1, 2, 3]
     assert column_of(p, "bm.c") == 1
-    assert [c["kind"] for c in p["columns"]] == ["givens", "step", "step", "step", "step", "answers"]
+    assert len(p["bands"]) == 1  # ck reads bm.c, so it is one calculation
+    assert [c["kind"] for c in p["bands"][0]["columns"]] == ["givens", "step", "step", "step", "step", "answers"]
     assert p["solve"]["state"] == "solved"
+
+
+def test_independent_calculations_are_separate_bands(conn):
+    worksheet.apply(conn, "k.N = 6\nu.a = 2\nu.b = u.a * k.N\nw.a = 3\nw.b = w.a * k.N\nw.c = w.b + 1")
+    p = flow(conn)
+    assert len(p["bands"]) == 2
+    assert [len(b["columns"]) for b in p["bands"]] == [3, 4]  # u: one step; w: two
+    # The shared constant joins nothing: each band has its own stub for it.
+    givens = [s for s in p["stubs"].values() if s["name"] == "k"]
+    assert len(givens) == 2 and all(s["id"].startswith("in") for s in givens)
+
+
+def test_an_equation_its_probe_cannot_evaluate_reads_only_what_it_reads(conn):
+    """A placeholder 1.0 puts arccos out of its domain; read at the solved
+    point the angle depends on its own three inputs, not on every value."""
+    worksheet.apply(conn, "p.E0 = 1 MeV\np.E1 = 11/13 * p.E0\np.EC = p.E0 - p.E1\n"
+                          "p.ival = 0.284\np.angle = arccos(p.EC / (p.E0 * p.ival))\n"
+                          "q.x = 2\nq.y = q.x * 3")
+    p = flow(conn)
+    assert len(p["bands"]) == 2
+    answers = {r["ref"] for g in p["groups"].values() if g["kind"] == "answers"
+               for s in g["stubs"] for r in p["stubs"][s]["rows"]}
+    assert answers == {"p.angle", "q.y"}
 
 
 def test_a_coupled_pair_is_one_group_with_residuals(beam):
@@ -78,8 +102,8 @@ def test_a_substitution_step_shows_no_residual(beam):
 
 def test_givens_and_answers_are_their_own_columns(beam):
     p = flow(beam)
-    givens = {r["ref"] for s in p["groups"]["in"]["stubs"] for r in p["stubs"][s]["rows"]}
-    answers = {r["ref"] for s in p["groups"]["out"]["stubs"] for r in p["stubs"][s]["rows"]}
+    givens = {r["ref"] for s in p["groups"]["in0"]["stubs"] for r in p["stubs"][s]["rows"]}
+    answers = {r["ref"] for s in p["groups"]["out0"]["stubs"] for r in p["stubs"][s]["rows"]}
     assert givens == {"bm.b", "bm.h", "bm.M"}
     # Nothing reads these; the check reading sigma does not make it an intermediate.
     assert answers == {"bm.sigma", "ck.x", "ck.y"}
@@ -106,9 +130,10 @@ def test_the_given_decides_the_direction(conn):
     forward = flow(conn)
     worksheet.apply(conn, "q.b = 6\nq.a = ?\nq.a * 3 == q.b")
     backward = flow(conn)
-    rows = lambda p, g: {r["ref"] for s in p["groups"][g]["stubs"] for r in p["stubs"][s]["rows"]}
-    assert rows(forward, "in") == {"p.a"} and rows(forward, "out") == {"p.b"}
-    assert rows(backward, "in") == {"q.b"} and rows(backward, "out") == {"q.a"}
+    rows = lambda p, kind: {r["ref"] for g in p["groups"].values() if g["kind"] == kind
+                            for s in g["stubs"] for r in p["stubs"][s]["rows"]}
+    assert rows(forward, "givens") == {"p.a"} and rows(forward, "answers") == {"p.b"}
+    assert rows(backward, "givens") == {"q.b"} and rows(backward, "answers") == {"q.a"}
 
 
 def test_wires_skip_columns_through_shared_relays(beam):
@@ -140,7 +165,7 @@ def test_a_sub_calculation_folds_sideways(beam):
     assert not cone["folded"]
     folded = flow(beam, folds={cone["id"]: True})
     # I -> S -> sigma become one card, ranked after c (step 1): one column fewer.
-    assert len(folded["columns"]) == len(p["columns"]) - 1
+    assert len(folded["bands"][0]["columns"]) == len(p["bands"][0]["columns"]) - 1
     g = next(g for g in folded["groups"].values() if g["fold"])
     assert g["fold"]["title"] == "bm.sigma ← 3 steps"
     # c is read by the coupled pair too, so it is not inside sigma's fold.

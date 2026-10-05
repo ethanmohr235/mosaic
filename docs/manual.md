@@ -76,7 +76,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `week [date]`, `month [date]` | Hour grid; six-week grid |
 | `graph [@sel\|#id\|‹name›] [--depth N]` | A mote's neighbourhood (default depth 2; `@sel` re-roots with the selection); no root: the whole garden |
 | `graph … --hide-rel a,b`, `--view ‹saved›`, `‹conditions›` | Leave out relationship types (not hopped either); keep what a saved view / conditions match |
-| `graph [@sel\|#id\|‹name›\|‹m.k›] --flow [--depth N]` | The solve, left to right: givens, one column per step, answers; `--depth` counts steps both ways; conditions keep steps touching what they match; follows the playhead's run |
+| `graph [@sel\|#id\|‹name›\|‹m.k›] --flow [--depth N]` | The solve, left to right: givens, one column per step, answers, one band per independent calculation; `--depth` counts steps both ways; conditions keep steps touching what they match; follows the playhead's run |
 | `detach #id ‹key› ‹occurrence› ‹start› ‹end›` | Move one occurrence out of its series (what `t` runs) |
 | `cd ‹garden›` | Switch garden (or click a crumb in the top bar's path) |
 | `gardens [--archived]` | Every garden: the ownership tree, loose, archived (folded); `solve` and `checks` marks per model garden |
@@ -253,7 +253,7 @@ zooms · ctrl+drag node → node prefills `A ->  -> B`.
 
 | Key | Does |
 |---|---|
-| `h` `j` `k` `l`, arrows | Cursor down/up a column, to the nearest in the next |
+| `h` `j` `k` `l`, arrows | Cursor down/up a column (on into the next band), to the nearest in the next column |
 | `⏎` / click | Select the row's mote, or the rule |
 | `o` / double-click | Open props in a new pane |
 | `e` | Prefill `set m.k ‹value› ‹unit›` (a row), `set #rule equation …` (a rule) |

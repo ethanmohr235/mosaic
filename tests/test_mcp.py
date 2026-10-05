@@ -660,7 +660,7 @@ def test_solve_health_reports_a_balanced_model(garden):
 def test_solve_flow_lays_the_solve_out_in_steps(garden):
     write_worksheet("bd.x = 3\nbd.y = bd.x * 2\nbd.z = bd.y + 1", garden=GARDEN)
     flow = solve_flow(garden=GARDEN)
-    assert [c["kind"] for c in flow["columns"]] == ["givens", "step", "step", "answers"]
+    assert [c["kind"] for c in flow["bands"][0]["columns"]] == ["givens", "step", "step", "answers"]
     assert flow["solve"]["state"] == "solved"
     rooted = solve_flow(root="bd.y", depth=1, garden=GARDEN)
     assert rooted["rootName"] == "bd.y" and len(rooted["cards"]) == 2

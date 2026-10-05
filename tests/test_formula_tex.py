@@ -18,7 +18,10 @@ from core.formula_tex import to_tex
     ("sigma_max == M * c / I", r"\sigma_{\mathrm{max}} = \frac{M\,c}{I}"),
     ("x_max >= 2 * R1", r"x_{\mathrm{max}} \ge 2\,R_{1}"),
     ("v == voltage", r"v = \mathit{voltage}"),
-    ("v == bd.l * targets('load').F", r"v = \mathrm{bd}.l\,\overrightarrow{\mathrm{load}}.F"),
+    ("v == bd.l * targets('load').F", r"v = \mathrm{bd}.l \cdot \overrightarrow{\mathrm{load}}.F"),
+    # Words and dotted references are dotted, so the names do not run together.
+    ("flux == density * n.v", r"\mathit{flux} = \mathit{density} \cdot \mathrm{n}.v"),
+    ("xs == Gn * Gy", r"\mathit{xs} = \mathit{Gn} \cdot \mathit{Gy}"),
     ("k == sum(sources('spring').k)", r"k = \sum \overleftarrow{\mathrm{spring}}.k"),
     ("f == 1e6 * x", r"f = 10^{6}\,x"),
     ("f == 2.5e-7 * x", r"f = 2.5 \times 10^{-7}\,x"),

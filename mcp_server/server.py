@@ -721,9 +721,11 @@ def solve_flow(
     """The solve as the console's `graph --flow` pane lays it out: what
     determined what, step by step, left to right.
 
-    Read off one in-memory solve (nothing is written). `columns` run from
-    the givens, through one column per solve step, to the answers (values
-    nothing else reads); each holds `groups` -- one step the solve took: a
+    Read off one in-memory solve (nothing is written). `bands` are the
+    independent calculations (steps joined by a value one computes and
+    another reads). A band's `columns` run from its givens, through one
+    column per solve step, to its answers (values nothing else reads);
+    each holds `groups` -- one step the solve took: a
     single equation that determined one value, or a `coupled` set the
     solver found together -- and `relays` (a wire passing through). A
     group's `cards` are its equations (with `tex`, and a residual or a

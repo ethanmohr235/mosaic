@@ -172,8 +172,10 @@ each can be two blocks with one short and one surplus. See
 
 `solve_flow` is the solve as the console's `graph --flow` pane lays it out,
 read off one in-memory solve that writes nothing.
-- `columns` run from the givens, through one column per solve step, to
-  the answers (values nothing else reads).
+- `bands` are the independent calculations: steps joined by a value one
+  computes and another reads. A shared constant joins nothing.
+- A band's `columns` run from its givens, through one column per solve
+  step, to its answers (values nothing else reads).
 - Each step is a group: one equation that determined one value, or a
   `coupled` set the solver found together. Its `cards` are the equations
   (with `tex`, and a residual or a check's margin) and its `stubs` the

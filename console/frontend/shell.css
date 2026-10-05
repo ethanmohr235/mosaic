@@ -890,10 +890,15 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 .flow-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .flow-wires path { fill: none; stroke: var(--line-strong); stroke-width: 1; opacity: 0.5; }
 .flow-wires path.hot { stroke: var(--bright); opacity: 1; }
-.flow-cols { position: relative; display: flex; align-items: flex-start; gap: calc(var(--col-gap) * 5);
-  padding: var(--row-h) var(--pad-x); }
+.flow-sheet { position: relative; display: flex; flex-direction: column; align-items: flex-start;
+  gap: calc(var(--group-gap) * 2); padding: var(--row-h) var(--pad-x); }
+.flow-band { border-top: 1px solid var(--track); padding-top: var(--group-gap); }
+.flow-band:first-child { border-top: none; padding-top: 0; }
+.flow-cols { display: flex; align-items: flex-start; gap: calc(var(--col-gap) * 5); }
 .flow-col { display: flex; flex-direction: column; align-items: flex-start; gap: var(--group-gap); }
-.flow-relay { align-self: stretch; height: var(--table-head-pad); }
+/* A relay is the wire's run across a column it passes through. */
+.flow-relay { align-self: stretch; height: 1px; background: var(--line-strong); opacity: 0.5; }
+.flow-relay.hot { background: var(--bright); opacity: 1; }
 .flow-group { display: flex; flex-direction: column; }
 .flow-group.framed { border: 1px solid var(--line); padding: var(--table-head-pad) var(--header-gap); }
 .flow-group.coupled { background: var(--bg-raised); }

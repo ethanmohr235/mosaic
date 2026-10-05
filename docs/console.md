@@ -756,6 +756,7 @@ shows equations and values.
 | Surface | `graph [@sel\|#id\|‹name›\|‹m.k›] --flow [--depth N] [conditions]`; `--hide-rel` is refused (flow draws no relationships) |
 | Structure | the solve's journal (`core/simulation.py::trace`), not `incidence.blocks()`, which would merge a chain into one block. Each step the solve took is a **group**: one equation that determined one value, or a coupled set the solver found together |
 | Columns | left to right: **givens**, one column per solve step (one right of the deepest step it reads), **answers** (solved values no other step reads; a check reading one does not count) |
+| Bands | each independent calculation (steps joined by a value one computes and another reads) is its own band, with its own givens, steps and answers; bands stack. A shared constant joins nothing, and each band reading it shows its own stub |
 | Direction | the current solve's, under the playhead run's scenario: flip which value is given and the arrows flip |
 | Cards | rule cards (name, KaTeX equation via `core/formula_tex.py`, a coupled group's residual or a check's margin); mote stub cards, one per (mote, group), siblings linked; rows only for solve values (`+N more`), each with value, unit, ±, source mark, check mark |
 | Checks | a check (a limit, a `?=`, an equation already satisfied) sits after what it reads and marks those rows pass/fail |
@@ -792,6 +793,16 @@ What the build decided within the settled plan above.
     solve would infer, in the base unit it was solved in.
   - A fault states its own counts in `solve_health`'s words. Health's
     blocks would blame the steps that did solve.
+- **What an equation reads is taken at the solved point**
+  (`simulation._touch_at`). The incidence probe evaluates with 1.0 for
+  every unknown, and when that fails (`arccos` out of its domain) it
+  counts *every* unsolved value. That is a safe over-count for health,
+  but it wired one rule to the whole garden. Re-read at the values the
+  solve found, the record is exact; the probe stays as the fallback.
+- **Relays are drawn** as the wire's run across the column they pass, so
+  a long wire is one line, not segments ending at column edges.
+- **Products**: a thin space between single-letter factors (`48 E I`), a
+  `·` when either is a word or a dotted reference (`density · n.v`).
 - **Limit: a rule that cannot be evaluated** (a name that resolves to
   nothing) fails the solve before its first step, so the whole picture
   is fault groups in one column. This is what `solve` itself reports.

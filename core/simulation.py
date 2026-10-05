@@ -45,6 +45,7 @@ from core.entities import Relationship
 from core.motes import list_motes, update_mote
 from core.providers import PropertyProvider
 from core.provenance import (
+    DERIVED_READ,
     MISSING_READ,
     PREVIOUS_READ,
     PROPERTY_READ,
@@ -411,12 +412,52 @@ def trace(
     except (SimulationError, SolverError) as e:
         error = str(e)
     solved = {v: x for d in journal.derivations for v, x in d.values.items()}
+    touches = {(r.mote.id, m): _touch_at(view, r, m, solved, model_cache, touches[(r.mote.id, m)])
+               for r, m in pairs}
     checked = constraint_results(view, list(pairs), solved, previous=view.properties,
                                  model_cache=model_cache)
     results = {(r.mote.id, m): c for (r, m), c in zip(pairs, checked)}
     equations = [(r, m) for r, m in pairs if _operator_of(r) == "==" and not r.is_check]
     inferred = _infer_missing_units(view, equations, solved, model_cache)
     return Trace(view, pairs, touches, journal, results, error, inferred)
+
+
+def _touch_at(
+    view: _GardenView,
+    rule: rules_repo.Rule,
+    mote_id: str,
+    solved: dict[Unknown, float],
+    model_cache: dict[str, PropertyProvider],
+    probed: incidence_repo.EquationTouch,
+) -> incidence_repo.EquationTouch:
+    """What one equation references, read at the point the solve reached.
+
+    _probe() evaluates with a placeholder 1.0 for every unknown, and when
+    that fails (`arccos(EC / (E0 * ival))` out of its domain) it falls back
+    to *every* unsolved value -- safe for health, which may over-count,
+    but a picture would wire that one equation to the whole garden. At
+    the solved values the equation evaluates as the solve evaluated it,
+    so the record is exact; only what is still unsolved stands in as 1.0.
+    If even that fails, the probe's answer is kept."""
+    reads = Reads(_normalizer(view), permissive=True)
+    free = {(m, k) for m, keys in view.freedoms.items() for k in keys}
+    point = RecordingSolved(solved)
+    for unknown in free - set(solved):
+        dict.setdefault(point, unknown, 1.0)
+    try:
+        ctx = _context(view, mote_id, point, 0.0, view.properties,
+                       model_cache=model_cache, reads=reads)
+        evaluate_equation(rule.equation, ctx)
+    except FormulaError:
+        return probed
+    referenced = frozenset(point.touched) & free
+    read_variables = frozenset(
+        (read.mote_id, read.key) for read in reads.collected()
+        if read.kind in (PROPERTY_READ, PREVIOUS_READ, MISSING_READ, DERIVED_READ)
+    )
+    determines = referenced if probed.determines else frozenset()
+    return dataclasses.replace(probed, determines=determines,
+                               reads=(read_variables | referenced) - determines)
 
 
 def garden_freedoms(conn: sqlite3.Connection) -> dict[str, set[str]]:

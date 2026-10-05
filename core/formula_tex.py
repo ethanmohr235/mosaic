@@ -119,13 +119,40 @@ def _binary(node: ast.BinOp) -> tuple[str, int]:
         return f"{_side(node.left, 0)} - {_side(node.right, _ADD)}", _ADD
     if isinstance(op, ast.Mult):
         left, right = _side(node.left, _ADD), _side(node.right, _NEG)
-        joint = r" \cdot " if right[:1].isdigit() or right.startswith("-") else r"\,"
-        return f"{left}{joint}{right}", _MUL
+        return f"{left}{_joint(node.left, node.right, right)}{right}", _MUL
     if isinstance(op, ast.Div):
         return rf"\frac{{{_expr(node.left)[0]}}}{{{_expr(node.right)[0]}}}", _FRAC
     if isinstance(op, ast.Pow):
         return f"{_side(node.left, _FRAC)}^{{{_expr(node.right)[0]}}}", _POW
     raise _Unsupported()
+
+
+def _joint(left: ast.AST, right: ast.AST, right_tex: str) -> str:
+    """How a product is written. Juxtaposed with a thin space when both
+    factors read as single symbols (`48 E I`, `M c`); a dot when either is
+    a word or a dotted reference, where juxtaposition would run the names
+    together (`density · n.v`), and before a number."""
+    if right_tex[:1].isdigit():
+        return r" \cdot "
+    if isinstance(left, ast.Constant) and _symbol(right):
+        return r"\,"
+    return r"\," if _symbol(left) and _symbol(right) else r" \cdot "
+
+
+def _symbol(node: ast.AST) -> bool:
+    """A factor that sets as one letter: a one-letter or Greek name (with
+    a subscript or not), a constant, or a power or bracket of one."""
+    if isinstance(node, ast.Name):
+        base = node.id.partition("_")[0]
+        digits = _TRAILING_DIGITS.match(node.id)
+        return len(digits.group(1) if digits else base) == 1 or base in GREEK or node.id == formula.TICK_NAME
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        return _symbol(node.left)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _symbol(node.left) and _symbol(node.right)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Div)):
+        return True  # bracketed or a fraction: self-delimiting
+    return isinstance(node, (ast.Constant, ast.Call))
 
 
 def name_tex(identifier: str) -> str:

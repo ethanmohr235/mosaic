@@ -342,26 +342,37 @@ def _extras(r: _Run, shown: list[Group], settings: dict) -> None:
 # ---- the payload ------------------------------------------------------------
 
 class _Payload:
-    """Columns, groups, cards, stubs, relays and segments for one run.
+    """Bands, columns, groups, cards, stubs, relays and segments for one run.
+
+    A **band** is one independent calculation: the steps joined by values
+    one computes and another reads. A garden of fifteen homework problems
+    is fifteen bands stacked, each with its own givens, steps and answers,
+    rather than one picture where every wire crosses every problem. A
+    given (a constant like Avogadro's number) does not join bands; each
+    band that reads it shows its own stub.
 
     Ports: `r:‹card›` is a rule card (or a folded group's card), `v:‹stub›:‹key›`
-    a row, `y:‹column›:‹n›` a relay -- a wire passing through a column
-    it does not stop in, one per value and column, which is the shared
-    trunk every reader further right leaves from."""
+    a row, `y:‹band›.‹column›:‹n›` a relay -- a wire passing through a
+    column it does not stop in, one per value and column, which is the
+    shared trunk every reader further right leaves from."""
 
     def __init__(self, r: _Run, shown: list[Group]):
         self.r = r
         self.shown = shown
         self.made = producers(shown)
         self.anywhere = producers(r.groups)
-        ranks = sorted({g.rank for g in shown})
-        self.column = {g.id: ranks.index(g.rank) + 1 for g in shown}
-        self.last = len(ranks) + 1
+        self.band = _bands(shown, self.made, r.garden)
+        self.column: dict[str, int] = {}
+        self.last: dict[int, int] = {}
+        for b in set(self.band.values()):
+            ranks = sorted({g.rank for g in shown if self.band[g.id] == b})
+            self.column.update({g.id: ranks.index(g.rank) + 1 for g in shown if self.band[g.id] == b})
+            self.last[b] = len(ranks) + 1
         self.stubs: dict[str, dict] = {}
         self.group_stubs: dict[str, list[str]] = defaultdict(list)
         self.group_cards: dict[str, list[str]] = {}
         self.card_group = {c: g.id for g in shown for c in self.card_ids(g)}
-        self.relays: dict[tuple[Unknown, int], str] = {}
+        self.relays: dict[tuple[Unknown, int, int], str] = {}
         self.segments: dict[tuple[str, str], Unknown] = {}
         self.instances: dict[str, int] = defaultdict(int)
         for rule, _m in r.trace.pairs:
@@ -385,10 +396,11 @@ class _Payload:
                 if f"{g.id}/{m}" not in self.group_stubs[g.id]:
                     self.group_stubs[g.id].append(f"{g.id}/{m}")
         for g in self.shown:
+            b = self.band[g.id]
             for m, k in sorted(g.values & self.r.ends):
-                self.stub(f"{ANSWERS}/{m}", m, [k])
-        for v in sorted({v for g in self.shown for v in g.inputs if v not in self.made}):
-            self.stub(f"{GIVENS}/{v[0]}", v[0], [v[1]])
+                self.stub(f"{ANSWERS}{b}/{m}", m, [k])
+            for m, k in sorted(v for v in g.inputs if v not in self.made):
+                self.stub(f"{GIVENS}{b}/{m}", m, [k])
 
     # -- cards --
 
@@ -403,33 +415,34 @@ class _Payload:
 
     # -- wiring --
 
-    def source(self, v: Unknown) -> tuple[str, int]:
-        """Where a wire carrying `v` starts, and its column."""
+    def source(self, v: Unknown, band: int) -> tuple[str, int]:
+        """Where a wire carrying `v` starts in `band`, and its column."""
         g = self.made.get(v)
         if g is None:
-            return self.row_port(f"{GIVENS}/{v[0]}", v[1]), 0
+            return self.row_port(f"{GIVENS}{band}/{v[0]}", v[1]), 0
         if v in self.r.ends:
             return f"r:{self.card_ids(g, v)[0]}", self.column[g.id]
         return self.row_port(f"{g.id}/{v[0]}", v[1]), self.column[g.id]
 
-    def wire(self, v: Unknown, start: tuple[str, int], end: str, column: int) -> None:
+    def wire(self, v: Unknown, band: int, start: tuple[str, int], end: str, column: int) -> None:
         port, at = start
         for c in range(at + 1, column):
-            relay = self.relays.setdefault((v, c), f"y:{c}:{len(self.relays)}")
+            relay = self.relays.setdefault((v, band, c), f"y:{band}.{c}:{len(self.relays)}")
             self.segments.setdefault((port, relay), v)
             port = relay
         self.segments.setdefault((port, end), v)
 
     def wire_all(self) -> None:
         for g in self.shown:
+            b = self.band[g.id]
             for v in sorted(g.inputs):
                 for card in self.card_ids(g, v):
-                    self.wire(v, self.source(v), f"r:{card}", self.column[g.id])
+                    self.wire(v, b, self.source(v, b), f"r:{card}", self.column[g.id])
             for v in sorted(g.values):
                 for card in self.card_ids(g, v):
                     if v in self.r.ends:
-                        end = self.row_port(f"{ANSWERS}/{v[0]}", v[1])
-                        self.wire(v, (f"r:{card}", self.column[g.id]), end, self.last)
+                        end = self.row_port(f"{ANSWERS}{b}/{v[0]}", v[1])
+                        self.wire(v, b, (f"r:{card}", self.column[g.id]), end, self.last[b])
                     else:
                         self.segments.setdefault((f"r:{card}", self.row_port(f"{g.id}/{v[0]}", v[1])), v)
 
@@ -443,12 +456,14 @@ class _Payload:
             return self.card_group[rest]
         return rest.rpartition(":")[0].split("/")[0]  # the stub's group
 
-    def columns(self) -> list[list[str]]:
-        cols: list[list[str]] = [[GIVENS]] + [[] for _ in range(self.last - 1)] + [[ANSWERS]]
-        for g in sorted(self.shown, key=lambda g: (self.column[g.id], _order_key(g, self))):
+    def columns(self, b: int) -> list[list[str]]:
+        cols: list[list[str]] = [[f"{GIVENS}{b}"]] + [[] for _ in range(self.last[b] - 1)] + [[f"{ANSWERS}{b}"]]
+        mine = [g for g in self.shown if self.band[g.id] == b]
+        for g in sorted(mine, key=lambda g: (self.column[g.id], _order_key(g, self))):
             cols[self.column[g.id]].append(g.id)
-        for (v, c), relay in sorted(self.relays.items(), key=lambda kv: kv[1]):
-            cols[c].append(relay)
+        for (v, band, c), relay in sorted(self.relays.items(), key=lambda kv: kv[1]):
+            if band == b:
+                cols[c].append(relay)
         return _barycenter(cols, self.item_edges())
 
     def item_edges(self) -> set[tuple[str, str]]:
@@ -464,8 +479,9 @@ class _Payload:
     def build(self, line, root_name: str | None) -> dict:
         self.place_values()
         self.wire_all()
-        cols = self.columns()
-        position = {item: (c, i) for c, items in enumerate(cols) for i, item in enumerate(items)}
+        bands = [self.columns(b) for b in range(len(self.last))]
+        position = {item: (c, i) for cols in bands for c, items in enumerate(cols)
+                    for i, item in enumerate(items)}
         self.order_insides(position)
         trace = self.r.trace
         return {
@@ -473,12 +489,13 @@ class _Payload:
             "root": line.root, "rootName": root_name, "depth": line.hops,
             "scenario": self.r.scenario,
             "solve": _solve_state(trace, self.r.groups),
-            "columns": [{"kind": "givens" if c == 0 else "answers" if c == self.last else "step",
-                         "items": items} for c, items in enumerate(cols)],
+            "bands": [{"columns": [{"kind": "givens" if c == 0 else "answers" if c == len(cols) - 1
+                                    else "step", "items": items} for c, items in enumerate(cols)]}
+                      for cols in bands],
             "groups": {g["id"]: g for g in self.group_payloads()},
             "cards": self.card_payloads(),
             "stubs": self.stub_payloads(),
-            "relays": {relay: {"ref": self.r.garden.text_of(*v)} for (v, _c), relay in self.relays.items()},
+            "relays": {relay: {"ref": self.r.garden.text_of(*v)} for (v, _b, _c), relay in self.relays.items()},
             "segments": [{"from": a, "to": b, "ref": self.r.garden.text_of(*v)}
                          for (a, b), v in self.segments.items()],
             "folds": [{"id": f.id, "kind": f.kind, "folded": f.folded, "steps": len(f.members)}
@@ -505,7 +522,7 @@ class _Payload:
 
         def weight(stub_id: str, key: str) -> float:
             port = self.row_port(stub_id, key)
-            if stub_id.startswith(f"{GIVENS}/"):
+            if _is_edge(stub_id, GIVENS):
                 return spot(out_of[port])
             ranks = [card_rank[p[2:]] for p in into[port] if p[2:] in card_rank]
             return _mean(ranks, spot(into[port]))
@@ -515,12 +532,12 @@ class _Payload:
             stub["weight"] = weight(stub["id"], stub["keys"][0]) if stub["keys"] else 0.0
 
     def group_payloads(self) -> list[dict]:
-        out = [self.edge_group(GIVENS, "givens"), self.edge_group(ANSWERS, "answers")]
+        out = [self.edge_group(b, kind) for b in self.last for kind in ("givens", "answers")]
         fold_ids = self.fold_candidates()
         for g in self.shown:
             stubs = sorted(self.group_stubs[g.id], key=lambda s: (self.stubs[s]["weight"], s))
             out.append({
-                "id": g.id, "kind": g.kind, "column": self.column[g.id],
+                "id": g.id, "kind": g.kind, "band": self.band[g.id], "column": self.column[g.id],
                 "coupled": g.method == SOLVER and len(g.equations) > 1 and not g.fold,
                 "equations": len(g.equations), "unknowns": len(g.values),
                 "cards": self.group_cards[g.id], "stubs": stubs,
@@ -529,11 +546,12 @@ class _Payload:
             })
         return out
 
-    def edge_group(self, gid: str, kind: str) -> dict:
+    def edge_group(self, band: int, kind: str) -> dict:
+        gid = f"{GIVENS if kind == 'givens' else ANSWERS}{band}"
         stubs = sorted((s for s in self.stubs if s.startswith(f"{gid}/")),
                        key=lambda s: (self.stubs[s]["weight"], s))
-        column = 0 if gid == GIVENS else self.last
-        return {"id": gid, "kind": kind, "column": column, "coupled": False, "equations": 0,
+        column = 0 if kind == "givens" else self.last[band]
+        return {"id": gid, "kind": kind, "band": band, "column": column, "coupled": False, "equations": 0,
                 "unknowns": 0, "cards": [], "stubs": stubs, "fold": None, "folds": [],
                 "health": None, "level": "ok"}
 
@@ -632,9 +650,14 @@ class _Payload:
             }
         return out
 
-    def stub_column(self, stub_id: str) -> int:
+    def stub_column(self, stub_id: str) -> tuple[int, int]:
         head = stub_id.split("/")[0]
-        return 0 if head == GIVENS else self.last if head == ANSWERS else self.column[head]
+        if _is_edge(stub_id, GIVENS):
+            return int(head[len(GIVENS):]), 0
+        if _is_edge(stub_id, ANSWERS):
+            band = int(head[len(ANSWERS):])
+            return band, self.last[band]
+        return self.band[head], self.column[head]
 
     def row(self, mote_id: str, key: str) -> dict:
         r, v = self.r, (mote_id, key)
@@ -669,12 +692,45 @@ class _Payload:
         checks = [self.r.trace.results[g.equations[0]] for g in self.shown
                   if g.kind == CHECK and g.equations[0] in self.r.trace.results]
         return {
-            "steps": self.last - 1,
+            "steps": max(self.last.values(), default=1) - 1,
+            "bands": len(self.last),
             "coupled": sum(1 for g in self.shown if g.method == SOLVER and len(g.equations) > 1),
             "answers": sum(len(g.values & self.r.ends) for g in self.shown),
             "checks": len(checks), "passed": sum(1 for c in checks if c.passed),
             "faults": sum(1 for g in self.shown if g.kind == FAULT),
         }
+
+
+def _is_edge(stub_id: str, kind: str) -> bool:
+    """Whether a stub is in a band's givens (`in3/…`) or answers (`out3/…`)."""
+    head = stub_id.split("/")[0]
+    return head.startswith(kind) and head[len(kind):].isdigit()
+
+
+def _bands(groups: list[Group], made: dict[Unknown, Group], garden: _Garden) -> dict[str, int]:
+    """Each group's band: the steps joined by a value one determines and
+    another reads, numbered in the order of the names of what they find."""
+    parent = {g.id: g.id for g in groups}
+
+    def root(i: str) -> str:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for g in groups:
+        for v in g.inputs:
+            if v in made:
+                parent[root(made[v].id)] = root(g.id)
+    members: dict[str, list[Group]] = defaultdict(list)
+    for g in groups:
+        members[root(g.id)].append(g)
+    # By what a band computes -- givens are shared, so they cannot tell
+    # two bands apart -- then by what it reads.
+    name = lambda gs: (sorted(garden.text_of(*v) for g in gs for v in g.values),
+                       sorted(garden.text_of(*v) for g in gs for v in g.inputs))
+    ordered = sorted(members.values(), key=name)
+    return {g.id: b for b, gs in enumerate(ordered) for g in gs}
 
 
 def _card_id(key: Key) -> str:

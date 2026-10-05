@@ -17,6 +17,11 @@
  * not lie on each other. The cursor's wires, followed through relays,
  * are drawn at full strength and the rest faint.
  *
+ * Each band (one independent calculation) is its own row of columns,
+ * stacked; gutters and the cursor's h/l are per band, j/k run on into
+ * the next band. A relay is drawn as the stretch of wire across its
+ * column, so a long wire is one unbroken line.
+ *
  * The cursor is a port id: a card or a row. Pan and zoom are a CSS
  * transform on the world, so cards and maths stay text at any zoom. */
 
@@ -41,8 +46,8 @@ export class FlowBoard {
     this.world = h("div", "flow-world");
     this.svg = document.createElementNS(SVG, "svg");
     this.svg.classList.add("flow-wires");
-    this.cols = h("div", "flow-cols");
-    this.world.append(this.svg, this.cols);
+    this.sheet = h("div", "flow-sheet");
+    this.world.append(this.svg, this.sheet);
     root.append(this.world);
     this.camera = { x: MARGIN, y: MARGIN, scale: 1 };
     this.cursor = null;
@@ -66,7 +71,8 @@ export class FlowBoard {
     this.palette = palette;
     this.valueOf = valueOf;
     this.reset();
-    this.cols.replaceChildren(...payload.columns.map((col, c) => this.column(col, c)));
+    this.sheet.replaceChildren(...payload.bands.map((band, b) =>
+      h("div", "flow-band", h("div", "flow-cols", band.columns.map((col, c) => this.column(col, `${b}.${c}`))))));
     if (this.cursor && !this.info.has(this.cursor)) this.cursor = null;
     this.markCursor();
     requestAnimationFrame(() => {
@@ -90,7 +96,9 @@ export class FlowBoard {
     const node = h("div", `flow-col ${col.kind}`);
     node.dataset.col = c;
     for (const id of col.items) {
-      node.append(id.startsWith("y:") ? this.relay(id, c) : this.group(this.payload.groups[id], c));
+      const g = this.payload.groups[id];
+      if (id.startsWith("y:")) node.append(this.relay(id, c));
+      else if (g.cards.length || g.stubs.length) node.append(this.group(g, c));
     }
     return node;
   }
@@ -212,7 +220,7 @@ export class FlowBoard {
   drawWires() {
     if (!this.payload) return;
     const rect = this.rects();
-    const colRect = [...this.cols.children].map((el) => rect(el));
+    const colRect = new Map([...this.sheet.querySelectorAll(".flow-col")].map((el) => [el.dataset.col, rect(el)]));
     const ends = this.payload.segments.map((seg) => this.ends(seg, rect)).filter(Boolean);
     const tracks = this.tracks(ends, colRect);
     this.svg.replaceChildren();
@@ -223,8 +231,8 @@ export class FlowBoard {
       this.svg.append(path);
       return { segment: e.segment, path };
     });
-    this.svg.setAttribute("width", this.cols.scrollWidth);
-    this.svg.setAttribute("height", this.cols.scrollHeight);
+    this.svg.setAttribute("width", this.sheet.scrollWidth);
+    this.svg.setAttribute("height", this.sheet.scrollHeight);
     this.markWires();
   }
 
@@ -233,7 +241,7 @@ export class FlowBoard {
     const to = this.ports.get(segment.to);
     if (!from || !to) return null;
     const a = rect(from), b = rect(to);
-    return { segment, colA: +from.dataset.col, colB: +to.dataset.col,
+    return { segment, colA: from.dataset.col, colB: to.dataset.col,
       a: { x: a.r, y: (a.t + a.b) / 2 }, b: { x: b.l, y: (b.t + b.b) / 2 } };
   }
 
@@ -248,8 +256,9 @@ export class FlowBoard {
     }
     const out = new Map();
     for (const [key, list] of gutters) {
-      const [lo, hi] = key.startsWith("g:") && colRect[list[0].colB - 1]
-        ? [colRect[list[0].colB - 1].r, colRect[list[0].colB].l]
+      const before = key.startsWith("g:") ? colRect.get(previousColumn(list[0].colB)) : null;
+      const [lo, hi] = before
+        ? [before.r, colRect.get(list[0].colB).l]
         : [Math.min(...list.map((e) => e.a.x)), Math.min(...list.map((e) => e.b.x))];
       const sources = [...new Set(list.map((e) => e.segment.from))]
         .sort((p, q) => list.find((e) => e.segment.from === p).a.y - list.find((e) => e.segment.from === q).a.y);
@@ -283,7 +292,12 @@ export class FlowBoard {
 
   markWires() {
     const hot = this.hotSegments();
-    this.paths.forEach(({ path }, i) => path.classList.toggle("hot", hot.has(i)));
+    const relays = new Set();
+    this.paths.forEach(({ path, segment }, i) => {
+      path.classList.toggle("hot", hot.has(i));
+      if (hot.has(i)) [segment.from, segment.to].filter((p) => p.startsWith("y:")).forEach((p) => relays.add(p));
+    });
+    for (const [id, el] of this.ports) if (id.startsWith("y:")) el.classList.toggle("hot", relays.has(id));
   }
 
   /* ---- cursor ---- */
@@ -296,31 +310,37 @@ export class FlowBoard {
   }
 
   markCursor() {
-    for (const el of this.cols.querySelectorAll(".cursor")) el.classList.remove("cursor");
+    for (const el of this.sheet.querySelectorAll(".cursor")) el.classList.remove("cursor");
     if (this.cursor) this.ports.get(this.cursor).classList.add("cursor");
   }
 
   /** The next cursor target `direction` of `from`: down/up in its column
-   *  by position, left/right to the nearest in the next column with any. */
+   *  by position (on into the next band at the end), left/right to the
+   *  nearest in the next column of its band that has any. */
   neighbour(from, direction) {
     const rect = this.rects();
     const spots = [...this.info.keys()].map((id) => {
       const r = rect(this.ports.get(id));
-      return { id, col: this.info.get(id).col, x: (r.l + r.r) / 2, y: (r.t + r.b) / 2 };
+      const [band, col] = this.info.get(id).col.split(".").map(Number);
+      return { id, band, col, x: (r.l + r.r) / 2, y: (r.t + r.b) / 2 };
     });
     const here = spots.find((s) => s.id === from);
     if (!here) return spots.length ? spots[0].id : null;
+    const nearest = (list, by) => list.sort((p, q) => by(p) - by(q))[0];
     if (direction === "up" || direction === "down") {
-      const same = spots.filter((s) => s.col === here.col).sort((p, q) => p.y - q.y || p.x - q.x);
-      const i = same.findIndex((s) => s.id === from) + (direction === "down" ? 1 : -1);
-      return same[i] ? same[i].id : null;
+      const down = direction === "down";
+      const same = spots.filter((s) => s.band === here.band && s.col === here.col).sort((p, q) => p.y - q.y || p.x - q.x);
+      const next = same[same.findIndex((s) => s.id === from) + (down ? 1 : -1)];
+      if (next) return next.id;
+      const band = spots.filter((s) => s.band === here.band + (down ? 1 : -1));
+      if (!band.length) return null;
+      const edge = down ? Math.min(...band.map((s) => s.y)) : Math.max(...band.map((s) => s.y));
+      return nearest(band.filter((s) => Math.abs(s.y - edge) < 40), (s) => Math.abs(s.x - here.x)).id;
     }
-    const cols = [...new Set(spots.map((s) => s.col))].sort((p, q) => p - q);
+    const cols = [...new Set(spots.filter((s) => s.band === here.band).map((s) => s.col))].sort((p, q) => p - q);
     const next = cols[cols.indexOf(here.col) + (direction === "right" ? 1 : -1)];
     if (next === undefined) return null;
-    const there = spots.filter((s) => s.col === next);
-    there.sort((p, q) => Math.abs(p.y - here.y) - Math.abs(q.y - here.y));
-    return there[0].id;
+    return nearest(spots.filter((s) => s.band === here.band && s.col === next), (s) => Math.abs(s.y - here.y)).id;
   }
 
   firstTarget() {
@@ -336,7 +356,7 @@ export class FlowBoard {
   }
 
   fit() {
-    const w = this.cols.scrollWidth, ht = this.cols.scrollHeight;
+    const w = this.sheet.scrollWidth, ht = this.sheet.scrollHeight;
     const vw = this.root.clientWidth, vh = this.root.clientHeight;
     if (!w || !ht || !vw || !vh) return this.apply();
     const scale = clamp(Math.min((vw - 2 * MARGIN) / w, (vh - 2 * MARGIN) / ht), MIN_SCALE, 1);
@@ -395,6 +415,12 @@ export class FlowBoard {
     this.root.removeEventListener("pointerdown", this.onDown);
     this.world.remove();
   }
+}
+
+/** `b.c` → `b.(c-1)`: the column a gutter opens after. */
+function previousColumn(key) {
+  const [b, c] = key.split(".");
+  return `${b}.${Number(c) - 1}`;
 }
 
 function clamp(v, lo, hi) {
