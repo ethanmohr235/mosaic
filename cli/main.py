@@ -2,6 +2,7 @@
 import argparse
 import json
 import logging
+import shlex
 import sys
 from pathlib import Path
 
@@ -390,6 +391,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     ### Calc
+    plot_parser = subparsers.add_parser(
+        "plot", help="Export a plot as a publication figure (svg, pdf, tex) or its points (csv)"
+    )
+    plot_sub = plot_parser.add_subparsers(dest="action")
+    plot_export = plot_sub.add_parser("export", help="Re-solve a plot line and write it out")
+    plot_export.add_argument("format", choices=["svg", "pdf", "tex", "csv"])
+    plot_export.add_argument("words", nargs=argparse.REMAINDER,
+                             help="The plot line, e.g. bd.l vs bd.x 1:9 --data L vs X; "
+                                  "end with --out PATH to choose the file")
+
     export_parser = subparsers.add_parser(
         "export", help="Write the project's document as .tex (with figure files) or a PDF"
     )
@@ -934,6 +945,42 @@ def _handle_import(conn, args) -> None:
     print(f"Imported {len(imported.row_ids)} row(s) under {imported.import_id}.")
 
 
+def _handle_plot(conn, args) -> None:
+    import csv as csv_module
+    from core import plotexport
+    words = list(args.words)
+    out = None
+    if "--out" in words:
+        at = words.index("--out")
+        out = words[at + 1] if at + 1 < len(words) else None
+        words = words[:at] + words[at + 2:]
+    if args.action != "export" or not words:
+        print("usage: monoss plot export svg|pdf|tex|csv <plot line> [--out PATH]")
+        return
+    line = "plot " + " ".join(shlex.quote(w) for w in words)
+    try:
+        if args.format == "csv":
+            pub = plotexport.build(conn, line)
+            columns = [pub.figure["xLabel"]] + [s["label"] for s in pub.figure["series"]]
+            xs = sorted({p[0] for s in pub.figure["series"] for p in s["points"] if p})
+            by_x = [{p[0]: p[1] for p in s["points"] if p} for s in pub.figure["series"]]
+            path = Path(out or f"{pub.name}.csv")
+            with path.open("w", newline="") as handle:
+                writer = csv_module.writer(handle)
+                writer.writerow(columns)
+                writer.writerows([[x] + [v.get(x) for v in by_x] for x in xs])
+        else:
+            data, pub = plotexport.export(conn, line, args.format)
+            path = Path(out or f"{pub.name}.{args.format}")
+            (path.write_bytes if isinstance(data, bytes) else path.write_text)(data)
+    except plotexport.PlotExportError as error:
+        print(f"Error: {error}")
+        return
+    print(f"Wrote {path}")
+    for problem in pub.problems:
+        print(f"  warning: {problem}")
+
+
 def _handle_export(conn, garden, args) -> None:
     if args.action == "tex":
         bundle = submit_repo.export(conn, garden, args.note)
@@ -1193,6 +1240,8 @@ def main() -> None:
                 _handle_import(conn, args)
             elif args.command == "image":
                 _handle_image(conn, args)
+            elif args.command == "plot":
+                _handle_plot(conn, args)
             elif args.command == "export":
                 _handle_export(conn, garden, args)
             elif args.command == "submit":

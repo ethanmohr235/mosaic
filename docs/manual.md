@@ -57,7 +57,8 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `plot ‹key› vs ‹key› --across` | One dot per mote with both keys |
 | `plot "‹saved›"` / `plot #id` | Open a saved plot |
 | `plot save ‹name›` | Save the focused plot as a mote |
-| `plot export csv\|png [path]` | Export the focused plot |
+| `plot … --data ‹ykey› vs ‹xkey› [--from ‹import›]` | Measured points over the curve (error bars from their `uncertainty`; drawn by the publication export) |
+| `plot export csv\|png\|svg\|pdf\|tex [path]` | Export the focused plot. `svg`/`pdf`/`tex` are publication figures: unit-labelled axes, log axes, a ± band where a given has `uncertainty`, the `--data` points. `pdf` needs tectonic (see `export pdf`) |
 | `fit ‹m.y› vs ‹m.x› --data ‹Y› vs ‹X› --free ‹m.k›…` | Fit inputs to measured points (every mote with `Y` and `X`); shows, never writes |
 | `fit … --apply` | Write the fitted values, their σ and `source: fitted` (undoable) |
 | `sim [--ticks N] [--scenario s] [--vs s\|garden] [--solver name] [conditions]` | Run N ticks (default 50) in memory and watch the values; conditions pick motes, as `find` |

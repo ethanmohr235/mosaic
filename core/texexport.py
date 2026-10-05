@@ -178,6 +178,7 @@ _PREAMBLE = r"""\documentclass[11pt]{article}
 \usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage{pgfplots}
+\usepgfplotslibrary{fillbetween}
 \pgfplotsset{compat=1.17}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.6em}
@@ -329,31 +330,7 @@ def _graph(b: dict, problems: list[str]) -> str:
 
 
 def sweep_axes(fig: dict) -> str:
-    """A solved sweep as pgfplots: one `axis` per unit band, stacked, each
-    with its own y label. Points a solve failed at (None) break the line."""
-    bands = fig["bands"] or [{"label": fig["yLabel"], "unit": "", "series": [
-        s["id"] for s in fig["series"]]}]
-    axes = []
-    for index, band in enumerate(bands):
-        ymode = "log" if fig.get("yScale") == "log" else "normal"
-        ylabel = band["label"] or fig["yLabel"]
-        if band.get("unit") and not any(f"{o}{band['unit']}{c}" in ylabel for o, c in ("[]", "()")):
-            ylabel = f"{ylabel} [{band['unit']}]"
-        plots = []
-        for s in fig["series"]:
-            if s["ghost"] or (fig["bands"] and s["band"] != index):
-                continue
-            coords = "\n".join(
-                "  " + ("nan nan" if p is None else f"{p[0]:.8g} {p[1]:.8g}") for p in s["points"])
-            plots.append(f"\\addplot+[mark=none] table[row sep=\\\\] {{\n{_rows(coords)}\n}};\n"
-                         f"\\addlegendentry{{{escape(s['label'])}}}")
-        axes.append(
-            "\\begin{tikzpicture}\n\\begin{axis}[width=0.9\\linewidth,height=6cm,grid=major,"
-            f"xlabel={{{escape(fig['xLabel'])}}},ylabel={{{escape(ylabel)}}},"
-            f"ymode={ymode},legend pos=outer north east,unbounded coords=jump]\n"
-            + "\n".join(plots) + "\n\\end{axis}\n\\end{tikzpicture}")
-    return "\n\n".join(axes)
-
-
-def _rows(coords: str) -> str:
-    return "\n".join(line + r" \\" for line in coords.splitlines())
+    """A solved sweep as pgfplots (core/plotexport.py draws it: one axis
+    per unit band; a failed point breaks the line)."""
+    from core import plotexport
+    return plotexport.sweep_tikz(fig)

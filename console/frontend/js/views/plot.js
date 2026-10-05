@@ -624,6 +624,8 @@ function create(ctx) {
       try {
         if (e.format === "csv") {
           result = await api.moxie.export_csv(st.command, e.path || null);
+        } else if (["svg", "pdf", "tex"].includes(e.format)) {
+          result = await api.moxie.export_publication(st.command, e.format, e.path || null);
         } else {
           const data = await rasterize();
           result = data ? await api.moxie.export_png(data, (st.payload && st.payload.name) || "plot", e.path || null)
@@ -634,7 +636,8 @@ function create(ctx) {
       }
       if (!result || result.error) return { message: (result && result.error) || "export failed", level: "fault" };
       if (result.cancelled) return { message: "export cancelled", level: "ok" };
-      return { message: `exported ${result.path}`, level: "ok" };
+      const problems = (result.problems || []).length ? ` (${result.problems[0]})` : "";
+      return { message: `exported ${result.path}${problems}`, level: result.problems && result.problems.length ? "warn" : "ok" };
     }
     return { message: `plot can't ${e.action}`, level: "fault" };
   }

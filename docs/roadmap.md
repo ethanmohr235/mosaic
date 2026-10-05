@@ -155,8 +155,13 @@ Each one was a separate act of filing. That lesson became a rule in
   **Done:** the `graph` pane (U8), annotations removed.
 - **Table:** keep the general table, and add a project variables pane
   (value, unit, given/solved/external, ±).
-- **Plots:** add publication-quality export (SVG/PDF, unit-labelled
-  axes, log axes), CSV data overlaid on theory curves, and error bars.
+- **Plots (done 2026-10-05):** publication export (`plot export
+  svg|pdf|tex`: unit-labelled axes, log axes), measured points overlaid
+  with `--data` (picked as `fit` picks them), error bars. **Decided:** SVG
+  is drawn by core, PDF is the pgfplots figure compiled by tectonic; the
+  theory curve carries the propagated ± as a shaded band, the data points
+  their own `uncertainty` as bars; the overlay is a flag on the line, not
+  part of a saved plot. Sweeps only.
 
 ### Across gardens
 - **Cross-garden search:** read-only across every `.db`, and results open

@@ -40,6 +40,7 @@ from core.calc import FITTED, SOURCE_KEY
 from core.command_bar import CommandError
 from core.csv_import import IMPORTED_FROM
 from core.plotcmd import _Garden
+from core import uncertainty as uncertainty_repo
 from core.uncertainty import UNCERTAINTY_KEY
 
 FIT_VERB = "fit"
@@ -154,6 +155,10 @@ class DataPoint:
     name: str
     x: float
     y: float
+    # The data mote's own ± (core/uncertainty.py), in the model's units.
+    # The fit ignores them; a plot's error bars draw them.
+    sx: float | None = None
+    sy: float | None = None
 
 
 @dataclass(frozen=True)
@@ -275,11 +280,25 @@ def _data(conn, garden: _Garden, line: FitLine, x_ref, y_ref) -> list[DataPoint]
         except units_repo.UnitError as e:
             raise CommandError(f"{mote.properties.get('name', mote.id[:8])}: {e}") from None
         name = mote.properties.get("name")
-        points.append(DataPoint(mote.id, name if isinstance(name, str) else mote.id[:8], x, y))
+        sx = _scaled_sigma(mote.properties, line.data_x, units.get(line.data_x), x_unit)
+        sy = _scaled_sigma(mote.properties, line.data_y, units.get(line.data_y), y_unit)
+        points.append(DataPoint(mote.id, name if isinstance(name, str) else mote.id[:8], x, y, sx, sy))
     if not points:
         where = f" in {line.source!r}" if line.source else ""
         raise CommandError(f"no mote{where} carries both {line.data_y!r} and {line.data_x!r}")
     return sorted(points, key=lambda p: p.x)
+
+
+def _scaled_sigma(properties: dict, key: str, have: str | None, want: str | None) -> float | None:
+    """A property's ±, carried into the model's unit as a *difference*
+    (so an offset unit like degC does not shift it)."""
+    sigma = uncertainty_repo.sigma_of(properties, key)
+    if not sigma:
+        return None
+    value = properties.get(key)
+    if not have or not want or have == want or not isinstance(value, (int, float)):
+        return float(sigma)
+    return abs(_convert(float(value) + sigma, have, want) - _convert(float(value), have, want))
 
 
 def _convert(value: float, have: str | None, want: str | None) -> float:

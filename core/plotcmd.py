@@ -11,7 +11,9 @@ line, and a layout that restores the line restores the plot:
     plot sigma vs l --across                    one dot per mote carrying both keys
     plot "Load curve"      plot #id             a saved plot, re-solved
     plot save "Load curve" [‹plot line›]         the only write
-    plot export csv|png [path]
+    plot export csv|png|svg|pdf|tex [path]
+    plot bd.sigma vs bd.l 4:24 --data sigma vs l --from bench.csv
+                                                 measured points over the curve
 
 Names are garden-scope names (`bd.l`, the worksheet's), or `#id.key`.
 `--hide ‹m.k›` keeps a series in the legend without drawing it.
@@ -37,11 +39,12 @@ from core.sweep import PLOT_KEY
 
 PLOT_VERB = "plot"
 SAVE, EXPORT = "save", "export"
-EXPORT_FORMATS = ("csv", "png")
+EXPORT_FORMATS = ("csv", "png", "svg", "pdf", "tex")
 VS, BY = "vs", "by"
 STEPS_FLAG, SET_FLAG, SCENARIO_FLAG = "--steps", "--set", "--scenario"
 LOG_FLAG, ACROSS_FLAG, HIDE_FLAG = "--log", "--across", "--hide"
-FLAGS = (STEPS_FLAG, SET_FLAG, SCENARIO_FLAG, LOG_FLAG, ACROSS_FLAG, HIDE_FLAG)
+DATA_FLAG, FROM_FLAG = "--data", "--from"
+FLAGS = (STEPS_FLAG, SET_FLAG, SCENARIO_FLAG, LOG_FLAG, ACROSS_FLAG, HIDE_FLAG, DATA_FLAG, FROM_FLAG)
 
 DEFAULT_STEPS = 200
 DEFAULT_SURFACE_STEPS = 40
@@ -81,6 +84,11 @@ class PlotLine:
     log: bool = False
     hide: tuple[str, ...] = ()
     saved: str | None = None
+    # Measured points to draw over the curve (the keys the data motes carry,
+    # as `fit` reads them), narrowed to one CSV import with `source`. Drawn
+    # by the publication export; a pane keeps them in its line.
+    data: tuple[str, str] | None = None
+    source: str | None = None
 
     @property
     def empty(self) -> bool:
@@ -116,6 +124,10 @@ class PlotLine:
             parts.append(LOG_FLAG)
         for ref in self.hide:
             parts += [HIDE_FLAG, _quote(ref)]
+        if self.data:
+            parts += [DATA_FLAG, _quote(self.data[0]), VS, _quote(self.data[1])]
+            if self.source:
+                parts += [FROM_FLAG, _quote(self.source)]
         return " ".join(parts)
 
 
@@ -145,7 +157,7 @@ def parse(args: Sequence[str]) -> PlotCommand:
         return PlotCommand(SAVE, parse_line(rest) if rest else None, name=args[1].strip())
     if args and args[0] == EXPORT:
         if len(args) not in (2, 3) or args[1] not in EXPORT_FORMATS:
-            raise CommandError("usage: plot export csv|png [path]")
+            raise CommandError("usage: plot export csv|png|svg|pdf|tex [path]")
         return PlotCommand(EXPORT, format=args[1], path=args[2] if len(args) == 3 else None)
     return PlotCommand(PLOT, parse_line(args))
 
@@ -170,6 +182,16 @@ def parse_line(tokens: Sequence[str]) -> PlotLine:
         token = tokens[i]
         if token in (LOG_FLAG, ACROSS_FLAG):
             fields[token[2:]] = True
+        elif token == DATA_FLAG:
+            if i + 3 >= len(tokens) or tokens[i + 2] != VS:
+                raise CommandError(f"--data takes ‹ykey› vs ‹xkey› -- {usage()}")
+            fields["data"] = (tokens[i + 1], tokens[i + 3])
+            i += 3
+        elif token == FROM_FLAG:
+            if i + 1 >= len(tokens):
+                raise CommandError(f"{token} needs an import name -- {usage()}")
+            i += 1
+            fields["source"] = tokens[i]
         elif token in (STEPS_FLAG, SET_FLAG, SCENARIO_FLAG, HIDE_FLAG):
             if i + 1 >= len(tokens):
                 raise CommandError(f"{token} needs a value -- {usage()}")
@@ -212,7 +234,9 @@ def parse_line(tokens: Sequence[str]) -> PlotLine:
         ys=ys, x=x, range=x_range, by=by, by_range=by_range, across=across,
         steps=fields.get("steps"), sets=sets, scenario=fields.get("scenario"),
         log=bool(fields.get("log")), hide=hide,
+        data=fields.get("data"), source=fields.get("source"),
     )
+
 
 
 def _flag(fields: dict, flag: str, value: str) -> None:
@@ -323,6 +347,8 @@ class Resolved:
     series: tuple[SeriesRef, ...] = ()
     knobs: tuple[Knob, ...] = ()
     x_pinned: bool = False
+    # (data y key, data x key, import name) from --data / --from
+    overlay: tuple[str, str, str | None] | None = None
 
 
 class _Garden:
@@ -458,7 +484,8 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
             series.append({"id": series_id, "mote": mote_id, "key": key, "scenario": scenario_id})
     spec["series"] = series
     return Resolved(spec, series=tuple(legend), knobs=knobs,
-                    x_pinned=x_key in freedoms.get(x_mote, set()))
+                    x_pinned=x_key in freedoms.get(x_mote, set()),
+                    overlay=(*line.data, line.source) if line.data else None)
 
 
 def line_of(conn: sqlite3.Connection, spec: dict) -> PlotLine:

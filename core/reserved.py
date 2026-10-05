@@ -292,7 +292,7 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
                  "describe": "make a mote its species' template"},
     "plot": {"usage": "plot ‹y…› vs ‹x› [lo:hi] [by ‹y› lo:hi] [--across] [--steps N] "
                       "[--set ‹m.k›=‹v›] [--scenario ‹s›] [--log] | plot ‹saved› | "
-                      "plot save ‹name› | plot export csv|png [path]",
+                      "plot save ‹name› | plot export csv|png|svg|pdf|tex [path] | ... --data ‹ykey› vs ‹xkey› [--from ‹import›]",
              "describe": "plot a value against another, re-solving the garden (nothing is written)"},
     "fit": {"usage": "fit ‹m.y› vs ‹m.x› --data ‹ykey› vs ‹xkey› [--from ‹import›] --free ‹m.k›… "
                      "[--scenario ‹s›] [--apply]",

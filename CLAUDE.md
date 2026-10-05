@@ -155,7 +155,11 @@ updates it in the same commit. Keep it compact: tables, no prose.
   diff`); `export`, `submit` and `revisions` verbs; `monoss export|submit|
   revisions`; MCP `export_document`, `submit_project`, `list_revisions`,
   `diff_revisions`. SVG images and surface plots are not exported yet.
-  Moxie's SVG/PDF export, plan-my-week and Home health are next.
+- **Moxie publication export (2026-10-05)**: `core/plotexport.py` (svg,
+  pgfplots `.tex`, PDF; the ± band, the `--data` overlay),
+  `plot export svg|pdf|tex`, `monoss plot export`, MCP `export_plot`; a
+  note's `\graph` in `.tex` uses the same pgfplots writer. Plan-my-week,
+  planned vs. actual and Home health are next.
 
 ## Split of work: cloud backend, local frontend
 

@@ -6,6 +6,8 @@
                                 dragged, a zoom, a series switched off)
     sensitivity(command, x)     which knob moves the first series most at x
     export_csv(command, path)   the figure's points as a file
+    export_publication(command, fmt, path)
+                                svg, pdf or tex with ± band and data
     export_png(data_url, name, path)
                                 the pane's own rasterized SVG as a file
 
@@ -31,6 +33,8 @@ from typing import Any, Callable
 
 from console.session import Session, locked
 from core import fit as fit_repo
+from core import plotexport
+from core import tectonic
 from core import plotcmd
 from core import plotview
 from core.command_bar import CommandError
@@ -138,6 +142,23 @@ class MoxieApi:
         writer.writerows(rows)
         target.write_text(buffer.getvalue())
         return {"path": str(target)}
+
+    @locked
+    def export_publication(self, command: str, fmt: str, path: str | None = None) -> dict[str, Any]:
+        """The plot as a publication figure -- svg, pdf or the pgfplots
+        `.tex` -- with its propagated ± band and any `--data` points
+        (core/plotexport.py). Re-solved here at full resolution, like
+        `export_csv`. A pdf is compiled by tectonic, which can take a
+        while the first time."""
+        try:
+            data, pub = plotexport.export(self._session.conn, command, fmt)
+        except (plotexport.PlotExportError, tectonic.TectonicError) as e:
+            return {"error": str(e)}
+        target = self._target(path, f"{pub.name}.{fmt}")
+        if target is None:
+            return {"cancelled": True}
+        (target.write_bytes if isinstance(data, bytes) else target.write_text)(data)
+        return {"path": str(target), "problems": list(pub.problems)}
 
     def export_png(self, data_url: str, name: str = "plot", path: str | None = None) -> dict[str, Any]:
         """The pane rasterizes its own SVG -- it is what knows how the plot

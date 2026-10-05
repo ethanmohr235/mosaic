@@ -286,7 +286,7 @@ def test_completion_offers_refs_then_vs(conn, divider):
     assert "C1.current" in first and "save" in first and "export" in first
     after = [c.value for c in plotcmd.choices(conn, "C1.current ")]
     assert after[0] == "vs"
-    assert [c.value for c in plotcmd.choices(conn, "export ")] == ["csv", "png"]
+    assert [c.value for c in plotcmd.choices(conn, "export ")] == ["csv", "png", "svg", "pdf", "tex"]
 
 
 def test_unitless_series_of_very_different_sizes_get_two_axes(conn, divider):

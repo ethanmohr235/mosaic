@@ -947,6 +947,27 @@ def export_document(
     return out
 
 
+def export_plot(line: str, format: str = "svg", garden: str | None = None) -> dict[str, Any]:
+    """A plot as a publication figure. `line` is a `plot` line without the
+    verb, e.g. `bd.sigma vs bd.l 4:24 --steps 100`; add `--data ‹ykey› vs
+    ‹xkey› [--from ‹import›]` to draw measured points (with error bars from
+    their `uncertainty`) over the curve. Where any given has an
+    `uncertainty`, the curve carries its propagated ± as a shaded band.
+    `format` is `svg` (returned as text in `content`), `tex` (a standalone
+    pgfplots document, text) or `pdf` (compiled with tectonic, base64 in
+    `pdf_base64`). Sweeps only. Writes nothing."""
+    import base64
+    from core import plotexport
+    with _connect(garden) as conn:
+        data, pub = plotexport.export(conn, "plot " + line, format)
+    out: dict[str, Any] = {"name": pub.name, "problems": list(pub.problems)}
+    if isinstance(data, bytes):
+        out["pdf_base64"] = base64.b64encode(data).decode("ascii")
+    else:
+        out["content"] = data
+    return out
+
+
 def submit_project(
     note: str | None = None, force: bool = False, garden: str | None = None
 ) -> dict[str, Any]:
@@ -1150,7 +1171,7 @@ _TOOLS: tuple[Callable[..., Any], ...] = (
     list_scenarios, check_roles,
     solve_health, read_worksheet, write_worksheet,
     add_image, list_images, rename_image,
-    export_document, submit_project, list_revisions, diff_revisions,
+    export_document, export_plot, submit_project, list_revisions, diff_revisions,
     project_tree, start_project, import_csv, propagate_uncertainty, fit_model,
     search_gardens, archive_garden, list_materials,
     calc_sections, shown_work,

@@ -49,7 +49,7 @@ view, the `find` table, the props pane and plots.
 | `unlink <target> <type> <other>` or `unlink <target> #<rel>` | Remove a relationship (either direction). |
 | `template <mote> <species>` | Make a mote the one its species' new instances start from. |
 | `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `plot` alone shows its grammar. |
-| `plot save <name>`, `plot export csv\|png [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
+| `plot save <name>`, `plot export csv\|png\|svg\|pdf\|tex [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
 | `fit <m.y> vs <m.x> --data <Y> vs <X> --free <m.k>…` | Fit inputs to measured points (below). `--apply` writes the result. |
 | `edit @sel\|<note>`, `read @sel\|<note>`, `notes [text]` | Write a note, read it rendered, list the notes (below). |
 | `worksheet` | The garden's calculation as lines of text; `esc` applies it (below). |
@@ -201,7 +201,14 @@ an ordinary mote with a `plot` property holding the *specification*
 a name again updates that plot. `\graph{name}` in a note draws it,
 re-solved at every render (`docs/modoc.md`). **`plot export csv`** writes
 the full-resolution points and **`plot export png`** the pane's picture,
-to `path` or through a save dialog.
+to `path` or through a save dialog. **`plot export svg|pdf|tex`** write a
+publication figure (`core/plotexport.py`): white ground, unit-labelled axes,
+one panel per unit band, log axes, a shaded ± band where any given carries
+an `uncertainty` (propagated across the sweep), and measured points from
+`--data ‹ykey› vs ‹xkey› [--from ‹import›]` with error bars from their own
+`uncertainty`. `tex` is a standalone pgfplots document, `pdf` that compiled
+by tectonic. Sweeps only. `monoss plot export svg|pdf|tex|csv ‹line›
+[--out PATH]` and MCP `export_plot` do the same.
 
 ### Fitting (`fit`)
 

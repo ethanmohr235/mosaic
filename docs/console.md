@@ -253,7 +253,8 @@ this table by the roadmap phase that builds them.
   plot sigma vs l --across                   # correlate: one dot per mote with both keys
   plot "Load curve"      plot #id            # a saved plot, re-solved
   plot save "Load curve"                     # the only write (undoable)
-  plot export csv|png
+  plot export csv|png|svg|pdf|tex
+  plot … --data I vs V [--from bench.csv]   # measured points over the curve
   ```
   The command parses in `core/` to the spec Saved Plot motes already
   hold (`core/sweep.py::PLOT_KEY`), so `\graph{…}` and existing saved

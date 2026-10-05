@@ -21,7 +21,7 @@ BRIDGE = {
 }
 # api.monolith (U2). The walk collects bare method names.
 MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
-MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "fit"}  # U4
+MOXIE_BRIDGE = {"plot", "rewrite", "sensitivity", "export_csv", "export_png", "export_publication", "fit"}  # U4
 MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
 MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply", "paste_image"}  # U6
 MONASTERY_BRIDGE = {"view", "rewrite", "edit", "skip", "slot", "follow"}  # U7
