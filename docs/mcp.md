@@ -46,18 +46,23 @@ absolute path.
 
 ## Tools
 
-56 tools, grouped: gardens (`list_gardens`, `create_garden`,
-`export_garden`), projects (`project_tree`, `start_project`, `archive_garden`, `search_gardens`), `import_csv`, `add_image`, `list_images`, `rename_image`, `propagate_uncertainty`, `fit_model`, `list_materials`, motes (`list_motes`, `search_motes`, `get_mote`,
-`create_mote`, `update_mote`, `delete_property`, `delete_mote`), relationships
-(`list_relationships`, `mote_relationships`, `create_relationship`,
-`update_relationship`, `delete_relationship`), species (`list_species`,
-`species_of`, `instances_of`, `set_species`, `set_template`,
-`template_for`, `create_instance`), graph (`neighborhood`,
-`whole_garden`), simulation (`preview_simulation`, `why`),
-dependencies (`impact`, `requires`, `producers`, `consumers`),
-the worksheet (`read_worksheet`, `write_worksheet`), `solve_health`, `solve_flow`,
-the calc sections (`calc_sections`, `shown_work`),
-`check_roles`, `list_scenarios`, notes (`resolve_modoc`), and
+58 tools, grouped: gardens (`list_gardens`, `create_garden`, `export_garden`,
+`archive_garden`, `search_gardens`), `sync` (`action`: `init`, `push`, `pull`,
+`run`, `status`), projects (`project_tree`, `start_project`), motes
+(`list_motes`, `search_motes`, `get_mote`, `create_mote`, `update_mote`,
+`delete_property`, `delete_mote`), relationships (`list_relationships`, which
+takes `from_id`, `type` and `mote_id` for either endpoint, then
+`create_relationship`, `update_relationship`, `delete_relationship`), species
+(`list_species`, `species_of`, `instances_of`, `set_species`, `set_template`,
+`template_for`, `create_instance`), `neighborhood` (no `mote_id`: the whole
+garden), simulation (`preview_simulation`, `why`), dependencies (`impact`,
+`requires`, `producers`, `consumers`), the worksheet (`read_worksheet`,
+`write_worksheet`), `solve_health`, `solve_flow`, the calc sections
+(`calc_sections`, `shown_work`), `check_roles`, `list_scenarios`,
+`propagate_uncertainty`, `fit_model`, `list_materials`, `import_csv`, images
+(`add_image`, `list_images`, `rename_image`), output (`export_document`,
+`export_plot`, `submit_project`, `list_revisions`, `diff_revisions`), time
+(`plan_week`, `log_time`, `time_budget`), notes (`resolve_modoc`), and
 `reserved_names`.
 
 The relationship-type parameter is `type` on every tool that takes one

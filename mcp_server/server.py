@@ -127,48 +127,52 @@ def export_garden(garden: str | None = None) -> dict[str, Any]:
 # own change log through it.
 
 
-def sync_init(sync_dir: str, garden: str | None = None, clone: bool = False) -> dict[str, Any]:
-    """Point a garden at a sync server (its http(s)://<token>@host:port/
-    URL). If that target already holds sync history for this garden and
-    the garden doesn't exist locally yet, pass clone=True to materialize
-    it from that history -- otherwise this refuses, rather than silently
-    creating an empty garden that would then diverge from history you
-    clearly meant to join."""
-    name = garden or gardens_repo.get_default_garden() or DEFAULT_GARDEN
-    return sync_repo.init(name, sync_dir, clone=clone)
+SYNC_ACTIONS = ("init", "push", "pull", "run", "status")
 
 
-def sync_push(garden: str | None = None, resend: bool = False) -> dict[str, Any]:
-    """Write this device's changes since the last push out to the sync
-    target, as one new batch. Other devices pick them up on their next
-    sync_pull(). `resend=True` resends this device's entire history --
-    only needed when moving an already-synced garden onto a new, empty
-    sync_dir."""
+def sync(
+    action: str,
+    garden: str | None = None,
+    sync_dir: str | None = None,
+    clone: bool = False,
+    resend: bool = False,
+) -> dict[str, Any]:
+    """Sync a garden between devices through a sync server. `action` is:
+
+    - "init": point the garden at the server (`sync_dir`, its
+      http(s)://<token>@host:port/ URL). If that target already holds sync
+      history for this garden and the garden doesn't exist locally yet,
+      pass `clone=True` to materialize it from that history -- otherwise
+      this refuses, rather than silently creating an empty garden that
+      would then diverge from history you clearly meant to join.
+    - "push": write this device's changes since the last push out as one
+      new batch. `resend=True` resends this device's entire history --
+      only needed when moving an already-synced garden onto a new, empty
+      server.
+    - "pull": apply other devices' changes. `skipped` lists anything not
+      applied as-is and why: "shadowed" means a local edit was already
+      newer (last-write-wins, per property); "delete_won" means the
+      entity this change targets was already deleted locally.
+    - "run": push, then pull -- the everyday one-shot sync.
+    - "status": the server it syncs through, how many local changes are
+      still unpushed, and how far each other known device's changes have
+      been applied."""
+    if action not in SYNC_ACTIONS:
+        raise ValueError(f"sync action must be one of {', '.join(SYNC_ACTIONS)}, not {action!r}")
+    if action == "init":
+        if not sync_dir:
+            raise ValueError("sync init needs sync_dir, the server's URL")
+        name = garden or gardens_repo.get_default_garden() or DEFAULT_GARDEN
+        return sync_repo.init(name, sync_dir, clone=clone)
     with _connect(garden) as conn:
-        return sync_repo.push(conn, gardens_repo.resolve_garden(garden), resend=resend)
-
-
-def sync_pull(garden: str | None = None) -> dict[str, Any]:
-    """Apply other devices' changes from the sync server. `skipped`
-    lists anything not applied as-is and why: "shadowed" means a local
-    edit was already newer (last-write-wins, per property); "delete_won"
-    means the entity this change targets was already deleted locally."""
-    with _connect(garden) as conn:
-        return sync_repo.pull(conn, gardens_repo.resolve_garden(garden))
-
-
-def sync_run(garden: str | None = None, resend: bool = False) -> dict[str, Any]:
-    """sync_push() then sync_pull() -- the everyday one-shot sync."""
-    with _connect(garden) as conn:
-        return sync_repo.run(conn, gardens_repo.resolve_garden(garden), resend=resend)
-
-
-def sync_status(garden: str | None = None) -> dict[str, Any]:
-    """This garden's sync configuration and progress: the server it
-    syncs through, how many local changes are still unpushed, and how
-    far each other known device's changes have been applied."""
-    with _connect(garden) as conn:
-        return sync_repo.status(conn, gardens_repo.resolve_garden(garden))
+        name = gardens_repo.resolve_garden(garden)
+        if action == "push":
+            return sync_repo.push(conn, name, resend=resend)
+        if action == "pull":
+            return sync_repo.pull(conn, name)
+        if action == "run":
+            return sync_repo.run(conn, name, resend=resend)
+        return sync_repo.status(conn, name)
 
 
 # ---- motes ----
@@ -255,21 +259,19 @@ def delete_mote(mote_id: str, garden: str | None = None) -> bool:
 def list_relationships(
     from_id: str | None = None,
     type: str | None = None,
+    mote_id: str | None = None,
     garden: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Relationships in the garden, optionally filtered by source mote
-    and/or type. Omit both filters for all of them."""
+    """Relationships in the garden, filtered by source mote (`from_id`),
+    `type`, and/or `mote_id` -- every relationship where that mote is
+    *either* endpoint, incoming as well as outgoing, which `from_id` alone
+    won't give you. Omit all the filters for every relationship."""
     with _connect(garden) as conn:
-        rels = rel_repo.list_relationships(conn, from_id, type)
-        return [dataclasses.asdict(r) for r in rels]
-
-
-def mote_relationships(mote_id: str, garden: str | None = None) -> list[dict[str, Any]]:
-    """Every relationship where this mote is either endpoint -- incoming
-    as well as outgoing, which list_relationships(from_id=...) won't
-    give you."""
-    with _connect(garden) as conn:
-        rels = graph_repo.relationships_touching(conn, mote_id)
+        if mote_id is not None:
+            rels = [r for r in graph_repo.relationships_touching(conn, mote_id)
+                    if (from_id is None or r.from_id == from_id) and (type is None or r.type == type)]
+        else:
+            rels = rel_repo.list_relationships(conn, from_id, type)
         return [dataclasses.asdict(r) for r in rels]
 
 
@@ -372,24 +374,20 @@ def create_instance(
 # ---- graph ----
 
 
-def neighborhood(mote_id: str, hops: int = 2, garden: str | None = None) -> dict[str, Any]:
+def neighborhood(
+    mote_id: str | None = None, hops: int = 2, garden: str | None = None
+) -> dict[str, Any]:
     """The motes and relationships within `hops` edges of a starting
     mote. Hop-counting is undirected, so a relationship pointing *into*
     the start mote still reaches its source. The usual way to explore a
-    garden without pulling all of it."""
+    garden without pulling all of it. Omit `mote_id` for the whole garden
+    -- every mote and relationship at once, including motes with no
+    connections, which no amount of hopping reaches."""
     with _connect(garden) as conn:
-        motes, rels = graph_repo.neighborhood(conn, mote_id, hops)
-        return {
-            "motes": [_mote_dict(m) for m in motes],
-            "relationships": [dataclasses.asdict(r) for r in rels],
-        }
-
-
-def whole_garden(garden: str | None = None) -> dict[str, Any]:
-    """Every mote and relationship at once. Unlike neighborhood(), this
-    reaches motes with no connections, which no amount of hopping can."""
-    with _connect(garden) as conn:
-        motes, rels = graph_repo.whole_garden(conn)
+        if mote_id is None:
+            motes, rels = graph_repo.whole_garden(conn)
+        else:
+            motes, rels = graph_repo.neighborhood(conn, mote_id, hops)
         return {
             "motes": [_mote_dict(m) for m in motes],
             "relationships": [dataclasses.asdict(r) for r in rels],
@@ -1232,13 +1230,13 @@ def reserved_names() -> dict[str, Any]:
 # without duplicating every signature and docstring.
 _TOOLS: tuple[Callable[..., Any], ...] = (
     list_gardens, create_garden, export_garden,
-    sync_init, sync_push, sync_pull, sync_run, sync_status,
+    sync,
     list_motes, search_motes, get_mote, create_mote, update_mote, delete_property, delete_mote,
-    list_relationships, mote_relationships, create_relationship, update_relationship,
+    list_relationships, create_relationship, update_relationship,
     delete_relationship,
     list_species, species_of, instances_of, set_species, set_template, template_for,
     create_instance,
-    neighborhood, whole_garden,
+    neighborhood,
     preview_simulation,
     why, impact, requires, producers, consumers,
     list_scenarios, check_roles,

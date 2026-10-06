@@ -24,7 +24,6 @@ from mcp_server.server import (
     list_relationships,
     list_scenarios,
     list_species,
-    mote_relationships,
     neighborhood,
     preview_simulation,
     producers,
@@ -33,21 +32,16 @@ from mcp_server.server import (
     reserved_names,
     resolve_modoc,
     search_motes,
+    sync,
     set_species,
     set_template,
     shown_work,
     solve_health,
     solve_flow,
     species_of,
-    sync_init,
-    sync_pull,
-    sync_push,
-    sync_run,
-    sync_status,
     template_for,
     update_mote,
     update_relationship,
-    whole_garden,
     why,
     write_worksheet,
     project_tree,
@@ -192,14 +186,14 @@ def test_list_relationships_filters():
     assert len(list_relationships(garden=GARDEN)) == 2
 
 
-def test_mote_relationships_includes_incoming_edges():
+def test_a_motes_relationships_include_incoming_edges():
     a = create_mote({"name": "A"}, GARDEN)
     b = create_mote({"name": "B"}, GARDEN)
     create_relationship(a["id"], b["id"], "next", GARDEN)
 
     # list_relationships is outgoing-only; this is the difference.
     assert list_relationships(from_id=b["id"], garden=GARDEN) == []
-    assert len(mote_relationships(b["id"], GARDEN)) == 1
+    assert len(list_relationships(mote_id=b["id"], garden=GARDEN)) == 1
 
 
 def test_deleting_a_mote_takes_its_relationships_with_it():
@@ -254,14 +248,14 @@ def test_neighborhood_respects_the_hop_limit():
     assert len(neighborhood(a["id"], 2, GARDEN)["motes"]) == 3
 
 
-def test_whole_garden_reaches_unconnected_motes():
+def test_neighborhood_with_no_mote_is_the_whole_garden_and_reaches_unconnected_motes():
     a = create_mote({"name": "A"}, GARDEN)
     b = create_mote({"name": "B"}, GARDEN)
     create_relationship(a["id"], b["id"], "next", GARDEN)
     create_mote({"name": "Island"}, GARDEN)
 
     assert len(neighborhood(a["id"], 5, GARDEN)["motes"]) == 2
-    assert len(whole_garden(GARDEN)["motes"]) == 3
+    assert len(neighborhood(garden=GARDEN)["motes"]) == 3
 
 
 # ---- simulation ----
@@ -563,35 +557,54 @@ def test_preview_simulation_is_quiet_when_constraints_hold(box):
 # other tools here do.
 
 
+def test_sync_refuses_an_unknown_action_and_an_init_with_no_server():
+    with pytest.raises(ValueError, match="one of init, push, pull, run, status"):
+        sync("flush", GARDEN)
+    with pytest.raises(ValueError, match="needs sync_dir"):
+        sync("init", GARDEN)
+
+
+def test_list_relationships_filters_by_either_endpoint_and_type():
+    a = create_mote({"name": "A"}, GARDEN)
+    b = create_mote({"name": "B"}, GARDEN)
+    c = create_mote({"name": "C"}, GARDEN)
+    create_relationship(a["id"], b["id"], "knows", garden=GARDEN)
+    create_relationship(c["id"], b["id"], "owns", garden=GARDEN)
+    assert len(list_relationships(mote_id=b["id"], garden=GARDEN)) == 2
+    assert [r["type"] for r in list_relationships(mote_id=b["id"], type="owns", garden=GARDEN)] == ["owns"]
+    assert [r["from_id"] for r in list_relationships(mote_id=b["id"], from_id=a["id"], garden=GARDEN)] == [a["id"]]
+    assert len(list_relationships(from_id=a["id"], garden=GARDEN)) == 1
+
+
 def test_sync_init_then_status_reports_the_server(sync_dir):
-    result = sync_init(sync_dir, GARDEN)
+    result = sync("init", GARDEN, sync_dir=sync_dir)
     assert result["garden"] == GARDEN
     assert result["cloned"] is False
 
-    status = sync_status(GARDEN)
+    status = sync("status", GARDEN)
     assert status["sync_dir"] == sync_dir
     assert status["remotes"] == []
 
 
 def test_sync_push_then_status_shows_nothing_pending(sync_dir):
     create_mote({"name": "Alice"}, GARDEN)
-    sync_init(sync_dir, GARDEN)
+    sync("init", GARDEN, sync_dir=sync_dir)
 
-    pushed = sync_push(GARDEN)
+    pushed = sync("push", GARDEN)
     assert pushed["pushed"] == 1
-    assert sync_status(GARDEN)["local_ops_pending"] == 0
+    assert sync("status", GARDEN)["local_ops_pending"] == 0
 
 
 def test_sync_pull_with_no_other_device_is_a_noop(sync_dir):
-    sync_init(sync_dir, GARDEN)
-    assert sync_pull(GARDEN) == {"applied": 0, "skipped": []}
+    sync("init", GARDEN, sync_dir=sync_dir)
+    assert sync("pull", GARDEN) == {"applied": 0, "skipped": []}
 
 
 def test_sync_run_pushes_and_pulls_in_one_call(sync_dir):
     create_mote({"name": "Alice"}, GARDEN)
-    sync_init(sync_dir, GARDEN)
+    sync("init", GARDEN, sync_dir=sync_dir)
 
-    result = sync_run(GARDEN)
+    result = sync("run", GARDEN)
     assert result["push"]["pushed"] == 1
     assert result["pull"] == {"applied": 0, "skipped": []}
 
