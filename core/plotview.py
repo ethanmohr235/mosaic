@@ -305,6 +305,8 @@ class _Directory:
             return None
 
     def axis_label(self, axis: dict) -> str:
+        if axis.get("time"):
+            return "t (tick)"
         unit = self.unit(axis["mote"], axis["key"])
         return self.label(axis["mote"], axis["key"]) + (f" ({unit})" if unit else "")
 
@@ -466,7 +468,13 @@ def _names_a_property(spec) -> bool:
 
 def _axis(spec, max_points: int) -> Axis | None:
     """The saved axis, resampled. The range is the author's and untouched;
-    only the number of intervals across it is ours."""
+    only the number of intervals across it is ours. A time axis is whole
+    ticks and is never resampled: a run is sequential."""
+    if isinstance(spec, dict) and spec.get("time"):
+        try:
+            return Axis.over_time(int(spec["lo"]), int(spec["hi"]))
+        except (TypeError, ValueError, KeyError):
+            return None
     if not _names_a_property(spec):
         return None
     try:

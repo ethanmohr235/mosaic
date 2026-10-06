@@ -670,7 +670,59 @@ def run_time_series(
         starting_view, starting_pairs, strict_units, model_cache
     )
 
-    for step in range(step_count):
+    for tick in iterate(
+        running, relationships, rules, step_count, solver, solver_configuration,
+        strict_constraints=strict_constraints, model_cache=model_cache,
+    ):
+        if tick.error is not None:
+            failed_at, error = tick.step, tick.error
+            logger.warning("simulation preview step %s failed: %s", tick.step, tick.error)
+            break
+        result = tick.result
+        steps.append(
+            StepResult(
+                tick.step, result.values, _changes_for(tick.view.properties, result.values),
+                result.equation_count, result.unsolved, result.constraint_violations,
+            )
+        )
+
+    return TimeSeriesResult(steps, failed_at, error, warnings)
+
+
+@dataclass(frozen=True)
+class Tick:
+    """One step of a run: the view it solved, and its answer -- or the
+    message of the failure that ended the run there."""
+    step: int
+    view: "_GardenView"
+    result: "Solved | None" = None
+    error: str | None = None
+
+
+def iterate(
+    properties: dict[str, dict],
+    relationships: list[Relationship],
+    rules: list[rules_repo.Rule],
+    count: int,
+    solver: str = _DEFAULT_SOLVER,
+    solver_configuration: dict | None = None,
+    *,
+    strict_constraints: bool = False,
+    log_constraints: bool = True,
+    model_cache: dict[str, PropertyProvider] | None = None,
+):
+    """`count` ticks of the garden, each solving from the *previous* tick's
+    answers (so `prev(x)` and `t` mean something), yielded as they are made.
+    A tick that fails is yielded with its `error` and ends the run: every
+    tick before it is still good.
+
+    The one stepping loop: a time-series preview (`run_time_series`) and a
+    plot over time (core/sweep.py) both walk it, in memory, writing
+    nothing. `properties` is the starting state, in each mote's declared
+    units."""
+    running = properties
+    model_cache = {} if model_cache is None else model_cache
+    for step in range(count):
         view = _build_view(running, relationships)
         pairs = _rule_instances(rules, view)
         try:
@@ -678,33 +730,21 @@ def run_time_series(
                 view, pairs, solver, solver_configuration,
                 tick=float(step), previous=running,
                 strict_constraints=strict_constraints,
-                model_cache=model_cache,
+                log_constraints=log_constraints, model_cache=model_cache,
             )
-            solved = result.values
-            violations = result.constraint_violations
         except (SimulationError, SolverError) as e:
-            failed_at, error = step, str(e)
-            logger.warning("simulation preview step %s failed: %s", step, e)
-            break
-
-        changes = _changes_for(view.properties, solved)
+            yield Tick(step, view, error=str(e))
+            return
+        yield Tick(step, view, result)
         # The running state deliberately mirrors the database's own
         # representation -- values in whatever unit each mote declares,
         # not the solver's base units. Every step re-reads it through the
         # same normalization an ordinary property read gets, so storing
         # base-unit values here would convert them a second time.
         next_running = {mid: dict(props) for mid, props in running.items()}
-        for mote_id, new_properties in _by_mote(view.properties, solved).items():
+        for mote_id, new_properties in _by_mote(view.properties, result.values).items():
             next_running.setdefault(mote_id, {}).update(new_properties)
         running = next_running
-        steps.append(
-            StepResult(
-                step, solved, changes, result.equation_count,
-                result.unsolved, violations,
-            )
-        )
-
-    return TimeSeriesResult(steps, failed_at, error, warnings)
 
 
 def _build_view(

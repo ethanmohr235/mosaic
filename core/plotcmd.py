@@ -24,6 +24,7 @@ asking the garden anything. resolve() is where names meet the garden --
 it turns a line into the specification a saved view holds
 (core/sweep.py::PLOT_KEY), which core/plotview.py draws. So a line saved
 with `plot save` is exactly what `\\graph{…}` in a note re-solves."""
+import math
 import re
 import shlex
 import sqlite3
@@ -37,7 +38,7 @@ from core import simulation as simulation_repo
 from core import plotview
 from core.command_bar import CommandError
 from core.knobs import number_text as _number_text
-from core.sweep import PLOT_KEY
+from core.sweep import PLOT_KEY, TIME_KEY
 
 PLOT_VERB = "plot"
 SAVE, EXPORT = "save", "export"
@@ -47,6 +48,13 @@ STEPS_FLAG, SET_FLAG, SCENARIO_FLAG = "--steps", "--set", "--scenario"
 LOG_FLAG, ACROSS_FLAG, HIDE_FLAG = "--log", "--across", "--hide"
 DATA_FLAG, FROM_FLAG = "--data", "--from"
 FLAGS = (STEPS_FLAG, SET_FLAG, SCENARIO_FLAG, LOG_FLAG, ACROSS_FLAG, HIDE_FLAG, DATA_FLAG, FROM_FLAG)
+
+# `plot m.y vs t [lo:hi]`: x is the tick of a run (core/simulation.py's
+# `iterate`, what `sim` walks). Whole ticks from tick 0, the sim's default
+# length when no range is given.
+TIME = TIME_KEY
+DEFAULT_TICKS = 50
+MAX_TICKS = 2000
 
 DEFAULT_STEPS = 200
 DEFAULT_SURFACE_STEPS = 40
@@ -230,6 +238,10 @@ def parse_line(tokens: Sequence[str]) -> PlotLine:
     across = bool(fields.get("across"))
     if across and (x_range or by or len(ys) != 1):
         raise CommandError("--across takes two keys and no range: plot ‹key› vs ‹key› --across")
+    if x == TIME:
+        if by or across:
+            raise CommandError("time is the x axis of a sweep: plot ‹m.y›… vs t [lo:hi], no `by` or --across")
+        _time_range(x_range)
     return PlotLine(
         ys=ys, x=x, range=x_range, by=by, by_range=by_range, across=across,
         steps=fields.get("steps"), sets=sets, scenario=fields.get("scenario"),
@@ -254,6 +266,18 @@ def _flag(fields: dict, flag: str, value: str) -> None:
         fields["scenario"] = value
     else:
         fields["hide"].append(value)
+
+
+def _time_range(span: tuple[float, float] | None) -> tuple[int, int]:
+    """The ticks `lo:hi` of a time axis (default 0:50): whole numbers,
+    from 0 up, at most MAX_TICKS."""
+    if span is None:
+        return 0, DEFAULT_TICKS
+    lo, hi = span
+    if not (float(lo).is_integer() and float(hi).is_integer()) or not 0 <= lo < hi <= MAX_TICKS:
+        raise CommandError(f"a time axis is whole ticks, lo:hi from 0 up to {MAX_TICKS} -- "
+                           f"e.g. plot a.y vs t 0:50")
+    return int(lo), int(hi)
 
 
 def _axis_words(words: list[str], keyword: str) -> tuple[str, tuple[float, float] | None]:
@@ -296,6 +320,11 @@ def rewrite(line: PlotLine, change: dict) -> PlotLine:
         return replace(line, sets=tuple(s for s in line.sets if s.ref != change["unset"]))
     if "range" in change:
         lo, hi = (float(v) for v in change["range"])
+        if line.x == TIME:  # a zoom lands between ticks: widen to whole ones
+            lo, hi = math.floor(min(lo, hi)), math.ceil(max(lo, hi))
+            if lo == hi:
+                hi += 1
+            return replace(line, range=(float(max(lo, 0)), float(hi)))
         if lo == hi:
             raise CommandError("a range needs two different ends")
         return replace(line, range=(min(lo, hi), max(lo, hi)))
@@ -458,6 +487,9 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
         spec["xKey"], spec["yKey"] = line.x, line.ys[0]
         return Resolved(spec, knobs=knobs)
 
+    if line.x == TIME:
+        return _resolve_time(garden, line, spec, scenario_id, knobs)
+
     x_mote, x_key = garden.ref(line.x)
     freedoms = simulation_repo.garden_freedoms(conn)
     if line.by:
@@ -483,6 +515,23 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
                     overlay=(*line.data, line.source) if line.data else None)
 
 
+def _resolve_time(garden: _Garden, line: PlotLine, spec: dict, scenario_id, knobs) -> Resolved:
+    """`plot … vs t`: a sweep whose x is the tick, so it draws, saves,
+    exports and fits through everything a sweep does (core/sweep.py)."""
+    lo, hi = _time_range(line.range)
+    spec["x"] = {"time": True, "lo": lo, "hi": hi, "steps": hi - lo}
+    series, legend = [], []
+    for index, ref in enumerate(line.ys):
+        mote_id, key = garden.ref(ref)
+        series_id = f"s{index}"
+        legend.append(SeriesRef(series_id, ref, ref in line.hide))
+        if ref not in line.hide:
+            series.append({"id": series_id, "mote": mote_id, "key": key, "scenario": scenario_id})
+    spec["series"] = series
+    return Resolved(spec, series=tuple(legend), knobs=knobs,
+                    overlay=(*line.data, line.source) if line.data else None)
+
+
 def line_of(conn: sqlite3.Connection, spec: dict) -> PlotLine:
     """A saved specification written back as a typed line, so a pane
     showing `plot "Load curve"` can be changed in place. What a line
@@ -500,6 +549,9 @@ def line_of(conn: sqlite3.Connection, spec: dict) -> PlotLine:
         return PlotLine(ys=(spec.get("yKey") or "",), x=spec.get("xKey"), across=True,
                         sets=sets, scenario=scenario, log=log)
     x = spec.get("x") or {}
+    if x.get("time"):
+        return PlotLine(ys=tuple(garden.text_of(s["mote"], s["key"]) for s in series), x=TIME,
+                        range=(float(x["lo"]), float(x["hi"])), sets=sets, scenario=scenario, log=log)
     if x.get("mote") not in garden.by_id:
         raise CommandError("this saved plot's axis names a mote that is gone")
     x_ref = garden.text_of(x["mote"], x["key"])
@@ -576,6 +628,8 @@ def choices(conn: sqlite3.Connection, rest: str) -> list[Choice]:
         keywords.append(Choice(VS, "then the value to sweep"))
     elif BY not in done and _RANGE_RE.match(before or ""):
         keywords.append(Choice(BY, "a second axis: a surface"))
+    if before == VS:
+        keywords.append(Choice(TIME, "time: the ticks of a run (0:50)"))
     return keywords + known
 
 

@@ -207,6 +207,15 @@ pane tick `t` is the state after the solve whose `tick` variable read
 `t`, so ticks run 0 to N-1; the value before the run (the garden, under
 the scenario) is each row's `start`, which tick 0's Δ is measured from.
 
+**Plotted.** The same run is a curve: `plot bd.level vs t 0:50` draws ticks
+0 to 50 of it, through everything a sweep does -- knobs and scenarios, `plot
+save`, the exports and `\graph{…}`. Both walk `simulation.iterate`, the one
+stepping loop, so the plot is the `sim` pane's rows by construction. The
+points are solved in order (each from the last), so a time axis is never
+sampled coarsely; a range `lo:hi` runs from tick 0 and shows `lo` to `hi`;
+a tick that fails ends the run there and draws as a failed span. `fit` over
+time and `--data` points on a time axis are not done.
+
 A rule with no `t`/`prev()` in it just solves to the same values every
 step, which is a perfectly normal, boring, valid case -- not every rule
 needs to be time-dependent for time-based simulation to be useful (e.g.

@@ -98,7 +98,7 @@ def _band(conn, spec: dict, figure, steps: int, problems: list[str]) -> dict[str
     givens, notes = uncertainty_repo._inputs(properties, simulation.garden_freedoms(conn), labels)
     problems.extend(notes)
     x_axis = spec["x"]
-    givens = [g for g in givens if (g.mote_id, g.key) != (x_axis["mote"], x_axis["key"])]
+    givens = [g for g in givens if (g.mote_id, g.key) != (x_axis.get("mote"), x_axis.get("key"))]
     if not givens:
         return {}
     knobs = [k for k in spec.get("knobs") or []]
@@ -137,6 +137,8 @@ def _overlay(conn, spec: dict, wanted) -> Overlay:
     series = [s for s in spec.get("series") or [] if s.get("mote") and s.get("key")]
     if not series:
         raise PlotExportError("--data needs a plotted series to draw over")
+    if spec["x"].get("time"):
+        raise PlotExportError("--data over a time axis isn't drawn yet -- plot against a property")
     garden = plotcmd._Garden(conn)
     x_ref = (spec["x"]["mote"], spec["x"]["key"])
     y_ref = (series[0]["mote"], series[0]["key"])

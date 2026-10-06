@@ -824,6 +824,18 @@ What the build decided within the settled plan above.
 - **Only `plot` drags them.** The other panes show knobs in their header
   and take them by retyping the line (`e`).
 
+### Settled for time on the plot (2026-10-06)
+
+- **`plot ‹m.y›… vs t [lo:hi]`** draws the run `sim` walks: x is the tick,
+  whole ticks from 0 (default `0:50`, as `sim`). It is a sweep in every
+  other way, so `plot save`, `plot export`, `\graph{…}`, knobs and
+  scenarios work unchanged; the spec's `x` is `{"time": true, "lo", "hi",
+  "steps"}`. The sim and the plot share `simulation.iterate`, so one run is
+  never described twice.
+- **Zoom stays whole ticks** (a drag widens to the ticks it covers), the
+  run is always solved from tick 0, and a failing tick ends it as a failed
+  span. `fit` and `--data` over time are not done.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and

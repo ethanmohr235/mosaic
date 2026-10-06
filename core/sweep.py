@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 
 from core import rules as rules_repo
 from core import scenarios as scenarios_repo
+from core import simulation
 from core.entities import Relationship
 from core.motes import list_motes
 from core.relationships import list_relationships
@@ -81,6 +82,9 @@ def has_plot(properties: dict) -> bool:
     return isinstance(properties.get(PLOT_KEY), (dict, str))
 
 
+TIME_KEY = "t"
+
+
 @dataclass(frozen=True)
 class Axis:
     """A property to vary, and the range to vary it over.
@@ -94,12 +98,23 @@ class Axis:
     lo: float
     hi: float
     steps: int = 200
+    # Time rather than a property: x is the tick, `lo` to `hi` whole ticks
+    # of a run from tick 0 (`prev()` and `t` mean something), one interval
+    # per tick. Points are then solved in order, each from the last.
+    time: bool = False
 
     def __post_init__(self) -> None:
         if self.steps < 1:
             raise ValueError("an axis needs at least one step")
         if self.hi == self.lo:
             raise ValueError("an axis needs a range, not a point")
+
+    @classmethod
+    def over_time(cls, lo: int, hi: int) -> "Axis":
+        """Ticks `lo` through `hi` of a run that starts at tick 0."""
+        if not (0 <= lo < hi):
+            raise ValueError("a time axis runs from a tick to a later one, from 0 up")
+        return cls("", TIME_KEY, float(lo), float(hi), hi - lo, time=True)
 
     @property
     def count(self) -> int:
@@ -371,6 +386,9 @@ def run_sweep(
     ground = _ground(source, [c.scenario_id for c in cases])
     scenarios = {c.key: _scenario_of(ground, c.scenario_id) for c in cases}
     wanted = list(indices) if indices is not None else list(range(axis.count))
+    if axis.time:
+        return _run_time(ground, axis, cases, scenarios, outputs, wanted, solver,
+                         solver_configuration, should_cancel, started)
 
     points: list[Point] = []
     solves = 0
@@ -409,6 +427,52 @@ def run_sweep(
         axis=axis, points=points, case_count=len(cases), solves=solves,
         seconds=seconds, pinned=pinned, cancelled=cancelled,
     )
+
+
+def _run_time(
+    ground: Ground, axis: Axis, cases: Sequence[Case], scenarios: dict,
+    outputs: Sequence[Output], wanted: list[int], solver: str,
+    solver_configuration: dict | None, should_cancel, started: float,
+) -> SweepResult:
+    """A time axis: each case is one run from tick 0 (core/simulation.py's
+    `iterate`, the loop `sim` walks), and the points are its ticks `lo` to
+    `hi`. A run is sequential -- tick k starts from tick k-1's answers --
+    so it can't be sampled coarsely; `wanted` only picks which points come
+    back. A tick that fails ends that case's run there: the point is its
+    error, and nothing is drawn after it."""
+    ticks = {i: Point(index=i, x=axis.at(i)) for i in wanted}
+    solves = 0
+    cancelled = False
+    for case in cases:
+        start = _perturbed(ground, scenarios[case.key], case.overrides)
+        for tick in simulation.iterate(
+            start, ground.relationships, ground.rules, int(axis.hi) + 1, solver,
+            solver_configuration, log_constraints=False,
+        ):
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
+            solves += 1
+            point = ticks.get(tick.step - int(axis.lo))
+            if tick.error is not None:
+                # A failure before the window is still the window's story.
+                (point or ticks.get(0, Point(index=0, x=axis.lo))).errors[case.key] = tick.error
+                break
+            if point is None:
+                continue
+            if tick.result.constraint_violations:
+                point.violations[case.key] = list(tick.result.constraint_violations)
+            for mote_id, key in outputs:
+                value = tick.result.value(mote_id, key)
+                if value is not None:
+                    point.values[(case.key, mote_id, key)] = value
+        if cancelled:
+            break
+    points = [ticks[i] for i in sorted(ticks) if ticks[i].values or ticks[i].errors]
+    seconds = time.monotonic() - started
+    logger.info("ran %s ticks x %s cases in %.3fs", int(axis.hi) + 1, len(cases), seconds)
+    return SweepResult(axis=axis, points=points, case_count=len(cases), solves=solves,
+                       seconds=seconds, pinned=False, cancelled=cancelled)
 
 
 def run_surface(

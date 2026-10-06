@@ -290,7 +290,7 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
                "describe": "remove a relationship"},
     "template": {"usage": "template #id|‹name› ‹species›",
                  "describe": "make a mote its species' template"},
-    "plot": {"usage": "plot ‹y…› vs ‹x› [lo:hi] [by ‹y› lo:hi] [--across] [--steps N] "
+    "plot": {"usage": "plot ‹y…› vs ‹x›|t [lo:hi] [by ‹y› lo:hi] [--across] [--steps N] "
                       "[--set ‹m.k›=‹v› [unit]] [--keep] [--scenario ‹s›] [--log] | plot ‹saved› | "
                       "plot save ‹name› | plot export csv|png|svg|pdf|tex [path] | ... --data ‹ykey› vs ‹xkey› [--from ‹import›]",
              "describe": "plot a value against another, re-solving the garden (nothing is written)"},

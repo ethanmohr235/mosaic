@@ -100,7 +100,9 @@ Each one was a separate act of filing. That lesson became a rule in
   (`core/data/materials.json`), nominal values only; a configuration's
   `values` adds or overrides. See `simulation.md` -> *Physical property
   models*.
-- **Time simulation** keeps ticks, but runs become curves to plot. Cut
+- **Time simulation** keeps ticks, and runs are curves to plot
+  (**done 2026-10-06**: `plot … vs t`, see `simulation.md` -> *Time-based
+  simulation*). Cut
   *commit tick N* and saved run history.
 
 ### Documents (Mora)

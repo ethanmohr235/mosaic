@@ -53,6 +53,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `unlink ‹target› ‹type› ‹other›` / `unlink ‹target› #rel` | Remove a relationship |
 | `template ‹mote› ‹species›` | Make a mote its species' template |
 | `plot ‹m.y›… vs ‹m.x› [lo:hi]` | Plot, re-solving at each point (nothing written) |
+| `plot ‹m.y›… vs t [lo:hi]` | A run drawn: the ticks `lo`–`hi` (whole, from 0; default `0:50`) of the run `sim` walks, so `prev()` and `t` give curves. Knobs, scenarios, save, export and `\graph` work as for any sweep; `fit` and `--data` don't take it yet |
 | `plot ‹m.z› vs ‹m.x› lo:hi by ‹m.y› lo:hi` | Surface |
 | `plot ‹key› vs ‹key› --across` | One dot per mote with both keys |
 | `plot "‹saved›"` / `plot #id` | Open a saved plot |
