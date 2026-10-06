@@ -947,10 +947,6 @@ Each step's done-check is the same:
   `$ command` bar, not 2b's quieter 22px tiled header. Is that right?
 - **Result colours in `log`.** Successful results are `--fg`; only
   warn and fault use their colours. Should success be `--ok`?
-- **Archived gardens in the console** (U9). Home shows why a garden is
-  archived, but the console still writes to an archived garden when it
-  is open; the CLI and MCP refuse (`projects.ensure_writable`). Should
-  the console refuse writes there too, or say so in the top bar only?
 - **Opening a `url`** (U8). The old shared inspector's *Open* button
   (`core/links.py::classify_link`, then the OS's opener) went with
   Monarch, and the props pane has no equivalent. Should `⏎` on a `url`

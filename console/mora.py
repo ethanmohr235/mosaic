@@ -23,6 +23,7 @@ import base64
 import binascii
 import logging
 import shlex
+import sqlite3
 from typing import Any, Callable
 
 from console.session import Session, locked
@@ -35,7 +36,7 @@ from core.command_bar import CommandError
 
 logger = logging.getLogger(__name__)
 
-_ERRORS = (CommandError, ValueError, LookupError)  # ImageError is a ValueError
+_ERRORS = (CommandError, ValueError, LookupError, sqlite3.OperationalError)  # ImageError is a ValueError
 # Every backslash-word the parser reads outside maths, for the editor's
 # highlighter: anything else is coloured as a typo.
 COMMANDS = sorted({*modoc.INLINE_COMMANDS, *modoc.BLOCK_COMMANDS})
@@ -142,7 +143,7 @@ class MoraApi:
         try:
             return compute()
         except _ERRORS as e:
-            return {"error": str(e)}
+            return {"error": self._session.describe(e)}
         except Exception as e:  # never a traceback across the bridge
             logger.exception("mora failed: %r", what)
             return {"error": f"internal error: {e}"}

@@ -63,10 +63,15 @@ flat and nothing is renamed.
 - `archived_by(garden)` says why a garden is archived (its own marker, an
   owner, or an ancestor), or None. `Node.archived` carries the same
   inherited flag, so Home can hide archived trees.
-- **Read-only is enforced at the CLI and MCP write paths**, not in the
-  store (decided): `ensure_writable(garden)` raises `ArchivedGarden`, and
-  every MCP write tool and CLI write command calls it first. Sync, undo
-  and the store are untouched, so un-archiving always works.
+- **Read-only is enforced at the surfaces**, not in the store (decided):
+  `ensure_writable(garden)` raises `ArchivedGarden`, and every MCP write
+  tool and CLI write command calls it first. The console holds one
+  connection per window, so it enforces the same rule at that seam:
+  `console/session.py::Session.sync_archive` sets `PRAGMA query_only`
+  while the open garden is archived (on open, `cd`, rename and after any
+  `garden archive|unarchive`), `Session.describe` words the refusal, and
+  the top bar shows `archived · read-only`. Sync (its own connection) and
+  the store are untouched, so un-archiving always works.
 - `set_archived(garden, bool)` writes the flag on the sole owner, or a
   marker mote named `Archived` inside a loose or disputed garden.
   Un-archiving clears owners and markers (deleting a marker it made,

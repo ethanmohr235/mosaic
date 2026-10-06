@@ -83,7 +83,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `garden [‹name›]` | A garden's details (none: the open one), with model health and any failing checks |
 | `garden new ‹name›`, `garden rename ‹old› ‹new›` | Make / rename a garden (renaming the open one follows it) |
 | `garden rm ‹name›` / `garden restore ‹name›` | Move aside (a typed one asks for a second ⏎; not the open one) / bring back |
-| `garden archive\|unarchive ‹name›` | Archive with everything it owns / undo that |
+| `garden archive\|unarchive ‹name›` | Archive with everything it owns / undo that. An archived garden is read-only in the console (top bar: `archived · read-only`; writes and undo are refused) |
 | `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
 | `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
 | `image add ‹path› [‹name›]`, `image rename ‹old› ‹new›` | Store a PNG/SVG for notes (`\image{name}`; auto-named `shot-NNN`), or rename one and every note that shows it (undoable) |

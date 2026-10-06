@@ -42,6 +42,7 @@ export function createStore() {
     history: [],
     log: [],
     live: false,
+    archived: null,
     // One shared playhead (docs/console.md → Settled for U5): every Motion
     // pane reads `tick`; the sim pane that last ran or was focused owns it
     // and publishes its tick `count` and `run` ({ticks, scenario, solver}).
@@ -153,9 +154,16 @@ function sessionOps(state, emit) {
       state.labels = new Map();
       state.live = !!boot.live;
       state.crumbs = boot.crumbs || [boot.garden];
+      state.archived = boot.archived || null;
       state.playhead = { tick: 0, count: 0, playing: false, run: null, owner: null };
       state.drafts = new Map();
       emit("garden", boot);
+    },
+
+    /** The open garden was archived or un-archived (why, or null). */
+    setArchived(why) {
+      state.archived = why || null;
+      emit("archived", state.archived);
     },
 
     /** Mirror a line Python just appended to the garden's history. */

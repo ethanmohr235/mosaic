@@ -175,8 +175,8 @@ Each one was a separate act of filing. That lesson became a rule in
   the project.
 - **Archive:** mark a finished tree read-only and out of the way. It stays
   flat on disk and remains searchable. **Decided:** read-only is refused
-  at the CLI and MCP write paths and flagged for the UI, not enforced in
-  the store. See `architecture.md` -> *Archive*.
+  at the CLI and MCP write paths and on the console's connection, not
+  enforced in the store. See `architecture.md` -> *Archive*.
 
 ## Phases
 

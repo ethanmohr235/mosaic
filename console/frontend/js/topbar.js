@@ -39,12 +39,18 @@ export function createTopbar({ root, store, panes, actions, components, onRun = 
   }
 
   /** `tick 12/49 ▶` while a sim pane owns the playhead, and `live` when
-   * every edit is solved (docs/console.md → Settled for U5). */
+   * every edit is solved (docs/console.md → Settled for U5); `archived ·
+   * read-only` while the open garden is archived. */
   function motion() {
     const parts = [];
     const p = store.state.playhead;
     if (p.count) parts.push(h("span", "playhead", `tick ${p.tick}/${p.count - 1} ${p.playing ? "▶" : "‖"}`));
     if (store.state.live) parts.push(h("span", "live lvl-ok", "live"));
+    if (store.state.archived) {
+      const tag = h("span", "lvl-warn", "archived · read-only");
+      tag.title = store.state.archived;
+      parts.push(tag);
+    }
     return parts;
   }
 
@@ -75,7 +81,7 @@ export function createTopbar({ root, store, panes, actions, components, onRun = 
     );
   }
 
-  ["layout", "garden", "selection", "panes", "playhead", "live"].forEach((event) => store.subscribe(event, render));
+  ["layout", "garden", "selection", "panes", "playhead", "live", "archived"].forEach((event) => store.subscribe(event, render));
   render();
   return { render };
 }

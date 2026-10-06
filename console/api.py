@@ -111,7 +111,7 @@ class Api:
         try:
             return self._dispatch(text, selection or [], confirm)
         except _USER_ERRORS as e:
-            return _error(str(e))
+            return _error(self._session.describe(e))
         except Exception as e:  # never a traceback across the bridge
             logger.exception("console command failed: %r", text)
             return _error(f"internal error: {e}")
@@ -188,11 +188,17 @@ class Api:
 
     @locked
     def undo(self) -> dict:
-        return {"label": self._session.undo.undo()}
+        return self._step(self._session.undo.undo)
 
     @locked
     def redo(self) -> dict:
-        return {"label": self._session.undo.redo()}
+        return self._step(self._session.undo.redo)
+
+    def _step(self, step) -> dict:
+        try:
+            return {"label": step()}
+        except sqlite3.OperationalError as e:  # an archived garden refuses the write
+            return _error(self._session.describe(e))
 
     @locked
     def refresh(self) -> dict:
@@ -371,6 +377,8 @@ class Api:
             return {"effect": "garden", "boot": self._boot_payload(),
                     "message": f"renamed {current!r} to {line.args[1]!r}"}
         done = home_repo.run(line, current)
+        if self._session.sync_archive():
+            return {"effect": "archived", "archived": self._session.archived, "message": done.message}
         return {"effect": "statement", "ok": True, "message": done.message,
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": True}
@@ -491,6 +499,7 @@ class Api:
             "history": list(self._state.history),
             "live": self._state.live,
             "crumbs": home_repo.path_of(self._session.garden),
+            "archived": self._session.archived,
         }
 
 

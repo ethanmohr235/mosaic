@@ -72,6 +72,15 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
     return { message: text, level: "ok" };
   }
 
+  /** The open garden was archived or un-archived: the top bar says so, and
+   * every pane re-reads (a write now refuses, or works again). */
+  function archived(e) {
+    store.setArchived(e.archived);
+    store.log("result", e.message || "", { level: "ok" });
+    store.emit("refresh");
+    return { message: e.message || "", level: "ok" };
+  }
+
   function undone(kind, label) {
     const text = label ? `${kind === "undo" ? "undone" : "redone"}: ${label}` : `nothing to ${kind}`;
     store.log("result", text, { level: label ? "ok" : "idle" });
@@ -137,6 +146,7 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
     open_view: openView,
     layout,
     garden,
+    archived,
     undo: (e) => undone("undo", e.label),
     redo: (e) => undone("redo", e.label),
     refresh,
@@ -167,6 +177,7 @@ export function createRunner({ store, api, actions, panes, autosave, bootWorkspa
   async function undo(kind) {
     try {
       const result = await (kind === "undo" ? api.undo() : api.redo());
+      if (result && result.effect === "error") return simple(result);
       return undone(kind, result && result.label);
     } catch (err) {
       return simple({ effect: "error", message: message(err) });

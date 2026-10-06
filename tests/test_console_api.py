@@ -42,14 +42,69 @@ def api():
 def test_boot_shape(api):
     boot = api.boot()
     assert set(boot) == {"garden", "gardens", "verbs", "layouts",
-                         "active", "working", "history", "live", "crumbs"}
+                         "active", "working", "history", "live", "crumbs", "archived"}
     assert boot["garden"] == "test"
     assert boot["gardens"] == ["test"]
     assert boot["crumbs"] == ["test"]
+    assert boot["archived"] is None
     assert boot["verbs"][35] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
+
+
+# ---- archive ---------------------------------------------------------------
+
+def test_an_archived_garden_refuses_every_console_write(api):
+    assert api.run("A.x = 1")["ok"]
+    done = api.run("garden archive test")
+    assert done["effect"] == "archived" and "archived" in done["archived"]
+    assert api.boot()["archived"] == done["archived"]
+
+    for line in ("A.x = 2", "set A x 3", "B -> related_to -> A", "delete A"):
+        refused = api.run(line, confirm=True)
+        assert refused["effect"] == "error", line
+        assert "archived and read-only" in refused["message"]
+        assert "garden unarchive test" in refused["message"]
+    assert [m.properties.get("x") for m in motes_repo.list_motes(api._session.conn)
+            if m.properties.get("name") == "A"] == [1]
+
+
+def test_an_archived_garden_still_reads(api):
+    api.run("A.x = 1")
+    api.run("garden archive test")
+    assert api.run("find name:A")["effect"] == "open_view"
+    assert api.monolith.table("find name:A")["rows"]
+
+
+def test_unarchiving_restores_writes(api):
+    api.run("garden archive test")
+    assert api.run("A.x = 1")["effect"] == "error"
+    done = api.run("garden unarchive test")
+    assert done["effect"] == "archived" and done["archived"] is None
+    assert api.run("A.x = 1")["ok"]
+
+
+def test_undo_and_a_note_save_are_refused_when_archived(api):
+    api.run("A.x = 1")
+    api.run("garden archive test")
+    assert api.undo()["effect"] == "error"
+    saved = api.mora.save(None, "Notes", "text")
+    assert "archived and read-only" in saved["error"]
+
+
+def test_opening_an_archived_garden_starts_read_only():
+    create_garden("shelved")
+    first = Api("shelved")
+    first.run("A.x = 1")
+    first.run("garden archive shelved")
+    first.shutdown()
+    again = Api("shelved")
+    try:
+        assert again.boot()["archived"]
+        assert again.run("A.x = 2")["effect"] == "error"
+    finally:
+        again.shutdown()
 
 
 # ---- the pywebview walk ------------------------------------------------------
