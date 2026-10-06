@@ -27,6 +27,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from core import calc
+from core import derivations
 from core import images as images_repo
 from core.calc import format_value  # noqa: F401 -- re-exported
 from core import modoc
@@ -292,8 +293,10 @@ def resolve(
         modoc.image_key(node): _picture(node.ref, motes)
         for node in modoc.images(document)
     }
+    # One live solve answers every `\work` in the note, however many there are.
+    explainer = derivations.Explainer(conn)
     works = {
-        modoc.work_key(node): _work(conn, node, anchor_id, motes)
+        modoc.work_key(node): _work(conn, node, anchor_id, motes, explainer)
         for node in modoc.works(document)
     }
     rules = {
@@ -324,14 +327,15 @@ SECTION_HEADINGS = {
 
 
 def _work(
-    conn: sqlite3.Connection, node: modoc.Work, anchor_id: str, motes: list[Mote]
+    conn: sqlite3.Connection, node: modoc.Work, anchor_id: str, motes: list[Mote],
+    explainer: derivations.Explainer,
 ) -> calc.Work:
     """`\\work{bd.l}` or `\\work{l}` -- the second read off the note's
     anchor, the same default `\\val` takes."""
     mote_id, key, error = _work_target(node.target, anchor_id, motes)
     if mote_id is None:
         return calc.Work(node.target, calc.Quantity(), error=error)
-    return calc.work(conn, mote_id, key, node.format.unit, node.format.figures)
+    return calc.work(conn, mote_id, key, node.format.unit, node.format.figures, explainer)
 
 
 def _work_target(

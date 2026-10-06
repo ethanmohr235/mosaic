@@ -218,10 +218,13 @@ and the result.
     bd.l == sqrt((80 in)^2 + (60 in)^2)
     bd.l = 100.0 in
 
-Read from **the last solve's record** (`core/derivations.py`) -- the same
-record `why` reads, so a document and a debugger explain one value one way.
-It follows that a garden nobody has solved has no work to show: the macro
-says so where it stands rather than inventing a derivation.
+Explained from **a live solve of the garden as it stands**
+(`core/derivations.py`) -- the same one `why` reads, so a document and a
+debugger explain one value one way, and neither can be older than the last
+edit. The result line is the live one too, so a given edited after the last
+write-back never leaves a stale answer under a substitution that no longer
+adds up to it. A value no solve determines has no work to show, and the
+macro says so where it stands rather than inventing a derivation.
 
 Three things about the middle line are worth knowing:
 

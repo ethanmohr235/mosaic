@@ -8,7 +8,7 @@ r_b), the same every tick. The tank is a recurrence: level = prev(level)
 check a row against."""
 import pytest
 
-from core import commands, derivations, motion
+from core import commands, motion
 from core import scenarios as scenarios_repo
 from core.command_bar import CommandError
 from core.motes import create_mote, get_mote, update_mote
@@ -189,7 +189,6 @@ def test_solve_writes_and_one_undo_takes_it_back(conn, divider):
     assert motion.why(conn, "C1.current")["value"] == pytest.approx(0.04)
     solved.command.undo()
     assert "current" not in get_mote(conn, divider).properties
-    assert derivations.snapshot(conn)["simulation_derivations"] == []
     solved.command.redo()
     assert get_mote(conn, divider).properties["current"] == pytest.approx(0.04)
     assert motion.why(conn, "C1.current")["equations"][0]["rule"] == "series"

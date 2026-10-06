@@ -195,7 +195,7 @@ also why nothing is freedom-idempotent mid-run the way a single solve
 is: each step deliberately builds on the last.
 
 **Preview** computes the whole requested number of steps entirely in
-memory. Nothing is written to the garden, provenance included; a time
+memory. Nothing is written to the garden; a time
 series is only ever a preview. If a step fails to solve, the run stops
 there but keeps every step computed before it, so you can still scrub
 through the good ones rather than losing the whole preview.
@@ -230,18 +230,20 @@ is `prev(x)`: a solve that writes back is one-shot and has no previous
 step, so a rule using `prev()` is refused rather than quietly advanced
 by a tick. A recurrence is something you preview.
 
-Nothing keeps a log of past runs. The garden's state is its motes; what
-the last solve did is kept only as far as `why` needs it (below).
+Nothing keeps a log of past runs. The garden's state is its motes; `why`
+solves it again in memory when asked (below).
 
 ## Why a value is what it is
 
-The last solve that wrote to the garden records not only *that* a
-property changed but which equations, reading which known values,
-determined it. `why` walks that record backwards:
+A solve finds not only *that* a property takes a value but which
+equations, reading which known values, determined it. `why` solves the
+garden as it stands, in memory and writing nothing, and walks that
+derivation backwards -- so it answers before anything has been written
+and can never describe a value an edit has since changed:
 
 ```
-monoss why <mote-id> <property>          # argparse CLI
-why id=<mote_id> key=<property>          # REPL
+monoss why <mote-id> <property>          # CLI
+why <m.k>                                # console
 ```
 
 ```text
@@ -276,8 +278,8 @@ but constrains nothing.
 
 Recursion stops on anything the solve did not derive -- a stored
 property or a `property()` model evaluation -- which is exactly the set
-of things that need no explanation. A value the last solve never
-determined reports that plainly rather than failing.
+of things that need no explanation. A value no solve determines
+reports that plainly rather than failing.
 
 **Values shown are in each dimension's base SI unit** -- what the solver
 worked in -- not the unit a mote declares. A resistance recorded as
@@ -285,14 +287,13 @@ worked in -- not the unit a mote declares. A resistance recorded as
 multiplies out. The changes `simulate` prints are converted back into
 each mote's own unit instead; the two are deliberately different views.
 
-`why` explains the last solve that wrote to the garden, which is the one
-whose values are on the motes now; `--depth` bounds how far back the
-recursion goes. Each successful solve replaces the whole record, right
-after its write-back, so it never describes values the motes no longer
-hold. A **preview** or a **scenario** solve records nothing, since
-neither writes. A **failed** solve records nothing either and leaves the
-previous record in place: the motes still hold the last good solve's
-values, so its record is still the right explanation of them.
+`why` explains the garden **as it stands now**, so it is never older than
+the last edit; `--depth` bounds how far back the recursion goes. It writes
+nothing, and the same explanation works under a scenario or a knob
+(`derivations.Explainer(scenario=…, overrides=…)`). A garden that does not
+solve answers with the solver's message in `note` rather than an
+explanation. One `Explainer` serves a whole document: its first question
+solves, the rest read the same journal.
 
 ## Comparison relations
 
@@ -641,8 +642,7 @@ High Load varies 1 mote(s):
 ```
 
 **A scenario run never writes to the graph.** `run_simulation` with a
-scenario solves and reports what *would* change, and records no
-provenance; `run_time_series` under a scenario is a preview like any
+scenario solves and reports what *would* change; `run_time_series` under a scenario is a preview like any
 other. To compare scenarios, preview them side by side: two `sim` panes
 under different `--scenario`s, or one with `--vs` for a difference
 column.
@@ -744,7 +744,7 @@ Three shapes, the same machinery three ways:
 
 ### A sweep writes nothing
 
-No write-back, no provenance, no scenario motes created and destroyed
+No write-back, no scenario motes created and destroyed
 around the edges. A sweep leaves the garden exactly as it found it,
 which is what makes it safe to fire on every frame of a dragged slider.
 This is not a default to be lifted later: the answer to "what would this
@@ -1042,9 +1042,9 @@ converted on the way to the screen.
 
 ## Dependency queries
 
-`why` reads what the last solve recorded. These four read the *rules*,
-so they answer before anything has been solved, and they answer about
-the model rather than about one solve:
+`why` explains one solve of the garden as it stands. These four read the
+*rules*, so they answer without solving at all, and they answer about the
+model rather than about one solve:
 
 ```
 monoss impact    <mote-id> <property> [--distance N]

@@ -456,10 +456,12 @@ def test_why_on_an_underived_value_says_so_without_the_unit_note(conn, capsys):
     assert "base SI unit" not in out
 
 
-def test_why_before_any_solve_says_none_is_recorded(conn, capsys):
+def test_why_before_any_solve_explains_the_garden_as_it_stands(conn, capsys):
     mote = _solved_chain(conn)
     _handle_why(conn, parse(["why", mote, "c"]))
-    assert "no solve has been recorded" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "no solve has been recorded" not in out
+    assert "c" in out and "base SI unit" in out
 
 
 def test_why_takes_no_run_or_step(conn, capsys):

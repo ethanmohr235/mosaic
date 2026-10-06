@@ -1,7 +1,6 @@
 import pytest
 
 from core.db import get_connection
-from core.derivations import NO_SOLVE_NOTE
 from core.rules import APPLIES_TO
 from core.simulation import run_simulation as core_run_simulation
 from core.species import INSTANCE_OF, TEMPLATE_OF
@@ -292,9 +291,8 @@ def test_preview_simulation_reports_changes(box):
 def test_preview_simulation_writes_nothing(box):
     preview_simulation(3, GARDEN)
 
-    # Neither the graph nor its provenance moves: a preview is in-memory only.
+    # The graph does not move: a preview is in-memory only.
     assert "area" not in get_mote(box["id"], GARDEN)["properties"]
-    assert why(box["id"], "area", garden=GARDEN)["note"] == NO_SOLVE_NOTE
 
 
 def test_preview_steps_carry_the_same_shape_every_adapter_gets(box):
@@ -415,8 +413,10 @@ def test_why_on_an_underived_value_returns_a_note_not_an_error(box):
     assert explanation["note"]
 
 
-def test_why_before_any_solve_says_none_is_recorded(box):
-    assert why(box["id"], "area", garden=GARDEN)["note"] == NO_SOLVE_NOTE
+def test_why_before_any_solve_explains_the_garden_as_it_stands(box):
+    explained = why(box["id"], "area", garden=GARDEN)
+    assert explained["method"] == "substitution" and explained["value"] == 12.0
+    assert "area" not in get_mote(box["id"], GARDEN)["properties"]
 
 
 def test_the_run_history_tools_are_gone():
@@ -459,7 +459,7 @@ def test_producers_and_consumers_read_the_same_index(box):
 def test_the_queries_answer_before_any_run(box):
     """No simulation has been run in this garden -- the index comes from
     the rules, not from any solve."""
-    assert why(box["id"], "area", garden=GARDEN)["note"] == NO_SOLVE_NOTE
+    assert why(box["id"], "area", garden=GARDEN)["value"] == 12.0
     assert producers(box["id"], "area", garden=GARDEN)
 
 
@@ -736,13 +736,13 @@ def test_shown_work_returns_the_three_steps(garden):
     assert shown["error"] is None
 
 
-def test_shown_work_on_an_unsolved_garden_says_so_rather_than_failing(garden):
+def test_shown_work_needs_no_solve_to_have_been_written(garden):
     write_worksheet(FEA, garden=GARDEN)
     bd = next(m for m in list_motes(garden=GARDEN)
               if m["properties"].get("name") == "bd")
     shown = shown_work(bd["id"], "l", garden=GARDEN)
-    assert shown["steps"] == []
-    assert shown["note"]
+    assert [s["kind"] for s in shown["steps"]][:1] == ["symbolic"]
+    assert shown["error"] is None
 
 
 def test_start_project_then_the_tree_shows_it_under_its_owner(garden):

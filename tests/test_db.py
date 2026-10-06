@@ -47,9 +47,6 @@ def test_generate_uuid_is_unique():
 
 
 _OLD_RUN_HISTORY = """
-    DROP TABLE simulation_derivations;
-    DROP TABLE simulation_derivation_equations;
-    DROP TABLE simulation_derivation_inputs;
     CREATE TABLE simulation_runs (
         id TEXT PRIMARY KEY, run_number INTEGER NOT NULL, ran_at TEXT NOT NULL,
         status TEXT NOT NULL, detail TEXT, committed INTEGER NOT NULL DEFAULT 1,
@@ -94,66 +91,59 @@ def _columns(cur, table: str) -> set[str]:
     return {row["name"] for row in cur.fetchall()}
 
 
-def test_a_fresh_garden_keeps_no_run_history():
+def _simulation_tables(cur) -> set[str]:
+    return {name for name in _tables(cur) if name.startswith("simulation_")}
+
+
+def test_a_fresh_garden_keeps_no_run_history_or_provenance():
+    # `why` explains the garden from a live solve (core/derivations.py), so
+    # nothing about a solve is stored.
     create_garden("test")
     conn = db.get_connection("test")
-    cur = conn.cursor()
 
-    assert not {"simulation_runs", "simulation_changes"} & _tables(cur)
-    assert "run_id" not in _columns(cur, "simulation_derivations")
-    assert "step" not in _columns(cur, "simulation_derivations")
+    assert _simulation_tables(conn.cursor()) == set()
     conn.close()
 
 
 def test_initialize_database_drops_an_old_run_history_garden():
     # A garden from when every run was logged and derivations were keyed
-    # by run and step. The log is dropped rather than converted: `why`
-    # explains only the last solve now, and the next solve rebuilds it.
+    # by run and step, then kept for the last solve. All of it is dropped
+    # rather than converted: an explanation is a live solve now.
     create_garden("test")
     conn = db.get_connection("test")
     cur = conn.cursor()
     cur.executescript(_OLD_RUN_HISTORY)
     conn.commit()
+    assert _simulation_tables(cur)
 
     db.initialize_database(conn)
 
-    tables = _tables(cur)
-    assert not {"simulation_runs", "simulation_changes"} & tables
-    for table in (
-        "simulation_derivations",
-        "simulation_derivation_equations",
-        "simulation_derivation_inputs",
-    ):
-        assert table in tables
-        assert not {"run_id", "step"} & _columns(cur, table)
-        cur.execute(f"SELECT COUNT(*) AS n FROM {table}")
-        assert cur.fetchone()["n"] == 0
-
+    assert _simulation_tables(cur) == set()
     cur.execute("SELECT name FROM sqlite_master WHERE type='index'")
     indexes = {row["name"] for row in cur.fetchall()}
-    assert "idx_simulation_changes_run" not in indexes
-    assert "idx_simulation_derivations_lookup" in indexes
+    assert not {i for i in indexes if i.startswith("idx_simulation_")}
     conn.close()
 
 
-def test_reopening_a_migrated_garden_keeps_its_derivations():
-    # Idempotent: once the old tables are gone, opening again must not
-    # drop the new ones -- they hold the last solve's provenance.
+def test_a_garden_with_last_solves_provenance_opens_and_loses_it():
     create_garden("test")
     conn = db.get_connection("test")
     cur = conn.cursor()
-    cur.executescript(_OLD_RUN_HISTORY)
-    conn.commit()
-    db.initialize_database(conn)
-    cur.execute(
-        "INSERT INTO simulation_derivations VALUES (0, 'm1', 'x', '2.0', 'substitution', NULL)"
+    cur.executescript(
+        """
+        CREATE TABLE simulation_derivations (
+            block INTEGER NOT NULL, mote_id TEXT NOT NULL, key TEXT NOT NULL,
+            value TEXT NOT NULL, method TEXT NOT NULL, detail TEXT);
+        CREATE INDEX idx_simulation_derivations_lookup ON simulation_derivations(mote_id, key);
+        INSERT INTO simulation_derivations VALUES (0, 'm1', 'x', '2.0', 'substitution', NULL);
+        """
     )
     conn.commit()
 
     db.initialize_database(conn)
+    db.initialize_database(conn)  # and again: dropping is idempotent
 
-    cur.execute("SELECT COUNT(*) AS n FROM simulation_derivations")
-    assert cur.fetchone()["n"] == 1
+    assert _simulation_tables(cur) == set()
     conn.close()
 
 

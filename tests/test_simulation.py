@@ -516,12 +516,6 @@ def test_changes_report_old_and_new_values(conn):
 
 # ---- time-based simulation: run_time_series ----
 
-def _rows(conn, table):
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT * FROM {table}")
-    return cursor.fetchall()
-
-
 @pytest.fixture
 def compounding(conn):
     """A single mote whose balance compounds by 5% each step -- the
@@ -546,7 +540,6 @@ def test_time_series_preview_never_writes(conn, compounding):
     run_time_series(conn, step_count=10)
 
     assert get_mote(conn, compounding).properties == before_props
-    assert _rows(conn, "simulation_derivations") == []
 
 
 def test_a_static_solve_has_no_previous_step(conn, compounding):

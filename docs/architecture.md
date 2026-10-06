@@ -188,11 +188,11 @@ Equations are written in a small expression language parsed against a strict whi
 
 Each side of a relation evaluates to a ratio of two linear expressions, and the denominator is cleared once against the relation as a whole, so an equation that is only nonlinear as *written* (`I / I0 == 0.1`) is solved as the linear equation it is equivalent to rather than having to be rearranged by hand. Solving then happens in two stages. A substitution loop repeatedly resolves any equation that has come down to a single unknown and feeds the answer back, which allows nonlinear formulas as long as the nonlinear part involves values already known. Whatever remains -- a still-linear system of several unknowns, or an equation genuinely nonlinear in its unknowns -- goes to a solver backend chosen per run via `solver`/`solver_configuration` (`core/solvers.py`), the same pluggable-by-name pattern physical property models use for `provider`/`configuration`. The default, `linear`, is an exact single least-squares solve and fails on genuine nonlinearity; `newton` solves that iteratively instead. See `docs/simulation.md` for the full solver reference.
 
-`core.simulation.run_simulation()` is the only path that writes: it solves the garden once, writes the solved values back onto the motes, and replaces the garden's provenance (below) in the same step. `run_time_series()` is a preview and never writes. Both call the same `solve_view()`, which is what makes a one-step preview show exactly what a solve would write.
+`core.simulation.run_simulation()` is the only path that writes: it solves the garden once, writes the solved values back onto the motes. `run_time_series()` is a preview and never writes. Both call the same `solve_view()`, which is what makes a one-step preview show exactly what a solve would write.
 
 A preview can be time-based: `run_time_series()` solves a requested number of discrete steps, each one starting from the *previous* step's solved values rather than the database, so a rule can use the reserved `t` (the current step index) or `prev(x)` (the value `x` had entering the step) to express time-dependent behavior or a recurrence. It is computed entirely in memory and writes nothing. A solve that writes back is one-shot and has no previous step, so a rule using `prev()` is refused there rather than advanced by a tick.
 
-No log of past runs is kept. The garden's state is its motes, and the only record of how they got their solved values is the last solve's provenance. See `docs/simulation.md` for the language reference and what is deferred.
+No log of past runs is kept. The garden's state is its motes, and how a value came out is not stored: `why` solves the garden again in memory (*Provenance*, below). See `docs/simulation.md` for the language reference and what is deferred.
 
 # Comparison relations
 
@@ -393,11 +393,16 @@ worked example.
 
 # Provenance
 
-The last solve that wrote to the garden also records *why* each value
-came out as it did: which equations, reading which already-known values,
-determined it. `core/provenance.py` collects this during the solve and
-`core/derivations.py` persists and replays it, backing the `why` command
-in both CLI surfaces, the console (`why ‹m.k›`) and the MCP server.
+`why` and `\work` explain a value from a **live solve of the garden as
+it stands**, not from anything stored: which equations, reading which
+already-known values, determined it. A record kept from "the last solve"
+goes stale the moment a given is edited, so nothing is kept. `core/
+provenance.py` collects the derivations during an in-memory solve
+(`simulation.solve_journal`, writing nothing) and `core/derivations.py`
+indexes and replays them, backing the `why` command in the CLI, the
+console (`why ‹m.k›`) and the MCP server. An `Explainer` is one such solve,
+made the first time it is asked and shared by everything after, so a
+document with forty `\work` blocks solves once.
 
 The recording is pure and DB-free, and -- importantly -- it does not touch
 `core/formula.py`. Reads are captured by handing the evaluator a dict
@@ -416,15 +421,12 @@ rather than implying a tree. Recorded values are in base SI units --
 what the solver worked in -- unlike a solve's reported changes, which
 convert back into each mote's declared unit.
 
-Only one solve's record is kept. `run_simulation()` replaces the whole
-set (`derivations.replace_journal`) right after its write-back, so `why`
-always explains the values the motes hold. The three
-`simulation_derivation*` tables carry no run id and no step for that
-reason. A preview or a scenario solve writes nothing and so records
-nothing; a failed solve records nothing and leaves the previous record
-in place, since the motes still hold that solve's values. A garden from
-before this, which logged every run, has its run and derivation tables
-dropped on open (`core/db.py`); the next solve rebuilds the record.
+Nothing is stored, so there is nothing to go stale or to undo, and the
+answer holds for a scenario or a knob as well (`Explainer(scenario=…,
+overrides=…)`). A garden that does not solve answers with the solver's
+message instead of an explanation. A garden from before this, which kept
+the last solve's record (and before that logged every run), has those
+tables dropped on open (`core/db.py`).
 
 # The worksheet
 
@@ -752,9 +754,9 @@ belongs in a document's given list is a property of the *garden* -- the
 numbers its equations read and are not free to determine -- and a note
 that had to list them would be the copy this format exists to avoid.
 `core/calc.py` answers all four, plus `\work`, which renders
-`core/derivations.py`'s record of the last solve as three lines: the
+`core/derivations.py`'s live explanation as three lines: the
 equation, the equation with values in it, the result. It is the same
-record `why` reads, so a document and a debugger cannot come to disagree
+explanation `why` reads, so a document and a debugger cannot come to disagree
 about how a value came out -- and a garden nobody has solved has no work
 to show, which the macro says rather than deriving one of its own.
 
@@ -782,12 +784,12 @@ The **calc sections** are the same idea one size up. `\given`, `\answers`,
 document's given list is a property of the *garden* -- the numbers its
 equations read and are not free to determine -- and a note that had to list
 them would be the copy this format exists to avoid. `core/calc.py` answers
-all four, plus `\work`, which renders `core/derivations.py`'s record of the
-last solve as three lines: the equation, the equation with values in it, the
-result. It is the same record `why` reads, so a document and a debugger
-cannot come to disagree about how a value came out -- and a garden nobody
-has solved has no work to show, which the macro says rather than deriving
-one of its own.
+all four, plus `\work`, which renders `core/derivations.py`'s live explanation
+as three lines: the equation, the equation with values in it, the result. It
+is the same explanation `why` reads, so a document and a debugger cannot come
+to disagree about how a value came out. The result line is the live one: if a
+given was edited after the last write-back, the stale stored answer is not
+printed under a substitution that no longer adds up to it.
 
 Two decisions inside `\work` are worth naming. Substituted values are in
 each mote's **declared** unit, not the base SI the solve worked in: the
@@ -1283,10 +1285,8 @@ the equation set; the engine has no `dt`, no seconds and no integration.
 is read from `core/solver_registry.py`: a future integrator appears in
 `sim --solver` by being registered.
 
-**`solve` and `live`.** `solve` writes one static solve and replaces
-the provenance, as one undo step that also puts the previous provenance
-back (`core/derivations.py::snapshot`/`restore`), so `why` after an undo
-explains the values the undo restored. `solve --live on` folds a solve
+**`solve` and `live`.** `solve` writes one static solve as one undo
+step (`why` is live, so it needs no record put back). `solve --live on` folds a solve
 into every write made from the window (`core/motion.py::live_solve`),
 kept per garden in the console sidecar -- UI state, like layouts.
 

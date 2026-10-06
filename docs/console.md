@@ -356,7 +356,7 @@ confirmed these defaults on 2026-10-01.
   is itself a mote's whole name.
 - **`solve`** refuses a garden whose rules use `prev()`, which only a run
   can answer, and so does a live solve (the edit stays, the message says
-  why). Its undo step puts the previous provenance back.
+  why). One undo step (`why` is live, so there is no record to put back).
 - **New token:** `--timeline-h` 72px, the sim pane's timeline.
 
 ### Settled for U6, Mora (2026-10-01)

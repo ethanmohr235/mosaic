@@ -271,11 +271,35 @@ def test_a_stored_value_has_no_work_and_says_so(conn):
     assert shown.quantity.text() == "80 in"
 
 
-def test_a_garden_nobody_solved_has_no_work_to_show(conn):
+def test_work_needs_no_solve_to_have_been_written(conn):
+    """The work is explained from a live solve of the garden as it stands,
+    so an unsolved garden has work to show all the same."""
     worksheet.apply(conn, PYTHAGORAS)
     shown = calc.work(conn, named(conn, "bd").id, "l")
-    assert not shown.shown
-    assert shown.note
+    assert shown.shown
+    assert steps_of(shown)[calc.SUBSTITUTED] == "bd.l == sqrt((80 in)^2 + (60 in)^2)"
+
+
+def test_work_never_contradicts_its_own_substitution(conn):
+    """A given was edited after the last solve, so the stored answer is
+    stale. The result line is the live one -- 100 in becomes 130 in, stored
+    in the unit the solve declared for it -- rather than printing 100 under
+    a substitution that adds up to 130."""
+    worksheet.apply(conn, PYTHAGORAS)
+    run_simulation(conn)
+    update_mote(conn, named(conn, "bd").id, {"x": 120, "y": 50})
+    shown = calc.work(conn, named(conn, "bd").id, "l")
+    assert steps_of(shown)[calc.SUBSTITUTED] == "bd.l == sqrt((120 in)^2 + (50 in)^2)"
+    assert shown.quantity.converted("in").value == pytest.approx(130)
+
+
+def test_one_explainer_serves_a_whole_documents_work(conn):
+    from core.derivations import Explainer
+    worksheet.apply(conn, PYTHAGORAS)
+    explainer = Explainer(conn)
+    first = calc.work(conn, named(conn, "bd").id, "l", explainer=explainer)
+    second = calc.work(conn, named(conn, "bd").id, "l", explainer=explainer)
+    assert first == second and explainer._index is not None
 
 
 def test_work_on_a_mote_that_does_not_exist_is_an_error_not_a_crash(conn):

@@ -54,7 +54,7 @@ view, the `find` table, the props pane and plots.
 | `edit @sel\|<note>`, `read @sel\|<note>`, `notes [text]` | Write a note, read it rendered, list the notes (below). |
 | `worksheet` | The garden's calculation as lines of text; `esc` applies it (below). |
 | `sim [--ticks N] [--scenario s] [--vs s\|garden] [<conditions>]` | Run the garden tick by tick and watch its values (below). Writes nothing. |
-| `rule @sel\|<rule>`, `why <m.k>`, `scenarios` | A rule and what it binds; how the last solve got a value; the scenarios and their overrides (below). |
+| `rule @sel\|<rule>`, `why <m.k>`, `scenarios` | A rule and what it binds; how the garden determines a value; the scenarios and their overrides (below). |
 | `solve`, `solve --live on\|off` | Solve once and write it (one undo step); or solve after every edit made here. |
 | `step +N\|-N\|<tick>`, `play`, `pause` | Move the shared playhead. |
 | `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. `set C1.voltage 30` is the same as `set C1 voltage 30`; `set --scenario hot C1.voltage 30` writes the scenario's override instead (making the scenario if there is none by that name). |
@@ -291,7 +291,7 @@ scenarios scrub together.
 and every value it binds, at the playhead's tick when a sim pane owns
 it. A mote that isn't a rule shows every rule touching it. Names the
 equation can't settle on one mote come back as hints (link the one you
-mean). `why C1.current` shows how the last written solve got a value,
+mean). `why C1.current` shows how the garden determines a value (a live solve),
 down through its inputs.
 
 | Key (rule) | Does |
@@ -311,7 +311,7 @@ overrides beside the garden's value.
 | `a` / `n` | Put `set --scenario ‹it› ` / `set --scenario ` on the command line |
 | `d` `d` | Clear the override at the cursor |
 
-**Solving.** `solve` writes one static solve and its provenance as one
+**Solving.** `solve` writes one static solve as one
 undo step; it refuses a garden whose rules use `prev()` (only a run can
 answer those). `solve --live on` is the old Fast mode: every write made
 from the window is followed by a solve, folded into the same undo step,

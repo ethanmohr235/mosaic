@@ -9,9 +9,9 @@ than prose somebody retyped -- which is the whole promise the format
 makes, kept for a whole section rather than for one number.
 
 Nothing here computes anything the engine has not already computed.
-`\\work` is a rendering of `core/derivations.py`'s record of the last solve
--- the same record `why` reads, so a document and a debugger cannot come to
-disagree about how a value came out. `\\checks` is
+`\\work` is a rendering of `core/derivations.py`'s explanation of a live
+solve of the garden -- the same one `why` reads, so a document and a
+debugger cannot come to disagree about how a value came out. `\\checks` is
 `core/simulation.py::check_constraints`. The givens and answers are the
 garden's own properties, split by whether the solver is free to determine
 them.
@@ -48,6 +48,7 @@ sentence.
 """
 import dataclasses
 import json
+import math
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -499,32 +500,51 @@ def work(
     key: str,
     unit: str | None = None,
     figures: int | None = None,
+    explainer: derivations_repo.Explainer | None = None,
 ) -> Work:
     """How `key` on `mote_id` came out, as lines a document can print.
 
-    Read from the last solve's record (`core/derivations.py`), which is the
-    same thing `why` reads -- so the document and the debugger explain one
-    value one way. A value the last solve did not determine has no work to
-    show and says so; a garden nobody has solved says so too. Never
-    raises: a note must render with the broken part visibly broken."""
+    Explained from a live solve of the garden as it stands
+    (`core/derivations.py`), the same thing `why` reads -- so the document
+    and the debugger explain one value one way, and neither can be older
+    than the last edit. Pass one `explainer` for a whole document and it
+    solves once. A value no solve determines has no work to show and says
+    so. Never raises: a note must render with the broken part visibly
+    broken."""
     properties = {m.id: m.properties for m in motes_repo.list_motes(conn)}
     if mote_id not in properties:
         return Work(f"{mote_id[:8]}.{key}", Quantity(), error=f"no mote {mote_id[:8]!r}")
 
     names = {mid: _name(props, mid) for mid, props in properties.items()}
     label = f"{names[mote_id]}.{key}"
-    shown = quantity(properties[mote_id], key).converted(unit)
+    stored = quantity(properties[mote_id], key)
 
-    explanation = derivations_repo.explain(conn, mote_id, key, depth=1)
+    explanation = (explainer or derivations_repo.Explainer(conn)).explain(mote_id, key, depth=1)
     if not explanation.derived:
-        return Work(label, shown, note=explanation.note or "not determined by the last solve")
+        return Work(label, stored.converted(unit),
+                    note=explanation.note or "not determined by a solve")
 
+    shown = _live(stored, explanation).converted(unit)
     steps, note = _steps(explanation, properties, names, shown, figures)
     return Work(
         label, shown, steps,
         tuple(f"{names.get(m, m[:8])}.{k}" for m, k in explanation.also_determined),
         note=note,
     )
+
+
+def _live(stored: Quantity, explanation) -> Quantity:
+    """The result a solve of the garden as it stands finds. The stored
+    number is shown when it agrees (so a solved garden reads exactly as it
+    always did); when a given was edited and nobody re-solved, the stored
+    answer is stale and the document would contradict its own
+    substitution, so the live one is shown instead."""
+    live = _from_base(explanation.value, stored.unit) if stored.unit \
+        else Quantity(explanation.value, None)
+    if stored.numeric and math.isclose(float(stored.value), float(live.value),
+                                       rel_tol=1e-9, abs_tol=1e-12):
+        return stored
+    return Quantity(live.value, live.unit)
 
 
 def _steps(

@@ -305,7 +305,7 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
     "scenarios": {"usage": "scenarios", "describe": "the garden's scenarios and what each overrides"},
     "solve": {"usage": "solve [--live on|off]",
               "describe": "solve the garden once and write it (--live: after every edit)"},
-    "why": {"usage": "why ‹m.k›", "describe": "how the last solve determined a value"},
+    "why": {"usage": "why ‹m.k›", "describe": "how the garden as it stands determines a value"},
     "step": {"usage": "step +N|-N|‹tick›", "describe": "move the playhead"},
     "play": {"usage": "play", "describe": "play the run from the playhead"},
     "pause": {"usage": "pause", "describe": "stop the playhead"},

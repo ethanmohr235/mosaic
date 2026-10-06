@@ -3,7 +3,7 @@
 
     sim [--ticks N] [--scenario s] [--vs s2|garden] [--solver name] [‹find conditions›]
     rule ‹rule›|#id                     a rule's equation and what it binds
-    why ‹m.k›                           how the last solve determined a value
+    why ‹m.k›                           how the garden determines a value
     solve [--live on|off]               one static solve, written, undoable
 
 A sim pane is its command, like every pane: the line says how long the
@@ -528,12 +528,14 @@ def card_json(card: RuleCard) -> dict:
 
 # ---- why -------------------------------------------------------------------
 
-def why(conn: sqlite3.Connection, ref: str) -> dict:
-    """How the last written solve determined `ref` (`m.k` or `#id.k`),
-    as a tree: each input the solve derived carries its own explanation."""
+def why(conn: sqlite3.Connection, ref: str, explainer: derivations_repo.Explainer | None = None) -> dict:
+    """How the garden as it stands determines `ref` (`m.k` or `#id.k`), as
+    a tree: each input the solve derived carries its own explanation. A
+    live solve, so it is never older than the last edit."""
     garden = _Garden(conn)
     mote_id, key = garden.ref(ref)
-    return _explanation_json(garden, derivations_repo.explain(conn, mote_id, key))
+    explainer = explainer or derivations_repo.Explainer(conn)
+    return _explanation_json(garden, explainer.explain(mote_id, key))
 
 
 def _explanation_json(garden: _Garden, e) -> dict | None:
@@ -575,15 +577,14 @@ def recurrences(conn: sqlite3.Connection) -> list[str]:
 
 
 def solve(conn: sqlite3.Connection, solver: str | None = None) -> Solve:
-    """Solve the garden once and write the answer back, as one undo step
-    that also puts the previous provenance back. Raises CommandError
+    """Solve the garden once and write the answer back, as one undo step.
+    Raises CommandError
     when the garden can't be solved (and then writes nothing)."""
     looping = recurrences(conn)
     if looping:
         raise CommandError(f"{looping[0]} uses prev(), which only a run can answer -- "
                            f"use sim; solve writes one static solve")
     before = {m.id: dict(m.properties) for m in motes_repo.list_motes(conn)}
-    provenance = derivations_repo.snapshot(conn)
     try:
         result = simulation_repo.run_simulation(conn, solver=solver or "linear")
     except simulation_repo.SimulationError as e:
@@ -596,20 +597,14 @@ def solve(conn: sqlite3.Connection, solver: str | None = None) -> Solve:
         if changed:
             steps.append(undo.for_update_mote(
                 conn, mote_id, {k: old[k] for k in changed if k in old}, changed, label="solve"))
-    replaced = derivations_repo.snapshot(conn)
-    steps.append(undo.Command(
-        label="solve",
-        undo=lambda: derivations_repo.restore(conn, provenance),
-        redo=lambda: derivations_repo.restore(conn, replaced),
-    ))
-    moved = len(steps) - 1
+    moved = len(steps)
     message = f"solved · {moved} mote{'' if moved == 1 else 's'} changed"
     if result.unsolved:
         message += f" · {len(result.unsolved)} freedom(s) had no equation"
     if result.constraint_violations:
         count = len(result.constraint_violations)
         message += f" · {count} constraint{'' if count == 1 else 's'} broken"
-    return Solve(message, undo.combine("solve", steps), moved, result)
+    return Solve(message, undo.combine("solve", steps) if steps else None, moved, result)
 
 
 _MISSING = object()
@@ -625,6 +620,8 @@ def live_solve(conn: sqlite3.Connection, edit: "undo.Command | None") -> tuple[s
         solved = solve(conn)
     except CommandError as e:
         return f" · live: {e}", edit
+    if solved.command is None:
+        return f" · live: {solved.message}", edit
     return f" · live: {solved.message}", undo.combine(edit.label, [edit, solved.command])
 
 
@@ -750,7 +747,10 @@ def choices(conn: sqlite3.Connection, verb: str, rest: str) -> list[tuple[str, s
 
 
 def _solved_refs(conn) -> list[tuple[str, str]]:
-    rows = conn.execute("SELECT DISTINCT mote_id, key FROM simulation_derivations").fetchall()
+    """Every value some equation determines, by name (what `why` can
+    explain) -- read off the rules, so completing a line costs no solve."""
+    index = simulation_repo.incidence_index(conn)
+    rows = {v for touch in index.touches for v in touch.determines}
     garden = _Garden(conn)
     out = []
     for mote_id, key in rows:

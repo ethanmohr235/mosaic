@@ -757,7 +757,7 @@ def _handle_simulate(conn, args) -> None:
 
 
 def _handle_why(conn, args) -> None:
-    explanation = derivations.explain(conn, args.mote_id, args.key, depth=args.depth)
+    explanation = derivations.Explainer(conn).explain(args.mote_id, args.key, depth=args.depth)
     if explanation.derived:
         print(BASE_UNIT_NOTE)
     for line in explanation_lines(conn, explanation):

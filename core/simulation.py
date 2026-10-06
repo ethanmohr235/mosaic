@@ -20,7 +20,6 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from core import derivations as derivations_repo
 from core import incidence as incidence_repo
 from core import model_resolver
 from core import roles as roles_repo
@@ -410,12 +409,7 @@ def trace(
     pairs = tuple(_rule_instances(rules_repo.list_rules(conn), view))
     model_cache: dict[str, PropertyProvider] = {}
     touches = {(r.mote.id, m): _touch(view, r, m, model_cache) for r, m in pairs}
-    journal, error = Journal(), None
-    try:
-        solve_view(view, list(pairs), solver, previous=view.properties,
-                   log_constraints=False, model_cache=model_cache, journal=journal)
-    except (SimulationError, SolverError) as e:
-        error = str(e)
+    journal, error = _journal_solve(view, pairs, solver, model_cache)
     solved = {v: x for d in journal.derivations for v, x in d.values.items()}
     touches = {(r.mote.id, m): _touch_at(view, r, m, solved, model_cache, touches[(r.mote.id, m)])
                for r, m in pairs}
@@ -425,6 +419,40 @@ def trace(
     equations = [(r, m) for r, m in pairs if _operator_of(r) == "==" and not r.is_check]
     inferred = _infer_missing_units(view, equations, solved, model_cache)
     return Trace(view, pairs, touches, journal, results, error, inferred)
+
+
+def _journal_solve(
+    view: _GardenView, pairs, solver: str, model_cache: dict[str, PropertyProvider]
+) -> tuple[Journal, str | None]:
+    """One in-memory solve of `view` with a journal, never raising: a solve
+    that fails comes back with what it derived before it did, and why."""
+    journal, error = Journal(), None
+    try:
+        solve_view(view, list(pairs), solver, previous=view.properties,
+                   log_constraints=False, model_cache=model_cache, journal=journal)
+    except (SimulationError, SolverError) as e:
+        error = str(e)
+    return journal, error
+
+
+def solve_journal(
+    conn: sqlite3.Connection, scenario: str | None = None, solver: str = _DEFAULT_SOLVER,
+    overrides: dict[str, dict[str, float]] | None = None,
+) -> tuple[Journal, str | None]:
+    """How the garden as it stands solves -- what `why` and `\\work` explain
+    (core/derivations.py). The solve and its journal of derivations, and
+    none of `trace()`'s probing of every equation; the error if the solve
+    stopped short. Writes nothing. `overrides` are knobs, over the
+    scenario's (core/knobs.py)."""
+    properties = {m.id: m.properties for m in list_motes(conn)}
+    view = _build_view(
+        scenarios_repo.overlay(
+            scenarios_repo.apply(properties, _resolve_scenario(conn, scenario)),
+            overrides or {}),
+        list_relationships(conn),
+    )
+    pairs = _rule_instances(rules_repo.list_rules(conn), view)
+    return _journal_solve(view, pairs, solver, {})
 
 
 def _touch_at(
@@ -514,11 +542,9 @@ def run_simulation(
     scenario: str | None = None,
     strict_constraints: bool = False,
 ) -> SimulationResult:
-    """Solve the garden and write the results back, replacing the
-    garden's provenance (core/derivations.py) with this solve's. Raises
+    """Solve the garden and write the results back. Raises
     SimulationError if the rules can't be satisfied, and then writes
-    nothing: the motes still hold the last good solve's values, so its
-    provenance is still the right explanation of them.
+    nothing: the motes still hold the last good solve's values.
 
     `solver` picks the backend that finishes whatever the substitution
     loop couldn't resolve on its own -- see core/solvers.py. The default,
@@ -532,8 +558,7 @@ def run_simulation(
     always has.
 
     `scenario` names a mote gathering overrides (see core/scenarios.py).
-    Solving under one **never writes to the graph** -- neither values nor
-    provenance -- and the returned changes say what *would* happen. That
+    Solving under one **never writes to the graph**, and the returned changes say what *would* happen. That
     is not a limitation to lift later: the answer to a hypothetical is
     not the garden's state, and the question of where a scenario solve's
     results would be written has no good answer.
@@ -551,13 +576,12 @@ def run_simulation(
 
     try:
         model_cache: dict[str, PropertyProvider] = {}
-        journal = Journal()
         _validate_units(view, pairs)
         warnings = _dimension_warnings(view, pairs, strict_units, model_cache)
         result = solve_view(
             view, pairs, solver, solver_configuration,
             strict_constraints=strict_constraints,
-            model_cache=model_cache, journal=journal,
+            model_cache=model_cache,
         )
         solved = result.values
         violations = result.constraint_violations
@@ -572,7 +596,6 @@ def run_simulation(
         inferred_units = _infer_missing_units(view, result.equations, solved, model_cache)
         properties = _apply_inferred_units(conn, view.properties, inferred_units)
         changes = _write_back(conn, properties, solved)
-        _record_provenance(conn, journal)
     else:
         changes = _changes_for(view.properties, solved)
     logger.info("simulation solved %s values", len(solved))
@@ -2125,10 +2148,3 @@ def _resolve_scenario(
             f"{scenarios_repo.VARIES!r} relationship to an override"
         )
     return case
-
-
-def _record_provenance(conn: sqlite3.Connection, journal: Journal) -> None:
-    """Replace the garden's provenance with this solve's, straight after
-    its write-back, so `why` always explains the values the motes hold."""
-    derivations_repo.replace_journal(conn.cursor(), journal)
-    conn.commit()

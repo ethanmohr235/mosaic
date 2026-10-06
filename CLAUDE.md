@@ -32,7 +32,7 @@ updates it in the same commit. Keep it compact: tables, no prose.
   - Momentum is removed
   - Monarch is frozen
   - commit-tick and run history are cut
-  - `why` explains the last solve only
+  - `why` explains the garden as it stands, from a live solve
 - Console **U1 (the shell) is done**:
   - the package is `console/`, launched by `run_console.py`
   - the grammar lives in `core/commands.py`

@@ -122,65 +122,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     # the whole migration. Dropping a table drops its index with it.
     cursor.execute("DROP TABLE IF EXISTS annotations")
 
-    _drop_run_history(cursor)
-
-    # Provenance for the last write-back solve: which equations, with
-    # which known inputs, determined which values. Only one solve's worth
-    # is ever kept -- core/simulation.py's run_simulation() replaces the
-    # whole set in the same transaction as its write-back, so it always
-    # describes the values the motes actually hold. A `block` is one group
-    # solved together -- exactly one equation and one value for a
-    # substitution step, N of each for a solver block, which is why both
-    # fit one shape. No FK to motes: the set is replaced wholesale, and an
-    # explanation of a since-deleted mote's value is harmless until the
-    # next solve drops it. See core/provenance.py and core/derivations.py.
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS simulation_derivations (
-        block INTEGER NOT NULL,
-        mote_id TEXT NOT NULL,
-        key TEXT NOT NULL,
-        value TEXT NOT NULL,
-        method TEXT NOT NULL,
-        detail TEXT
-    );
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS simulation_derivation_equations (
-        block INTEGER NOT NULL,
-        rule_mote_id TEXT NOT NULL,
-        rule_name TEXT NOT NULL,
-        anchor_mote_id TEXT NOT NULL,
-        equation TEXT NOT NULL
-    );
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS simulation_derivation_inputs (
-        block INTEGER NOT NULL,
-        kind TEXT NOT NULL,
-        mote_id TEXT NOT NULL,
-        key TEXT NOT NULL,
-        value TEXT NOT NULL
-    );
-    """)
-
-    # Explaining a value looks it up by (mote, key); expanding an input
-    # then looks up that input's own block the same way.
-    cursor.execute("""
-    CREATE INDEX IF NOT EXISTS idx_simulation_derivations_lookup
-        ON simulation_derivations(mote_id, key);
-    """)
-
-    cursor.execute("""
-    CREATE INDEX IF NOT EXISTS idx_simulation_derivation_inputs_block
-        ON simulation_derivation_inputs(block);
-    """)
-
-    cursor.execute("""
-    CREATE INDEX IF NOT EXISTS idx_simulation_derivation_equations_block
-        ON simulation_derivation_equations(block);
-    """)
+    _drop_provenance(cursor)
 
     # Sync (core/sync.py) needs to tell, for a property or relationship
     # already stored locally, whether an incoming remote edit is newer --
@@ -216,42 +158,25 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     _migrate_intervals(conn)
 
 
-# Tables from when a garden kept a log of every simulation run, with
-# derivations keyed by run and step. Dropped on open rather than
-# converted: provenance now covers only the last write-back solve, and
-# the next solve rebuilds it.
-_RUN_HISTORY_TABLES = (
+# Tables a garden used to keep: a log of every simulation run, and then
+# the last write-back solve's provenance. `why` and `\work` now explain
+# the garden as it stands from a live solve (core/derivations.py), so
+# nothing is stored. Dropped on open rather than converted; dropping a
+# table drops its indexes with it. None of them was ever synced.
+_PROVENANCE_TABLES = (
     "simulation_changes",
     "simulation_derivation_inputs",
     "simulation_derivation_equations",
     "simulation_derivations",
     "simulation_runs",
 )
-_DERIVATION_TABLES = _RUN_HISTORY_TABLES[1:4]
 
 
-def _drop_run_history(cursor: sqlite3.Cursor) -> None:
-    """Drop the run-log tables, and derivation tables still keyed by run,
-    so initialize_database can create the single-solve shape. A no-op on
-    a fresh garden and on one already migrated. Dropping a table drops
-    its indexes with it."""
-    if not _has_run_history(cursor):
-        return
-    for table in _RUN_HISTORY_TABLES:
+def _drop_provenance(cursor: sqlite3.Cursor) -> None:
+    """Drop every retired run-log and provenance table. A no-op on a fresh
+    garden and on one already migrated."""
+    for table in _PROVENANCE_TABLES:
         cursor.execute(f"DROP TABLE IF EXISTS {table}")
-
-
-def _has_run_history(cursor: sqlite3.Cursor) -> bool:
-    cursor.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'simulation_runs'"
-    )
-    if cursor.fetchone() is not None:
-        return True
-    for table in _DERIVATION_TABLES:
-        cursor.execute(f"PRAGMA table_info({table})")
-        if any(row["name"] == "run_id" for row in cursor.fetchall()):
-            return True
-    return False
 
 
 # Companion keys an interval absorbs. `duration` and `ends`/`end` say how

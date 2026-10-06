@@ -530,20 +530,19 @@ def why(
     produced it, the known values they read, and -- recursively -- how
     each of those was itself determined.
 
-    Explains the last solve that wrote to the garden (a solve made in
-    the app or the CLI), which is the one whose values are on the motes
-    now; previews and scenario solves are never recorded. `method` is "substitution" when
+    Explains the garden as it stands now, from a live solve that writes
+    nothing, so the answer is never older than the last edit. `method` is "substitution" when
     one equation determined the value alone, or "solver" when several
     equations determined several values *together*; in that case
     `also_determined` names the others and no finer attribution exists.
-    An empty `equations` with a `note` means the last solve did not
-    derive this value at all -- it was set directly, or is unchanged --
-    or that no solve has been recorded yet.
+    An empty `equations` with a `note` means no solve derives this value
+    -- it is set directly -- or that the garden has no equations or does
+    not solve (the note says which).
 
     Values are in each dimension's base SI unit, which is what the solver
     worked in, not the unit a mote declares."""
     with _connect(garden) as conn:
-        explanation = derivations_repo.explain(conn, mote_id, key, depth=depth)
+        explanation = derivations_repo.Explainer(conn).explain(mote_id, key, depth=depth)
         return dataclasses.asdict(explanation)
 
 
@@ -1178,16 +1177,14 @@ def shown_work(
     """How one value came out: the equation, the equation with the values
     written into it, and the result.
 
-    Read from the last solve's record -- the same record `why` reads, so
-    this and `why` explain one value one way. The substituted values are in
+    Explained from a live solve of the garden as it stands -- the same one
+    `why` reads, so this and `why` explain one value one way. The substituted values are in
     the unit each mote declares rather than base SI (somebody who wrote
     `80 in` has to see 80), and where one line mixes two units of a
     dimension they are converted to one and the step's `note` says so.
 
-    A value the last solve did not determine has no work to show and says
-    so in `note` -- which is an answer, not a failure. Solve first
-    (`preview_simulation` never writes, so it leaves no record; the app or
-    the CLI has to do the writing solve)."""
+    A value no solve determines has no work to show and says so in `note`
+    -- which is an answer, not a failure."""
     with _connect(garden) as conn:
         shown = calc_repo.work(conn, mote_id, key, unit, figures)
         return {

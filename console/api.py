@@ -436,7 +436,8 @@ class Api:
             return {"effect": "live", "live": live,
                     "message": "live: every edit made here is solved" if live else "live off"}
         solved = motion_repo.solve(self._session.conn)
-        self._session.undo.push(solved.command)
+        if solved.command is not None:
+            self._session.undo.push(solved.command)
         return {"effect": "statement", "ok": True, "message": solved.message,
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": True}

@@ -65,7 +65,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `plot\|sim\|fit\|graph --flow … --set ‹m.k›=‹value› [unit]` | **Knob**: try a value, write nothing. Repeatable. A unit is converted into the property's own (`--set bd.E="200 GPa"`); a unit on a unitless property is refused. In `sim`, the `--vs` run stays the plain garden; in `fit`, a held value or a free input's start; a `sim` pane's knobs also move the `rule` and flow panes that follow its playhead |
 | `plot\|sim\|fit\|graph --flow … --keep` | Write the line's `--set` knobs, as `set` would (one undo step). A pane offers it as `W`, then takes its line without the knobs |
 | `rule @sel\|‹rule›` | A rule's equation and bound values (a non-rule mote: every rule touching it) |
-| `why ‹m.k›` | How the last written solve got a value |
+| `why ‹m.k›` | How the garden as it stands determines a value (a live solve; writes nothing) |
 | `scenarios` | Scenarios and their overrides |
 | `solve` | Solve once and write it (undoable; refused if a rule uses `prev()`) |
 | `solve --live on\|off` | Solve after every edit made here (top bar: `live`) |

@@ -101,12 +101,12 @@ units. Call it before hand-writing an `equation` or a property-model
 mote — `docs/simulation.md` has the same content with more prose, but
 isn't itself reachable over MCP.
 
-`why` explains how a solved value was determined, recursively, as of the
-last solve that wrote to the garden. It needs such a solve to have
-happened; a preview or a scenario solve leaves nothing for it to read.
+`why` explains how a solved value is determined, recursively, from a live
+solve of the garden as it stands (nothing is written, and nothing needs to
+have been solved first), so it is never older than the last edit.
 
 The four dependency tools read the *rules* instead, so they answer
-before anything has been solved. Note that MonOSS solves constraint
+without solving at all. Note that MonOSS solves constraint
 systems: `producers` returns every equation that could determine a
 value, which for a coupled system is several, and an empty result means
 nothing can determine it at all.
@@ -149,9 +149,8 @@ needing a note to render. `unit` and `figures` convert and quote every
 quantity for display and change nothing stored.
 
 `shown_work(mote, key)` is `\work`: the equation, the equation with the
-values written into it, and the result. Read from the last solve's record,
-so it needs such a solve to have happened -- `preview_simulation` writes
-nothing and so leaves no record. Substituted values are in the unit each
+values written into it, and the result. Explained from a live solve of the
+garden as it stands, the same one `why` reads. Substituted values are in the unit each
 mote declares rather than base SI, and where one line mixes two units of a
 dimension the step's `note` says which one they were converted to.
 
