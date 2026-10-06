@@ -11,10 +11,6 @@ step; with `solve --live on` that happens after every edit. A scenario
 is never written, since it answers what *would* happen. The same answers
 are `core/motion.py`'s, so the CLI and MCP can reach them too.
 
-> This used to live in Monarch, as a settings popover and a bottom scrub
-> bar. It moved out wholesale: Monarch is a graph editor, and simulation
-> is a subject that needs a window rather than a corner of one.
-
 See "Time-based simulation" below.
 Programmatically, a single steady-state solve is
 `core.simulation.run_simulation(conn)`; a time-based run is
@@ -23,8 +19,8 @@ preview.
 
 A third question -- how one value moves as another changes -- has an
 answer shaped like a curve rather than like a state, and so has its own
-module and its own console pane: `core.sweep.run_sweep()`, and **Moxie**
-(`plot …`). See "Sweeping" below.
+module and its own console pane: `core.sweep.run_sweep()`, and the `plot`
+pane. See "Sweeping" below.
 
 ## The three pieces
 
@@ -553,8 +549,8 @@ motes still collapsing, because every existing garden relies on that.
 ### Roles never shadow properties
 
 A **bare name** is a property of the anchor mote. A name in the
-**attribute position** is a role. Nothing that used to mean a property
-can start meaning a role, because reading an attribute off anything other
+**attribute position** is a role. A name that means a property cannot
+start meaning a role, because reading an attribute off anything other
 than `targets()`/`sources()` was already an error. An undeclared name in
 the attribute position is rejected, naming what is declared.
 

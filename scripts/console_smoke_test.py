@@ -1161,6 +1161,53 @@ FLOW = ".view-flow"
 FLOW_BOARD = "document.querySelector('.view-flow .flow-surface').flow"
 
 
+def knob_checks(window):
+    """Knobs (`--set`), the time axis (`plot … vs t`) and an archived
+    garden's read-only top bar. Runs on C1 (r_a = 100) and puts it back."""
+    def head_with(prefix, fragment):
+        return next((h for h in headers(window) if h.startswith(prefix) and fragment in h), None)
+
+    def a_sim_knob_tries_a_value_then_w_keeps_it():
+        type_command(window, "sim --set C1.r_a=50", new_pane="right")
+        assert wait_until(lambda: head_with("sim", "--set C1.r_a=50")), headers(window)
+        assert wait_until(lambda: "set C1.r_a=50" in js(
+            window, "document.querySelector('.pane.focused .c-head-summary').textContent")), \
+            "the header should name the knob"
+        assert prop(ids["C1"], "r_a") == 100, "a knob must never write to the garden"
+        press(window, "W", shift=True)
+        assert wait_until(lambda: prop(ids["C1"], "r_a") == 50), "W should write the knob"
+        assert wait_until(lambda: head_with("sim", "--set") is None), \
+            f"the pane should take its line without the knob: {headers(window)}"
+        type_command(window, "undo")
+        assert wait_until(lambda: prop(ids["C1"], "r_a") == 100), "one undo takes the keep back"
+        no_errors(window)
+
+    check("knobs: `sim --set` tries a value, W keeps it as one undo step", a_sim_knob_tries_a_value_then_w_keeps_it)
+
+    def a_run_over_time_is_a_plot():
+        type_command(window, "plot C1.current vs t 0:5", new_pane="right")
+        assert wait_until(lambda: head_with("plot", "vs t 0:5")), headers(window)
+        assert wait_until(lambda: count(window, ".view-plot path.plot-series") >= 1), "no curve drawn"
+        assert wait_until(lambda: "t (tick)" in texts(window, ".view-plot .plot-title")), \
+            f"the x axis should say tick: {texts(window, '.view-plot .plot-title')}"
+        no_errors(window)
+
+    check("time: `plot C1.current vs t 0:5` draws the run", a_run_over_time_is_a_plot)
+
+    def an_archived_garden_is_read_only():
+        type_command(window, f"garden archive {GARDEN}")
+        assert wait_until(lambda: "archived" in topbar(window)), topbar(window)
+        before = prop(ids["C1"], "r_a")
+        type_command(window, "C1.r_a = 7")
+        assert wait_until(lambda: any("archived and read-only" in t for t in log_texts(window))), log_texts(window)[-3:]
+        assert prop(ids["C1"], "r_a") == before, "an archived garden must refuse the write"
+        type_command(window, f"garden unarchive {GARDEN}")
+        assert wait_until(lambda: "archived" not in topbar(window)), topbar(window)
+        no_errors(window)
+
+    check("archive: the top bar says read-only and a write is refused, then restored", an_archived_garden_is_read_only)
+
+
 def flow_checks(window):
     pane = "graph C1 --flow"
 
@@ -1405,6 +1452,7 @@ def drive(first, first_loaded):
         u7_checks(second)
         u8_checks(second)
         flow_checks(second)
+        knob_checks(second)
         u9_checks(second)
         time.sleep(0.8)  # the sorted find pane's autosave
         third, third_loaded = open_window("Mosaic smoke test (U2 relaunch)")

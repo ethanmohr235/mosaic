@@ -48,10 +48,9 @@ with a primary, vendors its fonts, and never saved run history.
   `console/frontend/` holds the shell, the store, the components and
   one ES module per view under `js/views/`. There is no build step, and
   since U9 there are no other windows and no `frontend_shared/`.
-- **Strangler migration.** Build the shell first, then port the apps
-  one at a time. An app's old window (`run_<app>.py`, `<app>/app.py`,
-  `<app>/frontend/`) keeps working until its app is ported. After that
-  it is deleted, with no shim and no preset launcher.
+- **No shims, no preset launchers.** The shell was built first and the
+  apps ported into it one at a time, each old window deleted when its
+  port landed. The console is the only window.
 - **New UI only in the shell.** Once the shell and view contract exist
   (U1), every new surface is built as a pane there, including the
   worksheet editor, Mora calc macros UI, Home tree and Monastery agenda.
@@ -103,7 +102,7 @@ else.
 - `find` query syntax (`type:task due:<7d`) builds on `core/query.py`,
   which Monolith already uses. Don't write a second query language.
 - Completion and history popups, inline ghost text, the grammar hint
-  header and the per-context history follow the handoff exactly.
+  header and the per-context history are in the shell (`js/commandline.js`).
 - `@sel` can be used anywhere a mote id is expected (see *Selection*).
 - Errors show in `--fault` on the right of the command line, and in the
   pane header's summary when a pane's command failed.
@@ -160,7 +159,7 @@ this table by the roadmap phase that builds them.
 - **Every** pane re-runs its command after any write made from the
   window (command line, props edit, a view's own edit).
 - Writes from outside the window (MCP, CLI, sync) are picked up when
-  the window regains focus, as the old windows do, and by an explicit
+  the window regains focus, and by an explicit
   `refresh`.
 - Re-running must be cheap enough for this. A view that's too slow to
   re-run gets a cache in its API namespace, not a stale-output mode.
@@ -196,16 +195,15 @@ this table by the roadmap phase that builds them.
 ### Inspector
 
 - **`props` is a pane** that follows `@sel`'s primary. It is the
-  main place a mote is edited, and it follows the handoff's props
-  layout: title, key/value grid, `links N`, `→ relation target`.
+  main place a mote is edited: title, key/value grid, `links N`, `→ relation target`.
 - **Floating on demand.** `p` (settled in U3) pops the same editor
   as a floating panel over any layout that has no props pane, and it
   closes on `esc`.
 - Pane and float are **one component**, so what you can do to a mote is
   the same in both, and the rule from `architecture.md` → *The
   inspector* still holds.
-- The float follows the handoff's popup style: `--bg-raised`, 1px
-  `--line-strong`, no shadow, no leader line.
+- The float is `--bg-raised`, 1px `--line-strong`, no shadow, no leader
+  line.
 
 ### Settled for U3 (2026-09-30)
 
@@ -513,8 +511,7 @@ What the build decided within the settled plan above.
 - **One line says what is drawn:** `graph [@sel|#id|‹name›] [--depth N]
   [find conditions]`. A root draws its neighbourhood (default depth 2),
   no root the whole garden, and a `@sel` root re-roots as the selection
-  moves. `mo narch` opens `find | graph @sel --depth 2 | open @sel`
-  (the handoff's Observatory screen).
+  moves. `layout graph` opens `find | graph @sel --depth 2 | open @sel`.
 - **Gestures become commands:** ctrl+drag node → node prefills `A ->
   ‹type› -> B` with the caret on the type; `n` prefills a new mote; `d d`
   runs `delete` (`unlink` on an edge; it prefilled until the post-U9 fixes). Not ported: copy/paste, the
@@ -524,10 +521,10 @@ What the build decided within the settled plan above.
   state; `u` unpins. Hiding is in the line: conditions, `--hide-rel`,
   `--view`. Not ported: the force sliders, colour by property, arranging
   species attractors.
-- **Style: handoff squares plus kind marks.** Squares stroked in species
+- **Style: squares plus kind marks.** Squares stroked in species
   colour; a species is a diamond, a rule has a hollow inner square;
   small arrowheads; an edge's type shows only around the selection or
-  the pointer; the handoff's corner notes.
+  the pointer.
 - **Annotations are removed** (already decided in *Steps*): the code,
   the docs, and a migration that drops their stored data.
 
@@ -840,7 +837,7 @@ What the build decided within the settled plan above.
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and
   "no animation except cursor blink and playhead" rules all come from
-  the handoff `README.md`. Put the tokens in one CSS file that every
+  the original design. They live in `console/frontend/tokens.css`: put the tokens in one CSS file that every
   view uses, and don't hard-code a color anywhere else.
 - **Color.**
   - Mote color comes from the species palette (`architecture.md` →
@@ -941,12 +938,9 @@ Each step's done-check is the same:
 
 ## Rules for agents on this track
 
-- Read this doc and the handoff `README.md` before any UI step. Open
-  the design canvas to check spacing and states, but don't copy its
-  code: it's a reference, not production.
+- Read this doc and `console/frontend/tokens.css` before any UI step.
 - Don't add a color, font, size, radius, shadow or animation that isn't
   in the tokens. If a view needs one, raise it as a question.
-- Don't build UI in an old window once U1 has landed.
 - Don't put logic in a view or in an API namespace that belongs in
   `core/` (`architecture.md` → *What belongs on which surface*). This
   includes command parsing and query semantics.
@@ -969,14 +963,14 @@ Each step's done-check is the same:
   bulk delete and *save view* come back as commands (`link @sel …`,
   `delete @sel`, `view save ‹name›`) -- U2 did not port them.
 - **Size tokens added in U1.** The shell took these from the design
-  canvas rather than the handoff README. Confirm or replace them:
+  canvas (no longer in the repo). Confirm or replace them:
   `--popup-mo` 36px, `--popup-app` 90px,
   `--divider-hit` 3px (invisible grab margin), `--popup-rows` 12,
   `--prompt-gap` 6px, `--bar-gap` 8px, `--border` 1px. U4 added
   `--plot-rail` 240px (the plot pane's legend/knob column; the design
   draws 320px) and the series hues `--s5` (195°) and `--s6` (40°), which
   are not colour-vision-checked against the other four.
-- **Plot keys.** The handoff's Moxie keys were `f x z t e ?`. `x` and `e`
+- **Plot keys.** The original design's keys were `f x z t e ?`. `x` and `e`
   are shell keys (close pane, edit command), so the plot pane uses `t`
   to show/hide a series, `z`/`Z` to zoom, `y` for log y, `[ ]` to pick
   a series, `j k` / `- +` for knobs. `f` waits for `fit`; export is

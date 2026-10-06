@@ -378,9 +378,8 @@ The neighbour scope stays, and stays *first*, because it is now the
 answer to a collision rather than the only way to resolve at all: a
 garden with two motes called `bd` draws one edge to say which one this
 rule means. `unresolved_equation_names()` reports exactly those
-collisions for an editor to offer that edge on; it used to report every
-unwired name, which with the garden scope in place would be offering a
-fix to something that isn't broken.
+collisions for an editor to offer that edge on, not every unwired name:
+with the garden scope in place an unwired name isn't broken.
 
 What `applies_to` points at decides a rule's reach, inferred rather than
 declared: a species means once per instance, any other mote means once
@@ -644,11 +643,10 @@ The charter:
   step: a verb's from `core/batch.py`-style commands, a statement's
   from `core/command_bar.py`'s journal, which records the inverse of
   each primitive write as the line runs -- and takes them all back if
-  the line fails halfway, so a statement never lands half-written. The
-  old windows' `/` bar pushes the same step. Layouts and command history are UI state, kept in
-  a per-garden sidecar (`gardens/<name>.db.console.json`) that follows
-  the garden through rename, trash and restore and never syncs. An app
-  not yet ported opens its old window from the console.
+  the line fails halfway, so a statement never lands half-written.
+  Layouts and command history are UI state, kept in a per-garden sidecar
+  (`gardens/<name>.db.console.json`) that follows the garden through
+  rename, trash and restore and never syncs.
 * **MCP** -- reads plus graph edits (above). Deliberately not: writing a
   simulation to the graph, deleting or restoring gardens, Calendar
   export, opening links.
@@ -709,25 +707,23 @@ tasks say `due` and events say `starts` needs no migration and no
 declaration -- it is answered by looking, exactly as a species is
 (`core/kinds.py`).
 
-This replaced three reserved names with none. `date`, `duration` and
-`recurrence` used to be separate properties, and only the first had a
-shape you could recognize -- a bare `30` is not distinguishable from any
-other number, so a span and a rule *had* to be found by name. Folding all
-three into one self-describing value is what removed the last reason for
-the calendar to know any name at all. `date` survives only as the key a
+No property name is reserved for it. How long and how often live inside
+the start's value, because a bare `30` is not distinguishable from any
+other number, so a span or a rule kept as a separate property could only
+be found by name. One self-describing value is what lets the calendar
+know no name at all. `date` survives only as the key a
 *new* mote's start is written to (`core/calendar.py::DEFAULT_BINDING`), a
 default rather than a name anything reads.
 
-Gardens written the old way are folded on open
-(`core/db.py::_migrate_intervals`), idempotently, **keeping each garden's
-own key name** -- `date` stays `date`, `when` stays `when`. An all-day
-`ends` was inclusive as people wrote it and becomes an exclusive interval,
-which is the end `core/calendar.py` always computed internally anyway.
-Durations use days/hours/minutes/seconds only: years and months have no
+A garden that still has a separate `date`/`duration`/`ends`/`recurrence`
+is folded on open (`core/db.py::_migrate_intervals`), idempotently,
+**keeping each garden's own key name** -- `date` stays `date`, `when` stays
+`when`. An all-day `ends` was inclusive as people wrote it and becomes an
+exclusive interval, the end `core/calendar.py` always computed. Durations use days/hours/minutes/seconds only: years and months have no
 fixed length, so an event lasting "one month" has no single answer.
 
 The one thing this costs: hand-typing a separate `duration` beside a date
-no longer does anything. The calendar panes are the mitigation: a move
+does nothing. The calendar panes are the mitigation: a move
 or a resize there writes the interval for you (`core/agenda.py`), so the
 notation is typed only to make a date in the first place.
 
@@ -900,11 +896,8 @@ clearing the view's declared unknowns first -- a note *reads state*, and
 a free variable with no solver behind it is useless rather than correct.
 
 **A note has no clock.** Every macro resolves against the garden as it
-stands, and there is no step to ask for. Notes used to resolve at `t+N`
-against a `run_time_series()` preview, with Mora carrying a stepper and
-an `Apply t+N…` button that committed the projection; all of it is
-removed. The line it was crossing is the one the windows are divided on:
-a note reports what a garden *is*, `sim` is where a garden moves through
+stands, and there is no step to ask for. The line is the one the panes
+are divided on: a note reports what a garden *is*, `sim` is where a garden moves through
 time, and `plot` is where a property is swept. A note editor that could
 also run and commit a simulation held a lever belonging in another room.
 What is left is a stronger promise than "it asks first" -- the note path
@@ -933,14 +926,11 @@ follows unsaved typing (`modoc_bind.assemble(..., source=)`); figures
 are memoised until the garden changes (`core/document.py::FigureMemo`).
 A note saves on every pause in typing, and one editing session folds
 into one undo step (the session's `UndoManager.push` coalescing key).
-Mora was a separate window (`mora/`) until U6.
-
 # The calendar
 
 `core/calendar.py` places motes in time, and the console's calendar
 panes draw them (`agenda`, `week`, `month`, over `core/agenda.py`;
-docs/console.md → *Settled for U7*). Monastery was a separate window
-(`monastery/`) until U7.
+docs/console.md → *Settled for U7*).
 
 The design decision worth stating is what it does *not* do: there is no
 calendar-entry type, and no property that means "this is an event."
@@ -1044,14 +1034,8 @@ One mote, one surface. The console's `props` pane and its `p` float
 draw the same payload, `core/inspect.py::inspect`, so they cannot
 disagree about what a mote is (docs/console.md -> *Settled for U3*).
 
-It was not like that. Each old window had grown its own docked detail
-panel, and what you were allowed to do to a mote depended on which
-window you happened to be standing in: Monarch could add a property,
-rename a key and set a species; Motion could overwrite the values a mote
-already had and nothing else; Mora could read properties and edit none.
-A shared floating panel (`frontend_shared/inspector.js` over
-`api_common.InspectorApi`) fixed that across the six windows, and went
-with the last of them, Monarch, in console step U8.
+What you may do to a mote does not depend on which pane you are in:
+every pane that shows one reaches the same commands.
 
 **Every edit is a command.** `set`, `rename`, `unlink`, `A -> type ->
 B` and `template` are what the props pane runs, so an edit is in the
@@ -1091,8 +1075,7 @@ calendar panes, repeating or not.
 In the console a date is written as that text (`set Lab date
 2026-10-08T13:00/PT2H`), or moved and resized on the calendar panes,
 whose every edit is the `set` line the move means (`core/agenda.py`).
-The old windows' calendar picker (`frontend_shared/interval.js`) went
-with Monarch in U8. No JavaScript reads an RRULE: expanding a recurring
+No JavaScript reads an RRULE: expanding a recurring
 value into occurrences is `core/calendar.py`'s job, via dateutil.
 
 # The table
@@ -1335,7 +1318,7 @@ a model is a note (see Notes).
 
 The console's gardens panes (`layout gardens`: `gardens | garden`, docs/console.md ->
 *Settled for U9*) is the ownership tree of `core/projects.py` drawn as a
-pane, and the garden manager the Gardens window used to be.
+pane, and the garden manager.
 
 `core/home.py` answers both panes and the `garden` subverbs. `gardens`
 lists owned gardens under their owner's garden with the cover's name,
@@ -1365,7 +1348,7 @@ the open garden `cd`s there.
 
 `console/frontend/focus.js` is loaded first and installs
 itself -- there is nothing to configure. It owns two window-wide rules
-that the old windows used to re-implement per app and per shared widget,
+that would otherwise be re-implemented per pane and per shared widget,
 each over its own subtree, with gaps between them:
 
 - **Middle-click never pastes.** WebKitGTK runs X11's primary-selection

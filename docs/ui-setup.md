@@ -2,12 +2,9 @@
 
 One tiled window, **the console** (`run_console.py`, window title
 *Mosaic*, via `pywebview`: a local HTML/CSS/JS frontend, no browser tab,
-no local web server). Every app has moved into it -- Monolith, the
-table; Moxie, the plots; Motion, the simulator; Mora, the notes;
-Monastery, the calendar; Monarch, the graph; and Home, where the
-gardens themselves are made, renamed, removed, imported, exported and
-synced -- and their old windows are deleted (`docs/console.md`, steps
-U1–U9).
+no local web server). Tables, plots, the simulator, notes, the calendar,
+the graph and the garden manager are all panes in it
+(`docs/console.md`).
 
 ---
 
@@ -19,55 +16,8 @@ U1–U9).
 
 One window, one garden at a time, every pane the output of a command.
 Its design, grammar and view contract are in `docs/console.md`; every
-command and key on one page is `docs/manual.md`. This
-section covers what it does today (steps U1–U4): the shell, the `log`
-view, the `find` table, the props pane and plots.
-
-### The shell
-
-- **Top bar:** the `[mo]saic` wordmark and `/ garden` (the ownership path).
-  On the right, slotted layouts as tabs (`1:two`) with `*` and
-  *unsaved layout* once the panes drift from the active one, then the
-  selection (`sel bd +2 · linked in N panes`) or, with nothing selected,
-  the pane count.
-- **Command line** (`$` prompt): `:` or `/` focuses it and `esc`
-  leaves. `⏎` runs in the focused pane, `^⏎` in a new pane below and `⇧⏎` in one to the right. `tab`
-  completes, and the best match shows as ghost text. `↑` on an empty
-  line opens this garden's history (`^r` searches it). Errors show in
-  red on the right. A delete asks for a second `⏎`.
-- **Key-hint bar:** always shows the focused view's keys, then the
-  shell's.
-
-### What you can type
-
-| Line | Does |
-|---|---|
-| `layout calc`, `layout docs`, `layout plan`, `layout graph`, `layout gardens` | A built-in layout, in the focused pane's place (`layout ` then `tab` lists them with the saved ones). A saved layout of the same name wins. |
-| `find <conditions> [--sort k] [--group k] [--cols a,b]` | The table (below). |
-| `open @sel\|#id\|<name>` | A mote's properties and links (below). |
-| `rename <target> <old> <new>` | Rename a property, keeping its value and unit. Refuses to overwrite a key that exists. |
-| `unlink <target> <type> <other>` or `unlink <target> #<rel>` | Remove a relationship (either direction). |
-| `template <mote> <species>` | Make a mote the one its species' new instances start from. |
-| `plot <m.y>… vs <m.x> [lo:hi] …` | A plot, re-solving the garden at each point (below). `plot` alone shows its grammar. |
-| `plot save <name>`, `plot export csv\|png\|svg\|pdf\|tex [path]` | Save the focused plot as a mote (the only write, undoable), or export it. |
-| `fit <m.y> vs <m.x> --data <Y> vs <X> --free <m.k>…` | Fit inputs to measured points (below). `--apply` writes the result. |
-| `edit @sel\|<note>`, `read @sel\|<note>`, `notes [text]` | Write a note, read it rendered, list the notes (below). |
-| `worksheet` | The garden's calculation as lines of text; `esc` applies it (below). |
-| `sim [--ticks N] [--scenario s] [--vs s\|garden] [<conditions>]` | Run the garden tick by tick and watch its values (below). Writes nothing. |
-| `rule @sel\|<rule>`, `why <m.k>`, `scenarios` | A rule and what it binds; how the garden determines a value; the scenarios and their overrides (below). |
-| `solve`, `solve --live on\|off` | Solve once and write it (one undo step); or solve after every edit made here. |
-| `step +N\|-N\|<tick>`, `play`, `pause` | Move the shared playhead. |
-| `set @sel\|#id\|<name> <key> <value>` | Set a property. `@sel` is the **whole** selection, as one undo step. `--clear` in place of the value removes the key. The value reads like a statement's, so `5 mm` records the unit. `set C1.voltage 30` is the same as `set C1 voltage 30`; `set --scenario hot C1.voltage 30` writes the scenario's override instead (making the scenario if there is none by that name). |
-| `log` | The command and error log for this session. |
-| `cd <garden>` | Switch the workspace to another garden, with its own layouts and history. |
-| `layout save\|load\|list\|rm <name>` | Save or restore the pane layout. |
-| `refresh` | Re-read the garden (picks up MCP, CLI and sync edits). |
-| `undo`, `redo` | Same as Ctrl+Z / Ctrl+Shift+Z. Every write undoes as one step, a typed statement included. |
-| anything else | A modeling statement, as in the old `/` bar: `R1.x = 5 ohm`, `A -> B`, `R1 : Resistor`, `R1.x ?`, `delete R1`. |
-
-`@sel` stands for the selected mote (the primary) anywhere a mote is
-expected, except after `set`, where it is the whole selection. A mote
-named like a verb (`log`, `find`) is reached as `"log"` or `#id`.
+command and key on one page is `docs/manual.md`. This section says what
+each pane shows.
 
 ### Props (`open`, and `p`)
 
@@ -97,10 +47,6 @@ says so; `set @sel …` writes them all.
 **`p`** opens the same view floating over a layout that has no props
 pane (with one, it focuses that pane). It follows the selection, has
 the keys while open, and `p` or `esc` closes it.
-
-Not in the console yet: the calendar picker for a date (dates edit as
-`2026-10-02` text until U7). A note is written with `edit ‹note›` and a
-solved value explained with `why ‹m.k›`.
 
 ### The table (`find`)
 
@@ -236,10 +182,6 @@ undo step.
 | `h` `l` / click | Step through the points; the status line shows the point and the fit there |
 | `esc` | Clear the cursor |
 
-Not ported from the old window: baselines (a scenario's curve drawn
-dashed beside each series) and the plot grid, which tiling replaces.
-`fit` is the step after U4.
-
 ### Sim (`sim`, `rule`, `scenarios`; `layout calc`)
 
 `layout calc` puts three panes where the focused one was:
@@ -313,14 +255,12 @@ overrides beside the garden's value.
 
 **Solving.** `solve` writes one static solve as one
 undo step; it refuses a garden whose rules use `prev()` (only a run can
-answer those). `solve --live on` is the old Fast mode: every write made
+answer those). `solve --live on` solves after every write: each one made
 from the window is followed by a solve, folded into the same undo step,
 and the top bar says `live`. It is kept per garden in the console's
 sidecar, off by default.
 
-Not ported from the old window: the node board (a graph of the model
-is the `graph` pane, U8), value lanes, the pre-flight role check
-and the impact view (both stay in the CLI and MCP).
+The role check and the impact view stay in the CLI and MCP.
 
 ### Notes (`edit`, `read`, `notes`; `layout docs`)
 
@@ -355,10 +295,6 @@ with captions, cited rules, `\include`d notes, and the note's problems at
 the end. Maths is KaTeX; a `\graph` draws with the console's plot
 renderer, re-solved (and remembered until the garden changes). `j` `k`
 scroll, `g` `G` top and end.
-
-Not ported from the old window: the `@` mote picker (type `\mote{name}`
-or `\mote{#id}`), print to PDF (phase 6 makes real PDFs), and the
-inspector's door into a note.
 
 ### The worksheet (`worksheet`)
 
@@ -452,10 +388,8 @@ Durations are days, hours, minutes and seconds (`P2D`, `PT1H30M`) —
 years and months have no fixed length, so an event lasting "one month"
 has no single answer.
 
-Gardens written the old way — `date` plus a separate `duration`, `ends`
-or `recurrence` — are folded into this on open, keeping whatever key each
-mote already used. The one thing it costs: typing a bare `duration`
-beside a date no longer does anything on its own.
+A bare `duration` beside a date does nothing on its own: how long and how
+often live inside the start's value.
 
 A recurring mote is still **one mote**: every occurrence it draws opens
 the same detail panel -- one mote → one event → the whole series. A rule
@@ -466,9 +400,7 @@ permissiveness a broken note gets in the read pane.
 Templates and scenario overrides are never placed, even when dated: they
 hold replacement values rather than real data.
 
-Not ported from the old window: the mini calendar, the draft popover's
-species picker (type `R1 : task` after creating), and polling -- the
-console re-reads on focus and after every write, like every pane.
+The console re-reads on focus and after every write, like every pane.
 
 ### The graph (`graph`; `layout graph`)
 
@@ -503,9 +435,8 @@ is under the pointer or the cursor.
 | `n` | `‹cursor› -> related_to -> ` on the command line, to name a new mote |
 | click an edge, `d` `d` | `unlink …` the edge, else `delete ‹cursor›` (runs) |
 
-Monarch's sticky notes, group boxes and pen strokes are gone, and the
-first open of a garden drops their stored data (`docs/architecture.md`
--> *The graph*).
+The graph pane draws structure; annotations (sticky notes, group boxes,
+pen strokes) do not exist (`docs/architecture.md` -> *The graph*).
 
 ### Gardens (`gardens`, `garden`; `layout gardens`)
 
@@ -600,6 +531,11 @@ Boots on a seeded temp garden and checks the following:
   selection's neighbourhood; a walk, `⏎`, and `[` `]` rewriting the
   depth; ctrl+drag prefills a link and `d d` deletes; dragging pins a
   node beside the garden, `U` unpins and `o` opens
+- `sim --set` shows its knob in the header and writes nothing; `W` keeps
+  it as one undo step and the pane takes its line without it
+- `plot ‹m.y› vs t 0:5` draws the run, with `t (tick)` on the x axis
+- `garden archive` on the open garden puts `archived · read-only` in the top
+  bar and a typed write is refused; `garden unarchive` restores it
 - `layout gardens` opens gardens | garden and the detail follows the cursor;
   `garden new`, `garden rm` (a second ⏎) and `garden restore`; `project
   start @sel` makes a garden, and the breadcrumb shows and climbs its path
@@ -664,9 +600,7 @@ tracking it:
 scripts/install_desktop_entry.sh
 ```
 
-That writes `~/.local/share/applications/monoss.desktop` -- the file
-Monarch's launcher used, so an old Monarch entry becomes Mosaic -- and
-runs `update-desktop-database`. Run it again after moving the checkout.
+That writes `~/.local/share/applications/monoss.desktop` and runs `update-desktop-database`. Run it again after moving the checkout.
 `StartupWMClass=Mosaic` has to match the window's own title (the `name`
 `console/app.py` passes to `launch_window`), or the desktop environment
 won't associate the launcher with the running window. From a terminal,

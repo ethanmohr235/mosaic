@@ -94,13 +94,13 @@ task, and a built-in layout opens each group (`layout calc`).
 
 | Surface | Panes | Role |
 |---|---|---|
-| **Calc** | `sim`, `rule`, `scenarios`, `worksheet`; `layout calc` | The model: runs, scenarios, solve health, the worksheet editor. |
+| **Calc** | `sim`, `rule`, `scenarios`, `worksheet`; `layout calc` | The model: runs, scenarios, solve health, the worksheet editor; knobs (`--set`) to try a value without writing it. |
 | **Documents** | `notes`, `edit`, `read`; `layout docs` | Engineering documents: shown work, given/answers, LaTeX export, submit and revisions. |
-| **Plots** | `plot`, `fit` | Plots and fits, heading toward publication-quality export. |
+| **Plots** | `plot`, `fit` | Plots (including a run over time, `plot … vs t`) and fits, with publication-quality export. |
 | **Table** | `find`, `open` (props) | The general table and a mote's properties, plus a planned project variables pane (value, unit, given/solved/external, ±). |
 | **Agenda** | `agenda`, `week`, `month`; `layout plan` | The agenda that launches work: project bars, plan-my-week, click-to-open, planned vs. actual time. |
-| **Gardens** | `gardens`, `garden`; `layout gardens` | The garden tree (owners → owned gardens) plus loose and archived gardens, and every garden act as a command. Health indicators come later. |
-| **Graph** | `graph`; `layout graph` | A structure debugger for seeing plumbing (edits are commands). |
+| **Gardens** | `gardens`, `garden`; `layout gardens` | The garden tree (owners → owned gardens) plus loose and archived gardens, and every garden act as a command, with solve and check marks per model garden. |
+| **Graph** | `graph`; `layout graph`; `graph --flow` | `graph`: a structure debugger for seeing plumbing (edits are commands). `graph --flow`: the solve drawn left to right, the model view. |
 | **CLI / MCP** | — | Scriptable and agent access to the same core. MCP is a side door, not the product. |
 
 Code still uses the old app names for packages and API namespaces

@@ -21,162 +21,38 @@ updates it in the same commit. Keep it compact: tables, no prose.
 - **Don't decide open questions yourself.** Anything under *Open
   questions* in `roadmap.md` or `console.md` is the user's call; ask.
 - **No new dependencies** without approval.
-- **Run the tests.** Use `python -m pytest -q`. `tests/test_sync_server.py`
-  needs Docker.
+- **Run the tests.** Use `.venv/bin/python -m pytest -q`. The sync tests
+  (`test_sync_server.py`, `test_sync.py`, `test_home.py`'s sync case) need
+  Docker and skip without it.
 - **Commit style.** Write focused commits, and end each message with the
   `Co-Authored-By` line your harness gives you.
 
-## Status (2026-09-30)
+## Where things stand (2026-10-06)
 
-- Roadmap **phase 1 (cleanup) is done**:
-  - Momentum is removed
-  - Monarch is frozen
-  - commit-tick and run history are cut
-  - `why` explains the garden as it stands, from a live solve
-- Console **U1 (the shell) is done**:
-  - the package is `console/`, launched by `run_console.py`
-  - the grammar lives in `core/commands.py`
-- Roadmap **phase 2's backend is done**:
-  - garden-scope names (`core/formula.py`), which deleted the
-    `related_to`-for-resolution edge
-  - the worksheet (`core/worksheet.py`), a projection of the graph
-  - solve health (`core/health.py`, `core/incidence.py::blocks`)
-  - `monoss worksheet read|apply` and `monoss health`; MCP
-    `read_worksheet`, `write_worksheet`, `solve_health`
-  - it needs a UI: `console.md` step U2+ — see the draft PR's *Handoff to
-    frontend*
-- Console **U2's core is done** (`core/table.py`, `core/findtext.py`,
-  `core/batch.py`, `core/views.py`), built in the cloud session at the
-  user's direction; `monolith/payload.py` re-exports from `core/table.py`
-  so the old window still works until U2 deletes it.
-- Roadmap **phase 3's backend is done**:
-  - the calc macros `\work`, `\given`, `\answers`, `\assumptions`,
-    `\checks`, and `\val{bd.l}{in, 4}` (`core/calc.py`)
-  - LaTeX basics: numbered equations, `\label`/`\ref`, `\rule` citing a
-    rule, `figure` captions, `tabular`, `enumerate`, and `\include`
-    (`core/modoc.py`, `core/modoc_bind.py::assemble`)
-  - new reserved property `source` (`assumed`, `external`)
-  - `monoss calc ...`; MCP `calc_sections`, `shown_work`
-  - its UI is the console's read pane (U6)
-- Roadmap **phase 4's backend is done** (`core/projects.py`): the reserved
-  `garden` property, `start_project`, the one-owner check, the ownership
-  tree and the cover (`name`, `due`, `status`, `author`, `revision`);
-  `monoss project start|stop|tree|check`; MCP `project_tree`,
-  `start_project`.
-- Roadmap **phase 7's backend is done** (Moxie's publication export is
-  UI and still to do; `plot export csv|png` exists):
-  - checks: reserved `check: true` / `tolerance` on a rule, `?=` in the
-    worksheet (`core/rules.py`, `core/simulation.py`)
-  - the V&V table: `source: {..., checks: <key>}`, `calc.verification`,
-    `\verification`, `monoss calc verification`
-  - CSV import (`core/csv_import.py`, `monoss import csv`, MCP `import_csv`)
-- Roadmap **phase 8's backend is done** (`core/uncertainty.py`): the
-  reserved `uncertainty` map, propagation on read, ± in `\val`/`\given`/
-  `\answers` and the worksheet (`bd.x = 80 ± 0.5 in`); `monoss
-  uncertainty`; MCP `propagate_uncertainty`.
-- Roadmap **phase 9's backend is done**: archive (reserved `archived`,
-  `projects.set_archived`/`ensure_writable`, CLI/MCP writes refuse an
-  archived garden), cross-garden search (`core/search.py`, `monoss
-  search`, MCP `search_gardens`), and the `materials` property provider
-  (`core/materials_provider.py` over `core/data/materials.json`).
-- Every roadmap phase's backend through 9 is done except phases 5 and 6,
-  which the user's brief did not assign to the cloud session.
-- Console **U2 is done**: the `find` table (`monolith:table`,
-  `console/monolith.py` over `core/table.py`/`findtext.py`), the `find`
-  and `set` verbs (`core/commands.py`; `set @sel` writes the whole
-  selection as one undo step), and Monolith's old window is deleted.
-  At the user's direction the cloud session now does frontend work too,
-  since the local session stopped.
-- Console **U3 is done**: the `mote:props` pane (`open @sel|#id|name`,
-  `mo te`) and the `p` float over the same view; `core/inspect.py` is the
-  payload both it and the old floating panel draw; `rename`, `unlink`
-  and `template` verbs; every typed statement is undoable
-  (`core/command_bar.py`'s write journal).
-- Console **U4 is done**: the `moxie:plot` pane (`plot …`, `mo xie`) over
-  `core/plotcmd.py` (the grammar, rewrites, line → saved-plot spec) and
-  `core/plotview.py` (`figure_from_spec`, `sensitivity`, `save_plot`);
-  `console/moxie.py` is `api.moxie`; `plot save`/`plot export` without a
-  line are a `pane_action` for the focused plot pane. Moxie's old window
-  is deleted.
-- **`fit` is done** (`core/fit.py`: Levenberg–Marquardt over the sweep's
-  solve, numpy only; `fit … --apply` writes value, σ and `source:
-  fitted`): the `moxie:fit` pane, `monoss fit`, MCP `fit_model`. The plot
-  pane's follow-up fixes are in too (narrow rail, solves off the lock,
-  magnitude-split axes).
-- Console **U5 is done**: Motion is `mo tion` (`scenarios | sim | rule
-  @sel`) over `core/motion.py` (the `sim` grammar and run rows, rule
-  cards, `why`, the undoable `solve`, the live solve); `console/motion.py`
-  is `api.motion`; `set --scenario` writes a scenario's override; the
-  shared playhead is store state. Motion's old window is deleted.
-- Console **U6 is done**: Mora is `mo ra` (`notes | edit @sel | read
-  @sel`) plus the `worksheet` pane; `core/document.py` renders a note's
-  draft (every macro), `console/mora.py` is `api.mora`, `js/editor.js` is
-  the modal editor with find/replace, and `core/worksheet.py` applies as
-  one undo step. Mora's old window is deleted.
-- Console **U7 is done**: Monastery is `mo nastery` (`agenda | week`,
-  and `month`) over `core/agenda.py` (the grammar, rows, bars, edits as
-  `set` lines, the `detach` verb); `console/monastery.py` is
-  `api.monastery`. Roadmap phase 5's bars and click-to-open are in;
-  plan-my-week and planned vs. actual are not. Monastery's old window is
-  deleted.
-- Console **U8 is done**: Monarch is `mo narch` (`find | graph @sel
-  --depth 2 | open @sel`) over `core/graphview.py` (the `graph` grammar:
-  root, depth, hidden types, conditions); `console/monarch.py` is
-  `api.monarch` (pins in the console sidecar); `js/graph.js` is the
-  restyled canvas. Annotations are removed and `core/db.py` drops their
-  table. Monarch's window, `api_common`'s old-window mixins and every
-  `frontend_shared/` file but `focus.js` are deleted.
-- Console **U9 is done**, and with it every UI step: Home is `mo saic`
-  (`gardens | garden`) over `core/home.py` (the tree, a garden's
-  details, the ownership path, the `garden` subverbs); `console/home.py`
-  is `api.home`; `project start|stop` is a write verb; the top bar shows
-  the ownership path. `gardens_app/`, `run_gardens.py`, `api_common.py`
-  and `frontend_shared/` are deleted: the console is the only window.
-- **Polish and unification (2026-10-02)**, `console.md` → *Polish and
-  unification*: there are no apps any more. `mo` is gone, and `layout
-  calc|docs|plan|graph|gardens` are built-in layouts
-  (`core/commands.py::BUILTIN_LAYOUTS`). The top bar is a fixed
-  `[mo]saic` wordmark. Layouts have slots (`^1`–`^9` save). `^⏎` opens
-  a new pane below and `⇧⏎` one to the right. A pane can be dragged by
-  its header. Headers hold a run's result and footers what is at the
-  cursor. The older status lines above still use the app names.
+Every roadmap phase (1–9) and every console step (U1–U9) is built. The
+console is the only window; there are no apps, only views and built-in
+layouts (`layout calc|docs|plan|graph|gardens`). What each part is, and
+what is still to do, lives in the docs; the short map:
 
-- **Images in modocs (2026-10-04)**: `\image{name}{width=N}` shows a
-  stored PNG/SVG (`core/images.py`, a mote with the reserved `image`
-  property, base64, 4 MB cap, one seam for side files later). `^v` in the
-  `edit` pane pastes a screenshot as `shot-NNN`; `image add|rename`
-  verbs; `monoss image …` and MCP `add_image`/`list_images`/`rename_image`.
-  `.tex` export of images waits for the Output phase.
-
-- **Output and Submit (2026-10-05, roadmap phase 6)**: `core/texexport.py`
-  (frozen `.tex`, pgfplots figures), `core/tectonic.py` (downloaded on
-  first use, pinned and checksummed), `core/submit.py` (the `submission`
-  mote, `r1`/`r2` revisions, the gate, the owner's cover, `revisions
-  diff`); `export`, `submit` and `revisions` verbs; `monoss export|submit|
-  revisions`; MCP `export_document`, `submit_project`, `list_revisions`,
-  `diff_revisions`. SVG images and surface plots are not exported yet.
-- **Moxie publication export (2026-10-05)**: `core/plotexport.py` (svg,
-  pgfplots `.tex`, PDF; the ± band, the `--data` overlay),
-  `plot export svg|pdf|tex`, `monoss plot export`, MCP `export_plot`; a
-  note's `\graph` in `.tex` uses the same pgfplots writer. Plan-my-week,
-  planned vs. actual and Home health are next.
-- **Plan my week (2026-10-05, roadmap phase 5)**: `core/planner.py`; `plan
-  [--apply]`, `worked`, `budget` verbs; `monoss plan|worked|budget`; MCP
-  `plan_week`, `log_time`, `time_budget`. Blocks are `Work block` motes with
-  `when`, `kind`, and a `for` relationship.
-- **Home health (2026-10-05)**: `core/home.py::health`; `solve` and `checks`
-  marks on each `gardens` row, full lines in the `garden` pane. Document
-  health and the submitted revision are deliberately not marked.
-- **`graph --flow` (2026-10-05)**: the solve drawn left to right.
-  - Givens, one column per solve step, then answers.
-  - Rule cards with typeset equations (`core/formula_tex.py`, which
-    `\rule`/`\work` and `.tex` export now use too); split mote stubs.
-  - Folds: blocks of ≥4 equations vertically, single-output
-    sub-calculations sideways.
-  - Follows the playhead, live solve and health.
-  - Code: `core/flowview.py` over `simulation.trace()`; `js/flow.js` +
-    `views/flow.js`, with `views/graph.js` switching modes; MCP
-    `solve_flow`. See `console.md` → *Settled/Built for `graph --flow`*.
+- **Model:** garden-scope names, the worksheet, solve health, checks
+  (`?=`), uncertainty (`±`), the materials provider, scenarios, sweeps and
+  `fit`. `why` and `\work` explain the garden as it stands from a live solve
+  (`core/derivations.py`); nothing about a solve is stored.
+- **Knobs:** `--set m.k=value [unit]` on `plot`, `sim`, `fit` and
+  `graph --flow` tries a value and writes nothing; `--keep` (key `W`)
+  writes it (`core/knobs.py`).
+- **Plots:** `plot … vs t` draws the run `sim` walks; publication export,
+  `--data` overlays.
+- **Documents:** the calc macros, LaTeX basics, images, `.tex`/PDF export
+  (`core/texexport.py`, tectonic), `submit` and revisions.
+- **Projects:** a mote may own a garden; Home (`gardens`, `garden`) shows
+  the tree with solve and check marks; archive is read-only in the console
+  too; cross-garden search.
+- **Time:** agenda, week, month, plan-my-week, `worked`, `budget`.
+- **Still to do** (`roadmap.md`): the project variables pane; `fit` and
+  `--data` over a time axis; document health and the submitted revision on
+  Home rows; SVG images and surface plots in `.tex` export; the Mosaic
+  rename of code (an open question).
 
 ## Split of work: cloud backend, local frontend
 

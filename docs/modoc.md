@@ -480,10 +480,9 @@ Everything above resolves against **the garden as it stands**, and that
 is the only reading a note has. `\val{t}` is 0, because a note is not at
 a step.
 
-This used to be otherwise: notes resolved at `t+N`, Mora's old window carried a
-stepper that flipped **Real** to **Projected**, and an `Apply t+N…`
-button committed the projection to the graph. All of it is gone, and the
-reason is worth keeping written down. A note says what a garden *is*.
+A note has no step to ask for, and the reason is worth keeping written
+down: a note that could also project and commit a simulation would hold a
+lever it should not. A note says what a garden *is*.
 What it will be after N steps is a simulation, which is the console's
 `sim` (`preview_simulation` on the MCP surface); how a value
 moves as another one changes is a sweep, which is `plot`. A note editor

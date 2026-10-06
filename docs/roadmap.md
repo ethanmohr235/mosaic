@@ -160,10 +160,15 @@ Each one was a separate act of filing. That lesson became a rule in
   `Work block` mote with `when`, `kind: planned` and a `for` link; `worked`
   logs `kind: actual` blocks; `budget` sums estimate / done / planned. See
   `console.md` -> *Plan my week*.
-- **Graph:** frozen as a structure debugger. No new investment.
-  **Done:** the `graph` pane (U8), annotations removed.
+- **Graph:** the force-directed `graph` is frozen as a structure
+  debugger (no new investment; **done:** the pane in U8, annotations
+  removed). `graph --flow` is the model view -- the solve drawn left to
+  right -- and *is* invested in (**built 2026-10-05**, `console.md` ->
+  *Settled/Built for `graph --flow`*).
 - **Table:** keep the general table, and add a project variables pane
-  (value, unit, given/solved/external, ±).
+  (value, unit, given/solved/external, ±). **Still to do.** `graph
+  --flow` marks given, solved, assumed, external and fitted values but is
+  not a table of them.
 - **Plots (done 2026-10-05):** publication export (`plot export
   svg|pdf|tex`: unit-labelled axes, log axes), measured points overlaid
   with `--data` (picked as `fit` picks them), error bars. **Decided:** SVG
