@@ -309,13 +309,8 @@ def _dispatch(conn: sqlite3.Connection, text: str, confirm: bool) -> CommandResu
 
 def _run_property(conn, mote_token: str, key: str, value_text: str) -> CommandResult:
     mote_id, created = _find_or_create(conn, mote_token)
-    value, unit_name = parse_value(value_text)
-    new_props = {key: value}
-    if unit_name:
-        mote = motes_repo.get_mote(conn, mote_id)
-        unit_map = units.parse_units_property(mote.properties.get(units.UNITS_KEY))
-        unit_map[key] = unit_name
-        new_props[units.UNITS_KEY] = unit_map
+    old = motes_repo.get_mote(conn, mote_id).properties
+    new_props, value, unit_name = property_update(old, key, value_text)
     _update_mote(conn, mote_id, new_props)
 
     label = _label_for(mote_token, created)
@@ -611,6 +606,23 @@ def _choice(conn, mote: Mote) -> dict:
 
 
 # ---- value + unit parsing ----------------------------------------------
+
+def property_update(old_props: dict, key: str, raw) -> tuple[dict, object, str | None]:
+    """What `key = raw` writes onto a mote holding `old_props`: the value
+    read as `R1.x = 5 ohm` reads it, and the mote's `units` map with the
+    key relabelled when a unit was typed. Returns (properties to write,
+    the value, the unit typed or None).
+
+    The one place a typed value becomes a write: the statement form and
+    the `set` verb (core/batch.py) both come through here."""
+    value, unit_name = parse_value(raw)
+    new = {key: value}
+    if unit_name:
+        unit_map = units.parse_units_property(old_props.get(units.UNITS_KEY))
+        unit_map[key] = unit_name
+        new[units.UNITS_KEY] = unit_map
+    return new, value, unit_name
+
 
 def parse_value(text: str):
     """`"500 ohms"` -> (500, "ohm"); `"500"` -> (500, None); anything else

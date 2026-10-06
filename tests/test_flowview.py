@@ -224,3 +224,24 @@ def test_completion_offers_flow(conn):
 
 def test_graph_run_hands_flow_over(beam):
     assert graphview.run(beam, graphview.parse_text("graph --flow"))["flow"]
+
+
+# ---- knobs ----
+
+def test_a_knob_moves_the_solve_and_writes_nothing(beam):
+    before = {m.id: dict(m.properties) for m in list_motes(beam)}
+    p = flow(beam, "graph --flow --set bm.h=12")
+    assert p["sets"] == ["bm.h=12"]
+    assert p["keep"] == {"command": "graph --flow --set bm.h=12 --keep", "cleared": "graph --flow"}
+    assert {m.id: dict(m.properties) for m in list_motes(beam)} == before
+    plain = flow(beam)
+    assert plain["sets"] == [] and plain["keep"] is None
+    assert p["summary"] != plain["summary"] or p["cards"] != plain["cards"]
+
+
+def test_the_playheads_knobs_reach_the_flow_and_the_lines_win(beam):
+    from_run = flow(beam, run={"sets": ["bm.h=12"]})
+    from_line = flow(beam, "graph --flow --set bm.h=12")
+    assert from_run["cards"] == from_line["cards"]
+    overridden = flow(beam, "graph --flow --set bm.h=6", run={"sets": ["bm.h=12"]})
+    assert overridden["cards"] == flow(beam)["cards"]

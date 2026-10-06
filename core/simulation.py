@@ -387,7 +387,8 @@ class Trace:
 
 
 def trace(
-    conn: sqlite3.Connection, scenario: str | None = None, solver: str = _DEFAULT_SOLVER
+    conn: sqlite3.Connection, scenario: str | None = None, solver: str = _DEFAULT_SOLVER,
+    overrides: dict[str, dict[str, float]] | None = None,
 ) -> Trace:
     """Solve once in memory with a journal, writing nothing (the
     `graph --flow` pane's structure; core/flowview.py).
@@ -396,10 +397,14 @@ def trace(
     relation -- an equation solved by substitution, one the solver
     finished, a check -- is checked against the values found, so its
     residual or margin reads off `results`. A recurrence's prev() reads
-    the garden as it stands, as a first tick would."""
+    the garden as it stands, as a first tick would. `overrides`
+    (`{mote_id: {key: value}}`, core/knobs.py) are values to try, laid
+    over the scenario's; nothing is written."""
     properties = {m.id: m.properties for m in list_motes(conn)}
     view = _build_view(
-        scenarios_repo.apply(properties, _resolve_scenario(conn, scenario)),
+        scenarios_repo.overlay(
+            scenarios_repo.apply(properties, _resolve_scenario(conn, scenario)),
+            overrides or {}),
         list_relationships(conn),
     )
     pairs = tuple(_rule_instances(rules_repo.list_rules(conn), view))
@@ -590,6 +595,7 @@ def run_time_series(
     strict_units: bool = False,
     scenario: str | None = None,
     strict_constraints: bool = False,
+    overrides: dict[str, dict[str, float]] | None = None,
 ) -> TimeSeriesResult:
     """A preview: runs step_count steps entirely in memory, each step's
     solve starting from the *previous* step's solved values rather than
@@ -609,15 +615,18 @@ def run_time_series(
     part-way through a run.
 
     `scenario` names a mote gathering overrides (see core/scenarios.py);
-    the garden is previewed as that scenario would have it."""
+    the garden is previewed as that scenario would have it. `overrides`
+    (`{mote_id: {key: value}}`, in each mote's declared units) are values
+    to try, laid over the scenario's -- a knob (core/knobs.py)."""
     if step_count < 1:
         raise ValueError("step_count must be at least 1")
 
     relationships = list_relationships(conn)
     rules = rules_repo.list_rules(conn)
     case = _resolve_scenario(conn, scenario)
-    running = scenarios_repo.apply(
-        {m.id: dict(m.properties) for m in list_motes(conn)}, case
+    running = scenarios_repo.overlay(
+        scenarios_repo.apply({m.id: dict(m.properties) for m in list_motes(conn)}, case),
+        overrides or {},
     )
     # Built once and reused across every step: the `uses_model` graph and
     # provider configuration don't change step-to-step (only solved

@@ -31,6 +31,7 @@ from typing import Sequence
 
 import numpy as np
 
+from core import knobs as knobs_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import sweep as sweep_repo
@@ -46,7 +47,8 @@ from core.uncertainty import UNCERTAINTY_KEY
 FIT_VERB = "fit"
 DATA_FLAG, FROM_FLAG, FREE_FLAG = "--data", "--from", "--free"
 SCENARIO_FLAG, APPLY_FLAG = "--scenario", "--apply"
-FLAGS = (DATA_FLAG, FROM_FLAG, FREE_FLAG, SCENARIO_FLAG, APPLY_FLAG)
+SET_FLAG = knobs_repo.SET_FLAG
+FLAGS = (DATA_FLAG, FROM_FLAG, FREE_FLAG, SCENARIO_FLAG, SET_FLAG, APPLY_FLAG)
 VS = "vs"
 
 MAX_ITERATIONS = 50
@@ -58,7 +60,7 @@ _SINGULAR = 1e12        # JᵀJ condition number past which inputs can't be told
 
 def usage() -> str:
     return ("usage: fit ‹m.y› vs ‹m.x› --data ‹ykey› vs ‹xkey› [--from ‹import›] "
-            "--free ‹m.k›… [--scenario ‹s›] [--apply]")
+            "--free ‹m.k›… [--scenario ‹s›] [--set ‹m.k=value [unit]›] [--apply]")
 
 
 # ---- the line -----------------------------------------------------------
@@ -73,6 +75,9 @@ class FitLine:
     free: tuple[str, ...] = ()
     scenario: str | None = None
     apply: bool = False
+    # Knobs (core/knobs.py): the state the fit starts from. They are held
+    # fixed -- a knob on a `--free` input is that input's starting value.
+    sets: tuple[knobs_repo.KnobSpec, ...] = ()
 
     @property
     def empty(self) -> bool:
@@ -88,6 +93,7 @@ class FitLine:
         parts += [FREE_FLAG, *map(q, self.free)]
         if self.scenario:
             parts += [SCENARIO_FLAG, q(self.scenario)]
+        parts += [q(word) for word in knobs_repo.words(self.sets)]
         if self.apply if apply is None else apply:
             parts.append(APPLY_FLAG)
         return " ".join(parts)
@@ -98,7 +104,7 @@ def parse(args: Sequence[str]) -> FitLine:
     args = list(args)
     if not args:
         return FitLine()
-    fields: dict = {"free": []}
+    fields: dict = {"free": [], "sets": []}
     head: list[str] = []
     i = 0
     while i < len(args):
@@ -110,11 +116,14 @@ def parse(args: Sequence[str]) -> FitLine:
                 raise CommandError(f"--data takes ‹ykey› vs ‹xkey› -- {usage()}")
             fields["data_y"], fields["data_x"] = args[i + 1], args[i + 3]
             i += 3
-        elif token in (FROM_FLAG, SCENARIO_FLAG):
+        elif token in (FROM_FLAG, SCENARIO_FLAG, SET_FLAG):
             if i + 1 >= len(args):
                 raise CommandError(f"{token} needs a value -- {usage()}")
             i += 1
-            fields["source" if token == FROM_FLAG else "scenario"] = args[i]
+            if token == SET_FLAG:
+                fields["sets"].append(knobs_repo.parse_set(args[i]))
+            else:
+                fields["source" if token == FROM_FLAG else "scenario"] = args[i]
         elif token == FREE_FLAG:
             while i + 1 < len(args) and not args[i + 1].startswith("--"):
                 i += 1
@@ -134,6 +143,7 @@ def parse(args: Sequence[str]) -> FitLine:
         y=head[0], x=head[2], data_y=fields["data_y"], data_x=fields["data_x"],
         source=fields.get("source"), free=tuple(dict.fromkeys(fields["free"])),
         scenario=fields.get("scenario"), apply=bool(fields.get("apply")),
+        sets=tuple(fields["sets"]),
     )
 
 
@@ -195,8 +205,9 @@ class FitResult:
 class _Model:
     """The garden read once, answering y at x for a set of free values."""
 
-    def __init__(self, ground, scenario_id, x_ref, y_ref, free):
+    def __init__(self, ground, scenario_id, x_ref, y_ref, free, base=None):
         self.ground = ground
+        self.base = base or {}
         self.scenario = sweep_repo._scenario_of(ground, scenario_id)
         self.x = x_ref
         self.y = y_ref
@@ -204,7 +215,7 @@ class _Model:
         self.solves = 0
 
     def at(self, values: Sequence[float], x: float) -> tuple[float | None, str | None]:
-        overrides: dict[str, dict[str, float]] = {}
+        overrides = knobs_repo.merged(self.base)
         for (mote, key), value in zip(self.free, values):
             overrides.setdefault(mote, {})[key] = float(value)
         point = {self.x[0]: {self.x[1]: float(x)}}
@@ -242,14 +253,15 @@ def prepare(conn: sqlite3.Connection, line: FitLine):
     free = [garden.ref(ref) for ref in line.free]
     scenario_id = garden.scenario(line.scenario)
     points = _data(conn, garden, line, x_ref, y_ref)
+    tried = knobs_repo.overrides(knobs_repo.resolve(garden, line.sets))
     starts = []
     for ref, (mote, key) in zip(line.free, free):
-        start = garden.value(mote, key)
+        start = tried.get(mote, {}).get(key, garden.value(mote, key))
         if start is None:
             raise CommandError(f"{ref} has no number to start the fit from -- give it one first")
         starts.append(start)
     model = _Model(sweep_repo.read_garden(conn, [scenario_id] if scenario_id else []),
-                   scenario_id, x_ref, y_ref, free)
+                   scenario_id, x_ref, y_ref, free, tried)
     units = [garden.unit(mote, key) for mote, key in free]
     return lambda: _fit(line, units, model, points, starts, free)
 

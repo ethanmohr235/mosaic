@@ -8,6 +8,7 @@ import pytest
 
 from core import plotcmd, plotview
 from core.command_bar import CommandError
+from core.knobs import KnobSpec
 from core.motes import create_mote, get_mote, list_motes
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO, FREEDOMS_KEY
@@ -60,7 +61,7 @@ def test_the_parts_of_a_sweep_line():
     parsed = line("plot bd.sigma bd.tau vs bd.l 4:24 --steps 200 --set bd.E=2e11 --log")
     assert parsed.ys == ("bd.sigma", "bd.tau")
     assert parsed.x == "bd.l" and parsed.range == (4.0, 24.0)
-    assert parsed.steps == 200 and parsed.log and parsed.sets == (("bd.E", 2e11),)
+    assert parsed.steps == 200 and parsed.log and parsed.sets == (KnobSpec("bd.E", 2e11),)
     assert parsed.mode == "sweep"
 
 
@@ -114,10 +115,10 @@ def test_save_and_export_forms():
 def test_a_knob_is_added_then_moved_in_place():
     base = line("plot a.y vs a.x 0:1 --set a.b=1 --set a.c=2")
     moved = plotcmd.rewrite(base, {"set": {"ref": "a.b", "value": 5}})
-    assert moved.sets == (("a.b", 5.0), ("a.c", 2.0))
+    assert moved.sets == (KnobSpec("a.b", 5.0), KnobSpec("a.c", 2.0))
     added = plotcmd.rewrite(base, {"set": {"ref": "a.d", "value": 0.25}})
     assert added.text().endswith("--set a.b=1 --set a.c=2 --set a.d=0.25")
-    assert plotcmd.rewrite(base, {"unset": "a.b"}).sets == (("a.c", 2.0),)
+    assert plotcmd.rewrite(base, {"unset": "a.b"}).sets == (KnobSpec("a.c", 2.0),)
 
 
 def test_zoom_log_and_hide_rewrite_the_line():

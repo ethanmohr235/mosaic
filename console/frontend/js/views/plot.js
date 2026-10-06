@@ -20,6 +20,7 @@
  * `plot save ‹name› ‹this line›` on the command line so it is in the
  * history, the log and undo. */
 
+import { KEEP_HINT, hasKnobs, keepKnobs } from "../knobs.js";
 import { render as draw, fmt, seriesStyle } from "../plot.js";
 
 const HINTS = [["h l", "cursor"], ["[ ]", "series"], ["space", "show/hide"], ["z", "zoom"], ["Z", "zoom out"],
@@ -527,6 +528,7 @@ function create(ctx) {
     Z: zoomOut,
     y: () => st.payload.figure && rewrite({ log: st.payload.figure.yScale !== "log" }),
     R: () => { st.rail = !railShown(); drawPlot(); },
+    W: () => keepKnobs(ctx, st.payload),
   };
 
   function onKey(event) {
@@ -664,7 +666,7 @@ function create(ctx) {
     },
     hints: () => {
       if (!st.payload || st.payload.empty || !st.payload.figure) return [];
-      const knobs = (st.payload.knobs || []).length ? KNOB_HINTS : [];
+      const knobs = [...((st.payload.knobs || []).length ? KNOB_HINTS : []), ...(hasKnobs(st.payload) ? [KEEP_HINT] : [])];
       const rail = [["R", "side column"]];
       if (st.payload.figure.mode === "sweep") return [...HINTS, ...knobs, ...rail];
       return st.payload.figure.mode === "correlate" ? [["y", "log y"], ...knobs, ...rail] : [...knobs, ...rail];

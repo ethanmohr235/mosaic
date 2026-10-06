@@ -291,14 +291,14 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
     "template": {"usage": "template #id|‹name› ‹species›",
                  "describe": "make a mote its species' template"},
     "plot": {"usage": "plot ‹y…› vs ‹x› [lo:hi] [by ‹y› lo:hi] [--across] [--steps N] "
-                      "[--set ‹m.k›=‹v›] [--scenario ‹s›] [--log] | plot ‹saved› | "
+                      "[--set ‹m.k›=‹v› [unit]] [--keep] [--scenario ‹s›] [--log] | plot ‹saved› | "
                       "plot save ‹name› | plot export csv|png|svg|pdf|tex [path] | ... --data ‹ykey› vs ‹xkey› [--from ‹import›]",
              "describe": "plot a value against another, re-solving the garden (nothing is written)"},
     "fit": {"usage": "fit ‹m.y› vs ‹m.x› --data ‹ykey› vs ‹xkey› [--from ‹import›] --free ‹m.k›… "
-                     "[--scenario ‹s›] [--apply]",
+                     "[--scenario ‹s›] [--set ‹m.k›=‹v› [unit]] [--apply|--keep]",
             "describe": "fit inputs to measured points by least squares (--apply writes them)"},
     "sim": {"usage": "sim [--ticks N] [--scenario ‹s›] [--vs ‹s›|garden] [--solver ‹name›] "
-                     "[‹find conditions›]",
+                     "[--set ‹m.k›=‹v› [unit]] [--keep] [‹find conditions›]",
             "describe": "run the garden tick by tick and watch its values (nothing is written)"},
     "rule": {"usage": "rule @sel|#id|‹rule›",
              "describe": "a rule's equation and the values it binds (follows the selection with @sel)"},
@@ -322,7 +322,7 @@ RESERVED_VERBS: dict[str, dict[str, str]] = {
               "describe": "the month as a six-week grid"},
     "detach": {"usage": "detach #id ‹key› ‹occurrence› ‹start› ‹end›",
                "describe": "move one occurrence out of its series"},
-    "graph": {"usage": "graph [@sel|#id|‹name›] [--depth N] [--hide-rel a,b] [--view ‹saved›] [‹conditions›]",
+    "graph": {"usage": "graph [@sel|#id|‹name›] [--depth N] [--hide-rel a,b] [--view ‹saved›] [--flow [--set ‹m.k›=‹v› [unit]] [--keep]] [‹conditions›]",
               "describe": "a mote's neighbourhood, or the whole garden, as a graph"},
     "image": {"usage": "image add ‹path› [‹name›] | image rename ‹old› ‹new›",
               "describe": "store a PNG or SVG for notes (\\image{name}), or rename one everywhere it is used"},

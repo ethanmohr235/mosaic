@@ -165,3 +165,19 @@ def apply(properties: dict[str, dict], scenario: Scenario | None) -> dict[str, d
         merged.update(override.properties)
         perturbed[override.target_id] = merged
     return perturbed
+
+
+def overlay(
+    properties: dict[str, dict], *layers: dict[str, dict[str, float]]
+) -> dict[str, dict]:
+    """`properties` with each `{mote_id: {key: value}}` layer merged over
+    it, in order -- what a knob (core/knobs.py) or a sweep's axis value
+    does to a copy of the garden. Pure, like apply(): nothing passed in is
+    changed, so the next solve starts from the same place this one did."""
+    out = dict(properties)
+    for layer in layers:
+        for mote_id, values in layer.items():
+            merged = dict(out.get(mote_id, {}))
+            merged.update(values)
+            out[mote_id] = merged
+    return out

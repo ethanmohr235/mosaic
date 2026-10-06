@@ -23,7 +23,9 @@ from dataclasses import dataclass, replace
 from typing import Sequence
 
 from core import findtext
+from core import knobs as knobs_repo
 from core import motes as motes_repo
+from core import plotcmd as plotcmd_repo
 from core import query
 from core import species as species_repo
 from core import table as table_repo
@@ -34,7 +36,8 @@ from core.entities import Mote, Relationship
 VERB = "graph"
 DEPTH_FLAG, HIDE_FLAG, VIEW_FLAG = "--depth", "--hide-rel", findtext.VIEW_FLAG
 FLOW_FLAG = "--flow"  # takes no value
-FLAGS = (DEPTH_FLAG, HIDE_FLAG, VIEW_FLAG, FLOW_FLAG)
+SET_FLAG = knobs_repo.SET_FLAG  # --flow only: a value to try (core/knobs.py)
+FLAGS = (DEPTH_FLAG, HIDE_FLAG, VIEW_FLAG, FLOW_FLAG, SET_FLAG)
 DEFAULT_DEPTH = 2
 SEL = "@sel"
 
@@ -49,6 +52,7 @@ class GraphLine:
     view: str | None = None
     conditions: tuple[str, ...] = ()
     flow: bool = False
+    sets: tuple[knobs_repo.KnobSpec, ...] = ()
 
     def text(self) -> str:
         words = [VERB]
@@ -56,6 +60,7 @@ class GraphLine:
             words.append(self.root)
         if self.flow:
             words.append(FLOW_FLAG)
+        words += knobs_repo.words(self.sets)
         if self.depth is not None:
             words += [DEPTH_FLAG, str(self.depth)]
         if self.hide:
@@ -79,6 +84,7 @@ def _quote(word: str) -> str:
 def parse(args: Sequence[str]) -> GraphLine:
     fields: dict = {}
     conditions: list[str] = []
+    sets: list[knobs_repo.KnobSpec] = []
     root = None
     i = 0
     while i < len(args):
@@ -98,6 +104,8 @@ def parse(args: Sequence[str]) -> GraphLine:
                 fields["depth"] = _depth(value)
             elif word == HIDE_FLAG:
                 fields["hide"] = tuple(t for t in (p.strip() for p in value.split(",")) if t)
+            elif word == SET_FLAG:
+                sets.append(knobs_repo.parse_set(value))
             else:
                 fields["view"] = value
             continue
@@ -112,9 +120,11 @@ def parse(args: Sequence[str]) -> GraphLine:
         raise CommandError("--depth needs a root: graph @sel --depth 2")
     if fields.get("flow") and fields.get("hide"):
         raise CommandError("--flow draws the solve, not relationships -- --hide-rel has nothing to hide")
+    if sets and not fields.get("flow"):
+        raise CommandError("--set tries a value in the solve, so it needs --flow: graph --flow --set bd.E=200 GPa")
     if conditions:
         findtext.parse_find(shlex.join(conditions))  # raises FindSyntaxError naming the word
-    return GraphLine(root, conditions=tuple(conditions), **fields)
+    return GraphLine(root, conditions=tuple(conditions), sets=tuple(sets), **fields)
 
 
 def parse_text(command: str) -> GraphLine:
@@ -265,9 +275,12 @@ def choices(conn, rest: str) -> list[tuple[str, str]]:
         return [(shlex.quote(views_repo.name_of(v)), "saved view") for v in views_repo.list_views(conn)]
     if before == DEPTH_FLAG:
         return [(str(n), f"{n} hop{'s' if n > 1 else ''}") for n in (1, 2, 3, 4)]
+    if before == SET_FLAG:
+        return [(c.value, c.description) for c in plotcmd_repo.refs(conn)]
     if partial.startswith("-"):
         return [(DEPTH_FLAG, "hops from the root"), (HIDE_FLAG, "leave out relationship types"),
-                (VIEW_FLAG, "start from a saved view"), (FLOW_FLAG, "the solve, left to right")]
+                (VIEW_FLAG, "start from a saved view"), (FLOW_FLAG, "the solve, left to right"),
+                (SET_FLAG, "--flow: try a value, write nothing")]
     names = sorted({m.properties["name"] for m in motes_repo.list_motes(conn)
                     if isinstance(m.properties.get("name"), str)})
     return [(SEL, "the selection")] + [(_quote(n), "root") for n in names]

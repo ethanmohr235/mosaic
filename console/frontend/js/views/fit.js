@@ -7,6 +7,7 @@
  * `--apply` on the command line, so the write is in the history, the log
  * and undo like any other. */
 
+import { KEEP_HINT, hasKnobs, keepKnobs, knobSummary } from "../knobs.js";
 import { render as draw, fmt, seriesStyle } from "../plot.js";
 
 const HINTS = [["A", "apply the fit"], ["h l", "cursor"], ["esc", "clear cursor"]];
@@ -157,7 +158,8 @@ function create(ctx) {
     if (p.empty) return { summary: "", level: "idle" };
     const values = p.params.map((x) => `${x.ref.split(".").pop()} ${fmt(x.value)}`).join(", ");
     const r2 = p.r2 !== null && p.r2 !== undefined ? ` · R² ${p.r2.toFixed(4)}` : "";
-    return { summary: p.rms === null ? p.message : `${values} · RMS ${fmt(p.rms)}${r2}`, level: level() === "ok" ? "ok" : "warn" };
+    const set = knobSummary(p) ? ` · ${knobSummary(p)}` : "";
+    return { summary: (p.rms === null ? p.message : `${values} · RMS ${fmt(p.rms)}${r2}`) + set, level: level() === "ok" ? "ok" : "warn" };
   }
 
   async function applyFit() {
@@ -186,6 +188,7 @@ function create(ctx) {
 
   const KEYS = {
     A: applyFit,
+    W: () => keepKnobs(ctx, st.payload),
     h: () => moveCursor(-1), ArrowLeft: () => moveCursor(-1),
     l: () => moveCursor(1), ArrowRight: () => moveCursor(1),
   };
@@ -218,7 +221,7 @@ function create(ctx) {
       st.seq += 1;
       root = plotEl = statusEl = railEl = null;
     },
-    hints: () => (st.payload && !st.payload.empty ? HINTS : []),
+    hints: () => (st.payload && !st.payload.empty ? [...HINTS, ...(hasKnobs(st.payload) ? [KEEP_HINT] : [])] : []),
     onKey,
   };
 }

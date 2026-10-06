@@ -35,9 +35,11 @@ from console.moxie import MoxieApi
 from console.session import Session, best_effort_sync, locked
 from core import commands
 from core import gardens as gardens_repo
-from core import home as home_repo
-from core import motes as motes_repo
 from core import fit as fit_repo
+from core import graphview
+from core import home as home_repo
+from core import knobs as knobs_repo
+from core import motes as motes_repo
 from core import motion as motion_repo
 from core import planner as planner_repo
 from core import plotcmd
@@ -52,6 +54,14 @@ logger = logging.getLogger(__name__)
 # What a statement, verb or app line may fail with that is the user's
 # input rather than a bug: shown as an error effect, never raised.
 _USER_ERRORS = (CommandError, LookupError, ValueError, FileExistsError, sqlite3.Error)
+
+# The verbs whose line takes knobs (`--set`), and so `--keep`.
+_KNOB_LINES = {
+    plotcmd.PLOT_VERB: lambda args: plotcmd.parse(args).line,
+    motion_repo.SIM_VERB: motion_repo.parse,
+    fit_repo.FIT_VERB: fit_repo.parse,
+    graphview.VERB: graphview.parse,
+}
 
 
 def _error(message: str) -> dict:
@@ -210,6 +220,9 @@ class Api:
         # `set` is read before @sel is expanded: its `@sel` is the whole
         # selection, where everywhere else it is the primary.
         literal = commands.parse(text)
+        if (literal.kind == commands.VERB and literal.head in _KNOB_LINES
+                and knobs_repo.KEEP_FLAG in literal.args):
+            return self._verb_keep(literal)
         if literal.kind == commands.VERB and literal.head in commands.WRITE_VERBS:
             return self._verb_write(literal.head, literal.args, selection)
         if literal.kind == commands.VERB and literal.head in submit_repo.OUTPUT_VERBS:
@@ -336,6 +349,21 @@ class Api:
                     "needsConfirm": False, "choices": [], "wrote": True}
         return {"effect": "pane_action", "view": view, "action": command.kind,
                 "name": command.name, "format": command.format, "path": command.path}
+
+    def _verb_keep(self, parsed: commands.ParsedLine) -> dict:
+        """`plot|sim|fit|graph … --keep` writes the line's knobs (`--set`)
+        onto the garden through `set`'s own writer, one undo step. The pane
+        that offered it then takes its line without them."""
+        args = tuple(a for a in parsed.args if a != knobs_repo.KEEP_FLAG)
+        line = _KNOB_LINES[parsed.head](args)
+        if line is None or not line.sets:
+            return _error("no knobs to keep -- add --set m.k=value")
+        conn = self._session.conn
+        message, command = knobs_repo.keep(conn, knobs_repo.resolve(plotcmd._Garden(conn), line.sets))
+        live = self._push(command)
+        return {"effect": "statement", "ok": command is not None, "message": message + live,
+                "moteId": None, "moteName": None, "created": False,
+                "needsConfirm": False, "choices": [], "wrote": command is not None}
 
     def _verb_fit(self, parsed: commands.ParsedLine) -> dict:
         """`fit …` opens (or re-points) a fit pane with the literal line;

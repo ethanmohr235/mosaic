@@ -33,7 +33,6 @@ from core import command_bar
 from core import graph as graph_repo
 from core import motes as motes_repo
 from core import undo
-from core import units
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +58,10 @@ def set_property(
     with another about what was typed."""
     if not key:
         raise ValueError("A property needs a key.")
-    value, unit_name = command_bar.parse_value(raw_value)
     commands = []
     for mote_id in existing(conn, mote_ids):
         old = motes_repo.get_mote(conn, mote_id).properties
-        new = {key: value}
-        if unit_name:
-            unit_map = units.parse_units_property(old.get(units.UNITS_KEY))
-            unit_map[key] = unit_name
-            new[units.UNITS_KEY] = unit_map
+        new, _value, _unit = command_bar.property_update(old, key, raw_value)
         before = {k: old[k] for k in new if k in old}
         motes_repo.update_mote(conn, mote_id, new)
         commands.append(undo.for_update_mote(

@@ -698,6 +698,19 @@ and what it would leave missing -- before anything is solved.
 - Scenarios compose with time series: each step reads the perturbed
   state.
 
+### Knobs: a trial value with no mote
+
+A scenario is a mote, so trying one value still means making motes. A
+**knob** is the lighter form: `--set bd.E=200 GPa` on a `plot`, `sim`, `fit`
+or `graph --flow` line (`core/knobs.py`). The solves take knobs as the same
+`{mote_id: {key: value}}` overrides a sweep point does, laid over the
+scenario's (`scenarios.overlay`): `run_time_series(overrides=…)`,
+`trace(overrides=…)`, `sweep.Case.overrides`. Nothing is written, and
+`run_simulation`, the solve that writes, takes none. A typed unit is
+converted into the property's own unit, never relabelled; `--keep`
+writes the knobs through `set`'s writer when the trial turns out to be the
+answer. See `console.md` -> *Settled for knobs*.
+
 ## Sweeping
 
 A scenario lets a garden hold a second answer. A **sweep** lets it hold a

@@ -798,6 +798,32 @@ What the build decided within the settled plan above.
   answer, wired; `l` walks to the answer; `e` prefills `set`; `z` says
   there is nothing to fold.
 
+### Settled for knobs (2026-10-06)
+
+- **A knob is `--set m.k=value [unit]` on a pane's line**, on `plot`,
+  `sim`, `fit` and `graph --flow`. It tries a value and writes nothing:
+  the pane re-solves as if `m.k` held it. A pane is still its command, so
+  a layout that restores the line restores the knobs, and a saved plot
+  keeps its own. `core/knobs.py` is the one grammar; the solves take the
+  values as `{mote_id: {key: value}}` overrides laid over the scenario's
+  (`scenarios.overlay`).
+- **`set` writes, a knob tries.** The value reads as `set` reads it, so
+  `200 GPa` works; but a knob's unit is *converted* into the property's
+  own, never relabelled, because a trial must not change what a number on
+  the garden means. A unit on a property that declares none is refused.
+- **Where they apply.** `sim`: the run itself, never its `--vs` partner,
+  so `--vs garden` compares the knobbed run with the plain garden; the
+  knobs also travel in the playhead's run, so the `rule` and flow panes
+  following it read the same trial. `fit`: held fixed (a knob on a
+  `--free` input is its starting value). `graph --flow`: its own line's
+  knobs over the playhead's; ± is not shown under knobs.
+- **`--keep` (key `W`) is the way out**, shaped like `fit --apply`: the
+  pane's payload carries the line with `--keep` and the line without
+  knobs; the key runs the first on the command line (history, log, one
+  undo step, through `set`'s own writer), then the pane takes the second.
+- **Only `plot` drags them.** The other panes show knobs in their header
+  and take them by retyping the line (`e`).
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and

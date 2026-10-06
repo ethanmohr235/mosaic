@@ -36,7 +36,9 @@ from typing import Sequence
 
 from core import derivations as derivations_repo
 from core import findtext
+from core import knobs as knobs_repo
 from core import motes as motes_repo
+from core import plotcmd as plotcmd_repo
 from core import query
 from core import relationships as rel_repo
 from core import rules as rules_repo
@@ -53,7 +55,8 @@ from core.plotcmd import _Garden
 SIM_VERB, RULE_VERB, WHY_VERB, SOLVE_VERB = "sim", "rule", "why", "solve"
 SCENARIOS_VERB, STEP_VERB, PLAY_VERB, PAUSE_VERB = "scenarios", "step", "play", "pause"
 TICKS_FLAG, SCENARIO_FLAG, VS_FLAG, SOLVER_FLAG = "--ticks", "--scenario", "--vs", "--solver"
-FLAGS = (TICKS_FLAG, SCENARIO_FLAG, VS_FLAG, SOLVER_FLAG)
+SET_FLAG = knobs_repo.SET_FLAG
+FLAGS = (TICKS_FLAG, SCENARIO_FLAG, VS_FLAG, SOLVER_FLAG, SET_FLAG)
 LIVE_FLAG = "--live"
 # `--vs garden`: the other run is the garden as it stands, no scenario.
 # A scenario that happens to be called "garden" is reached as #id.
@@ -83,6 +86,9 @@ class SimLine:
     vs: str | None = None
     solver: str | None = None
     conditions: tuple[str, ...] = ()
+    # Knobs (core/knobs.py): values to try in the run, never written. They
+    # move the run itself, not the `--vs` one it is compared with.
+    sets: tuple[knobs_repo.KnobSpec, ...] = ()
 
     def text(self) -> str:
         words = [SIM_VERB]
@@ -94,6 +100,7 @@ class SimLine:
             words += [VS_FLAG, self.vs]
         if self.solver:
             words += [SOLVER_FLAG, self.solver]
+        words += knobs_repo.words(self.sets)
         return shlex.join(words + list(self.conditions))
 
     @property
@@ -106,6 +113,7 @@ def parse(args: Sequence[str]) -> SimLine:
     condition. Raises CommandError naming the word at fault."""
     fields: dict = {}
     conditions: list[str] = []
+    sets: list[knobs_repo.KnobSpec] = []
     i = 0
     while i < len(args):
         word = args[i]
@@ -122,6 +130,8 @@ def parse(args: Sequence[str]) -> SimLine:
                 fields["scenario"] = value
             elif word == VS_FLAG:
                 fields["vs"] = value
+            elif word == SET_FLAG:
+                sets.append(knobs_repo.parse_set(value))
             else:
                 if value not in solvers_repo.list_solvers():
                     raise CommandError(f"no solver {value!r} -- solvers: "
@@ -131,7 +141,7 @@ def parse(args: Sequence[str]) -> SimLine:
         findtext.parse_condition(word)  # raises FindSyntaxError (a ValueError) naming it
         conditions.append(word)
         i += 1
-    return SimLine(conditions=tuple(conditions), **fields)
+    return SimLine(conditions=tuple(conditions), sets=tuple(sets), **fields)
 
 
 def parse_text(command: str) -> SimLine:
@@ -222,7 +232,9 @@ def run(conn: sqlite3.Connection, line: SimLine) -> SimRun:
     scenario_id = garden.scenario(line.scenario)
     vs_id, vs_name = _vs(garden, line.vs)
     solver = line.solver or "linear"
-    result = _series_run(conn, line.tick_count, solver, scenario_id)
+    knobs = knobs_repo.resolve(garden, line.sets)
+    tried = knobs_repo.overrides(knobs)
+    result = _series_run(conn, line.tick_count, solver, scenario_id, tried)
     other = _series_run(conn, line.tick_count, solver, vs_id) if line.vs else None
 
     relationships = rel_repo.list_relationships(conn)
@@ -231,12 +243,12 @@ def run(conn: sqlite3.Connection, line: SimLine) -> SimRun:
     case = scenarios.get(scenario_id) if scenario_id else None
     other_case = scenarios.get(vs_id) if vs_id else None
     base = {m.id: dict(m.properties) for m in garden.motes if m.id not in hidden_ids}
-    start = scenarios_repo.apply(base, case)
+    start = scenarios_repo.overlay(scenarios_repo.apply(base, case), tried)
     vs_start = scenarios_repo.apply(base, other_case) if other is not None else None
 
     solved = {(c.mote_id, c.key) for step in result.steps for c in step.changes}
     freedoms = _freedoms(start, relationships)
-    varied = _overridden(case)
+    varied = _overridden(case) | {(k.mote, k.key) for k in knobs}
     problems: list[str] = []
     if line.conditions:
         # Every number the matches hold, and what the run solves on them
@@ -282,9 +294,11 @@ def run(conn: sqlite3.Connection, line: SimLine) -> SimRun:
     )
 
 
-def _series_run(conn, ticks: int, solver: str, scenario_id: str | None):
+def _series_run(conn, ticks: int, solver: str, scenario_id: str | None,
+                overrides: dict[str, dict[str, float]] | None = None):
     try:
-        return simulation_repo.run_time_series(conn, ticks, solver=solver, scenario=scenario_id)
+        return simulation_repo.run_time_series(
+            conn, ticks, solver=solver, scenario=scenario_id, overrides=overrides)
     except simulation_repo.SimulationError as e:
         # Only a strict up-front check raises here; a failed tick is kept.
         raise CommandError(str(e)) from None
@@ -373,6 +387,7 @@ def run_json(result: SimRun) -> dict:
         "seconds": result.seconds,
         "markers": [{"tick": m.tick, "kind": m.kind, "text": m.text} for m in result.markers],
         "rows": [_row_json(row) for row in result.rows],
+        **knobs_repo.line_payload(result.line),
     }
 
 
@@ -413,13 +428,15 @@ class RuleCard:
 
 
 def rule_cards(conn: sqlite3.Connection, ref: str, *, ticks: int | None = None,
-               scenario: str | None = None, solver: str | None = None) -> list[RuleCard]:
+               scenario: str | None = None, solver: str | None = None,
+               sets: Sequence[str] = ()) -> list[RuleCard]:
     """The card for rule `ref` (a name or `#id`) -- or, when `ref` names
     a mote that is not a rule, a card for every rule that touches it.
 
     With `ticks`, every binding also carries its series over that run
-    (the shared playhead's run), so the pane reads a value at any tick
-    without asking again."""
+    (the shared playhead's run, knobs included: `sets` are its `--set`
+    assignments), so the pane reads a value at any tick without asking
+    again."""
     garden = _Garden(conn)
     mote_id = _mote(garden, ref)
     scenario_id = garden.scenario(scenario)
@@ -437,9 +454,11 @@ def rule_cards(conn: sqlite3.Connection, ref: str, *, ticks: int | None = None,
                  for v in (*t.determines, *t.reads)}
     series = None
     if ticks is not None:
-        result = _series_run(conn, ticks, solver or "linear", scenario_id)
+        tried = knobs_repo.overrides(knobs_repo.resolve(garden, [knobs_repo.parse_set(s) for s in sets]))
+        result = _series_run(conn, ticks, solver or "linear", scenario_id, tried)
         case = scenarios_repo.get_scenario(conn, scenario_id) if scenario_id else None
-        start = scenarios_repo.apply({m.id: dict(m.properties) for m in garden.motes}, case)
+        start = scenarios_repo.overlay(
+            scenarios_repo.apply({m.id: dict(m.properties) for m in garden.motes}, case), tried)
         series = _values(start, result.steps, variables)
     cards = []
     for rule in wanted:
@@ -691,7 +710,8 @@ def override_for_write(conn: sqlite3.Connection, scenario_id: str, target_id: st
 
 
 def usage() -> str:
-    return "sim [--ticks N] [--scenario s] [--vs s|garden] [--solver name] [find conditions]"
+    return ("sim [--ticks N] [--scenario s] [--vs s|garden] [--solver name] "
+            "[--set m.k=value [unit]] [find conditions]")
 
 
 def choices(conn: sqlite3.Connection, verb: str, rest: str) -> list[tuple[str, str]]:
@@ -709,8 +729,11 @@ def choices(conn: sqlite3.Connection, verb: str, rest: str) -> list[tuple[str, s
             return [(s, "solver") for s in solvers_repo.list_solvers()]
         if before == TICKS_FLAG:
             return [(str(DEFAULT_TICKS), "ticks")]
+        if before == SET_FLAG:
+            return [(c.value, c.description) for c in plotcmd_repo.refs(conn)]
         return [(TICKS_FLAG, "how many ticks (default 50)"), (SCENARIO_FLAG, "run under a scenario"),
-                (VS_FLAG, "compare with another run"), (SOLVER_FLAG, "solver backend")]
+                (VS_FLAG, "compare with another run"), (SOLVER_FLAG, "solver backend"),
+                (SET_FLAG, "try a value, write nothing")]
     if verb == RULE_VERB and not (words and not partial):
         rules = sorted({r.name for r in rules_repo.list_rules(conn)})
         return [("@sel", "the selected rule, or the rules touching it")] + [(_quoted(n), "rule") for n in rules]

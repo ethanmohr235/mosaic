@@ -65,7 +65,8 @@ class MotionApi:
             settings = run or {}
             cards = motion.rule_cards(
                 self._session.conn, ref, ticks=settings.get("ticks"),
-                scenario=settings.get("scenario"), solver=settings.get("solver"))
+                scenario=settings.get("scenario"), solver=settings.get("solver"),
+                sets=settings.get("sets") or ())
             return {"kind": "rule", "cards": [motion.card_json(c) for c in cards],
                     "run": settings or None}
         return self._answer(command, answer)

@@ -62,6 +62,8 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `fit ‹m.y› vs ‹m.x› --data ‹Y› vs ‹X› --free ‹m.k›…` | Fit inputs to measured points (every mote with `Y` and `X`); shows, never writes |
 | `fit … --apply` | Write the fitted values, their σ and `source: fitted` (undoable) |
 | `sim [--ticks N] [--scenario s] [--vs s\|garden] [--solver name] [conditions]` | Run N ticks (default 50) in memory and watch the values; conditions pick motes, as `find` |
+| `plot\|sim\|fit\|graph --flow … --set ‹m.k›=‹value› [unit]` | **Knob**: try a value, write nothing. Repeatable. A unit is converted into the property's own (`--set bd.E="200 GPa"`); a unit on a unitless property is refused. In `sim`, the `--vs` run stays the plain garden; in `fit`, a held value or a free input's start; a `sim` pane's knobs also move the `rule` and flow panes that follow its playhead |
+| `plot\|sim\|fit\|graph --flow … --keep` | Write the line's `--set` knobs, as `set` would (one undo step). A pane offers it as `W`, then takes its line without the knobs |
 | `rule @sel\|‹rule›` | A rule's equation and bound values (a non-rule mote: every rule touching it) |
 | `why ‹m.k›` | How the last written solve got a value |
 | `scenarios` | Scenarios and their overrides |
@@ -103,9 +105,9 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 Calendar flags: `--keys a,b` · `--type ‹species›` · find conditions. Dates:
 ISO, `today`, `7d`, `-2w`.
 
-Fit flags: `--from ‹import›` (one CSV import's rows) · `--scenario name`.
+Fit flags: `--from ‹import›` (one CSV import's rows) · `--scenario name` · `--set m.k=v [unit]`.
 
-Plot flags: `--steps N` · `--set m.k=v` (knob, never written) ·
+Plot flags: `--steps N` · `--set m.k=v [unit]` (knob, never written) ·
 `--scenario name` · `--log` · `--hide m.k`.
 
 Find conditions: `status:todo` is · `name~truss` contains ·
@@ -131,6 +133,7 @@ Across panes a key means one thing:
 | `r` | Rename |
 | `a` | Add |
 | `v` | Compare |
+| `W` | Keep knobs: write the line's `--set` values (plot, sim, fit, flow) |
 | `d` `d` | Delete |
 | `space` | Toggle (play in the sim panes) |
 | `esc` | Back / clear |

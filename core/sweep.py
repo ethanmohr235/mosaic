@@ -312,13 +312,7 @@ def _perturbed(
     """The garden's properties with a scenario and then each override
     layer merged over them, in order. Pure -- `ground.properties` is never
     touched, so the next point starts from the same place this one did."""
-    properties = dict(scenarios_repo.apply(ground.properties, scenario))
-    for layer in overrides:
-        for mote_id, values in layer.items():
-            merged = dict(properties.get(mote_id, {}))
-            merged.update(values)
-            properties[mote_id] = merged
-    return properties
+    return scenarios_repo.overlay(scenarios_repo.apply(ground.properties, scenario), *overrides)
 
 
 def _solve(

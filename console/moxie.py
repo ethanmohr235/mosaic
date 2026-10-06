@@ -33,6 +33,7 @@ from typing import Any, Callable
 
 from console.session import Session, locked
 from core import fit as fit_repo
+from core import knobs as knobs_repo
 from core import plotexport
 from core import tectonic
 from core import plotcmd
@@ -96,6 +97,7 @@ class MoxieApi:
             "converged": result.converged, "solves": result.solves,
             "message": result.message, "xLabel": result.x_label, "yLabel": result.y_label,
             "applyCommand": line.text(apply=True),
+            **knobs_repo.line_payload(line),
             "seconds": round(time.perf_counter() - started, 3),
         }
 
@@ -210,6 +212,7 @@ class MoxieApi:
             "name": resolved.name,
             "coarse": coarse,
             "seconds": round(time.perf_counter() - started, 3),
+            **knobs_repo.line_payload(line),
         }
 
     def _figure(self, resolved: plotcmd.Resolved, coarse: bool, **snapshot) -> plotview.Figure:

@@ -15,6 +15,7 @@
  * Nothing here writes; `v` rewrites the line (`--vs garden`). */
 
 import { fmt } from "../plot.js";
+import { KEEP_HINT, hasKnobs, keepKnobs, knobSummary } from "../knobs.js";
 import { PLAYHEAD_HINTS, playheadKey, at } from "../playhead.js";
 
 const HINTS = [["j k", "row"], ["⏎", "select mote"], ["v", "vs garden"], ...PLAYHEAD_HINTS];
@@ -270,6 +271,7 @@ function create(ctx) {
     g: () => moveTo(0), G: () => moveTo(st.payload.rows.length - 1),
     Enter: () => { const row = st.payload.rows[st.cursor]; if (row) select(row); },
     v: () => rewrite({ vs: st.payload.vs ? null : "garden" }),
+    W: () => keepKnobs(ctx, st.payload),
   };
 
   function onKey(event) {
@@ -287,7 +289,7 @@ function create(ctx) {
   function claim(force = false) {
     const p = st.payload;
     if (!p || p.error && !p.count) return;
-    store.claimPlayhead(token, { count: p.count, run: { ticks: p.ticks, scenario: p.scenario, solver: p.solver } },
+    store.claimPlayhead(token, { count: p.count, run: { ticks: p.ticks, scenario: p.scenario, solver: p.solver, sets: p.sets } },
       { force });
   }
 
@@ -332,6 +334,7 @@ function create(ctx) {
     if (pinned) parts.push(`${pinned} pinned`);
     if (p.error) parts.push(`failed @${p.failedAt}: ${p.error}`);
     if (p.vsError) parts.push(`${p.vs}: ${p.vsError}`);
+    if (knobSummary(p)) parts.push(knobSummary(p));
     return { summary: parts.join(" · "), level: p.error || p.vsError ? "fault" : breaks || pinned ? "warn" : "ok" };
   }
 
@@ -352,7 +355,7 @@ function create(ctx) {
       st.seq += 1;
       root = tableEl = timelineEl = statusEl = null;
     },
-    hints: () => (st.payload ? HINTS : []),
+    hints: () => (st.payload ? [...HINTS, ...(hasKnobs(st.payload) ? [KEEP_HINT] : [])] : []),
     onKey,
     action,
   };

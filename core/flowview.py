@@ -32,6 +32,7 @@ from core import calc
 from core import formula_tex
 from core import graphview
 from core import health as health_repo
+from core import knobs as knobs_repo
 from core import motion
 from core import scenarios as scenarios_repo
 from core import simulation
@@ -282,6 +283,7 @@ class _Run:
     groups: list[Group]
     ends: set[Unknown]
     folds: list[Fold]
+    tried: dict = field(default_factory=dict)
     series: dict[Unknown, list] | None = None
     sigma: dict[Unknown, float] = field(default_factory=dict)
     culprits: dict[Unknown, str] = field(default_factory=dict)
@@ -293,17 +295,25 @@ def run(conn, line: graphview.GraphLine, selection=(), run: dict | None = None,
     settings = run or {}
     garden = _Garden(conn)
     scenario = garden.scenario(settings.get("scenario"))
-    trace = simulation.trace(conn, scenario, settings.get("solver") or "linear")
+    tried = _knobs(garden, settings, line)
+    trace = simulation.trace(conn, scenario, settings.get("solver") or "linear", tried)
     raw = build_groups(trace)
     ends = answers(raw)
     fold_list = folds_of(raw, ends, {str(k): bool(v) for k, v in (folds or {}).items()})
     groups = contract(raw, fold_list)
     rank(groups)
-    r = _Run(conn, garden, table_repo.read(conn)[2], trace, scenario, groups, ends, fold_list)
+    r = _Run(conn, garden, table_repo.read(conn)[2], trace, scenario, groups, ends, fold_list, tried)
     root_name, kept = _keep(r, line, selection)
     shown = [g for g in groups if g.id in kept]
     _extras(r, shown, settings)
     return _Payload(r, shown).build(line, root_name)
+
+
+def _knobs(garden: _Garden, settings: dict, line) -> dict:
+    """The values to try: the playhead's run's (a sim pane's `--set`), then
+    this line's own, which win."""
+    specs = [knobs_repo.parse_set(s) for s in settings.get("sets") or ()] + list(line.sets)
+    return knobs_repo.overrides(knobs_repo.resolve(garden, specs))
 
 
 def _keep(r: _Run, line, selection) -> tuple[str | None, set[str]]:
@@ -327,11 +337,12 @@ def _extras(r: _Run, shown: list[Group], settings: dict) -> None:
     variables = _touched(shown)
     if settings.get("ticks"):
         result = motion._series_run(r.conn, int(settings["ticks"]),
-                                    settings.get("solver") or "linear", r.scenario)
+                                    settings.get("solver") or "linear", r.scenario, r.tried)
         case = scenarios_repo.get_scenario(r.conn, r.scenario) if r.scenario else None
-        start = scenarios_repo.apply({m.id: dict(m.properties) for m in r.garden.motes}, case)
+        start = scenarios_repo.overlay(
+            scenarios_repo.apply({m.id: dict(m.properties) for m in r.garden.motes}, case), r.tried)
         r.series = motion._values(start, result.steps, variables)
-    if r.scenario is None and uncertainty.has_uncertainty(r.conn):
+    if r.scenario is None and not r.tried and uncertainty.has_uncertainty(r.conn):
         report = uncertainty.propagate(r.conn)
         r.sigma = {(p.mote_id, p.key): p.sigma for p in report.results}
     if r.trace.error or any(g.kind == FAULT for g in r.groups):
@@ -503,6 +514,7 @@ class _Payload:
             "summary": self.summary(),
             "speciesIds": sorted(m.id for m in species_repo.list_species(self.r.conn)),
             "problems": [],
+            **knobs_repo.line_payload(line),
         }
 
     def order_insides(self, position: dict) -> None:

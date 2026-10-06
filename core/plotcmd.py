@@ -30,11 +30,13 @@ import sqlite3
 from dataclasses import dataclass, replace
 from typing import Sequence
 
+from core import knobs as knobs_repo
 from core import motes as motes_repo
 from core import scenarios as scenarios_repo
 from core import simulation as simulation_repo
 from core import plotview
 from core.command_bar import CommandError
+from core.knobs import number_text as _number_text
 from core.sweep import PLOT_KEY
 
 PLOT_VERB = "plot"
@@ -56,7 +58,6 @@ _SUGGESTION_SPAN = (0.5, 2.0)
 
 _NUMBER = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 _RANGE_RE = re.compile(rf"^({_NUMBER}):({_NUMBER})$")
-_SET_RE = re.compile(rf"^(.+)=({_NUMBER})$")
 
 PLOT, SAVED = "plot", "saved"
 
@@ -79,7 +80,7 @@ class PlotLine:
     by_range: tuple[float, float] | None = None
     across: bool = False
     steps: int | None = None
-    sets: tuple[tuple[str, float], ...] = ()
+    sets: tuple[knobs_repo.KnobSpec, ...] = ()
     scenario: str | None = None
     log: bool = False
     hide: tuple[str, ...] = ()
@@ -116,8 +117,7 @@ class PlotLine:
             parts.append(ACROSS_FLAG)
         if self.steps is not None:
             parts += [STEPS_FLAG, str(self.steps)]
-        for ref, value in self.sets:
-            parts += [SET_FLAG, _quote(f"{ref}={_number_text(value)}")]
+        parts += [_quote(word) for word in knobs_repo.words(self.sets)]
         if self.scenario:
             parts += [SCENARIO_FLAG, _quote(self.scenario)]
         if self.log:
@@ -249,10 +249,7 @@ def _flag(fields: dict, flag: str, value: str) -> None:
             raise CommandError(f"--steps is 1 to {MAX_STEPS}")
         fields["steps"] = steps
     elif flag == SET_FLAG:
-        match = _SET_RE.match(value)
-        if not match:
-            raise CommandError(f"--set takes ‹mote.key›=‹number›, not {value!r}")
-        fields["sets"].append((match.group(1), float(match.group(2))))
+        fields["sets"].append(knobs_repo.parse_set(value))
     elif flag == SCENARIO_FLAG:
         fields["scenario"] = value
     else:
@@ -293,13 +290,10 @@ def rewrite(line: PlotLine, change: dict) -> PlotLine:
         raise CommandError("only a typed plot line can be changed in place")
     change = change or {}
     if "set" in change:
-        ref, value = change["set"]["ref"], float(change["set"]["value"])
-        sets = [(r, v) for r, v in line.sets if r != ref]
-        at = next((i for i, (r, _v) in enumerate(line.sets) if r == ref), len(sets))
-        sets.insert(at, (ref, value))
-        return replace(line, sets=tuple(sets))
+        spec = knobs_repo.KnobSpec(change["set"]["ref"], float(change["set"]["value"]))
+        return replace(line, sets=knobs_repo.add_to_line(line.sets, spec))
     if "unset" in change:
-        return replace(line, sets=tuple((r, v) for r, v in line.sets if r != change["unset"]))
+        return replace(line, sets=tuple(s for s in line.sets if s.ref != change["unset"]))
     if "range" in change:
         lo, hi = (float(v) for v in change["range"])
         if lo == hi:
@@ -451,7 +445,8 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
         )
 
     scenario_id = garden.scenario(line.scenario)
-    knobs = tuple(_knob(garden, ref, *garden.ref(ref), value) for ref, value in line.sets)
+    knobs = tuple(_knob(garden, k.ref, k.mote, k.key, k.value)
+                  for k in knobs_repo.resolve(garden, line.sets))
     spec: dict = {
         "mode": line.mode,
         "knobs": [{"mote": k.mote, "key": k.key, "value": k.value} for k in knobs],
@@ -494,7 +489,7 @@ def line_of(conn: sqlite3.Connection, spec: dict) -> PlotLine:
     can't say -- a per-series scenario other than the first, an `extra`
     override, a baseline -- is left out."""
     garden = _Garden(conn)
-    sets = tuple((garden.text_of(k["mote"], k["key"]), float(k["value"]))
+    sets = tuple(knobs_repo.KnobSpec(garden.text_of(k["mote"], k["key"]), float(k["value"]))
                  for k in spec.get("knobs") or [] if isinstance(k, dict) and k.get("mote") in garden.by_id)
     log = spec.get("yScale") == "log"
     series = [s for s in spec.get("series") or [] if isinstance(s, dict) and s.get("mote") in garden.by_id]
@@ -536,12 +531,6 @@ def _quote(text: str) -> str:
     return shlex.quote(text)
 
 
-def _number_text(value: float) -> str:
-    if float(value).is_integer() and abs(value) < 1e15:
-        return str(int(value))
-    return format(value, ".6g")
-
-
 def _range_text(span: tuple[float, float]) -> str:
     return f"{_number_text(span[0])}:{_number_text(span[1])}"
 
@@ -576,21 +565,21 @@ def choices(conn: sqlite3.Connection, rest: str) -> list[Choice]:
         return [Choice(s.name, "scenario") for s in scenarios_repo.list_scenarios(conn)]
     if before == STEPS_FLAG:
         return [Choice(str(DEFAULT_STEPS))]
-    refs = _refs(conn)
+    known = refs(conn)
     if not done:
         saved = [Choice(plotview.name_of(v), "saved plot")
                  for v in plotview.list_views(motes_repo.list_motes(conn))]
-        return refs + saved + [Choice(SAVE, "save the focused plot as a mote"),
+        return known + saved + [Choice(SAVE, "save the focused plot as a mote"),
                                Choice(EXPORT, "export the focused plot")]
     keywords = []
     if VS not in done:
         keywords.append(Choice(VS, "then the value to sweep"))
     elif BY not in done and _RANGE_RE.match(before or ""):
         keywords.append(Choice(BY, "a second axis: a surface"))
-    return keywords + refs
+    return keywords + known
 
 
-def _refs(conn: sqlite3.Connection) -> list[Choice]:
+def refs(conn: sqlite3.Connection) -> list[Choice]:
     garden = _Garden(conn)
     freedoms = simulation_repo.garden_freedoms(conn)
     rows: dict[str, Choice] = {}

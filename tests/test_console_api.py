@@ -107,6 +107,35 @@ def test_opening_an_archived_garden_starts_read_only():
         again.shutdown()
 
 
+# ---- knobs ------------------------------------------------------------------
+
+def test_keep_writes_a_lines_knobs_as_one_undo_step(api):
+    api.run("C1.x = 1")
+    api.run("C1.y = 2")
+    for line in ("sim --set C1.x=9 --set C1.y=8 --keep", "plot C1.y vs C1.x 0:5 --set C1.x=9 --set C1.y=8 --keep"):
+        done = api.run(line)
+        assert done["effect"] == "statement" and done["wrote"], line
+        assert "kept 2 knobs" in done["message"]
+        c1 = next(m for m in motes_repo.list_motes(api._session.conn) if m.properties.get("name") == "C1")
+        assert (c1.properties["x"], c1.properties["y"]) == (9, 8)
+        assert api.undo()["label"]
+        c1 = next(m for m in motes_repo.list_motes(api._session.conn) if m.properties.get("name") == "C1")
+        assert (c1.properties["x"], c1.properties["y"]) == (1, 2)
+
+
+def test_keep_without_knobs_is_an_error(api):
+    api.run("C1.x = 1")
+    assert api.run("sim --keep")["effect"] == "error"
+
+
+def test_a_knob_line_opens_a_pane_and_writes_nothing(api):
+    api.run("C1.x = 1")
+    opened = api.run("sim --set C1.x=9")
+    assert opened["effect"] == "open_view" and opened["command"] == "sim --set C1.x=9"
+    c1 = next(m for m in motes_repo.list_motes(api._session.conn) if m.properties.get("name") == "C1")
+    assert c1.properties["x"] == 1
+
+
 # ---- the pywebview walk ------------------------------------------------------
 
 def _reachable(obj, seen=None):

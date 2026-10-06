@@ -19,6 +19,7 @@
 
 import { FlowBoard, CHECK_MARK, SOURCE_MARK } from "../flow.js";
 import { createPalette } from "../palette.js";
+import { KEEP_HINT, hasKnobs, keepKnobs, knobSummary } from "../knobs.js";
 import { PLAYHEAD_HINTS, playheadKey, at } from "../playhead.js";
 import { fmt } from "../plot.js";
 
@@ -77,6 +78,7 @@ function create(ctx) {
     parts.push(`${s.answers} answer${s.answers === 1 ? "" : "s"}`);
     if (s.checks) parts.push(`checks ${s.passed}/${s.checks}`);
     if (p.solve.state !== "solved") parts.push(p.solve.message);
+    if (knobSummary(p)) parts.push(knobSummary(p));
     const level = p.solve.state === "failed" ? "fault"
       : p.solve.state === "partial" || s.passed < s.checks ? "warn" : "ok";
     return { summary: parts.join(" · "), level };
@@ -189,6 +191,7 @@ function create(ctx) {
 
   const KEYS = {
     Enter: () => board.cursor && pick(board.cursor), o: () => open(), e: prefill,
+    W: () => keepKnobs(ctx, st.payload),
     z: () => fold(false), Z: () => fold(true),
     "[": () => rewrite({ depth: -1 }), "]": () => rewrite({ depth: 1 }),
     f: () => board.fit(), "+": () => board.zoom(1.25), "=": () => board.zoom(1.25), "-": () => board.zoom(0.8),
@@ -263,7 +266,8 @@ function create(ctx) {
       if (board) board.destroy();
       root = board = corners = errorBox = null;
     },
-    hints: () => (st.payload ? [...HINTS, ...(store.state.playhead.count ? PLAYHEAD_HINTS.slice(0, 2) : [])] : []),
+    hints: () => (st.payload ? [...HINTS, ...(hasKnobs(st.payload) ? [KEEP_HINT] : []),
+      ...(store.state.playhead.count ? PLAYHEAD_HINTS.slice(0, 2) : [])] : []),
     onKey,
   };
 }
