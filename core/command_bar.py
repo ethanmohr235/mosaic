@@ -1,8 +1,7 @@
 # core/command_bar.py
 """The statement grammar and execution -- one typed line edits the graph
 without leaving the keyboard. The console's command line runs every line
-that isn't a verb or an app through here (core/commands.py); it began as
-the old windows' "/" command bar.
+that isn't a verb through here (core/commands.py).
 
 Seven forms, tried in this order (first match wins):
 
@@ -616,8 +615,7 @@ def _choice(conn, mote: Mote) -> dict:
 def parse_value(text: str):
     """`"500 ohms"` -> (500, "ohm"); `"500"` -> (500, None); anything else
     tries JSON (`"true"` -> True, `"[1, 2]"` -> [1, 2]) and falls back to
-    the literal string -- the tolerance the old windows' property boxes
-    gave typed values too.
+    the literal string.
 
     Public because it is the one answer to "what did that typed value
     mean": core/batch.py's bulk write reads a value exactly as `R1.x = 5

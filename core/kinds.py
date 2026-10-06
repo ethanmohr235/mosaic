@@ -104,14 +104,6 @@ def kinds_of(mote: Mote, relationships: Iterable[Relationship]) -> list[str]:
     return kinds_in([mote], relationships).get(mote.id, [])
 
 
-def ids_with_kind(
-    kind_name: str, motes: Iterable[Mote], relationships: Iterable[Relationship]
-) -> list[str]:
-    """Just the motes of one named kind, in the order given."""
-    kinds = kinds_in(motes, relationships)
-    return [mote.id for mote in motes if kind_name in kinds.get(mote.id, ())]
-
-
 def _is(kind: Kind, mote: Mote, id_sets: dict[str, set[str]]) -> bool:
     if kind.ids_in is not None and mote.id not in id_sets[kind.name]:
         return False

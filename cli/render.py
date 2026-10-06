@@ -1,11 +1,9 @@
 # cli/render.py
-"""Rendering shared by both command-line surfaces.
+"""Rendering for the command line.
 
-`cli/main.py` (argparse, one command per invocation) and `cli/repl.py`
-(interactive) are two front doors onto the same functions, and each has
-grown its own copy of the small printers. An explanation tree is too big
-to copy: it is recursive, and two copies would drift into two different
-accounts of the same run.
+`cli/main.py` (argparse, one command per invocation) prints through these
+helpers. An explanation tree is too big to inline: it is recursive, and
+a second copy would drift into a different account of the same run.
 
 The explanation/impact/requirement helpers return lines rather than
 printing them, so the caller decides where output goes and a test can

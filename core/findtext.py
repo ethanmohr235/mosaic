@@ -2,8 +2,7 @@
 """One typed line as a query: `status:todo due:<7d --sort -updated`.
 
 `core/query.py` is the query *language* -- fields, operators, joins,
-sorting, grouping -- and Monolith was an editor for it built out of
-dropdowns. The console has one line to type into instead, so the same
+sorting, grouping -- and a table with dropdowns could edit it. The console has one line to type into instead, so the same
 query needs a written form, and this is it: `parse_find()` reads a line
 into a Query, `format_find()` writes one back out, and
 `format_find(parse_find(text)) == text` for text already in canonical

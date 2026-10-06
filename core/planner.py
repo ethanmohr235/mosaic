@@ -15,7 +15,7 @@ reported as skipped, one past due as overdue.
 estimate, less what is logged done, less what is already planned ahead)
 are cut into blocks of at most `--block` and each goes in the earliest
 free slot inside the working hours (`core/calendar.py::earliest_free_slot`,
-so "busy" is exactly what Monastery draws as busy) on or before the due
+so "busy" is exactly what the calendar panes draw as busy) on or before the due
 day, never past a timed due. What does not fit is reported with the hours
 short. `plan` alone only previews; `plan --apply` writes.
 

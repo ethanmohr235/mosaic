@@ -383,8 +383,8 @@ about that mote. `Rule.scope` carries the resolved answer and
 `check_roles` lists every `once` rule, because making the first instance
 of a mote silently converts every rule asserted about it.
 
-See `docs/simulation.md` for the reference and
-`scripts/example_rankine_cycle.py` for a worked cycle.
+See `docs/simulation.md` for the reference and its Rankine cycle
+worked example.
 
 # Provenance
 

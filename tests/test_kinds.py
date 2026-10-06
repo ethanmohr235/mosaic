@@ -17,7 +17,6 @@ from core.kinds import (
     RULE,
     SPECIES,
     TEMPLATE,
-    ids_with_kind,
     kinds_in,
     kinds_of,
 )
@@ -107,12 +106,6 @@ def test_a_mote_with_no_role_is_left_out_entirely():
 
 
 # ---- helpers ----
-
-def test_ids_with_kind_filters_and_preserves_order():
-    motes = [mote("a"), mote("s1"), mote("b")]
-    rels = [rel("x", "a", "instance_of"), rel("y", "b", "instance_of")]
-    assert ids_with_kind(SPECIES, motes, rels) == ["a", "b"]
-
 
 def test_every_kind_has_a_label_and_at_least_one_test():
     assert set(KIND_NAMES) == set(KIND_LABELS)

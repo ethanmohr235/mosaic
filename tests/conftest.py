@@ -4,7 +4,7 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -113,7 +113,11 @@ def sync_dir():
     reachable, instead of each one repeating that check."""
     if not DOCKER_AVAILABLE:
         pytest.skip("Docker not available for testcontainers")
-    with live_sync_server() as base_url:
+    with ExitStack() as stack:
+        try:
+            base_url = stack.enter_context(live_sync_server())
+        except Exception as e:  # a daemon that answers `docker info` but can't start the container
+            pytest.skip(f"sync server container unavailable: {e}")
         yield base_url
 
 

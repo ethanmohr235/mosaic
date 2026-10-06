@@ -266,7 +266,7 @@ class Query:
     def from_json(raw: dict | None) -> "Query":
         """Forgiving on purpose: a saved query lives on a mote, and a
         mote's properties are editable from the CLI, from MCP and from
-        Monarch's detail panel. A view that has been hand-edited into
+        the props pane. A view that has been hand-edited into
         nonsense should come back as a narrower view, not as an exception
         in the window that opens it."""
         if not isinstance(raw, dict):

@@ -132,31 +132,7 @@ def test_a_hand_edited_query_comes_back_narrower_rather_than_raising(conn):
     assert [v.id for v in views.list_views(conn)] == [mote_id]
 
 
-# ---- deleting ----
-
-def test_deleting_a_view_removes_only_that_mote(conn):
-    keeper = create_mote(conn, {"name": "Schema"})
-    saved, _ = views.save_view(conn, "Doing", DOING)
-
-    deleted, _ = views.delete_view(conn, saved["id"])
-    assert deleted
-    assert get_mote(conn, saved["id"]) is None
-    assert get_mote(conn, keeper) is not None
-
-
-def test_deleting_a_view_that_is_already_gone_is_not_an_error(conn):
-    assert views.delete_view(conn, "gone") == (False, None)
-
-
-def test_deleting_a_view_can_be_undone(conn, undo_stack):
-    saved, _ = views.save_view(conn, "Doing", DOING)
-    apply(undo_stack, views.delete_view(conn, saved["id"]))
-
-    assert undo_stack.undo() == "delete view"
-    restored = get_mote(conn, saved["id"])
-    assert restored.properties["name"] == "Doing"
-    assert species_repo.species_of(conn, saved["id"])
-
+# ---- undo ----
 
 def test_saving_a_view_can_be_undone(conn, undo_stack):
     saved = apply(undo_stack, views.save_view(conn, "Doing", DOING))

@@ -21,8 +21,7 @@ without either of them knowing this module exists.
 This lived in `monolith/api.py`. It is in `core/` because a saved view is
 not one window's state: `docs/architecture.md`'s charter says every
 capability lives in core and an adapter holding logic of its own is a bug,
-and this one was already being read by a second surface
-(Monarch's graph filter, since gone) through the property directly.
+and a second surface can read the property directly.
 """
 import sqlite3
 
@@ -106,24 +105,6 @@ def save_view(
     return (
         {"id": new_id, "created": True},
         undo.for_create_mote(conn, new_id, properties, label="save view"),
-    )
-
-
-def delete_view(conn: sqlite3.Connection, view_id: str) -> tuple[bool, undo.Command | None]:
-    """Deletes the view mote outright. Needs no confirmation flag, unlike
-    deleting rows: what is lost is a saved query rather than any of the
-    garden's own data, and it undoes like anything else."""
-    mote = motes_repo.get_mote(conn, view_id)
-    if mote is None:
-        return False, None
-    relationships = [
-        {"id": r.id, "fromId": r.from_id, "toId": r.to_id, "type": r.type}
-        for r in graph_repo.relationships_touching(conn, view_id)
-    ]
-    if not motes_repo.delete_mote(conn, view_id):
-        return False, None
-    return True, undo.for_delete_mote(
-        conn, view_id, mote.properties, relationships, label="delete view",
     )
 
 

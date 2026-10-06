@@ -86,17 +86,9 @@ class Occurrence:
     all_day: bool
     # Whether this placement came out of a rule rather than standing
     # alone. Answered here, where the rule was parsed anyway, so
-    # Monastery can ask "this occurrence or the whole series?" without
+    # the calendar panes can ask "this occurrence or the whole series?" without
     # parsing anything in JavaScript.
     recurring: bool = False
-
-
-def parse_date_value(value) -> tuple[datetime, bool] | None:
-    """(when, all_day) for a value that says when something starts, else
-    None. The shape test a binding is recognized by, kept as a named
-    function because several callers want only the start."""
-    found = interval_repo.parse(value)
-    return None if found is None else (found.start, found.all_day)
 
 
 def binding_counts(motes: list[Mote]) -> dict[str, int]:
@@ -235,22 +227,6 @@ def occurrences(
     return sorted(found, key=lambda o: (o.start, not o.all_day, o.mote.id))
 
 
-def undated_count(motes: list[Mote], *, exclude_ids: set[str] | None = None) -> int:
-    """Motes carrying no interval-shaped property at all -- the status
-    bar's "without a date property" figure. Asked of every key rather
-    than only the enabled bindings: a mote hidden because you toggled
-    `due` off is still a dated mote, and counting it as undated would
-    make the number move for the wrong reason."""
-    excluded = exclude_ids or set()
-    return sum(
-        1 for mote in motes
-        if mote.id not in excluded and not any(
-            interval_repo.parse(value) is not None
-            for value in mote.properties.values()
-        )
-    )
-
-
 def earliest_free_slot(
     motes: list[Mote],
     *,
@@ -264,11 +240,11 @@ def earliest_free_slot(
     """The first moment on `day` with `duration` free after it, or None if
     the day cannot fit it.
 
-    A building block for Monastery's planned plan-my-week (roadmap phase
-    5): the person chooses the day, and the earliest gap that is actually
-    free chooses the time. It reads the same occurrences the calendar
-    draws, through the same bindings, so "busy" means exactly what
-    Monastery shows as busy -- there is no second notion of a booked hour.
+    What plan-my-week (core/planner.py) places work with: the person
+    chooses the day, and the earliest gap that is actually free chooses
+    the time. It reads the same occurrences the calendar draws, through
+    the same bindings, so "busy" means exactly what the calendar panes
+    show as busy -- there is no second notion of a booked hour.
 
     All-day placements are not busy. A task `due` on Thursday marks the
     day rather than occupying it, and treating one as a booking would
@@ -351,22 +327,9 @@ def conflicts(
     return found
 
 
-def is_calendar_value(value) -> bool:
-    """Whether a property value is one the calendar reads structurally,
-    rather than user data the detail panel should list plainly. Used only
-    for presentation.
-
-    Asked about the **value**, not the key -- which is the whole of what
-    changed here. There is no list of calendar property names any more to
-    ask about, so the badge a panel shows moves from "this key is
-    reserved" to "this value is a recognized shape."
-    """
-    return interval_repo.parse(value) is not None
-
-
 # ---- writing -------------------------------------------------------
 #
-# Monastery lets you drag a rectangle; everything below says what that
+# The week grid lets you drag a rectangle; everything below says what that
 # means in properties. Still pure -- a mote and a datetime or two in, a
 # dict of properties out -- so what a drag *means* is tested in
 # tests/test_calendar.py without a window, and core/agenda.py only has
@@ -382,7 +345,7 @@ def is_calendar_value(value) -> bool:
 
 def is_recurring(mote: Mote, binding: str) -> bool:
     """Whether this placement is a series rather than a single event,
-    which is what decides whether Monastery asks "this occurrence, or the
+    which is what decides whether the calendar panes ask "this occurrence, or the
     whole series?" before writing.
 
     A rule that does not parse is deliberately *not* recurring: it
@@ -509,8 +472,8 @@ def resized_properties(
     One span, every occurrence: core reads a single length off the value
     and hands it to each start, so lengthening one Tuesday of a weekly
     meeting lengthens all of them. That is the same "one mote is the
-    whole series" the rest of this module means, and the reason Monastery
-    asks first when a mote recurs.
+    whole series" the rest of this module means, and the reason the calendar panes
+    ask first when a mote recurs.
     """
     found = interval_repo.parse(mote.properties.get(binding))
     if found is None:

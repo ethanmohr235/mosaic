@@ -17,10 +17,8 @@ from core.calendar import (
     is_recurring,
     moved_properties,
     occurrences,
-    parse_date_value,
     resized_properties,
     span_of,
-    undated_count,
     with_exception,
 )
 from core.entities import Mote
@@ -39,30 +37,6 @@ def _in_week(motes, bindings):
 
 
 # ---- parsing ----
-
-def test_parse_date_value_reads_a_bare_date_as_all_day():
-    assert parse_date_value("2026-08-24") == (datetime(2026, 8, 24), True)
-
-
-def test_parse_date_value_reads_an_iso_datetime_as_timed():
-    assert parse_date_value("2026-08-24T09:15:00") == (datetime(2026, 8, 24, 9, 15), False)
-
-
-def test_parse_date_value_accepts_a_space_instead_of_a_t():
-    """What people actually type into a property field."""
-    assert parse_date_value("2026-08-24 09:15") == (datetime(2026, 8, 24, 9, 15), False)
-
-
-def test_parse_date_value_rejects_non_dates():
-    for value in ["", "   ", "not-a-date", "2026-13-45", None, 12345, [], {}]:
-        assert parse_date_value(value) is None
-
-
-def test_parse_date_value_rejects_booleans():
-    # True is an int in Python; a mote with done:true must not be dated.
-    assert parse_date_value(True) is None
-    assert parse_date_value(False) is None
-
 
 # ---- bindings ----
 
@@ -257,25 +231,6 @@ def test_a_broken_rule_still_places_the_mote_on_its_own_date():
     motes = [_mote({"when": "2026-08-24 09:00\nRRULE:FREQ=NONSENSE"})]
     placed = _in_week(motes, ["when"])
     assert [o.start.day for o in placed] == [24]
-
-
-# ---- the status bar ----
-
-def test_undated_count_is_motes_with_no_date_shaped_property():
-    motes = [
-        _mote({"name": "Rina", "role": "engineer"}, id="a"),
-        _mote({"name": "Dev"}, id="b"),
-        _mote({"name": "Audit", "due": "2026-08-25"}, id="c"),
-    ]
-    assert undated_count(motes) == 2
-
-
-def test_undated_count_ignores_which_bindings_are_toggled_on():
-    """A mote hidden because you toggled `due` off is still a dated mote
-    -- counting it as undated would move the number for the wrong
-    reason."""
-    motes = [_mote({"due": "2026-08-25"})]
-    assert undated_count(motes) == 0
 
 
 # ---- exceptions ----

@@ -1,22 +1,10 @@
 from core.graph import (
-    most_recent_mote_id,
     neighborhood,
     relationships_touching,
     whole_garden,
 )
 from core.motes import create_mote, delete_property, update_mote
 from core.relationships import create_relationship
-
-
-def test_most_recent_mote_id_none_when_empty(conn):
-    assert most_recent_mote_id(conn) is None
-
-
-def test_most_recent_mote_id_returns_last_inserted(conn):
-    create_mote(conn, {"name": "Alice"})
-    create_mote(conn, {"name": "Bob"})
-    last = create_mote(conn, {"name": "Carol"})
-    assert most_recent_mote_id(conn) == last
 
 
 def test_relationships_touching_matches_either_endpoint(conn):

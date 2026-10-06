@@ -86,7 +86,7 @@ PROPERTY_MEANINGS: dict[str, str] = {
     MODOC_KEY: "A .modoc note about this mote -- a small LaTeX subset whose "
         "\\mote/\\val/\\graph macros resolve live against the garden. The "
         "property is the canonical copy; .modoc files are import/export only. "
-        "Written and read in Mora (run_mora.py); see docs/modoc.md.",
+        "Written and read by the `edit` and `read` panes; see docs/modoc.md.",
     QUERY_KEY: "A saved view: the structured query (filter, sort, grouping "
         "and columns) a table of the garden is drawn from, as JSON -- see "
         "core/query.py for the shape. A field in it names a property key, a "

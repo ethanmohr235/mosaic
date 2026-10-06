@@ -15,10 +15,9 @@ one.
 
 Two things it deliberately does not do. It never writes, and it never
 runs the clock: a note says what the garden *is*, not what it will be.
-That second one used to be a `t+N` preview living here, and removing it
-is what makes the boundary between the windows honest -- Motion is where
-a garden moves through time, Moxie is where a property is swept, and a
-note reads the state those produce. And it never raises: every failure
+That boundary is what keeps a note honest -- `sim` is where a garden
+moves through time, `plot` is where a property is swept, and a note
+reads the state those produce. And it never raises: every failure
 lands in the returned diagnostics, because a note with one bad
 expression in it must still render the other nineteen.
 """

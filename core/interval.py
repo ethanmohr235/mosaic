@@ -46,8 +46,8 @@ from datetime import date, datetime, timedelta
 DEFAULT_TIMED_MINUTES = 60
 DEFAULT_ALL_DAY_DAYS = 1
 
-# Lines an interval may carry beneath itself. EXDATE is the one Monastery
-# writes: taking a single occurrence out of a series is what RFC 5545
+# Lines an interval may carry beneath itself. EXDATE is the one the calendar
+# panes write: taking a single occurrence out of a series is what RFC 5545
 # already calls an exception, so "delete this one" needs no new property.
 RULE_PREFIXES = ("RRULE", "EXDATE", "RDATE", "EXRULE")
 

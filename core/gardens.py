@@ -164,10 +164,6 @@ def set_default_garden(name: str) -> None:
     _default_garden_config_path().write_text(name)
 
 
-def clear_default_garden() -> None:
-    _default_garden_config_path().unlink(missing_ok=True)
-
-
 def _sync_dir_path(name: str) -> Path:
     path = garden_db_path(name)
     return path.with_name(path.name + ".sync_dir")

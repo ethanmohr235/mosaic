@@ -223,20 +223,3 @@ def test_for_delete_relationship_round_trips(conn):
     assert rel_repo.get_relationship(conn, rel_id) is None
 
 
-def test_for_update_relationship_restores_old_fields(conn):
-    a = motes_repo.create_mote(conn)
-    b = motes_repo.create_mote(conn)
-    c = motes_repo.create_mote(conn)
-    rel_id = rel_repo.create_relationship(conn, a, b, "depends_on")
-    command = undo.for_update_relationship(
-        conn, rel_id, old_fields={"to_id": b}, new_fields={"to_id": c}, label="repoint to C",
-    )
-
-    rel_repo.update_relationship(conn, rel_id, to_id=c)
-    assert rel_repo.get_relationship(conn, rel_id).to_id == c
-
-    command.undo()
-    assert rel_repo.get_relationship(conn, rel_id).to_id == b
-
-    command.redo()
-    assert rel_repo.get_relationship(conn, rel_id).to_id == c

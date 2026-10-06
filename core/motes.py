@@ -111,9 +111,8 @@ def search_motes(conn: sqlite3.Connection, query: str, limit: int = 60) -> list[
     """Case-insensitive text search over every mote's id and properties.
     "key = value" matches a specific property's value exactly; anything
     else is a substring match against the mote id or any property key or
-    value. An empty/blank query matches everything. (Monarch's search
-    palette kept a JavaScript twin of this; the console searches with
-    `find`, core/findtext.py.)"""
+    value. An empty/blank query matches everything. (The console searches
+    with `find`, core/findtext.py.)"""
     motes = list_motes(conn)
     query = (query or "").strip()
     if not query:

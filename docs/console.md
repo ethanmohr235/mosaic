@@ -10,33 +10,15 @@ rules in `rules.md` still apply: every step below is a phase, so it goes
 through plan mode, questions and approval before any code. Anything under
 *Open questions* is undecided. Ask before you assume.
 
-## Sources
+## Visual reference
 
-- **Visual reference:** `docs/design/mosaic-console/`. Open
-  `Design System Proposals.dc.html` in a browser (it needs `support.js`
-  beside it). Follow **Turn 3 → 3c, 3e**, **Turn 2 → 2a, 2b**, and
-  **Turn 1 → 1a** for Motion and Moxie details. Ignore 1b, 1c and 2c.
-  The handoff `README.md` has the tokens, sizes and key bindings, and it
-  is high-fidelity for type, color, spacing, density, shell structure
-  and command-line behavior.
-- **This doc wins** wherever the two disagree. The handoff was drawn
-  against fake data and an older picture of the repo. The corrections
-  are listed next.
-
-### Corrections to the handoff
-
-| Handoff says | Actually |
-|---|---|
-| Frontend in `ui/frontend/`, API in `ui/api.py` | Neither exists. The console is `console/` (`api.py` and a namespace module per app) with `console/frontend/`. See *Architecture*. |
-| Graph drawn with Cytoscape | Monarch's graph is a hand-written canvas, kept and restyled to the graph styling rules (`console/frontend/js/graph.js`, U8). |
-| Apps: Observatory (`mo rph`), Motion, Moxie, Monastery, Mote Inspector, Launcher | There are no apps, only views and built-in layouts (see *Views and built-in layouts*). Observatory is the `graph` pane. Momentum was removed and never ported. |
-| Fixed mote-type colors: task, note, event, source | Mosaic privileges no type. Motes are colored by **species**, using the existing probed palette retuned into the design's band. See *Color*. |
-| Motion *runs* list, `diff vs #0412`, Moxie `run #0414` | Saved run history and *commit tick* are cut (`roadmap.md`). Motion lists **scenarios**. A run is a curve you plot, not a record you diff. |
-| `hil disconnected` hardware row | Not a feature. Ignore it. |
-| The prompt is always `mo`; the first token is an app suffix or a command | The prompt is `$`, and the first token is a verb or a statement. The top bar keeps the `[mo]` box as the `[mo]saic` wordmark. |
-| Selection is one mote id | Selection is an **ordered set with a primary**. See *Selection*. |
-| Inspector is only the `props` pane | The props pane plus a floating inspector on demand. See *Inspector*. |
-| Google Fonts for Geist Mono | Vendored, like the current fonts. Nothing is fetched at runtime. |
+`console/frontend/tokens.css` and `shell.css` are the source of truth for
+type, color, spacing and density. The mockups the console was drawn
+from were removed from the repo (they stay in git history, under
+`docs/design/mosaic-console/`). Where this doc and an old mockup
+disagree, this doc wins: the console has no apps (views and built-in
+layouts only), colors motes by species, keeps selection as an ordered set
+with a primary, vendors its fonts, and never saved run history.
 
 ## Decided
 

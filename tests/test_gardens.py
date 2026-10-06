@@ -2,7 +2,6 @@ import pytest
 
 from core.db import garden_db_path
 from core.gardens import (
-    clear_default_garden,
     clear_sync_dir,
     create_garden,
     delete_garden,
@@ -118,14 +117,6 @@ def test_resolve_garden_none_uses_preferred_default():
     set_default_garden("work")
     assert resolve_garden(None) == "work"
     assert not garden_exists("default")
-
-
-def test_clear_default_garden_reverts_to_autocreate():
-    create_garden("work")
-    set_default_garden("work")
-    clear_default_garden()
-    assert get_default_garden() is None
-    assert resolve_garden(None) == "default"
 
 
 def test_resolve_garden_none_falls_back_when_preferred_deleted():

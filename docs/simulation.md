@@ -184,13 +184,7 @@ Being overdetermined is *not* an error, as long as the extra equations agree. Th
 
 ## Worked example
 
-`scripts/example_voltage_divider.py` builds a complete circuit in a garden called `circuit-example`:
-
-```
-.venv/bin/python scripts/example_voltage_divider.py
-```
-
-A 10 V source across 100 Ω and 200 Ω in series, modelled with four rules -- Ohm's law, Kirchhoff's current law, a source law, and a ground reference. Terminal convention: current enters a component's `a` terminal and leaves its `b` terminal, so a source's own current comes out negative.
+A complete circuit in a garden called `circuit-example`: a 10 V source across 100 Ω and 200 Ω in series, modelled with four rules -- Ohm's law, Kirchhoff's current law, a source law, and a ground reference. Terminal convention: current enters a component's `a` terminal and leaves its `b` terminal, so a source's own current comes out negative.
 
 ## Time-based simulation
 
@@ -597,13 +591,7 @@ freedoms directly, and needs no species at all.
 
 ### Worked example
 
-`scripts/example_rankine_cycle.py` builds a complete Rankine cycle in a
-garden called `rankine-cycle-example`:
-
-```
-.venv/bin/python scripts/example_rankine_cycle.py
-```
-
+A complete Rankine cycle in a garden called `rankine-cycle-example`.
 Boiler, turbine, condenser and pump each solve their own state from
 CoolProp; a `Rankine Cycle` assembly declares them as four roles and
 closes the loop with rules like `turbine.h_in == boiler.h_out`. Those
@@ -1177,8 +1165,7 @@ Three providers are built in, all in SI units:
   temperature)`, `entropy_pt(pressure, temperature)`, `density_pt
   (pressure, temperature)`, `temperature_ph(pressure, enthalpy)`, and
   `enthalpy_ps(pressure, entropy)` (the isentropic lookup a turbine uses
-  to get its ideal outlet enthalpy). See
-  `scripts/example_steam_turbine.py`. Quality (vapor mass fraction, 0-1,
+  to get its ideal outlet enthalpy). Quality (vapor mass fraction, 0-1,
   dimensionless) only means anything inside the two-phase dome, so it
   appears both as an input and an output: `quality_ph(pressure,
   enthalpy)` and `quality_ps(pressure, entropy)` read a state's quality
@@ -1370,14 +1357,7 @@ instead, for a garden whose units are complete enough to enforce.
 
 ### Worked example
 
-`scripts/example_radiating_panel.py` builds a garden called
-`radiating-panel-example`:
-
-```
-.venv/bin/python scripts/example_radiating_panel.py
-```
-
-Two radiating panels solving `power == emissivity * stefan_boltzmann *
+A garden called `radiating-panel-example`: two radiating panels solving `power == emissivity * stefan_boltzmann *
 area * temperature ** 4` for their surface temperature. The same rule
 demonstrates both halves of this page: it is genuinely nonlinear in its
 unknown, so `linear` refuses it and `newton` solves it; and the two

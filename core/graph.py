@@ -6,14 +6,6 @@ from core.motes import get_motes, list_motes
 from core.relationships import list_relationships
 
 
-def most_recent_mote_id(conn: sqlite3.Connection) -> str | None:
-    """Most recently inserted mote, via SQLite's implicit rowid ordering."""
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM motes ORDER BY rowid DESC LIMIT 1")
-    row = cur.fetchone()
-    return row["id"] if row is not None else None
-
-
 def relationships_touching(conn: sqlite3.Connection, mote_id: str) -> list[Relationship]:
     """All relationships where mote_id is either endpoint."""
     return [r for r in list_relationships(conn) if mote_id in (r.from_id, r.to_id)]

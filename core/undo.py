@@ -177,15 +177,6 @@ def for_delete_relationship(conn, rel_id: str, from_id: str, to_id: str, type_: 
     )
 
 
-def for_update_relationship(conn, rel_id: str, old_fields: dict, new_fields: dict, label: str) -> Command:
-    """old_fields/new_fields hold whichever of from_id/to_id/type_ changed."""
-    return Command(
-        label=label,
-        undo=lambda: rel_repo.update_relationship(conn, rel_id, **old_fields),
-        redo=lambda: rel_repo.update_relationship(conn, rel_id, **new_fields),
-    )
-
-
 def combine(label: str, commands: list[Command]) -> Command:
     """One Command out of several, so a bulk action (delete 200 selected
     rows, restyle a whole column) is one undo step rather than 200 -- a

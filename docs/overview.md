@@ -90,8 +90,7 @@ Everything happens in **one tiled window**, the console: one workspace
 of panes, each a command and its output, with a compact, minimal,
 terminal-like look. There are no separate apps; panes are grouped by
 task, and a built-in layout opens each group (`layout calc`).
-`console.md` has the design (with the visual reference in
-`docs/design/mosaic-console/`), the architecture and the view contract.
+`console.md` has the design, the architecture and the view contract.
 
 | Surface | Panes | Role |
 |---|---|---|

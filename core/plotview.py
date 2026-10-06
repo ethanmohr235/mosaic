@@ -480,8 +480,8 @@ def _axis(spec, max_points: int) -> Axis | None:
 
 
 def _case_key(series: dict) -> str:
-    """A series' case key -- the same string the old Moxie window built,
-    so saved plots written by it keep their meaning. Two series that differ only in which property they read
+    """A series' case key -- the same string saved plots were written with,
+    so they keep their meaning. Two series that differ only in which property they read
     share a case and therefore one solve per point; the string is how
     they recognize each other, so it has to be the same string on both
     sides."""
@@ -644,7 +644,7 @@ SENSITIVITY_NUDGE = 0.05
 
 def figure_json(figure: Figure) -> dict:
     """A Figure on the wire, flat and already reduced: a renderer
-    (console/frontend/js/plot.js, or Mora's) decides nothing about it
+    (console/frontend/js/plot.js) decides nothing about it
     beyond colour and size."""
     return {
         "mode": figure.mode,

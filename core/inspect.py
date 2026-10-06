@@ -3,11 +3,9 @@
 kind for each, the keys its template says it usually has, its species,
 and every relationship with the other end's label.
 
-This lived in the old windows' shared bridge (api_common.InspectorApi,
-deleted with Monarch in U8). It is in `core/` because the console's
-props pane and its `p` float both draw from it (docs/console.md, U3),
-and "editing a mote works identically everywhere" starts with both
-seeing the same mote. Reads only; every write is a command
+It is in `core/` because the console's props pane and its `p` float
+both draw from it (docs/console.md, U3), and "editing a mote works
+identically everywhere" starts with both seeing the same mote. Reads only; every write is a command
 (core/commands.py).
 """
 import re

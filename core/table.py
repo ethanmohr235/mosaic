@@ -1,7 +1,7 @@
 # core/table.py
 """A garden shaped as a table: which columns it has, and one query's rows.
 
-The mockup Monolith was designed against declares its columns -- status,
+The mockup the table was designed against declares its columns -- status,
 owner, priority. A garden declares nothing: motes carry free-form JSON,
 and two motes side by side need not share a single key. So the columns are
 **discovered**, once per request, from what the garden actually contains:
