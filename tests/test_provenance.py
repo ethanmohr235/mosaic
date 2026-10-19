@@ -293,8 +293,8 @@ def test_a_value_no_solve_determines_says_so(conn, chain):
 def test_one_explainer_solves_once(conn, chain, monkeypatch):
     from core import simulation
     calls = []
-    real = simulation.solve_journal
-    monkeypatch.setattr(simulation, "solve_journal", lambda *a, **k: calls.append(1) or real(*a, **k))
+    real = simulation.live_garden
+    monkeypatch.setattr(simulation, "live_garden", lambda *a, **k: calls.append(1) or real(*a, **k))
     explainer = Explainer(conn)
     explainer.explain(chain, "b")
     explainer.explain(chain, "c")

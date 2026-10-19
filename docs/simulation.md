@@ -239,6 +239,16 @@ by a tick. A recurrence is something you preview.
 Nothing keeps a log of past runs. The garden's state is its motes; `why`
 solves it again in memory when asked (below).
 
+**Stored values are the record, and only `solve` writes them.** A
+document does not wait for one: `live_garden()` is the garden as a solve
+would leave it, in memory. Solved values are laid over the stored ones in
+their declared (or inferred) units, and a freedom the solve did not
+determine is taken out and named in `unsolved`. That is what `\val`,
+`\work` and the calc sections read (`modoc.md` -> *A note reads the
+garden as a solve leaves it*). Surfaces that show stored values (the
+console's table and `open`) mark a freedom that holds no number as *not
+solved*.
+
 ## Why a value is what it is
 
 A solve finds not only *that* a property takes a value but which

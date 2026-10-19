@@ -483,6 +483,83 @@ def solve_journal(
     return _journal_solve(view, pairs, solver, {})
 
 
+@dataclass(frozen=True)
+class LiveGarden:
+    """The garden as a solve of it would write it, with nothing written.
+
+    What a document reads (core/modoc_bind.py, core/calc.py): every value
+    the solve determined, in its mote's declared unit -- or the unit a
+    written solve would infer for it -- laid over the stored properties,
+    so a note is never older than the last edit whether or not anyone ran
+    `solve`. A freedom the solve did *not* determine is taken out rather
+    than left holding whatever an older solve wrote, and named in
+    `unsolved`, so a reader is told "not solved" instead of being shown a
+    stale number. `journal` is the same solve `why` and `\\work` explain."""
+    properties: dict[str, dict]
+    journal: Journal
+    error: str | None = None
+    unsolved: dict[str, set[str]] = field(default_factory=dict)
+
+    @property
+    def values(self) -> dict[Unknown, float]:
+        """Every value the solve determined, in base units."""
+        return {v: x for d in self.journal.derivations for v, x in d.values.items()}
+
+    def is_unsolved(self, mote_id: str, key: str) -> bool:
+        return key in self.unsolved.get(mote_id, set())
+
+
+def live_garden(
+    conn: sqlite3.Connection, scenario: str | None = None, solver: str = _DEFAULT_SOLVER,
+    overrides: dict[str, dict[str, float]] | None = None,
+) -> LiveGarden:
+    """Solve once in memory and return the garden as that solve would
+    leave it (see LiveGarden). Never raises: a solve that stops short
+    still lays over what it found, and `error` says why it stopped."""
+    stored = {m.id: m.properties for m in list_motes(conn)}
+    view = _build_view(
+        scenarios_repo.overlay(
+            scenarios_repo.apply(stored, _resolve_scenario(conn, scenario)), overrides or {}),
+        list_relationships(conn),
+    )
+    pairs = _rule_instances(rules_repo.list_rules(conn), view)
+    model_cache: dict[str, PropertyProvider] = {}
+    journal, error = _journal_solve(view, pairs, solver, model_cache)
+    determined = {v for d in journal.derivations for v in d.values}
+    solved = _static_values(journal)
+    equations = [(r, m) for r, m in pairs if _operator_of(r) == "==" and not r.is_check]
+    properties = {mote_id: dict(props) for mote_id, props in stored.items()}
+    for mote_id, units_by_key in _infer_missing_units(view, equations, solved, model_cache).items():
+        merged = {**parse_units_property(properties[mote_id].get(UNITS_KEY)), **units_by_key}
+        properties[mote_id][UNITS_KEY] = merged
+    for mote_id, values in _by_mote(properties, solved).items():
+        properties[mote_id].update(values)
+    unsolved: dict[str, set[str]] = {}
+    for mote_id, key in _unsolved(view, {v: 0.0 for v in determined}):
+        if mote_id in properties:
+            properties[mote_id].pop(key, None)
+            unsolved.setdefault(mote_id, set()).add(key)
+    return LiveGarden(properties, journal, error, unsolved)
+
+
+def _static_values(journal: Journal) -> dict[Unknown, float]:
+    """The values a solve found that are the garden's state rather than a
+    step of a run. A value found through prev() -- or from one that was --
+    is the next tick, which a written solve refuses to produce, so a
+    reader of the garden keeps the stored one. The journal is in the order
+    the solve worked, so one pass sees every input before what it fed."""
+    stepped: set[Unknown] = set()
+    static: dict[Unknown, float] = {}
+    for derivation in journal.derivations:
+        if any(read.kind == PREVIOUS_READ
+               or (read.kind == DERIVED_READ and (read.mote_id, read.key) in stepped)
+               for read in derivation.inputs):
+            stepped |= set(derivation.values)
+        else:
+            static.update(derivation.values)
+    return static
+
+
 def _touch_at(
     view: _GardenView,
     rule: rules_repo.Rule,
@@ -1121,7 +1198,8 @@ def _check_constraints(
 
 
 def check_constraints(
-    conn: sqlite3.Connection, scenario: str | None = None
+    conn: sqlite3.Connection, scenario: str | None = None,
+    live: LiveGarden | None = None,
 ) -> list[ConstraintResult]:
     """Every comparison relation in the garden, checked against the values
     the motes hold right now -- solving nothing and writing nothing.
@@ -1138,8 +1216,12 @@ def check_constraints(
     sigma the last solve actually wrote, which is the answer the document
     is reporting on. A freedom nothing has determined yet has no value and
     comes back *not checked*, which is correct and is the one thing a
-    checklist must not call a pass."""
-    properties = {m.id: m.properties for m in list_motes(conn)}
+    checklist must not call a pass.
+
+    `live` (live_garden()) checks against the values a solve of the garden
+    as it stands finds instead -- what a document reports on."""
+    properties = live.properties if live is not None else {
+        m.id: m.properties for m in list_motes(conn)}
     view = dataclasses.replace(
         _build_view(
             scenarios_repo.apply(properties, _resolve_scenario(conn, scenario)),

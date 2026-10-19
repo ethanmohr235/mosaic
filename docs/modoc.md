@@ -167,9 +167,31 @@ takes a limit, the value carries a **notice** (`phi: limit r → 0 cm`):
 `resolve_modoc`, and a `notice:` line from `modoc check`. A notice is
 never a problem, because the value is right, so it never stops `submit`.
 
-A `\val` never has freedoms. It reads the state the garden is in; there
-is no solver behind a note to hand a free variable to -- `core/simulation.py::
-expression_context()` clears them for exactly that reason.
+### A note reads the garden as a solve leaves it
+
+`\val`, `\work` and the calc sections read **one live solve** of the
+garden as it stands (`core/simulation.py::live_garden`), not only what is
+stored. `sim` and `plot` write nothing, and a note that waited for
+somebody to run `solve` showed nothing, or last week's number. Now:
+
+- **A value the solver determines is the live solve's**, in the unit its
+  mote declares, or else the unit a written solve would infer for it. An
+  edited given shows on the next render, solved or not. Givens and every
+  other property read as stored.
+- **A value the solver is free to determine but the solve did not find
+  reads "not solved"**, with the reason: no equation determines it yet,
+  or the garden does not solve and why. It is never shown as whatever an
+  older solve once wrote. It is a problem of the note, like an
+  unresolved value.
+- **A value found through `prev()` keeps its stored value**, as does
+  anything computed from one. A recurrence's next value is a step of a
+  run, which a written solve refuses to produce, not the garden's state.
+- One solve per render answers every macro in the note. Nothing is
+  written.
+
+A `\val` still never has freedoms. It reads values, and there is no
+solver behind an expression to hand a free variable to --
+`expression_context()` clears them for exactly that reason.
 
 ### `\graph` -- a saved Moxie view
 
@@ -296,8 +318,9 @@ Assumptions are not scoped that way: an assumption may be about something
 no equation touches ("neglect self-weight"), and leaving it out because
 nothing computed with it would defeat the point of writing it down.
 
-An answer nobody has computed yet appears with an empty value rather than
-being hidden. A check whose value has not been determined reads *not
+The sections read the same live solve `\val` does (above), so
+`\answers` is never older than the last edit. An answer the solve could
+not find appears with an empty value rather than being hidden. A check whose value has not been determined reads *not
 checked*, never as a pass.
 
 `\checks` takes no unit or figures -- a relation is not a quantity -- and

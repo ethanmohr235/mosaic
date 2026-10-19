@@ -34,6 +34,7 @@ from core import modoc
 from core import kinds as kinds_repo
 from core import plotview
 from core import rules as rules_repo
+from core import simulation
 from core import uncertainty
 from core.entities import Mote, Relationship
 from core.formula import Context, FormulaError, evaluate_expression
@@ -144,11 +145,19 @@ class _Garden:
     the last can have changed it. This was a `_Timeline` of one
     nondestructive simulation preview per step; there are no steps any
     more, so it is what it always was underneath -- properties,
-    relationships, and a Context built from them."""
+    relationships, and a Context built from them.
 
-    def __init__(self, conn: sqlite3.Connection, motes: list[Mote]) -> None:
+    The properties are the live ones: what a solve would write, laid over
+    what is stored, with a freedom nothing determined taken out (see
+    `_value`: such a value reads "not solved")."""
+
+    def __init__(self, conn: sqlite3.Connection, live: "simulation.LiveGarden") -> None:
         self.relationships: list[Relationship] = list_relationships(conn)
-        self.properties: dict[str, dict] = {m.id: dict(m.properties) for m in motes}
+        # The garden as a solve of it leaves it (core/simulation.py's
+        # live_garden): a note is never older than the last edit, whether
+        # or not anyone ran `solve`.
+        self.properties: dict[str, dict] = live.properties
+        self.live = live
         self._conn = conn
         self._freedoms = None
         self._spreads = None
@@ -274,7 +283,9 @@ def resolve(
     call and cannot know what happened between two of them."""
     anchor_id, diagnostics = modoc.anchor(conn, note_id)
     motes = list_motes(conn)
-    garden = _Garden(conn, motes)
+    # One live solve answers every value, `\work` and section in the note.
+    explainer = derivations.Explainer(conn)
+    garden = _Garden(conn, explainer.live)
 
     links = {
         node.ref: _link(node.ref, motes, garden.relationships)
@@ -296,8 +307,6 @@ def resolve(
         modoc.image_key(node): _picture(node.ref, motes)
         for node in modoc.images(document)
     }
-    # One live solve answers every `\work` in the note, however many there are.
-    explainer = derivations.Explainer(conn)
     works = {
         modoc.work_key(node): _work(conn, node, anchor_id, motes, explainer)
         for node in modoc.works(document)
@@ -309,7 +318,7 @@ def resolve(
     # One read of the garden per *kind* of section, however many times the
     # note asks for one -- the same reason `graphs` is keyed by its view.
     sections = {
-        modoc.section_key(node): _section(conn, node)
+        modoc.section_key(node): _section(conn, node, explainer.live)
         for node in modoc.sections(document)
     }
     return Resolution(
@@ -411,7 +420,9 @@ def _rule_by_label(
     return matches[0] if len(matches) == 1 else None
 
 
-def _section(conn: sqlite3.Connection, node: modoc.Section) -> SectionResult:
+def _section(
+    conn: sqlite3.Connection, node: modoc.Section, live: "simulation.LiveGarden",
+) -> SectionResult:
     heading = SECTION_HEADINGS.get(node.kind, node.kind)
     if node.kind == "checks":
         # A check is a relation, not a quantity, so a unit and a figure
@@ -419,7 +430,7 @@ def _section(conn: sqlite3.Connection, node: modoc.Section) -> SectionResult:
         error = None if node.format.empty else (
             "a check is a relation, not a quantity -- \\checks takes no unit or figures"
         )
-        return SectionResult(node.kind, heading, checks=calc.checks(conn), error=error)
+        return SectionResult(node.kind, heading, checks=calc.checks(conn, live=live), error=error)
 
     if node.kind == "verification":
         # The hand value's unit is the table's, since each row compares
@@ -431,7 +442,7 @@ def _section(conn: sqlite3.Connection, node: modoc.Section) -> SectionResult:
                 hand=c.hand.converted(node.format.unit),
                 external=c.external.converted(node.format.unit),
             )
-            for c in calc.verification(conn)
+            for c in calc.verification(conn, live)
         )
         return SectionResult(node.kind, heading, comparisons=comparisons,
                              figures=node.format.figures)
@@ -441,7 +452,7 @@ def _section(conn: sqlite3.Connection, node: modoc.Section) -> SectionResult:
         return SectionResult(node.kind, heading, error=f"no {node.kind!r} section")
     rows = tuple(
         dataclasses.replace(row, quantity=row.quantity.converted(node.format.unit))
-        for row in reader(conn)
+        for row in reader(conn, live)
     )
     return SectionResult(node.kind, heading, rows=rows, figures=node.format.figures)
 
@@ -587,6 +598,8 @@ def _value(
         return ValueResult(f"?{node.ref}", None, error)
 
     properties = garden.at(mote_id)
+    if _PLAIN_PROPERTY_RE.match(node.expression) and garden.live.is_unsolved(mote_id, node.expression):
+        return _not_solved(node.expression, garden.live)
     if _PLAIN_PROPERTY_RE.match(node.expression) and node.expression in properties:
         # The fast path, and the reason \val{due} can be a date at all:
         # core/formula.py is numeric by construction, so a plain property
@@ -598,6 +611,8 @@ def _value(
     if dotted:
         other_ref, other_key = dotted.groups()
         other, error = _find(other_ref, motes)
+        if other is not None and garden.live.is_unsolved(other.id, other_key):
+            return _not_solved(node.expression, garden.live)
         if other is not None:
             other_properties = garden.at(other.id)
             if other_key in other_properties:
@@ -621,6 +636,15 @@ def _value(
         calc.Quantity(number, node.format.unit).text(node.format.figures), number,
         note="; ".join(f"{limit.function}: limit {limit.approach}" for limit in limits),
     )
+
+
+def _not_solved(expression: str, live: "simulation.LiveGarden") -> ValueResult:
+    """A value the solver is free to determine that the solve of the
+    garden as it stands did not -- said where it stands, never shown as
+    whatever an older solve once wrote."""
+    why = f"the garden does not solve: {live.error}" if live.error else \
+        "no equation determines it yet"
+    return ValueResult(f"?{expression}", None, f"not solved -- {why}")
 
 
 def _property_result(

@@ -111,14 +111,22 @@ class Explainer:
     scenario: str | None = None
     solver: str = "linear"
     overrides: dict | None = None
+    _live: simulation.LiveGarden | None = field(default=None, init=False, repr=False)
     _index: Index | None = field(default=None, init=False, repr=False)
+
+    @property
+    def live(self) -> simulation.LiveGarden:
+        """The garden as this solve would write it -- what a document's
+        values read, so `\\val` and `\\work` come from the one solve."""
+        if self._live is None:
+            self._live = simulation.live_garden(
+                self.conn, self.scenario, self.solver, self.overrides)
+        return self._live
 
     @property
     def index(self) -> Index:
         if self._index is None:
-            journal, error = simulation.solve_journal(
-                self.conn, self.scenario, self.solver, self.overrides)
-            self._index = index(journal, error)
+            self._index = index(self.live.journal, self.live.error)
         return self._index
 
     def explain(self, mote_id: str, key: str, depth: int = DEFAULT_DEPTH) -> Explanation:

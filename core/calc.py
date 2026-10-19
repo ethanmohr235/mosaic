@@ -283,7 +283,7 @@ class Row:
         return self.quantity.text(figures)
 
 
-def givens(conn: sqlite3.Connection) -> tuple[Row, ...]:
+def givens(conn: sqlite3.Connection, live: "simulation.LiveGarden | None" = None) -> tuple[Row, ...]:
     """Every number the garden's equations read and are not free to
     determine, by mote then key.
 
@@ -291,11 +291,14 @@ def givens(conn: sqlite3.Connection) -> tuple[Row, ...]:
     this a *calculation's* givens rather than a dump of the garden: a
     homework mote's `estimate: 3` is a real property and not an input to
     anything. Same rule `core/worksheet.py` renders its given lines from,
-    so a document and a worksheet agree about what counts as given."""
-    return _rows(conn, free=False)
+    so a document and a worksheet agree about what counts as given.
+
+    `live` (simulation.live_garden) reads the garden as a solve of it
+    would leave it -- what a document shows -- rather than as stored."""
+    return _rows(conn, free=False, live=live)
 
 
-def answers(conn: sqlite3.Connection) -> tuple[Row, ...]:
+def answers(conn: sqlite3.Connection, live: "simulation.LiveGarden | None" = None) -> tuple[Row, ...]:
     """Every value the solver is free to determine, with what it currently
     holds. A freedom with no value yet comes back with an empty quantity
     rather than being hidden -- an answer nobody has computed is exactly
@@ -303,8 +306,9 @@ def answers(conn: sqlite3.Connection) -> tuple[Row, ...]:
 
     Where any given carries a ±, each answer carries its propagated one
     (`core/uncertainty.py`). A hand-written `uncertainty` entry on a
-    freedom is never shown: it is not what the ± is."""
-    rows = _rows(conn, free=True)
+    freedom is never shown: it is not what the ± is. `live` as for givens:
+    a document's answers are the live solve's, never an older write."""
+    rows = _rows(conn, free=True, live=live)
     if not uncertainty_repo.has_uncertainty(conn):
         return rows
     report = uncertainty_repo.propagate(conn)
@@ -320,7 +324,7 @@ def _propagated(report, mote_id: str, key: str) -> float | None:
     return None if found is None else found.sigma
 
 
-def assumptions(conn: sqlite3.Connection) -> tuple[Row, ...]:
+def assumptions(conn: sqlite3.Connection, live: "simulation.LiveGarden | None" = None) -> tuple[Row, ...]:
     """Every value marked `source: assumed`.
 
     Not scoped to the equations, unlike the givens: an assumption may be
@@ -328,31 +332,31 @@ def assumptions(conn: sqlite3.Connection) -> tuple[Row, ...]:
     leaving it out of the document because nothing computed with it would
     defeat the point of writing it down."""
     return tuple(
-        row for row in _all_rows(conn)
+        row for row in _all_rows(conn, live)
         if row.source is not None and row.source.kind == ASSUMED
     )
 
 
-def external(conn: sqlite3.Connection) -> tuple[Row, ...]:
+def external(conn: sqlite3.Connection, live: "simulation.LiveGarden | None" = None) -> tuple[Row, ...]:
     """Every value marked `source: external` -- an FEA probe, a
     measurement. What the V&V table is built from."""
     return tuple(
-        row for row in _all_rows(conn)
+        row for row in _all_rows(conn, live)
         if row.source is not None and row.source.kind in (EXTERNAL, MEASURED)
     )
 
 
-def _rows(conn: sqlite3.Connection, free: bool) -> tuple[Row, ...]:
+def _rows(conn: sqlite3.Connection, free: bool, live=None) -> tuple[Row, ...]:
     referenced = worksheet_repo.calculation_mote_ids(conn)
     freedoms = simulation.garden_freedoms(conn)
     return tuple(
-        row for row in _all_rows(conn)
+        row for row in _all_rows(conn, live)
         if row.mote_id in referenced
         and ((row.key in freedoms.get(row.mote_id, set())) is free)
     )
 
 
-def _all_rows(conn: sqlite3.Connection) -> tuple[Row, ...]:
+def _all_rows(conn: sqlite3.Connection, live=None) -> tuple[Row, ...]:
     """Every mote's own quantities, ordered by mote name then key, with a
     freedom's missing value included.
 
@@ -364,14 +368,15 @@ def _all_rows(conn: sqlite3.Connection) -> tuple[Row, ...]:
     would make this module import the one that imports it."""
     rows = []
     freedoms = simulation.garden_freedoms(conn)
-    for mote in motes_repo.list_motes(conn):
-        name = _name(mote.properties, mote.id)
-        sources = parse_source_property(mote.properties.get(SOURCE_KEY))
-        for key in sorted(set(mote.properties) | freedoms.get(mote.id, set())):
-            value = quantity(mote.properties, key)
+    stored = {m.id: m.properties for m in motes_repo.list_motes(conn)}
+    for mote_id, properties in (live.properties if live is not None else stored).items():
+        name = _name(properties, mote_id)
+        sources = parse_source_property(properties.get(SOURCE_KEY))
+        for key in sorted(set(properties) | freedoms.get(mote_id, set())):
+            value = quantity(properties, key)
             if value.value is not None and not value.numeric:
                 continue
-            rows.append(Row(mote.id, name, key, value, sources.get(key)))
+            rows.append(Row(mote_id, name, key, value, sources.get(key)))
     return tuple(sorted(rows, key=lambda r: (r.mote.casefold(), r.key)))
 
 
@@ -380,11 +385,13 @@ def _name(properties: dict, mote_id: str) -> str:
     return name if isinstance(name, str) and name else mote_id[:8]
 
 
-def checks(conn: sqlite3.Connection, scenario: str | None = None) -> tuple:
+def checks(conn: sqlite3.Connection, scenario: str | None = None,
+           live: "simulation.LiveGarden | None" = None) -> tuple:
     """Every comparison relation, with whether the garden's values satisfy
     it -- `core/simulation.py::check_constraints` unchanged. Here so a note
-    reaches one module for all five sections rather than three."""
-    return tuple(simulation.check_constraints(conn, scenario))
+    reaches one module for all five sections rather than three. `live`
+    checks a live solve's values, as a document does."""
+    return tuple(simulation.check_constraints(conn, scenario, live))
 
 
 # ---- verification: hand vs. external ----
@@ -416,27 +423,31 @@ class Comparison:
         return f"{self.mote}.{self.key}"
 
 
-def verification(conn: sqlite3.Connection) -> tuple[Comparison, ...]:
+def verification(
+    conn: sqlite3.Connection, live: "simulation.LiveGarden | None" = None,
+) -> tuple[Comparison, ...]:
     """Every external value that names the hand value it verifies.
 
     Paired through the external value's own `source` entry, which is
     where the pairing was decided to live: `bd.sigma_fea` carrying
     `source: {sigma_fea: {kind: external, note: "FEA probe", checks:
     "sigma"}}` sits beside `bd.sigma` in the table. An external value that
-    names nothing is not a comparison, and is left to `\given`'s
+    names nothing is not a comparison, and is left to `\\given`'s
     listing of where values came from."""
     found = []
-    for mote in motes_repo.list_motes(conn):
-        name = _name(mote.properties, mote.id)
+    garden = live.properties if live is not None else {
+        m.id: m.properties for m in motes_repo.list_motes(conn)}
+    for mote_id, properties in garden.items():
+        name = _name(properties, mote_id)
         for external_key, source in parse_source_property(
-            mote.properties.get(SOURCE_KEY)
+            properties.get(SOURCE_KEY)
         ).items():
             if source.kind not in (EXTERNAL, MEASURED) or not source.checks:
                 continue
             found.append(_compare(
-                mote.id, name, source.checks, external_key, source.note,
-                quantity(mote.properties, source.checks),
-                quantity(mote.properties, external_key),
+                mote_id, name, source.checks, external_key, source.note,
+                quantity(properties, source.checks),
+                quantity(properties, external_key),
             ))
     return tuple(sorted(found, key=lambda c: (c.mote.casefold(), c.key, c.external_key)))
 
@@ -516,7 +527,10 @@ def work(
     solves once. A value no solve determines has no work to show and says
     so. Never raises: a note must render with the broken part visibly
     broken."""
-    properties = {m.id: m.properties for m in motes_repo.list_motes(conn)}
+    explainer = explainer or derivations_repo.Explainer(conn)
+    # The garden as the solve leaves it, so a result reads in the unit a
+    # written solve would give it, inferred ones included.
+    properties = explainer.live.properties
     if mote_id not in properties:
         return Work(f"{mote_id[:8]}.{key}", Quantity(), error=f"no mote {mote_id[:8]!r}")
 
@@ -524,7 +538,7 @@ def work(
     label = f"{names[mote_id]}.{key}"
     stored = quantity(properties[mote_id], key)
 
-    explanation = (explainer or derivations_repo.Explainer(conn)).explain(mote_id, key, depth=1)
+    explanation = explainer.explain(mote_id, key, depth=1)
     if not explanation.derived:
         return Work(label, stored.converted(unit),
                     note=explanation.note or "not determined by a solve")
