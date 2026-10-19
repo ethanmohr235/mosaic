@@ -707,10 +707,12 @@ def evaluate_expression(text: str, ctx: Context) -> LinearExpr:
     denominator against, an unknown left under a division bar has nowhere
     to go, so `linear()` raises the same NonlinearError this always
     did."""
-    return _as_ratio(_evaluate(_parse_expression(text), ctx)).linear()
+    return _as_ratio(_evaluate(parse_expression(text), ctx)).linear()
 
 
-def _parse_expression(text: str) -> ast.AST:
+def parse_expression(text: str) -> ast.AST:
+    """A bare expression's tree, `^` read as a power -- for a walk over a
+    function's body that is not this evaluator (core/dimensions.py)."""
     return _parse_ast(text)
 
 

@@ -894,6 +894,8 @@ def _handle_health(conn, args) -> None:
         print(f"  {culprit.label}: {culprit.reason}")
     for problem in report.unit_problems:
         print(f"  units: {problem}")
+    for problem in report.function_problems:
+        print(f"  {problem}")
     if report.inert:
         print(f"{len(report.inert)} relation(s) determine nothing (a check, or all givens):")
         for inert in report.inert:

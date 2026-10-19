@@ -25,6 +25,7 @@ repeating them, and tests/test_dimensions.py fails if a builtin is added
 there without being handled here. See docs/simulation.md, Units.
 """
 import ast
+import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -41,9 +42,13 @@ from core.formula import (
     PROPERTY_CALL,
     FormulaError,
     TICK_NAME,
+    function_named,
+    is_bare_number,
     name_match,
     parse_equation,
+    parse_expression,
 )
+from core import functions as functions_repo
 from core.units import (
     DIMENSIONLESS,
     Dimension,
@@ -78,6 +83,13 @@ LITERAL = _LiteralDimension()
 
 def _is_literal(dimension: Dim) -> bool:
     return isinstance(dimension, _LiteralDimension)
+
+
+@dataclass(frozen=True)
+class _NameScope:
+    """The two Context fields core/formula.py's function_named reads."""
+    named: Callable[[str], list[str]]
+    properties: Callable[[str], dict]
 
 
 @dataclass(frozen=True)
@@ -129,6 +141,9 @@ class DimensionContext:
     neighbors: Callable[[str], list[str]] = lambda mote_id: []
     mote_name: Callable[[str], str | None] = lambda mote_id: None
     named: Callable[[str], list[str]] = lambda name: []
+    # A mote's properties, for reading a function mote's body and
+    # parameters at a call. Defaults to nothing, so no call resolves.
+    properties: Callable[[str], dict] = lambda mote_id: {}
 
 
 def check_equation(text: str, ctx: DimensionContext) -> list[str]:
@@ -225,10 +240,18 @@ class _Checker:
     """One walk over one equation, accumulating problems rather than
     raising, so a single pass reports everything wrong at once."""
 
-    def __init__(self, ctx: DimensionContext):
+    def __init__(
+        self, ctx: DimensionContext, bindings: dict[str, Dim] | None = None,
+        calls: tuple[str, ...] = (), parent: "_Checker | None" = None,
+    ):
         self.ctx = ctx
-        self.problems: list[str] = []
-        self._reported_units: set[str] = set()
+        # Inside a function's body: each parameter's dimension, and the
+        # functions being walked (to stop on recursion). A body's problems
+        # are the calling equation's problems, so they share one list.
+        self.bindings = bindings or {}
+        self.calls = calls
+        self.problems: list[str] = parent.problems if parent else []
+        self._reported_units: set[str] = parent._reported_units if parent else set()
 
     def report(self, message: str) -> None:
         if message not in self.problems:
@@ -248,6 +271,8 @@ class _Checker:
         if isinstance(node, ast.Constant):
             return LITERAL
         if isinstance(node, ast.Name):
+            if node.id in self.bindings:
+                return self.bindings[node.id]
             if node.id == TICK_NAME:
                 return None
             if node.id in MATH_CONSTANTS:
@@ -428,7 +453,57 @@ class _Checker:
             return self._name(self.ctx.mote_id, node.args[0].id)
         if name == PROPERTY_CALL:
             return self._property(node)
-        raise FormulaError(f"unknown function {name!r} in formula")
+        return self._function_call(name, node)
+
+    def _function_call(self, name: str, node: ast.Call) -> Dim:
+        """A function mote's body, walked with each parameter bound to a
+        dimension: the one it declares, else its argument's. Anything the
+        evaluator itself refuses (an unknown name, the wrong arity,
+        recursion) is raised for check_equation to leave to the run."""
+        function_id = function_named(self._evaluator_view(), name)
+        if function_id in self.calls:
+            raise FormulaError(f"{name}() calls itself")
+        properties = self.ctx.properties(function_id)
+        try:
+            parameters = functions_repo.parameters_of(properties)
+        except functions_repo.FunctionDefinitionError as e:
+            raise FormulaError(str(e)) from e
+        if len(parameters) != len(node.args):
+            raise FormulaError(f"{name}() takes {len(parameters)} arguments")
+        bindings = {
+            parameter: self._argument(name, function_id, parameter, arg)
+            for parameter, arg in zip(parameters, node.args)
+        }
+        inner = _Checker(dataclasses.replace(self.ctx, mote_id=function_id),
+                         bindings, (*self.calls, function_id), parent=self)
+        return inner.dimension(parse_expression(functions_repo.body_of(properties)))
+
+    def _argument(self, name: str, function_id: str, parameter: str, node: ast.AST) -> Dim:
+        """One argument's dimension as the body sees it. A bare number into
+        a parameter with no unit is read as base SI -- legal, and exactly
+        the slip (`phi(5)` meaning 5 cm) worth a warning."""
+        declared = self._name(function_id, parameter)
+        undeclared = parameter not in self.ctx.units(function_id)
+        if is_bare_number(node):
+            if undeclared:
+                self.report(
+                    f"{name}({ast.unparse(node)}): {ast.unparse(node)} is passed to "
+                    f"{parameter}, which declares no unit, so it is read in base SI units "
+                    f"-- declare one on {name} (or [1] for a pure number)"
+                )
+            return declared if declared is not None else LITERAL
+        actual = self.dimension(node)
+        if declared is not None and _conflict(actual, declared):
+            self.report(
+                f"{name}(): {parameter} declares {describe(declared)}, but is passed "
+                f"{describe(actual)}"
+            )
+        return declared if declared is not None else actual
+
+    def _evaluator_view(self):
+        """Just enough of a formula Context for formula.function_named, so
+        the two walks resolve a call's name the one same way."""
+        return _NameScope(self.ctx.named, self.ctx.properties)
 
     def _navigate(self, name: str, node: ast.Call) -> _Motes:
         if len(node.args) != 1 or not isinstance(node.args[0], ast.Constant):

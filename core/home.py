@@ -113,7 +113,7 @@ def health(name: str, detail: bool = False) -> dict | None:
         conn.close()
     failing = [r for r in results if r.status == "fail"]
     unchecked = [r for r in results if r.status == "not checked"]
-    problems = len(report.culprits) + len(report.unit_problems)
+    problems = len(report.culprits) + len(report.unit_problems) + len(report.function_problems)
     out = {
         "solve": {"state": "warn" if problems or not report.solvable else "ok",
                   "problems": problems, "summary": report.summary},
@@ -124,6 +124,7 @@ def health(name: str, detail: bool = False) -> dict | None:
     if detail:
         out["solve"]["lines"] = [c.label + ": " + c.reason for c in report.culprits] + \
             [f"units: {p}" for p in report.unit_problems] + \
+            list(report.function_problems) + \
             [g.message for g in report.groups if g.shortfall > 0]
         out["checks"] = out["checks"] and {**out["checks"], "lines": [
             f"{r.status}: {r.label}" + (f" ({r.error or r.detail})" if r.error or r.detail else "")

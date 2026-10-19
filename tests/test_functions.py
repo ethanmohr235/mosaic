@@ -10,11 +10,11 @@ import math
 
 import pytest
 
-from core import worksheet
+from core import health, worksheet
 from core.formula import FormulaError, function_name_problem
 from core.functions import FunctionDefinitionError, parameters_of
 from core.motes import create_mote, list_motes
-from core.simulation import SimulationError, run_simulation
+from core.simulation import SimulationError, check_garden, run_simulation
 from core.units import UNITS_KEY
 
 
@@ -167,3 +167,64 @@ def test_the_formula_level_error_for_an_unknown_name():
     from core.formula import evaluate_expression
     with pytest.raises(FormulaError, match="unknown function 'nope'"):
         evaluate_expression("nope(1)", context())
+
+
+# ---- the unit check and solve health ----
+
+def unit_problems(conn, sheet: str) -> list[str]:
+    applied = worksheet.apply(conn, sheet)
+    assert not applied.problems, applied.problems
+    return check_garden(conn).problems
+
+
+def test_a_bare_number_into_an_undeclared_parameter_warns(conn):
+    create_mote(conn, {"name": "double", "function": "2 * x", "parameters": "x"})
+    [problem] = unit_problems(conn, "m.y = double(3)")
+    assert "3 is passed to x, which declares no unit" in problem
+    assert "base SI" in problem
+
+
+def test_a_bare_number_into_a_declared_parameter_is_quiet(conn):
+    flux(conn)
+    assert unit_problems(conn, "reactor.center = phi(0)") == []
+
+
+def test_a_dimensionless_parameter_is_quiet(conn):
+    create_mote(conn, {"name": "g", "function": "sinc(x)", "parameters": "x",
+                       UNITS_KEY: {"x": "1"}})
+    assert unit_problems(conn, "m.y = g(0)") == []
+
+
+def test_an_argument_of_the_wrong_dimension_warns(conn):
+    flux(conn)
+    [problem] = unit_problems(conn, "reactor.T = 300 K\nreactor.f = phi(reactor.T)")
+    assert "r declares" in problem and "is passed" in problem
+
+
+def test_a_problem_inside_the_body_is_the_callers_problem(conn):
+    create_mote(conn, {"name": "bad", "function": "x + y", "parameters": "x",
+                       "y": 1, UNITS_KEY: {"x": "m", "y": "s"}})
+    problems = unit_problems(conn, "m.r = 1 m\nm.z = bad(m.r)")
+    assert any("different dimensions" in p for p in problems)
+
+
+def test_the_result_unit_is_inferred_through_the_body(conn):
+    create_mote(conn, {"name": "twice", "function": "2 * x", "parameters": "x",
+                       UNITS_KEY: {"x": "m"}})
+    solve(conn, "m.r = 3 m\nm.d = twice(m.r)")
+    assert named(conn, "m").properties[UNITS_KEY]["d"] == "m"
+
+
+def test_health_reports_a_function_no_call_can_reach(conn):
+    create_mote(conn, {"name": "sin", "function": "2 * x", "parameters": "x"})
+    create_mote(conn, {"name": "f", "function": "2 * x", "parameters": "x, x"})
+    create_mote(conn, {"name": "g", "function": "2 *", "parameters": "x"})
+    problems = health.check(conn).function_problems
+    assert any(p.startswith("function sin:") and "builtin" in p for p in problems)
+    assert any(p.startswith("function f:") and "repeat" in p for p in problems)
+    assert any(p.startswith("function g:") and "parse" in p for p in problems)
+
+
+def test_a_healthy_function_reports_nothing(conn):
+    flux(conn)
+    assert health.check(conn).function_problems == ()

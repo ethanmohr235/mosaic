@@ -545,6 +545,19 @@ reactor.flux_center = phi(0)
   arguments. An error inside a body says which function it came from.
 - A function mote is **never solved**. It has no freedoms and no rule
   applies to it; it is read from, like a property model.
+- **The unit check walks into the body** (`core/dimensions.py`), with
+  each parameter given its declared dimension, or else its argument's. A
+  problem inside the body is the calling equation's problem, and a
+  solved value's unit is inferred through a call as through any
+  expression. Two warnings are about calls themselves: an argument whose
+  dimension is not the parameter's declared one, and **a bare number
+  passed to a parameter that declares no unit**, since `phi(5)` read as
+  5 m when 5 cm was meant is the slip this exists to catch. A declared
+  parameter, including `[1]`, never warns.
+- **Solve health lists a function no call can reach**
+  (`Health.function_problems`): a builtin's name, unreadable
+  parameters, or a body that does not parse. These are reported even
+  when nothing calls the function yet.
 
 ### Limits
 
@@ -1109,6 +1122,9 @@ Alongside the blocks, `check()` reports:
   already per line: each problem is labelled with the rule it was found on,
   and a worksheet rule is labelled by its own equation, so a warning reads
   back as the line that caused it.
+- **`function_problems`** — each [function mote](#functions) no call can
+  reach or evaluate: a builtin's name, unreadable parameters, a body that
+  does not parse.
 - **`checks`** — comparison relations, counted apart from the equations.
   Counting one among them would make a model look balanced because of a
   line that cannot determine anything.

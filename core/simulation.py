@@ -1486,6 +1486,7 @@ def _dimension_context(
         neighbors=lambda mid: view.neighbors.get(mid, []),
         mote_name=lambda mid: view.properties.get(mid, {}).get("name"),
         named=lambda name: view.by_name.get(name, []),
+        properties=lambda mid: view.properties.get(mid, {}),
     )
 
 

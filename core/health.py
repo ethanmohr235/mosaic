@@ -42,12 +42,15 @@ current view of a number belongs in their data.
 import sqlite3
 from dataclasses import dataclass
 
+from core import functions as functions_repo
 from core import incidence as incidence_repo
 from core import motes as motes_repo
 from core import rules as rules_repo
 from core import simulation
 from core import units as units_repo
-from core.formula import FormulaError, Unknown, relation_operator
+from core.formula import (
+    FormulaError, Unknown, function_name_problem, parse_expression, relation_operator,
+)
 
 # What the counts add up to. Never a pass/fail -- see the module docstring.
 BALANCED = "balanced"
@@ -116,6 +119,9 @@ class Health:
     culprits: tuple[Culprit, ...] = ()
     inert: tuple[Inert, ...] = ()
     unit_problems: tuple[str, ...] = ()
+    # Function motes no call can reach or evaluate: a builtin's name, bad
+    # parameters, a body that does not parse.
+    function_problems: tuple[str, ...] = ()
 
     @property
     def verdict(self) -> str:
@@ -166,7 +172,32 @@ def check(conn: sqlite3.Connection, scenario: str | None = None) -> Health:
         culprits=_culprits(index, labels),
         inert=_inert(index, labels),
         unit_problems=tuple(simulation.check_garden(conn).problems),
+        function_problems=function_problems(conn),
     )
+
+
+def function_problems(conn: sqlite3.Connection) -> tuple[str, ...]:
+    """What is wrong with each function mote, before anything calls it. A
+    call reports these too, but a function nothing calls yet would
+    otherwise hide them until the day something does."""
+    problems: list[str] = []
+    for mote in motes_repo.list_motes(conn):
+        if not functions_repo.is_function(mote.properties):
+            continue
+        name = mote.properties.get("name")
+        label = f"function {name or mote.id[:8]}"
+        problem = function_name_problem(name)
+        if problem:
+            problems.append(f"{label}: {problem}")
+        try:
+            functions_repo.parameters_of(mote.properties)
+        except functions_repo.FunctionDefinitionError as e:
+            problems.append(f"{label}: {e}")
+        try:
+            parse_expression(functions_repo.body_of(mote.properties))
+        except FormulaError as e:
+            problems.append(f"{label}: {e}")
+    return tuple(problems)
 
 
 def _count(index: incidence_repo.Index) -> tuple[int, int]:

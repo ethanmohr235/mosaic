@@ -708,6 +708,7 @@ def solve_health(garden: str | None = None) -> dict[str, Any]:
                 for i in report.inert
             ],
             "unitProblems": list(report.unit_problems),
+            "functionProblems": list(report.function_problems),
         }
 
 

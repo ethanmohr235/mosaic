@@ -169,7 +169,8 @@ wrong" *before* anything runs. A failed solve says "underdetermined",
 which is true of the whole garden and names nothing; this names the coupled
 **block** of unknowns that is short an equation (`groups`), the free values
 nothing can determine at all (`culprits`), and the dimensionally
-inconsistent equations (`unitProblems`). Read `verdict`, not the totals:
+inconsistent equations (`unitProblems`), and function motes no call can
+reach (`functionProblems`). Read `verdict`, not the totals:
 `equations == unknowns` is neither necessary nor sufficient, since three of
 each can be two blocks with one short and one surplus. See
 `docs/simulation.md`.
