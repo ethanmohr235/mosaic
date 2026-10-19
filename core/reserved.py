@@ -20,6 +20,7 @@ declaring DESCRIPTION/CONFIGURATION/CAPABILITIES on the provider class
 removed that reason, and with it the third place the same facts were
 written down."""
 from core.calc import SOURCE_KEY
+from core.functions import FUNCTION_KEY, PARAMETERS_KEY
 from core.images import IMAGE_KEY
 from core.links import URL_PROPERTY
 from core.projects import ARCHIVED_KEY, GARDEN_KEY, SUBMISSION_KEY
@@ -37,7 +38,7 @@ from core.units import UNITS_KEY
 
 RESERVED_PROPERTIES = {
     URL_PROPERTY,
-    EQUATION_KEY, FREEDOMS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
+    EQUATION_KEY, FREEDOMS_KEY, FUNCTION_KEY, PARAMETERS_KEY, PROVIDER_KEY, CONFIGURATION_KEY, UNITS_KEY,
     ROLES_KEY, MODOC_KEY, QUERY_KEY, PLOT_KEY, SOURCE_KEY, GARDEN_KEY,
     CHECK_KEY, TOLERANCE_KEY, UNCERTAINTY_KEY, ARCHIVED_KEY, IMAGE_KEY, SUBMISSION_KEY,
 }
@@ -60,6 +61,12 @@ PROPERTY_MEANINGS: dict[str, str] = {
         "own, and *replaces* rather than adds to what its species declare -- "
         "which is how two instances of one species can pose opposite "
         "questions (sizing vs rating).",
+    FUNCTION_KEY: "A function mote's body: an expression of its `parameters` "
+        "(and of its own properties, as constants), callable by the mote's "
+        "`name` from any formula -- `phi(0)`, `phi(reactor.r)`. Never solved.",
+    PARAMETERS_KEY: "A function mote's parameter names, in call order: a "
+        "comma-separated string ('r, z') or a JSON list. A parameter's entry "
+        "in `units` is what a bare number passed to it means.",
     CHECK_KEY: "On a rule mote: `true` makes the rule a check -- evaluated "
         "against the answer after solving and shown green or red, but never "
         "used to determine a value, even when written with `==` (`sum(Fy) == "
@@ -254,6 +261,11 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
         "('balance == prev(balance) * 1.05'). x must be a bare "
         "property/unknown name on the current mote. Only valid in a "
         "time-based run (see preview_simulation)."},
+    {"syntax": "phi(x, ...)", "meaning":
+        "A call to the function mote named 'phi' (one carrying a `function` "
+        "body): the body evaluated with each parameter bound to its "
+        "argument. An unknown may be an argument. A bare number is in the "
+        "unit the parameter declares in the function mote's `units`."},
     {"syntax": "property('rel', 'operation', arg, ...)", "meaning":
         "Evaluates 'operation' through the property model of the single "
         "mote reached by relationship type 'rel', e.g. property"

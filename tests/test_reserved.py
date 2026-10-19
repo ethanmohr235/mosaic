@@ -14,7 +14,7 @@ def test_reserved_properties_match_the_documented_list():
         "equation", "freedoms", "url",
         "provider", "configuration", "units", "roles", "modoc", "query",
         "plot", "source", "garden", "check", "tolerance", "uncertainty", "archived", "image",
-        "submission",
+        "submission", "function", "parameters",
     }
 
 

@@ -92,9 +92,10 @@ to both.
 | `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `sinc`, `sqrt` | Also only on known values. `sinc(x)` is the unnormalized `sin(x)/x`, with `sinc(0) = 1` (numpy's `sinc` is `sin(πx)/(πx)`; this one is not). `sin`/`cos`/`tan` take radians -- an argument declaring unit `deg` (see [Units](#units) below) arrives already converted; their inverses `arcsin`/`arccos`/`arctan` return radians the same way, and `arcsin`/`arccos` require an argument between -1 and 1. `sqrt` of a negative number is an error. |
 | `t` | The current step's index within a time-based run (0 for the first step). A reserved word -- shadows a property literally named `t` inside a formula specifically, though that property is still ordinary and visible everywhere else. Always 0 in a plain (non-time-based) run. |
 | `prev(x)` | The value `x` had *entering* the current step -- `x` must be a bare property/unknown name on the mote the rule is running against (not `targets(...)`'s result). This is how a rule expresses a recurrence: `balance == prev(balance) * 1.05`. Only meaningful in a time-based run; raises an error otherwise. |
+| `phi(x)` | A call to a [function mote](#functions) named `phi`: its body, evaluated with each parameter bound to its argument. An unknown may be an argument; it passes into the body as itself. |
 | `property('rel', 'operation', ...)` | Evaluates `operation` (e.g. `'pressure'`) through the property model of the single mote reached by relationship type `'rel'`, e.g. `property('working_fluid', 'pressure', density, temperature)`. The relationship type and operation must be quoted string literals; the remaining arguments must already be known numbers -- a property model is an opaque function of its inputs, so like `abs`/`min`/`max` this is deferred (retried by the substitution loop) until they are. See "Physical property models" below. |
 
-Anything else -- indexing, comprehensions, attribute access, `import`, calling arbitrary functions -- is rejected when the formula is parsed. The parser uses Python's `ast` module against a whitelist and never calls `eval`.
+Anything else -- indexing, comprehensions, attribute access, `import`, calling a Python function -- is rejected when the formula is parsed. The parser uses Python's `ast` module against a whitelist and never calls `eval`.
 
 ## What the solver can handle
 
@@ -492,6 +493,58 @@ Relationships in a garden now mean something. `targets(...)`/`sources
 (...)` navigation and roles are unchanged -- they are how a *model*
 expresses structure, and a name reference was never a replacement for
 either.
+
+## Functions
+
+A rule is an equation about specific motes, so it holds at one point: the
+flux at whatever `reactor.r` holds. A **function** is the relation
+itself, asked at whatever point a caller names. It is an ordinary mote
+(`core/functions.py`) with a reserved `function` body and reserved
+`parameters`:
+
+```text
+name:        phi
+function:    A * sin(B * r) / r
+parameters:  r                         <- a comma string or a JSON list
+units:       {"r": "cm", "B": "1/cm"}
+A:           5e13
+B:           0.0628
+```
+
+```text
+reactor.flux        = phi(reactor.r)
+reactor.flux_center = phi(0)
+```
+
+- **A call is the body, evaluated with each parameter bound to its
+  argument** (`core/formula.py::_function_call`). Arguments are evaluated
+  where the call is, so an unknown goes into the body as itself, and the
+  body is exactly as linear, or as deferred, as it would be written
+  inline. `line(s.x) == 7` solves with the default solver; `sq(s.x) == 9`
+  needs `newton`, just as `s.x * s.x == 9` would. Every surface that
+  evaluates a formula gets calls with no changes: rules, checks, `\val`,
+  `\work`, `why`, sweeps, `fit`, uncertainty and solve health.
+- **A bare name in the body is a parameter first, then a property of the
+  function mote.** That is the same anchor rule a rule's bare names
+  follow, which is what lets constants live on the function mote. A
+  qualified name (`reactor.k`) reaches any mote, as usual. A parameter
+  shadows `t`, `pi` and `e` inside the body, so `decay(t) = exp(-k * t)`
+  means the parameter.
+- **A parameter's unit is the function mote's ordinary `units` entry.** It
+  says what a *bare number* passed to that parameter means: `phi(0)` is
+  0 cm. A number with no declared unit is base SI. An argument that reads
+  a property already carries that property's unit, so it is never
+  reinterpreted. `[1]` declares a parameter dimensionless.
+- **The name resolves like a garden-scope name**: the one mote in the
+  garden with that name *and* a `function` body. Two is the same hard
+  error two `bd`s are, and none is an unknown function. A function cannot
+  be named like a builtin, `t`, `pi` or `e`, since a call to one could
+  never reach it.
+- **Refused:** the wrong number of arguments (the message names the
+  parameters), a function that calls itself, directly or not, and keyword
+  arguments. An error inside a body says which function it came from.
+- A function mote is **never solved**. It has no freedoms and no rule
+  applies to it; it is read from, like a property model.
 
 ## Roles
 

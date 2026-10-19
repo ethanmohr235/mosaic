@@ -20,10 +20,12 @@ nonlinear ones (`x * y == 1`) to defer to a solver backend exactly as
 before.
 """
 import ast
+import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from core import functions as functions_repo
 from core import roles as roles_repo
 from core.units import UnitError, to_base
 
@@ -77,6 +79,20 @@ TICK_NAME = "t"
 # well-known handful of names is worth the same small shadowing risk `t`
 # already accepts, rather than a per-garden opt-in nobody would find.
 MATH_CONSTANTS: dict[str, float] = {"pi": math.pi, "e": math.e}
+
+
+def function_name_problem(name: object) -> str | None:
+    """Why `name` cannot name a function mote, or None when it can. A call
+    to a builtin never reaches a function mote, and `t`, `pi` and `e` are
+    bare names a formula already reads, so a function spelled like any of
+    them could never be called."""
+    if not isinstance(name, str) or not name.isidentifier():
+        return f"a function's name must be a plain identifier, not {name!r}"
+    if name in ALLOWED_CALLS:
+        return f"{name!r} is a builtin, so a function of that name could never be called"
+    if name == TICK_NAME or name in MATH_CONSTANTS:
+        return f"{name!r} is a reserved name in a formula"
+    return None
 
 
 class FormulaError(ValueError):
@@ -562,6 +578,11 @@ class Context:
     evaluate_model: Callable[[str, str, str, list[float]], float] = _model_evaluation_unavailable
     units: Callable[[str], dict] = lambda mote_id: {}
     roles: Callable[[str], dict] = lambda mote_id: {}
+    # Inside a function's body: each parameter's argument, and the
+    # function motes being called, outermost first (for refusing
+    # recursion). Empty everywhere else.
+    bindings: dict[str, "Ratio"] = field(default_factory=dict)
+    calls: tuple[str, ...] = ()
 
 
 def relation_operator(text: str) -> str:
@@ -705,6 +726,8 @@ def _evaluate(node: ast.AST, ctx: Context):
     if isinstance(node, ast.Constant):
         return _constant(node)
     if isinstance(node, ast.Name):
+        if node.id in ctx.bindings:
+            return ctx.bindings[node.id]
         if node.id == TICK_NAME:
             return Ratio.number(ctx.tick)
         if node.id in MATH_CONSTANTS:
@@ -879,7 +902,83 @@ def _call(node: ast.Call, ctx: Context):
         return _previous(node, ctx)
     if name == PROPERTY_CALL:
         return _property(node, ctx)
-    raise FormulaError(f"unknown function {name!r} in formula")
+    return _function_call(name, node, ctx)
+
+
+def function_named(ctx: Context, name: str) -> str:
+    """The one function mote `name` calls: a mote of that name, anywhere
+    in the garden, carrying a `function` body. Several is the same hard
+    error a name reference gets; none is an unknown function."""
+    candidates = [
+        mid for mid in ctx.named(name)
+        if functions_repo.is_function(ctx.properties(mid))
+    ]
+    found = name_match(candidates, name, "with a function body in the garden")
+    if found is None:
+        raise FormulaError(f"unknown function {name!r} -- no builtin or function mote has that name")
+    return found[0]
+
+
+def is_bare_number(node: ast.AST) -> bool:
+    """Whether an argument is a number as written -- literals, `pi`/`e` and
+    arithmetic on them, with no property in it. Only a bare number takes
+    its unit from the parameter it is passed to; anything that reads a
+    property already carries that property's unit."""
+    for inner in ast.walk(node):
+        if isinstance(inner, (ast.Attribute, ast.Call)):
+            return False
+        if isinstance(inner, ast.Name) and inner.id not in MATH_CONSTANTS:
+            return False
+    return True
+
+
+def _function_call(name: str, node: ast.Call, ctx: Context) -> Ratio:
+    """`phi(x)`: the function mote's body, evaluated with each parameter
+    bound to its argument. Arguments are evaluated where the call is, so
+    an unknown passes into the body as itself and the body is exactly as
+    linear -- or as deferred -- as it would be written inline."""
+    function_id = function_named(ctx, name)
+    if function_id in ctx.calls:
+        raise FormulaError(f"{name}() calls itself -- a function cannot be recursive")
+    properties = ctx.properties(function_id)
+    try:
+        parameters = functions_repo.parameters_of(properties)
+    except functions_repo.FunctionDefinitionError as e:
+        raise FormulaError(f"function {name}: {e}") from e
+    if len(node.args) != len(parameters):
+        raise FormulaError(
+            f"{name}() takes {len(parameters)} argument"
+            f"{'' if len(parameters) == 1 else 's'} ({', '.join(parameters)}), "
+            f"got {len(node.args)}"
+        )
+    arguments = {
+        parameter: _argument(ctx, function_id, parameter, arg)
+        for parameter, arg in zip(parameters, node.args)
+    }
+    return _call_body(name, function_id, functions_repo.body_of(properties), arguments, ctx)
+
+
+def _argument(ctx: Context, function_id: str, parameter: str, node: ast.AST) -> Ratio:
+    """One argument, in base units. A bare number is in the unit the
+    parameter declares (`phi(0)` into `r [cm]` is 0 cm); with none
+    declared, it is already base SI -- which the unit check warns about."""
+    value = _as_ratio(_evaluate(node, ctx))
+    if not is_bare_number(node):
+        return value
+    return Ratio.number(_normalize(ctx, function_id, parameter, value.constant))
+
+
+def _call_body(
+    name: str, function_id: str, body: str, arguments: dict[str, Ratio], ctx: Context
+) -> Ratio:
+    inner = dataclasses.replace(
+        ctx, mote_id=function_id, bindings=arguments, calls=(*ctx.calls, function_id))
+    try:
+        return _as_ratio(_evaluate(_parse_ast(body), inner))
+    except FormulaError as e:
+        # Same type, so a NonlinearError still defers and an
+        # IndeterminateError can still be answered with a limit.
+        raise type(e)(f"in {name}(): {e}") from e
 
 
 def _previous(node: ast.Call, ctx: Context) -> Ratio:
