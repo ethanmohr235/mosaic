@@ -237,6 +237,11 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
         "known -- but writing an exponential law as its logarithm ("
         "'mxs * x == -ln(I / I0)' rather than 'I == I0 * exp(-mxs * x)') "
         "makes it linear in x, so the default solver gets it exactly."},
+    {"syntax": "sin, cos, tan, arcsin, arccos, arctan, sinc, sqrt", "meaning":
+        "Only on values that are already known. Radians in (a value "
+        "declaring unit 'deg' arrives converted) and out. sinc(x) is the "
+        "unnormalized sin(x)/x with sinc(0) == 1 -- not numpy's sin(pi x)/"
+        "(pi x)."},
     {"syntax": "abs(x), min(...), max(...)", "meaning":
         "Only on values that are already known by the time they're "
         "evaluated -- deferred otherwise, same as property()."},

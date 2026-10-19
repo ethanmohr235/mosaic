@@ -47,8 +47,10 @@ NUMERIC_CALLS = frozenset({"abs", "min", "max"})
 # reads it, the same normalization every other unit gets. arcsin/arccos/
 # arctan are their inverses: dimensionless in, radians out -- which is
 # still dimensionless in this system, the same way sin/cos/tan's own
-# output is.
-TRIG_CALLS = frozenset({"sin", "cos", "tan", "arcsin", "arccos", "arctan"})
+# output is. `sinc` is the unnormalized sin(x)/x with sinc(0) = 1 -- the
+# physics convention, not numpy's sin(pi x)/(pi x) -- so a profile like
+# sin(B r)/r can be written `B * sinc(B * r)` and read at r = 0.
+TRIG_CALLS = frozenset({"sin", "cos", "tan", "arcsin", "arccos", "arctan", "sinc"})
 # `log` is the natural logarithm, matching math.log(), numpy, and every
 # other scientific-computing default -- the same "follow the stdlib"
 # choice TRIG_CALLS makes about radians. `ln` is an alias for anyone who
@@ -79,6 +81,22 @@ MATH_CONSTANTS: dict[str, float] = {"pi": math.pi, "e": math.e}
 
 class FormulaError(ValueError):
     """A formula could not be parsed or evaluated."""
+
+
+class IndeterminateError(FormulaError):
+    """0/0: both sides of a division are exactly zero. Distinct from a
+    plain division by zero (a pole), because at a function call this is
+    the one failure a limit can answer (see core/limits.py)."""
+
+
+def _divide_by_zero(numerator_is_zero: bool) -> FormulaError:
+    if numerator_is_zero:
+        return IndeterminateError(
+            "0/0 is indeterminate -- if the value is a limit, write the "
+            "expression as a function (the solver takes the limit at a call) "
+            "or use sinc()"
+        )
+    return FormulaError("division by zero")
 
 
 class NonlinearError(FormulaError):
@@ -163,7 +181,7 @@ class LinearExpr:
         # that just happen to live at a subatomic scale. IEEE-754 divides
         # a merely-tiny float by another cleanly -- only true zero raises.
         if other.constant == 0.0:
-            raise FormulaError("division by zero")
+            raise _divide_by_zero(self.is_constant and self.constant == 0.0)
         return self.scaled(1.0 / other.constant)
 
     def __pow__(self, other: "LinearExpr") -> "LinearExpr":
@@ -329,7 +347,8 @@ class Ratio:
 
     def __truediv__(self, other: "Ratio") -> "Ratio":
         if other.numerator.is_constant and other.numerator.constant == 0.0:
-            raise FormulaError("division by zero")
+            raise _divide_by_zero(
+                self.numerator.is_constant and self.numerator.constant == 0.0)
         return self * Ratio(other.denominator, other.numerator)
 
     def __pow__(self, other: "Ratio") -> "Ratio":
@@ -979,6 +998,7 @@ _TRIG_FUNCS = {
     "arcsin": math.asin,
     "arccos": math.acos,
     "arctan": math.atan,
+    "sinc": lambda x: 1.0 if x == 0.0 else math.sin(x) / x,
 }
 _ARC_TRIG_DOMAIN = {"arcsin", "arccos"}
 

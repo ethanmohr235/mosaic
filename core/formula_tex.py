@@ -263,6 +263,7 @@ CALL_TEX: dict[str, Callable[[ast.Call], str]] = {
     "max": _extreme(r"\max"),
     "sin": _fn(r"\sin"), "cos": _fn(r"\cos"), "tan": _fn(r"\tan"),
     "arcsin": _fn(r"\arcsin"), "arccos": _fn(r"\arccos"), "arctan": _fn(r"\arctan"),
+    "sinc": _fn(r"\operatorname{sinc}"),
     "log": _fn(r"\ln"), "ln": _fn(r"\ln"), "log10": _fn(r"\log_{10}"), "exp": _fn(r"\exp"),
     formula.SQRT_CALL: lambda node: rf"\sqrt{{{_one(node)}}}",
     formula.PREVIOUS_CALL: _previous,

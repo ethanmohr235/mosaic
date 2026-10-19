@@ -334,6 +334,7 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
         "arcsin": "arcsin(x)",
         "arccos": "arccos(x)",
         "arctan": "arctan(x)",
+        "sinc": "sinc(x)",
         "sqrt": "sqrt(x)",
         "log": "log(x)",
         "ln": "ln(x)",

@@ -5,6 +5,7 @@ import pytest
 from core.formula import (
     Context,
     FormulaError,
+    IndeterminateError,
     LinearExpr,
     NonlinearError,
     attribute_bases,
@@ -564,7 +565,8 @@ def test_sqrt_of_a_negative_number_is_rejected():
         evaluate_expression("sqrt(-1)", context())
 
 
-@pytest.mark.parametrize("name", ["sin", "cos", "tan", "arcsin", "arccos", "arctan", "sqrt"])
+@pytest.mark.parametrize(
+    "name", ["sin", "cos", "tan", "arcsin", "arccos", "arctan", "sinc", "sqrt"])
 def test_trig_and_sqrt_defer_on_unknowns(name):
     with pytest.raises(NonlinearError):
         evaluate_expression(f"{name}(current)", context())
@@ -580,6 +582,30 @@ def test_arc_trig_functions_invert_their_trig_counterparts():
 def test_arcsin_arccos_reject_arguments_outside_unit_range(name):
     with pytest.raises(FormulaError, match="between -1 and 1"):
         evaluate_expression(f"{name}(2)", context())
+
+
+def test_sinc_is_the_unnormalized_sin_x_over_x():
+    assert evaluate_expression("sinc(0)", context()).constant == 1.0
+    assert evaluate_expression("sinc(pi / 2)", context()).constant == pytest.approx(2 / math.pi)
+    assert evaluate_expression("sinc(-1)", context()).constant == pytest.approx(math.sin(1))
+
+
+# ---- 0/0 ----
+
+def test_zero_over_zero_is_indeterminate_not_a_pole():
+    with pytest.raises(IndeterminateError, match="sinc"):
+        evaluate_expression("sin(0) / 0", context())
+
+
+def test_a_nonzero_numerator_over_zero_is_a_pole():
+    with pytest.raises(FormulaError, match="division by zero") as raised:
+        evaluate_expression("1 / (resistance - 100)", context())
+    assert not isinstance(raised.value, IndeterminateError)
+
+
+def test_zero_over_zero_inside_a_relation_is_indeterminate():
+    with pytest.raises(IndeterminateError):
+        evaluate_equation("current == (resistance - 100) / (resistance - 100)", context())
 
 
 # ---- property() ----
