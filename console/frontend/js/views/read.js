@@ -26,7 +26,7 @@ function create(ctx) {
   const { api, store, components } = ctx;
   const { h } = components;
   const st = { command: "", seq: 0, drawSeq: 0, note: null, payload: null, error: null, empty: false };
-  let root = null, page = null, resize = null, draftTimer = 0;
+  let root = null, page = null, resize = null, draftTimer = 0, renderSeq = 0, lastTop = 0;
   const figures = [];
   const offs = [];
 
@@ -104,7 +104,10 @@ function create(ctx) {
 
   function graph(b) {
     const f = b.figure || {};
+    // Its height is set now, not when it's drawn, so the page has its full
+    // length the moment it's swapped in and the scroll position holds.
     const area = h("div", "doc-figure-area");
+    area.style.height = `${FIGURE_H}px`;
     const node = h("figure", "doc-figure", [area, caption(b)]);
     if (f.error) area.replaceChildren(h("div", "doc-broken", `\\graph{${b.view}}: ${f.error}`));
     else figures.push({ area, figure: f });
@@ -169,18 +172,20 @@ function create(ctx) {
     for (const { area, figure } of figures) {
       const width = area.clientWidth;
       if (width < 40) continue;
-      area.style.height = `${FIGURE_H}px`;
       drawPlot(area, figureModel(figure, width, FIGURE_H));
     }
   }
 
+  /** A redraw keeps the reader where they were: the new article is built
+   * off the page, its images decoded (an undecoded <img> is 0px tall and
+   * would clamp the scroll), and only then swapped into the same page. */
   function render() {
     if (!root) return;
+    const seq = ++renderSeq;
     if (st.error) return root.replaceChildren(h("div", "pane-error lvl-fault", st.error));
     if (st.empty) return root.replaceChildren(h("div", "plot-empty", "select a note, or: read ‹name›"));
     if (!st.payload) return;
     figures.length = 0;
-    const top = page ? page.scrollTop : 0;
     const blocks = st.payload.blocks.map(block);
     if (!blocks.length) blocks.push(h("p", "doc-note", st.note && st.note.exists ? "(empty)" : "(new)"));
     const problems = st.payload.problems;
@@ -188,10 +193,20 @@ function create(ctx) {
       blocks.push(h("div", "doc-problems", [h("div", "doc-section-head", `${problems.length} problem${problems.length === 1 ? "" : "s"}`),
         ...problems.map((p) => h("div", "doc-problem", [h("span", "doc-note", p.line ? `line ${p.line}  ` : ""), p.message]))]));
     }
-    page = h("div", "doc-page scroll", h("article", "doc", blocks));
-    root.replaceChildren(page);
-    page.scrollTop = top;
-    drawFigures();
+    const article = h("article", "doc", blocks);
+    const images = [...article.querySelectorAll("img")].map((img) => img.decode().catch(() => {}));
+    Promise.all(images).then(() => {
+      if (seq !== renderSeq || !root) return;
+      if (!page || page.parentNode !== root) {
+        const p = h("div", "doc-page scroll");
+        p.addEventListener("scroll", () => { lastTop = p.scrollTop; });
+        page = p;
+        root.replaceChildren(page);
+      }
+      page.replaceChildren(article);
+      page.scrollTop = lastTop;
+      drawFigures();
+    });
   }
 
   function summary() {
@@ -271,6 +286,7 @@ function create(ctx) {
       return { summary: r.error || "", level: r.error ? "fault" : "idle" };
     }
     st.empty = false;
+    if (!st.note || st.note.noteId !== r.noteId || st.note.name !== r.name) lastTop = 0;
     st.note = { noteId: r.noteId, name: r.name, source: r.source, exists: r.exists };
     return (await draw()) || { summary: "", level: "idle" };
   }
