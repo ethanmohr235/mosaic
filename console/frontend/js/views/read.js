@@ -214,6 +214,7 @@ function create(ctx) {
     const n = st.payload.problems.length;
     const editing = store.draft(key()) !== null ? " · draft" : "";
     return { summary: `${st.payload.stats.words} words${n ? ` · ${n} problem${n === 1 ? "" : "s"}` : ""}${editing}`,
+      detail: st.payload.problems.map((p) => (p.line ? `line ${p.line}: ${p.message}` : p.message)).join("\n"),
       level: n ? "warn" : "ok" };
   }
 

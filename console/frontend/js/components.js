@@ -263,8 +263,9 @@ function popupRow(row, i, highlighted, onPick) {
 /**
  * A pane header: `$ command` (or the view id when there's no command),
  * then a right-aligned summary whose color follows its level. The
- * focused pane's header is inverted.
- *   update({command, label, summary, level, focused})
+ * focused pane's header is inverted. `detail`, when given, is the
+ * summary's tooltip (what the problems it counts are).
+ *   update({command, label, summary, detail, level, focused})
  */
 export function paneHeader({ onClick = null } = {}) {
   const prompt = h("span", "c-head-prompt", "$");
@@ -273,12 +274,13 @@ export function paneHeader({ onClick = null } = {}) {
   const el = h("div", "c-head", [prompt, command, summary]);
   if (onClick) el.addEventListener("click", onClick);
 
-  function update({ command: text = "", label = "", summary: sum = "", level = "idle", focused = false }) {
+  function update({ command: text = "", label = "", summary: sum = "", detail = "", level = "idle", focused = false }) {
     const shown = text || label;
     prompt.hidden = !text;
     command.textContent = shown;
     command.title = shown;
     summary.textContent = sum || "";
+    summary.title = detail || "";
     summary.className = `c-head-summary lvl-${level || "idle"}`;
     el.classList.toggle("focused", focused);
   }

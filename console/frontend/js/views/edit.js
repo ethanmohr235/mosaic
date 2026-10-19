@@ -165,14 +165,17 @@ function create(ctx) {
     if (n) parts.push(`${n} problem${n === 1 ? "" : "s"}`);
     if (!st.note.exists) parts.push("new note");
     else if (editor && editor.value() !== st.saved) parts.push("editing");
-    return { summary: parts.join(" · "), level: st.problems.size ? "warn" : "ok" };
+    const detail = [...st.problems].sort((a, b) => a[0] - b[0])
+      .flatMap(([index, messages]) => messages.map((m) => `line ${index + 1}: ${m}`)).join("\n");
+    return { summary: parts.join(" · "), detail, level: st.problems.size ? "warn" : "ok" };
   }
 
   /** The header follows saves and checks between runs (a pane's summary
    * is otherwise only set by run()). */
   function header() {
     const s = summary();
-    if (lastSummary && lastSummary.summary === s.summary && lastSummary.level === s.level) return;
+    if (lastSummary && lastSummary.summary === s.summary && lastSummary.detail === s.detail
+      && lastSummary.level === s.level) return;
     lastSummary = s;
     if (root) ctx.setSummary(s);
   }

@@ -95,6 +95,7 @@ function create(ctx) {
     render();
     return { summary: p.problems.length ? `${p.problems.length} problem${p.problems.length === 1 ? "" : "s"}`
       : p.archivedBy ? "archived" : p.current ? "open here" : p.garden,
+    detail: p.problems.join("\n"),
     level: p.problems.length ? "warn" : "ok" };
   }
 

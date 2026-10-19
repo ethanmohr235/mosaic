@@ -43,9 +43,9 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
       setCommand: (command) => setPaneCommand(pane, command),
       runCommand: (line, options) => onRun(line, options),
       prefill: (line, caret = null) => onPrefill(line, caret),
-      setSummary: ({ summary = "", level = "idle" } = {}) => {
+      setSummary: ({ summary = "", detail = "", level = "idle" } = {}) => {
         if (panes.get(pane.id) !== pane) return;
-        Object.assign(pane, { summary, level });
+        Object.assign(pane, { summary, detail, level });
         updateHeader(pane);
       },
       isFocused: () => store.state.focusedId === pane.id,
@@ -74,7 +74,7 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
       if (event.button !== 1) store.focus(id);
     });
     const pane = { id, el, header, body, instance: null, view: null, command: null,
-      runCommand: "", summary: "", level: "idle", token: 0, dragged: false };
+      runCommand: "", summary: "", detail: "", level: "idle", token: 0, dragged: false };
     panes.set(id, pane);
     return pane;
   }
@@ -84,6 +84,7 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
       command: pane.command,
       label: pane.command ? "" : "new pane",
       summary: pane.summary,
+      detail: pane.detail,
       level: pane.level,
       focused: pane.id === store.state.focusedId,
     });
@@ -98,14 +99,14 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
         console.error(`unmounting ${pane.view ? pane.view.id : "blank pane"} failed`, err);
       }
     }
-    Object.assign(pane, { instance: null, view: null, summary: "", level: "idle" });
+    Object.assign(pane, { instance: null, view: null, summary: "", detail: "", level: "idle" });
     pane.body.replaceChildren();
   }
 
   function showError(pane, message) {
     teardown(pane);
     pane.body.appendChild(h("div", "pane-error lvl-fault", message));
-    Object.assign(pane, { summary: message, level: "fault" });
+    Object.assign(pane, { summary: message, detail: "", level: "fault" });
     updateHeader(pane);
     store.emit("panes");
   }
@@ -177,6 +178,7 @@ export function createPanes({ root, store, api, components, onEdit, onPrompt, on
     }
     if (token !== pane.token) return;
     pane.summary = (result && result.summary) || "";
+    pane.detail = (result && result.detail) || "";
     pane.level = (result && result.level) || "idle";
     updateHeader(pane);
     store.emit("panes");

@@ -87,10 +87,11 @@ function create(ctx) {
 
   function summary() {
     const bad = st.lines.filter((l) => l.problem).length;
+    const detail = st.lines.flatMap((l, i) => (l.problem ? [`line ${i + 1}: ${l.problem}`] : [])).join("\n");
     const count = st.lines.filter((l) => l.kind !== "blank").length;
     const editing = editor && editor.value() !== st.applied ? " · not applied" : "";
     return { summary: `${count} line${count === 1 ? "" : "s"}${bad ? ` · ${bad} problem${bad === 1 ? "" : "s"}` : ""}${editing}`,
-      level: bad ? "warn" : "ok" };
+      detail, level: bad ? "warn" : "ok" };
   }
 
   function render() {

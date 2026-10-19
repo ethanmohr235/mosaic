@@ -152,6 +152,7 @@ function create(ctx) {
     const archived = p.groups.find((g) => g.key === "archived");
     return { summary: `${p.total} garden${p.total === 1 ? "" : "s"}${archived && archived.count ? ` · ${archived.count} archived` : ""}`
       + `${p.problems.length ? ` · ${p.problems.length} problem${p.problems.length === 1 ? "" : "s"}` : ""}`,
+    detail: p.problems.join("\n"),
     level: p.problems.length ? "warn" : "ok" };
   }
 

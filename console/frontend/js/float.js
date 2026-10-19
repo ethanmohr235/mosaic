@@ -48,7 +48,7 @@ export function createFloat({ store, api, components, panes, onRun }) {
     } catch (err) {
       result = { summary: String(err && err.message ? err.message : err), level: "fault" };
     }
-    header.update({ command, summary: (result && result.summary) || "", level: (result && result.level) || "idle",
+    header.update({ command, summary: (result && result.summary) || "", detail: (result && result.detail) || "", level: (result && result.level) || "idle",
       focused: true });
   }
 

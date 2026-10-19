@@ -888,7 +888,9 @@ exact shape is documented at the top of
   Leaks are bugs.
 - **`run(command)`**: re-run in place (for `⏎`, a selection change or a
   data change). It returns the header summary (`16 motes`, `0.4s`,
-  `1 clamped`) and an ok/warn/fault level.
+  `1 clamped`) and an ok/warn/fault level, plus an optional `detail`
+  shown as the summary's tooltip (a view that counts problems lists
+  them there).
 - **`followsSel`**: true when the view re-runs on selection change even
   without `@sel` in its command.
 - **`hints()`**: the key hints shown while it's focused.
