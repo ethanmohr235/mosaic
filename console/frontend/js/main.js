@@ -19,6 +19,7 @@ import { createTopbar } from "./topbar.js";
 import { createHintbar } from "./hintbar.js";
 import { createFloat } from "./float.js";
 import { createPlayer } from "./playhead.js";
+import { createTooltip } from "./tooltip.js";
 
 const FIRST_PANE = "log";
 
@@ -83,6 +84,7 @@ function wire(api) {
   createTopbar({ root: $("topbar"), store, panes: shell.panes, actions: shell.actions, components,
     onRun: (line) => shell.runLine(line) });
   createPlayer({ store });
+  createTooltip();
   createHintbar({ root: $("hintbar"), store, keys: shell.keys, components });
 
   // Writes from outside the window (MCP, CLI, sync) show up when it

@@ -196,6 +196,19 @@ body {
 
 /* ---------- popups ---------- */
 
+.c-tip {
+  position: fixed;
+  z-index: 200;
+  max-width: min(var(--tip-w), 100vw);
+  padding: var(--popup-pad-y) var(--popup-pad-x);
+  background: var(--bg-raised);
+  border: var(--border) solid var(--line-strong);
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
 .popup {
   position: absolute;
   left: 0;

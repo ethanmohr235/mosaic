@@ -106,6 +106,10 @@ else.
 - `@sel` can be used anywhere a mote id is expected (see *Selection*).
 - Errors show in `--fault` on the right of the command line, and in the
   pane header's summary when a pane's command failed.
+- Hover text is the console's own tooltip (`js/tooltip.js`): mono,
+  `--bg-raised`, a `--line-strong` border, square corners. Views keep
+  setting plain `title` attributes (or SVG `<title>` children); the
+  shell shows them, and the native tooltip never appears.
 
 ### Views and built-in layouts
 

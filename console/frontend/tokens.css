@@ -144,6 +144,7 @@
   --popup-key: 110px;
   --popup-time: 48px;
   --popup-rows: 12;          /* rows shown before the list scrolls */
+  --tip-w: 480px;            /* a tooltip wraps past this */
 
   /* Shape. */
   --radius: 0px;
