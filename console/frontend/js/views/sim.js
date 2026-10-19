@@ -6,7 +6,9 @@
  * range over the run, and with `--vs` the other run's value and the
  * difference. Under the table, the timeline: the cursor row's series,
  * its min and max in --dim, constraint breaks and a failed tick in
- * --fault, and the playhead.
+ * --fault, and the playhead. The timeline shows only when the run moves
+ * (some value changes over the ticks, or the run failed partway) and the
+ * pane is tall enough to keep TABLE_MIN_ROWS rows of table above it.
  *
  * api.motion.sim(command) answers with every row's whole series, so the
  * playhead scrubs without asking again. The playhead is the store's: this
@@ -22,6 +24,7 @@ const HINTS = [["j k", "row"], ["⏎", "select mote"], ["v", "vs garden"], ...PL
 const STATE_LEVEL = { solved: "ok", pinned: "warn", varied: null, given: "idle" };
 const SVG = "http://www.w3.org/2000/svg";
 const PAD = 10;
+const TABLE_MIN_ROWS = 6;
 
 function message(err) {
   return String(err && err.message ? err.message : err);
@@ -40,11 +43,29 @@ function extent(values) {
   return [Math.min(...finite), Math.max(...finite)];
 }
 
+function varies(series) {
+  if (!series) return false;
+  const span = extent(series);
+  if (!span) return false;
+  const [lo, hi] = span;
+  if (hi - lo > 1e-12 * Math.max(Math.abs(lo), Math.abs(hi))) return true;
+  return series.some((v) => v === null) && series.some((v) => v !== null);
+}
+
+/** Does the answer depend on time: does any watched value change over the run? */
+function moves(p) {
+  return p.count < p.ticks || p.rows.some((r) => varies(r.series) || varies(r.vs));
+}
+
+function cssPx(el, name) {
+  return parseFloat(getComputedStyle(el).getPropertyValue(name)) || 0;
+}
+
 function create(ctx) {
   const { api, store, components } = ctx;
   const { h } = components;
   const token = {};
-  const st = { command: "", seq: 0, payload: null, error: null, cursor: 0, cursorKey: null };
+  const st = { command: "", seq: 0, payload: null, error: null, cursor: 0, cursorKey: null, moves: false };
   let root = null, tableEl = null, timelineEl = null, statusEl = null, resize = null;
   const offs = [];
 
@@ -118,8 +139,15 @@ function create(ctx) {
       root.replaceChildren(tableEl, timelineEl, statusEl);
     }
     drawTable();
-    drawTimeline();
+    layoutTimeline();
     drawStatus();
+  }
+
+  /** Show the timeline only when the run moves and the pane has the height. */
+  function layoutTimeline() {
+    const tall = root.clientHeight - cssPx(root, "--timeline-h") >= TABLE_MIN_ROWS * cssPx(root, "--row-h");
+    timelineEl.hidden = !(st.moves && tall);
+    if (!timelineEl.hidden) drawTimeline();
   }
 
   function drawTable() {
@@ -322,6 +350,7 @@ function create(ctx) {
       return { summary: st.error, level: "fault" };
     }
     st.payload = p;
+    st.moves = moves(p);
     st.error = null;
     const at_ = p.rows.findIndex((r) => rowKey(r) === st.cursorKey);
     st.cursor = at_ >= 0 ? at_ : Math.min(st.cursor, Math.max(p.rows.length - 1, 0));
@@ -344,7 +373,7 @@ function create(ctx) {
       st.command = command;
       root = h("div", "view-motion");
       el.appendChild(root);
-      resize = new ResizeObserver(() => { if (timelineEl && st.payload) drawTimeline(); });
+      resize = new ResizeObserver(() => { if (timelineEl && st.payload) layoutTimeline(); });
       resize.observe(root);
     },
     run,

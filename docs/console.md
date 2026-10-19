@@ -360,6 +360,10 @@ confirmed these defaults on 2026-10-01.
   can answer, and so does a live solve (the edit stays, the message says
   why). One undo step (`why` is live, so there is no record to put back).
 - **New token:** `--timeline-h` 72px, the sim pane's timeline.
+- **The timeline shows only when the answer depends on time:** some
+  watched value (or its `--vs` partner) changes over the run, or the run
+  failed partway. It also hides when the pane is too short to keep six
+  table rows above it (2026-10-19).
 
 ### Settled for U6, Mora (2026-10-01)
 
