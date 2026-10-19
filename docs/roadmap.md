@@ -100,6 +100,15 @@ Each one was a separate act of filing. That lesson became a rule in
   (`core/data/materials.json`), nominal values only; a configuration's
   `values` adds or overrides. See `simulation.md` -> *Physical property
   models*.
+- **Functions (done 2026-10-19).** A reusable relation asked at any
+  point: `phi(r [cm]) = A * sin(B * r) / r`, then `phi(0)` in a document
+  and `phi(reactor.r)` in a rule. **Decided:** a function is a mote with
+  reserved `function` and `parameters` (no `\val` knobs); `sinc` is the
+  unnormalized sin(x)/x; at a call, and only there, 0/0 is answered with
+  a two-sided limit that the solve, `\work` and `\val` all report;
+  parameter units are optional, and a bare number into one that declares
+  none warns; `\work` writes the call out as its body with values in it.
+  See `simulation.md` -> *Functions*.
 - **Time simulation** keeps ticks, and runs are curves to plot
   (**done 2026-10-06**: `plot … vs t`, see `simulation.md` -> *Time-based
   simulation*). Cut

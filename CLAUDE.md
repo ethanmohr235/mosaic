@@ -38,6 +38,9 @@ what is still to do, lives in the docs; the short map:
   (`?=`), uncertainty (`±`), the materials provider, scenarios, sweeps and
   `fit`. `why` and `\work` explain the garden as it stands from a live solve
   (`core/derivations.py`); nothing about a solve is stored.
+- **Functions:** a function mote (`function`, `parameters`) is called by
+  name from any formula; a call at 0/0 takes a reported limit
+  (`core/functions.py`, `core/limits.py`, `core/function_text.py`); `sinc`.
 - **Knobs:** `--set m.k=value [unit]` on `plot`, `sim`, `fit` and
   `graph --flow` tries a value and writes nothing; `--keep` (key `W`)
   writes it (`core/knobs.py`).
