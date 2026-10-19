@@ -301,6 +301,9 @@ def print_diagnostics(document: "modoc.Document", resolution) -> int:
     for problem in found:
         where = f"line {problem.line}" if problem.line else "note"
         print(f"{where}: {problem.kind}: {problem.message}")
+    # Not counted: a notice is about a value that came out right.
+    for notice in modoc_bind.notices(document, resolution):
+        print(f"line {notice.line}: notice: {notice.message}")
     return len(found)
 
 

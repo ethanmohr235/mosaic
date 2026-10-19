@@ -1,6 +1,7 @@
 # window_launcher.py
 """The pywebview boilerplate the console's window launches with: port
-picking and the WebKit HTTP-cache-clearing workaround. It was shared by
+picking, the WebKit HTTP-cache-clearing workaround and the empty-clipboard
+paste guard. It was shared by
 seven windows once; the console is the only one now (docs/console.md,
 U9), and console/app.py its only caller.
 """
@@ -59,6 +60,35 @@ def clear_http_cache(storage_dir: Path) -> None:
     shutil.rmtree(storage_dir / "cache", ignore_errors=True)
 
 
+PASTE_KEYS = {("v", "ctrl"), ("V", "ctrl+shift"), ("Insert", "shift")}
+
+
+def guard_empty_paste(window) -> None:
+    """Swallow the paste keys while nothing owns the clipboard.
+
+    WebKitGTK 2.54 segfaults the whole process when it pastes from a
+    clipboard with no owner (copied from an app since closed, or never
+    copied to), in any text field, with or without a paste listener. The
+    window sees a key before WebKit does, so it can check first; the
+    context menu's Paste is not a way in, pywebview turns the menu off."""
+    from gi.repository import Gdk, GLib, Gtk
+
+    def on_key(_widget, event) -> bool:
+        mods = event.state & Gtk.accelerator_get_default_mod_mask()
+        combo = "+".join(name for flag, name in ((Gdk.ModifierType.CONTROL_MASK, "ctrl"),
+                                                   (Gdk.ModifierType.SHIFT_MASK, "shift")) if mods & flag)
+        if (Gdk.keyval_name(event.keyval), combo) not in PASTE_KEYS:
+            return False
+        has_targets, targets = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_targets()
+        return not (has_targets and targets)
+
+    def connect() -> bool:
+        window.native.connect("key-press-event", on_key)
+        return False
+
+    GLib.idle_add(connect)
+
+
 def launch_window(
     *,
     name: str,
@@ -87,6 +117,7 @@ def launch_window(
     )
     api._window = window
     window.events.closed += api.shutdown
+    window.events.before_show += lambda: guard_empty_paste(window)
     # http_server=True: serve the frontend over http://127.0.0.1 instead
     # of file://. WebKit disables localStorage for file:// pages (no
     # origin to partition storage by), which every frontend here relies

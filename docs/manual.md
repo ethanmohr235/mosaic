@@ -212,6 +212,7 @@ against it · `a` / `n` add override / new scenario (prefills `set
 | `^f` | Find / replace: `⏎` `⇧⏎` next/prev · `tab` field · `⏎` in replace: one · `^⏎` all · `esc` close |
 | `^z` | Undo typing (the text box's own) |
 | `^v` | In a note: paste a clipboard image as `\image{shot-NNN}` on its own line (one undo step; rename it with `image rename`) |
+| `^e` | In a note: insert `\begin{equation}` … `\end{equation}` with the caret (or the selection) inside |
 | `j` `k`, `g` `G` | Scroll (not typing) |
 
 Read pane: `j` `k` `g` `G` `space` scroll · click a link to select its mote.

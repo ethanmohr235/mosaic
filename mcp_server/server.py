@@ -482,6 +482,10 @@ def resolve_modoc(mote: str, garden: str | None = None) -> dict[str, Any]:
                 dataclasses.asdict(d)
                 for d in modoc_bind_repo.problems(document, resolution)
             ],
+            "notices": [
+                dataclasses.asdict(d)
+                for d in modoc_bind_repo.notices(document, resolution)
+            ],
         }
 
 

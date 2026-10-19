@@ -75,6 +75,9 @@ class ValueResult:
     text: str
     value: object = None
     error: str | None = None
+    # Said about a value that is right but worth knowing how it was found:
+    # `phi: limit r → 0 cm` when a function call took a limit.
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -500,6 +503,19 @@ def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Dia
     return sorted(found, key=lambda d: d.line)
 
 
+def notices(document: modoc.Document, resolution: Resolution) -> list[modoc.Diagnostic]:
+    """What a reader should know about values that resolved fine -- a
+    `\val` whose function call took a limit. Kept apart from problems():
+    a problem stops `submit`, and a limit is a right answer."""
+    found = []
+    for node in modoc.values(document):
+        result = resolution.values.get(modoc.value_key(node))
+        if result is not None and result.note:
+            found.append(modoc.Diagnostic(
+                node.line, "limit", f"\\val{{{node.expression}}}: {result.note}"))
+    return sorted(found, key=lambda d: d.line)
+
+
 # --- references ------------------------------------------------------
 
 def _link(ref: str, motes: list[Mote], relationships: list[Relationship]) -> LinkTarget:
@@ -591,8 +607,10 @@ def _value(
         # fall through to the formula evaluator, which also resolves
         # `role.property` and a name-matched relationship neighbor.
 
+    limits: list = []
+    context = dataclasses.replace(garden.context(mote_id), limit_taken=limits.append)
     try:
-        number = evaluate_expression(node.expression, garden.context(mote_id)).value()
+        number = evaluate_expression(node.expression, context).value()
     except (FormulaError, ZeroDivisionError) as e:
         return ValueResult(f"?{node.expression}", None, str(e))
     # An evaluated expression is in base SI (core/formula.py normalizes
@@ -600,7 +618,8 @@ def _value(
     # and there is nothing to convert from. Significant figures still
     # apply, which is the half of a format an expression can honour.
     return ValueResult(
-        calc.Quantity(number, node.format.unit).text(node.format.figures), number
+        calc.Quantity(number, node.format.unit).text(node.format.figures), number,
+        note="; ".join(f"{limit.function}: limit {limit.approach}" for limit in limits),
     )
 
 

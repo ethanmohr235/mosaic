@@ -161,6 +161,12 @@ date. Anything else goes to the same expression language rules use
     \val{t}                              0 -- a note is at no step
     \val{turbine.work}                   a role's part (see core/roles.py)
 
+A `\val` may call a function mote (`\val{phi(0)}{3}`). When the call
+takes a limit, the value carries a **notice** (`phi: limit r → 0 cm`):
+`modoc_bind.notices()`, `notices` in the rendered payload and in
+`resolve_modoc`, and a `notice:` line from `modoc check`. A notice is
+never a problem, because the value is right, so it never stops `submit`.
+
 A `\val` never has freedoms. It reads the state the garden is in; there
 is no solver behind a note to hand a free variable to -- `core/simulation.py::
 expression_context()` clears them for exactly that reason.
@@ -243,6 +249,24 @@ line stays text, since a value with a unit in it is not a formula.
 
 The figure count applies to the **result**, not to the givens. Padding
 `80 in` to `80.00 in` would claim precision the given never stated.
+
+**A call to a [function mote](simulation.md#functions) is written out.**
+`phi(0)` with values in it is still `phi(0)`, which checks nothing, so an
+equation that calls a function gets a fourth line, between the equation
+and the substituted one: the equation with every call replaced by its
+body (`core/function_text.py`). The arguments go in for the parameters,
+and constants the body reads bare are qualified (`phi.A`):
+
+    reactor.center == phi(0)
+    reactor.center == phi.A * sin(phi.B * (0 cm)) / (0 cm)
+    reactor.center == 5e13 * sin((0.0628 1/cm) * (0 cm)) / (0 cm)
+    reactor.center = 3.14e14            phi: limit r → 0 cm
+
+A bare number passed to a parameter that declares a unit is written with
+it, since that is what it meant. Calls inside a body are written out too.
+When the call **took a limit** (`simulation.md` → *Limits*), the result
+line says so in its note. That note is also printed after the line in the
+`.tex` export, as every step's note is (`converted to ohm` included).
 
 A value several equations determined **together** gets one symbolic line
 per equation and no substituted line -- there is no single expression to

@@ -155,6 +155,8 @@ def render(conn: sqlite3.Connection, note_id: str, source: str, draw=None) -> di
         "anchor": table_repo.describe(index, resolution.anchor_id),
         "blocks": [shape.block(b) for b in document.blocks],
         "problems": [{"line": d.line, "kind": d.kind, "message": d.message} for d in found],
+        "notices": [{"line": d.line, "kind": d.kind, "message": d.message}
+                    for d in modoc_bind.notices(document, resolution)],
         "stats": {
             "words": modoc.word_count(document),
             "links": len(modoc.links(document)),
@@ -286,5 +288,6 @@ class _Shaper:
         result = self.resolution.values.get(modoc.value_key(n))
         return {"type": "value", "expression": n.expression,
                 "text": result.text if result else f"?{n.expression}",
+                "note": result.note if result else "",
                 "error": result.error if result else "unresolved value"}
 

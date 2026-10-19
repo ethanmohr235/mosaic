@@ -47,7 +47,7 @@ _SYMBOLS = {
     "π": r"\ensuremath{\pi}", "ρ": r"\ensuremath{\rho}", "σ": r"\ensuremath{\sigma}",
     "τ": r"\ensuremath{\tau}", "φ": r"\ensuremath{\varphi}", "ω": r"\ensuremath{\omega}",
     "²": r"\ensuremath{^2}", "³": r"\ensuremath{^3}", "⁻": r"\ensuremath{^-}",
-    "¹": r"\ensuremath{^1}",
+    "¹": r"\ensuremath{^1}", "→": r"\ensuremath{\to}",
 }
 _SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
 _SUPERSCRIPT_RUN_RE = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+")
@@ -288,10 +288,11 @@ def _work(b: dict, problems: list[str]) -> str:
 
 def _work_step(step: dict) -> str:
     """A symbolic step the converter could set is maths; the rest (values
-    with units in them) stay the monospace line they were."""
-    if step.get("tex"):
-        return f"${step['tex']}$"
-    return rf"\texttt{{{escape(step['text'])}}}"
+    with units in them) stay the monospace line they were. A step's note
+    (`converted to ohm`, `phi: limit r → 0 cm`) follows it, as it does on
+    screen: it says what was done to the numbers."""
+    line = f"${step['tex']}$" if step.get("tex") else rf"\texttt{{{escape(step['text'])}}}"
+    return line + (rf" \quad\emph{{({escape(step['note'])})}}" if step.get("note") else "")
 
 
 def _section(b: dict, problems: list[str]) -> str:

@@ -35,9 +35,12 @@ function escapeHtml(text) {
  *   onPasteImage(base64, mime) -> text|null   an image on the clipboard: the
  *                       text to put at the caret in its place (null: paste
  *                       nothing). Without it, an image paste does nothing.
+ *   snippets {key: [before, after]}  while typing, ^key puts `before` and
+ *                       `after` round the selection, on lines of their own,
+ *                       and leaves the caret between them.
  */
 export function createEditor({ h, className = "", wrap = true, highlight = () => [], decorate = () => null,
-  gutter = false, onInput = () => {}, onStart = () => {}, onLeave = () => {}, onPasteImage = null }) {
+  gutter = false, onInput = () => {}, onStart = () => {}, onLeave = () => {}, onPasteImage = null, snippets = {} }) {
   const textarea = h("textarea", "c-editor-text");
   textarea.spellcheck = false;
   textarea.setAttribute("autocapitalize", "off");
@@ -258,6 +261,18 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
     insert(from, to, `${lead}${text}${tail}`);
   }
 
+  /* ---- snippets ---- */
+
+  function insertSnippet([before, after]) {
+    const { selectionStart: from, selectionEnd: to, value } = textarea;
+    const lead = from > 0 && value[from - 1] !== "\n" ? "\n" : "";
+    const tail = value[to] === "\n" ? "" : "\n";
+    const caret = from + lead.length + before.length;
+    insert(from, to, `${lead}${before}${value.slice(from, to)}${after}${tail}`);
+    textarea.setSelectionRange(caret, caret + (to - from));
+    revealCaret();
+  }
+
   /* ---- keys (the view hands them over; true = handled) ---- */
 
   function onKey(event) {
@@ -283,6 +298,11 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
     }
     if (event.key === "Tab" && !ctrl && !event.altKey) {
       insert(textarea.selectionStart, textarea.selectionEnd, "  ");
+      return true;
+    }
+    const snippet = ctrl && !event.shiftKey && !event.altKey && snippets[event.key.toLowerCase()];
+    if (snippet) {
+      insertSnippet(snippet);
       return true;
     }
     return false;

@@ -17,7 +17,8 @@
 import { createEditor, modocRanges } from "../editor.js";
 
 const HINTS = [["i ⏎", "edit"], ["j k", "scroll"], ["g G", "top / end"], ["^f", "find"]];
-const EDIT_HINTS = [["esc", "stop editing"], ["^f", "find / replace"], ["^z", "undo typing"], ["^v", "paste a screenshot"]];
+const EDIT_HINTS = [["esc", "stop editing"], ["^f", "find / replace"], ["^z", "undo typing"], ["^v", "paste a screenshot"], ["^e", "equation"]];
+const SNIPPETS = { e: ["\\begin{equation}\n", "\n\\end{equation}"] };
 const AUTOSAVE_MS = 900;
 const CHECK_MS = 400;
 
@@ -193,7 +194,7 @@ function create(ctx) {
     }
     if (!editor) {
       editor = createEditor({ h, className: "editor-note", wrap: true,
-        highlight: (text) => modocRanges(text, st.known), decorate, onInput, onStart, onLeave, onPasteImage });
+        highlight: (text) => modocRanges(text, st.known), decorate, onInput, onStart, onLeave, onPasteImage, snippets: SNIPPETS });
       root.replaceChildren(editor.el);
     }
   }

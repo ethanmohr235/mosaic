@@ -219,8 +219,16 @@ def _call(node: ast.Call) -> str:
         raise _Unsupported()
     render = CALL_TEX.get(node.func.id)
     if render is None:
-        raise _Unsupported()
+        return _function_call(node)
     return render(node)
+
+
+def _function_call(node: ast.Call) -> str:
+    """A call to a function mote (core/functions.py), set as the function
+    it is: `phi(0)` as φ(0), its name read the way a variable's is."""
+    if formula.function_name_problem(node.func.id):
+        raise _Unsupported()
+    return rf"{name_tex(node.func.id)}{_bracket(', '.join(_args(node)))}"
 
 
 def _fn(command: str) -> Callable[[ast.Call], str]:

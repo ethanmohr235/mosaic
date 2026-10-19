@@ -54,11 +54,13 @@ import sqlite3
 from dataclasses import dataclass
 
 from core import derivations as derivations_repo
+from core import function_text
 from core import motes as motes_repo
 from core import simulation
 from core import uncertainty as uncertainty_repo
 from core import units as units_repo
 from core import worksheet as worksheet_repo
+from core.provenance import LIMIT_READ
 from core.units import UnitError
 
 SOURCE_KEY = "source"
@@ -70,8 +72,11 @@ MEASURED = "measured"
 FITTED = "fitted"  # written by `fit … --apply` (core/fit.py)
 SOURCES = (ASSUMED, EXTERNAL, MEASURED, FITTED)
 
-# The three lines of shown work.
+# The lines of shown work. EXPANDED appears only when the equation calls
+# a function mote: the equation with each call written out as its body
+# (core/function_text.py), which is what the values are then written into.
 SYMBOLIC = "symbolic"
+EXPANDED = "expanded"
 SUBSTITUTED = "substituted"
 RESULT = "result"
 
@@ -561,18 +566,31 @@ def _steps(
     steps = [Step(SYMBOLIC, equation) for equation in equations]
     note = None
     if len(equations) == 1:
+        expanded = function_text.expand(equations[0], properties)
+        if expanded:
+            steps.append(Step(EXPANDED, expanded))
         substituted, note = _substitute(
-            equations[0], explanation, properties, names, shown
+            expanded or equations[0], explanation, properties, names, shown
         )
-        if substituted:
+        if substituted and substituted != expanded:
             steps.append(Step(SUBSTITUTED, substituted, note or ""))
     else:
         note = (
             f"solved together with {len(equations)} equations, so there is no "
             f"one expression to substitute into"
         )
-    steps.append(Step(RESULT, shown.text(figures)))
+    steps.append(Step(RESULT, shown.text(figures), _limits_taken(explanation, names)))
     return tuple(steps), note
+
+
+def _limits_taken(explanation, names: dict[str, str]) -> str:
+    """`phi: limit r → 0 cm`, for each function call the solve answered
+    with a limit (core/limits.py) -- said on the result, because that is
+    the number the limit is."""
+    return "; ".join(
+        f"{names.get(read.mote_id, read.mote_id[:8])}: limit {read.key}"
+        for read in explanation.inputs if read.kind == LIMIT_READ
+    )
 
 
 def _substitute(
@@ -628,6 +646,8 @@ def _reads(explanation, properties: dict[str, dict], names: dict[str, str]) -> d
     reason this cannot just print what the record holds."""
     reads: dict[str, Quantity] = {}
     for read in explanation.inputs:
+        if read.kind == LIMIT_READ:
+            continue  # an answer, not a value to write into the line
         declared = quantity(properties.get(read.mote_id, {}), read.key)
         value = _from_base(read.value, declared.unit) if declared.unit \
             else Quantity(read.value, None)

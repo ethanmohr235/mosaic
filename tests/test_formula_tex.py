@@ -45,9 +45,14 @@ def test_a_bare_expression():
     assert to_tex("a / b") == r"\frac{a}{b}"
 
 
-@pytest.mark.parametrize("bad", ["a ===", "import os", "f(x) == 1", "a == 'text'", "0 <= x <= 1"])
+@pytest.mark.parametrize("bad", ["a ===", "import os", "a == 'text'", "0 <= x <= 1"])
 def test_what_cannot_be_drawn_is_none(bad):
     assert to_tex(bad) is None
+
+
+def test_a_function_mote_call_is_set_as_a_function():
+    assert to_tex("y == phi(0)") == r"y = \phi\left(0\right)"
+    assert to_tex("y == flux(r, 2)") == r"y = \mathit{flux}\left(r, 2\right)"
 
 
 def test_every_whitelisted_call_has_a_rendering():
