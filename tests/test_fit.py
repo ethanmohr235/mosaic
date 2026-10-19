@@ -163,3 +163,10 @@ def test_apply_refuses_a_fit_with_no_values(conn, divider):
     result = fit.FitResult(line=fit.parse_text(LINE), message="too few points")
     with pytest.raises(CommandError, match="too few points"):
         fit.apply(conn, result)
+
+
+def test_completion_offers_refs_after_vs(conn):
+    """`fit m.y vs ` completes to model values -- once broken by a rename
+    in core/plotcmd.py that only the console's completion reached."""
+    create_mote(conn, {"name": "m", "x": 1, "y": 2})
+    assert any(c.value == "m.x" for c in fit.choices(conn, "m.y vs "))

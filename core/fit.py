@@ -454,7 +454,7 @@ def apply(conn: sqlite3.Connection, result: FitResult) -> tuple[str, undo.Comman
 def choices(conn: sqlite3.Connection, rest: str) -> list:
     """Refs where a model value goes, keys after --data, import names
     after --from, flags after a `-`."""
-    from core.plotcmd import Choice, _refs
+    from core.plotcmd import Choice, refs
     words = rest.split()
     partial = "" if not rest or rest[-1].isspace() else words[-1]
     done = words if not partial else words[:-1]
@@ -471,4 +471,4 @@ def choices(conn: sqlite3.Connection, rest: str) -> list:
         return [Choice(k) for k in keys]
     if len(done) == 1:
         return [Choice(VS)]
-    return _refs(conn)
+    return refs(conn)
