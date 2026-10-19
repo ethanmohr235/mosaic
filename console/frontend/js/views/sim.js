@@ -335,6 +335,7 @@ function create(ctx) {
     if (p.error) parts.push(`failed @${p.failedAt}: ${p.error}`);
     if (p.vsError) parts.push(`${p.vs}: ${p.vsError}`);
     if (knobSummary(p)) parts.push(knobSummary(p));
+    parts.push("preview — solve writes");
     return { summary: parts.join(" · "), level: p.error || p.vsError ? "fault" : breaks || pinned ? "warn" : "ok" };
   }
 

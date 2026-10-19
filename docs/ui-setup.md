@@ -196,7 +196,10 @@ the garden N ticks in memory (default 50; a tick is one re-solve, which
 is what `prev()` and `tick` read) and shows one row per value: its
 state, its value at the playhead, Δ/tick, a bar for where that value
 sits in its range over the run, and with `--vs` the other run's value
-and the difference. Nothing is written.
+and the difference. Nothing is written, and the header says so
+(`preview — solve writes`): `solve` is what writes values onto motes.
+A document needs neither, since it reads a live solve
+(`docs/modoc.md` -> *A note reads the garden as a solve leaves it*).
 
 | State | Means |
 |---|---|

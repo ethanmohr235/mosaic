@@ -270,3 +270,11 @@ def test_field_of_reads_back_every_column_key(conn, garden):
         assert table_repo.field_of(table_repo.column_key(column.field)) == column.field
     with pytest.raises(ValueError):
         table_repo.field_of("nonsense")
+
+
+def test_a_freedom_cell_nothing_wrote_says_unsolved(conn):
+    create_mote(conn, {"name": "a", "freedoms": "flux", "flux": ""})
+    create_mote(conn, {"name": "b", "freedoms": "flux", "flux": 2.0})
+    the_query = q.Query(columns=(q.Field(q.PROPERTY, "flux"),))
+    rows = {r["name"]: r["cells"][0] for r in table(conn, the_query)["rows"]}
+    assert rows["a"]["unsolved"] and not rows["b"]["unsolved"]

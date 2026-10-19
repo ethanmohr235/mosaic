@@ -837,6 +837,19 @@ What the build decided within the settled plan above.
   run is always solved from tick 0, and a failing tick ends it as a failed
   span. `fit` and `--data` over time are not done.
 
+### Settled for live documents (2026-10-19)
+
+- **Documents read a live solve** (`core/simulation.py::live_garden`;
+  `docs/modoc.md`), so a note's values are never older than the last
+  edit and need no `solve`. `sim` and `plot` still write nothing, and
+  `solve` stays the one write.
+- **A freedom that holds no number reads `not solved`** (`--warn`) in the
+  props pane and in a find table's cell, instead of a blank or a missing
+  row (`core/inspect.py::unsolved_keys`; a cell's `unsolved`). The props
+  pane lists such a freedom even when no property holds it.
+- **The sim header ends `preview — solve writes`.** There is no key that
+  writes a tick.
+
 ### Visual system
 
 - The tokens, type scale, spacing, 0px radius, inverted selection, and

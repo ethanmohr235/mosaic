@@ -12,6 +12,7 @@ import re
 import sqlite3
 
 from core import motes as motes_repo
+from core import simulation
 from core import relationships as rel_repo
 from core import species as species_repo
 from core import units as units_repo
@@ -55,11 +56,13 @@ def inspect(conn: sqlite3.Connection, mote_id: str) -> dict | None:
     species_id = species[0].id if species else None
     template = species_repo.template_for(conn, species_id) if species_id else None
 
+    unsolved = unsolved_keys(mote.properties, simulation.garden_freedoms(conn).get(mote_id, set()))
     return {
         "id": mote.id,
         "label": label(mote),
         "properties": dict(mote.properties),
-        "keys": visible_keys(mote.properties),
+        "keys": visible_keys(mote.properties) + [k for k in unsolved if k not in mote.properties],
+        "unsolved": unsolved,
         "reserved": sorted(k for k in mote.properties if k in RESERVED_PROPERTIES),
         "kinds": kinds_of(conn, mote, species_id),
         "hints": template_hints(template, mote.properties),
@@ -190,6 +193,19 @@ def visible_keys(properties: dict) -> list[str]:
                       if k != "name" and k not in RESERVED_PROPERTIES)
     reserved = sorted(k for k in properties if k in RESERVED_PROPERTIES)
     return ordinary + reserved
+
+
+def unsolved_keys(properties: dict, freedoms: set[str]) -> list[str]:
+    """The freedoms that hold no number: values the solver may determine
+    that nothing has written yet. Shown as *not solved* rather than left
+    out or blank -- `sim` and `plot` write nothing, so a blank here reads
+    as a missing value when the answer is "run solve". Only `solve` (or
+    `solve --live on`) writes them; a document reads them live anyway."""
+    return sorted(
+        key for key in freedoms
+        if isinstance(properties.get(key), bool)
+        or not isinstance(properties.get(key), (int, float))
+    )
 
 
 def template_hints(template, properties: dict) -> list[dict]:

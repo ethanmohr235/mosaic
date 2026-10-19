@@ -74,6 +74,8 @@ function create(ctx) {
   function renderCell(row, column) {
     const cell = row.cells[column.index];
     if (column.key === NAME) return [components.swatch(st.palette.colorOf(row)), " ", cell.text || ""];
+    // A freedom nothing has written: `sim` and `plot` preview, `solve` writes.
+    if (cell.unsolved) return h("span", "lvl-warn", "not solved");
     return cell.empty ? "" : cell.text;
   }
 

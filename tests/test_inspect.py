@@ -36,3 +36,17 @@ def test_the_payload_types_each_value_and_lists_both_directions(conn):
     assert payload["species"]["label"] == "task"
     directions = {(r["type"], r["direction"], r["otherLabel"]) for r in payload["relationships"]}
     assert ("instance_of", "out", "task") in directions and ("supports", "in", "wall") in directions
+
+
+def test_a_freedom_nothing_wrote_is_listed_as_not_solved(conn):
+    """`sim` and `plot` write nothing, so an inspector has to say a
+    freedom is waiting on `solve` rather than show a blank or leave it out."""
+    m = create_mote(conn, {"name": "reactor", "freedoms": ["flux", "center"], "flux": ""})
+    shown = inspect.inspect(conn, m)
+    assert shown["unsolved"] == ["center", "flux"]
+    assert "center" in shown["keys"]   # a row even though no property holds it
+
+
+def test_a_written_freedom_is_not_marked(conn):
+    m = create_mote(conn, {"name": "reactor", "freedoms": ["flux"], "flux": 3.1})
+    assert inspect.inspect(conn, m)["unsolved"] == []

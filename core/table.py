@@ -36,8 +36,10 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 
 from core import graph as graph_repo
+from core import inspect as inspect_repo
 from core import query
 from core import reserved
+from core import simulation
 from core import species as species_repo
 from core.entities import Mote, Relationship
 from core.query import Condition, Field, Index, Query
@@ -479,8 +481,9 @@ def table(
         # a palette claimed from a subgraph would give one species two
         # colours in two surfaces (docs/architecture.md, *Species colour*).
         "speciesIds": sorted(m.id for m in species_repo.list_species(conn)),
-        **answer(index, schema, asked, motes, today),
+        **answer(index, schema, asked, motes, today, simulation.garden_freedoms(conn)),
     }
+
 
 
 def answer(
@@ -489,8 +492,11 @@ def answer(
     the_query: Query,
     motes: list[Mote],
     today: str | None = None,
+    freedoms: dict[str, set[str]] | None = None,
 ) -> dict:
     """The rows half of `table()`, off a read a caller already holds.
+    `freedoms` (each mote's) marks a freedom holding no number as *not
+    solved* rather than as an empty cell.
 
     Separate from `table()` because two callers need exactly this and
     nothing else around it: `table()` itself, and a surface adding its own
@@ -505,7 +511,7 @@ def answer(
     # plain table; `groups` is the same rows cut into headers. Building the
     # second from the first rather than beside it is what keeps them from
     # ever disagreeing about a cell.
-    drawn = {mote.id: _row(index, mote, columns) for mote in matched}
+    drawn = {mote.id: _row(index, mote, columns, freedoms or {}) for mote in matched}
     return {
         "columns": [c.to_json() for c in columns],
         "groups": [_group(g, drawn, labelled) for g in groups],
@@ -526,11 +532,13 @@ def _group(group: query.Group, drawn: dict[str, dict], labelled: bool) -> dict:
     }
 
 
-def _row(index: Index, mote: Mote, columns: list[Column]) -> dict:
-    return {**describe(index, mote.id), "cells": [_cell(index, mote, c) for c in columns]}
+def _row(index: Index, mote: Mote, columns: list[Column], freedoms: dict[str, set[str]]) -> dict:
+    unsolved = set(inspect_repo.unsolved_keys(mote.properties, freedoms.get(mote.id, set())))
+    return {**describe(index, mote.id),
+            "cells": [_cell(index, mote, c, unsolved) for c in columns]}
 
 
-def _cell(index: Index, mote: Mote, column: Column) -> dict:
+def _cell(index: Index, mote: Mote, column: Column, unsolved: set[str] = frozenset()) -> dict:
     """A cell carries the text it draws *and* the raw value behind it, so
     the editor opens on what is stored rather than on what was rendered --
     a date cell reading "Aug 25" still edits 2026-08-25."""
@@ -549,6 +557,7 @@ def _cell(index: Index, mote: Mote, column: Column) -> dict:
         "editable": column.editable,
         "empty": empty,
         "ids": list(value) if isinstance(value, list) else [],
+        "unsolved": column.field.source == query.PROPERTY and column.field.key in unsolved,
     }
 
 

@@ -64,7 +64,8 @@ function create(ctx) {
     const rows = [];
     for (const key of p.keys) {
       const meta = p.kinds[key] || { kind: "text" };
-      rows.push({ type: "prop", key, meta, value: p.properties[key], reserved: p.reserved.includes(key) });
+      rows.push({ type: "prop", key, meta, value: p.properties[key], reserved: p.reserved.includes(key),
+        unsolved: (p.unsolved || []).includes(key) });
     }
     rows.push({ type: "add" });
     for (const hint of p.hints || []) rows.push({ type: "hint", key: hint.key, value: hint.value });
@@ -84,6 +85,8 @@ function create(ctx) {
 
   function valueNode(row) {
     const { meta, value } = row;
+    // A freedom nothing has written: `sim` and `plot` preview, `solve` writes.
+    if (row.unsolved) return h("span", "lvl-warn", "not solved");
     if (value === "" || value === null || value === undefined) return h("span", "dim", "—");
     if (meta.kind === "ref") {
       return h("span", "props-link", [components.swatch(st.palette(meta.refSpeciesId)), " ", meta.refLabel]);

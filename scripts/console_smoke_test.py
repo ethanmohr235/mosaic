@@ -1184,6 +1184,22 @@ def knob_checks(window):
 
     check("knobs: `sim --set` tries a value, W keeps it as one undo step", a_sim_knob_tries_a_value_then_w_keeps_it)
 
+    def an_unwritten_freedom_reads_not_solved_and_sim_says_preview():
+        type_command(window, "Q1")
+        type_command(window, "set Q1 freedoms x")
+        type_command(window, "open Q1", new_pane="right")
+        assert wait_until(lambda: props_title(window) == "Q1"), props_title(window)
+        assert wait_until(lambda: "not solved" in texts(window, f"{PROPS} .props-value")), \
+            texts(window, f"{PROPS} .props-value")
+        type_command(window, "sim", new_pane="right")
+        assert wait_until(lambda: "preview — solve writes" in js(
+            window, "document.querySelector('.pane.focused .c-head-summary').textContent")), \
+            "the sim header should say it writes nothing"
+        no_errors(window)
+
+    check("live: a freedom nothing wrote reads `not solved`; sim says it is a preview",
+          an_unwritten_freedom_reads_not_solved_and_sim_says_preview)
+
     def a_run_over_time_is_a_plot():
         type_command(window, "plot C1.current vs t 0:5", new_pane="right")
         assert wait_until(lambda: head_with("plot", "vs t 0:5")), headers(window)
