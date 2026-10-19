@@ -41,6 +41,7 @@ from core.formula import (
 )
 from core.dimensions import DimensionContext, check_equation, infer_unit
 from core.entities import Relationship
+from core.limits import Limit
 from core.motes import list_motes, update_mote
 from core.providers import PropertyProvider
 from core.provenance import (
@@ -98,6 +99,9 @@ class SimulationResult:
     # *answer*, a dimensional mismatch one about the *model*, and folding
     # them together would make neither readable.
     constraint_violations: list[str] = field(default_factory=list)
+    # Function calls answered with a limit rather than evaluated: the
+    # answer is right, and how it was reached is worth saying.
+    limits: list[Limit] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -115,6 +119,7 @@ class SimulationResult:
         if self.constraint_violations:
             count = len(self.constraint_violations)
             text += f" {count} constraint problem{'' if count == 1 else 's'}."
+        text += _limit_summary(self.limits)
         if self.scenario_id is not None:
             text += " Nothing was written -- a scenario run is always hypothetical."
         return text
@@ -131,6 +136,7 @@ class StepResult:
     equation_count: int
     unsolved: list[Unknown] = field(default_factory=list)
     constraint_violations: list[str] = field(default_factory=list)
+    limits: list[Limit] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -143,7 +149,7 @@ class StepResult:
         )
         if self.unsolved:
             text += f" {len(self.unsolved)} declared freedom(s) had no equation."
-        return text
+        return text + _limit_summary(self.limits)
 
 
 @dataclass(frozen=True)
@@ -170,6 +176,15 @@ class TimeSeriesResult:
             for step in self.steps
             for problem in step.constraint_violations
         ]
+
+    @property
+    def limits(self) -> list[Limit]:
+        """Every limit any step took, once each."""
+        found: dict[tuple, Limit] = {}
+        for step in self.steps:
+            for limit in step.limits:
+                found.setdefault(limit.key, limit)
+        return list(found.values())
 
 
 # How a constraint came out. `NOT_CHECKED` is deliberately not a third
@@ -226,6 +241,19 @@ class _GardenView:
     # dict the run reads, so an override mote -- whose properties are
     # stripped above -- contributes no name to resolve against.
     by_name: dict[str, list[str]] = field(default_factory=dict)
+    # Every limit a function call took while this view was solved
+    # (core/limits.py), once per (function, parameter, point). Mutable
+    # on purpose: it is the one thing evaluation writes back to the run.
+    limits: dict[tuple, Limit] = field(default_factory=dict)
+
+
+def _limit_summary(limits: list[Limit]) -> str:
+    """` 1 value came from a limit (phi: r → 0 cm).`, for a summary."""
+    if not limits:
+        return ""
+    count = len(limits)
+    listed = "; ".join(f"{limit.function}: {limit.approach}" for limit in limits)
+    return f" {count} value{'' if count == 1 else 's'} came from a limit ({listed})."
 
 
 def step_payloads(steps: list[StepResult]) -> list[dict]:
@@ -607,6 +635,7 @@ def run_simulation(
         dimension_warnings=warnings,
         scenario_id=scenario,
         constraint_violations=violations,
+        limits=list(view.limits.values()),
     )
 
 
@@ -683,6 +712,7 @@ def run_time_series(
             StepResult(
                 tick.step, result.values, _changes_for(tick.view.properties, result.values),
                 result.equation_count, result.unsolved, result.constraint_violations,
+                list(tick.view.limits.values()),
             )
         )
 
@@ -1239,6 +1269,11 @@ def _context(
             reads.model(mid, operation, value)
         return value
 
+    def limit_taken(limit: Limit) -> None:
+        view.limits.setdefault(limit.key, limit)
+        if reads is not None:
+            reads.limit(limit.function_id, limit.approach, limit.value)
+
     return Context(
         mote_id=mote_id,
         properties=properties,
@@ -1256,6 +1291,7 @@ def _context(
         evaluate_model=evaluate_model,
         units=lambda mid: view.units.get(mid, {}),
         roles=lambda mid: view.roles.get(mid, {}),
+        limit_taken=limit_taken,
     )
 
 

@@ -546,6 +546,39 @@ reactor.flux_center = phi(0)
 - A function mote is **never solved**. It has no freedoms and no rule
   applies to it; it is read from, like a property model.
 
+### Limits
+
+`sin(B r)/r` is 0/0 at r = 0, and the number anyone means there is the
+limit, B. **At a function call, and only there**, a body that lands
+exactly on 0/0 is answered with its two-sided limit (`core/limits.py`),
+and the solve says so:
+
+```text
+Solved 1 value across 1 mote from 1 equation. 1 value came from a limit (phi: r → 0 cm).
+```
+
+- **Only at a call**, because there the parameter is the variable to
+  approach along. A plain rule that hits 0/0 (`reactor.r = 0`, `flux =
+  sin(B * reactor.r) / reactor.r`) has no such variable, since any of its
+  givens could be the one meant, so it stays an error. The error says to
+  write the expression as a function or use `sinc`.
+- **0/0 only.** A nonzero number over zero is a pole and stays a division
+  by zero. Two sides that settle on different values are a jump, and a
+  side that never settles has no finite limit. Each of these fails with
+  its own message rather than averaging into a number.
+- **How:** from each side, in steps that halve from a starting step,
+  Richardson-extrapolated to a zero step. The starting step is a
+  thousandth of the parameter's declared unit (a thousandth of a cm for
+  `r [cm]`), or else a thousandth of the point's size, or of 1. It is
+  retried a thousand and a million times finer before giving up. With
+  several parameters, the limit is approached along each in turn, and the
+  first that settles is used.
+- **Reported everywhere the answer is:** `SimulationResult.limits`,
+  `TimeSeriesResult.limits` and each step's summary. It is also a
+  `limit` read in provenance (the function mote, and `r → 0 cm` in the
+  key's place), which is how `why` and `\work` say it.
+- `sinc(x)` gives the same number with no limit: `A * B * sinc(B * r)`.
+
 ## Roles
 
 A rule can always reach other motes by navigating relationships

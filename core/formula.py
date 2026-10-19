@@ -26,8 +26,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from core import functions as functions_repo
+from core import limits as limits_repo
 from core import roles as roles_repo
-from core.units import UnitError, to_base
+from core.units import UnitError, from_base, to_base
 
 # An unknown the solver may determine: which mote, which property key.
 Unknown = tuple[str, str]
@@ -583,6 +584,9 @@ class Context:
     # recursion). Empty everywhere else.
     bindings: dict[str, "Ratio"] = field(default_factory=dict)
     calls: tuple[str, ...] = ()
+    # Told of every limit a function call takes (core/limits.py), so a
+    # solve can say its answer came from one. Ignored by default.
+    limit_taken: Callable[[limits_repo.Limit], None] = lambda limit: None
 
 
 def relation_operator(text: str) -> str:
@@ -955,7 +959,13 @@ def _function_call(name: str, node: ast.Call, ctx: Context) -> Ratio:
         parameter: _argument(ctx, function_id, parameter, arg)
         for parameter, arg in zip(parameters, node.args)
     }
-    return _call_body(name, function_id, functions_repo.body_of(properties), arguments, ctx)
+    body = functions_repo.body_of(properties)
+    try:
+        return _call_body(name, function_id, body, arguments, ctx)
+    except IndeterminateError:
+        if not all(a.is_constant for a in arguments.values()):
+            raise
+        return _limit_call(name, function_id, body, arguments, ctx)
 
 
 def _argument(ctx: Context, function_id: str, parameter: str, node: ast.AST) -> Ratio:
@@ -966,6 +976,50 @@ def _argument(ctx: Context, function_id: str, parameter: str, node: ast.AST) -> 
     if not is_bare_number(node):
         return value
     return Ratio.number(_normalize(ctx, function_id, parameter, value.constant))
+
+
+def _limit_call(
+    name: str, function_id: str, body: str, arguments: dict[str, Ratio], ctx: Context
+) -> Ratio:
+    """The call's value as a limit, approached along one parameter at a
+    time, in order -- the first that settles is the answer, and the
+    context is told. Only at a call: there the parameter is the variable
+    to approach along, which a bare rule does not have."""
+    first_failure = None
+    for parameter in arguments:
+        try:
+            limit = _limit_along(name, function_id, body, arguments, parameter, ctx)
+        except limits_repo.LimitError as e:
+            first_failure = first_failure or e
+            continue
+        ctx.limit_taken(limit)
+        return Ratio.number(limit.value)
+    shown = ", ".join(f"{p} = {a.constant:g}" for p, a in arguments.items())
+    raise FormulaError(f"in {name}(): 0/0 at {shown}, and {first_failure}")
+
+
+def _limit_along(
+    name: str, function_id: str, body: str, arguments: dict[str, Ratio],
+    parameter: str, ctx: Context,
+) -> limits_repo.Limit:
+    def at(x: float) -> float:
+        try:
+            moved = {**arguments, parameter: Ratio.number(x)}
+            return _call_body(name, function_id, body, moved, ctx).constant
+        except NonlinearError:
+            raise
+        except FormulaError as e:
+            raise limits_repo.LimitError(f"it is not defined beside the point: {e}") from e
+
+    point = arguments[parameter].constant
+    unit_name = ctx.units(function_id).get(parameter)
+    try:
+        scale = (to_base(1.0, unit_name) - to_base(0.0, unit_name)) if unit_name else None
+    except UnitError:
+        unit_name = scale = None  # reported by the unit check, not here
+    value = limits_repo.two_sided(at, point, limits_repo.first_step(point, scale))
+    shown = f"{from_base(point, unit_name):g} {unit_name}" if unit_name else f"{point:g}"
+    return limits_repo.Limit(function_id, name, parameter, point, shown, value)
 
 
 def _call_body(

@@ -46,6 +46,9 @@ MODEL_READ = "model"
 # by a permissive Reads (see below) -- during a real solve this is an
 # error, not an observation.
 MISSING_READ = "missing"
+# A function call answered with a limit (core/limits.py): the function
+# mote, the approach (`r → 0 cm`) in the key's place, and the limit.
+LIMIT_READ = "limit"
 
 # Reads whose value comes out of a mote's stored properties, and so
 # arrives in whatever unit that mote declares.
@@ -159,6 +162,12 @@ class Reads:
         the property key's place: `enthalpy_pt` is what was asked for, and
         there is no property on any mote that holds the answer."""
         self.note(MODEL_READ, mote_id, operation, value)
+
+    def limit(self, mote_id: str, approach: str, value: float) -> None:
+        """Record one limit a function call took. Like a model read, the
+        key's place holds what was asked -- the approach, `r → 0 cm` --
+        since no property holds the answer."""
+        self.note(LIMIT_READ, mote_id, approach, value)
 
     def collected(self) -> tuple[InputRead, ...]:
         return tuple(
