@@ -1003,6 +1003,7 @@ a mote and a rule per line. Eight lines say the same thing.
 | `bd.sigma <= 250` | a **check**: evaluated, never solved |
 | `b.R1 + b.R2 ?= b.W` | an **equality check**: stored as `==` with `check: true` |
 | `bd.x = 80 ± 0.5 in` | a given with a ±, in its `uncertainty` entry (`± 2%` is relative) |
+| `phi(r [cm]) = A * sin(B * r) / r` | a **function**: the mote `phi` with that `function` body, `parameters: [r]`, and `cm` for `r` in its `units` (see [Functions](#functions)) |
 | `... ! ΣFx` | names the rule that line makes |
 | (blank) | ignored |
 
@@ -1061,6 +1062,15 @@ under the lines that are fine.
 once per instance — a reusable model, which species and templates are still
 for — and is not a line. `Applied.untouched` counts them, so a surface can
 say so rather than implying a worksheet is the whole garden.
+
+**A function line** is a call on the left of a single `=`, which no other
+line can be, since an assignment's left side is always `mote.key`. Each
+parameter may carry a unit in brackets. Its constants are ordinary given
+lines (`phi.A = 5e13`). `read()` puts every function, with its
+constants, in a leading block of definitions. Applying replaces here too:
+a function whose line is gone loses its body and parameters, and the mote
+itself is deleted when nothing else is left on it (`Applied.deleted` says
+`phi()`).
 
 One asymmetry worth knowing: applying **adds** freedoms and never removes
 one. A freedom may have been declared in another surface about a mote the

@@ -424,3 +424,88 @@ def test_a_spread_round_trips_and_a_removed_one_is_cleared(conn):
 
     worksheet.apply(conn, read.replace(" ± 0.5", "").replace(" ± 2%", ""))
     assert "uncertainty" not in named(conn, "bd").properties
+
+
+# ---- functions ----
+
+FLUX_SHEET = """phi(r [cm]) = A * sin(B * r) / r
+phi.A = 5e13
+phi.B = 0.0628 1/cm
+reactor.r = 10 cm
+reactor.flux = phi(reactor.r)
+reactor.center = phi(0)"""
+
+
+def test_a_call_on_the_left_is_a_function_line():
+    line = worksheet.parse("phi(r [cm], z) = A * sin(B * r) / r").lines[0]
+    assert (line.kind, line.mote, line.relation) == ("function", "phi", "A * sin(B * r) / r")
+    assert line.parameters == (("r", "cm"), ("z", None))
+
+
+def test_a_call_compared_with_double_equals_is_still_a_relation():
+    line = worksheet.parse("sq(s.x) == 9").lines[0]
+    assert line.kind == "equation" and not line.free
+
+
+@pytest.mark.parametrize("text, problem", [
+    ("sin(x) = x", "builtin"),
+    ("f(x, x) = x", "repeats"),
+    ("f(s.x) = 1", "not a parameter"),
+    ("f(x [furlongs]) = x", "not a unit"),
+    ("f(x) = 2 *", "parse"),
+])
+def test_a_function_line_that_could_never_be_called_says_so(text, problem):
+    assert problem in worksheet.parse(text).lines[0].problem
+
+
+def test_applying_a_function_line_writes_the_function_mote(conn):
+    applied = worksheet.apply(conn, FLUX_SHEET)
+    assert not applied.problems
+    phi = named(conn, "phi").properties
+    assert phi["function"] == "A * sin(B * r) / r"
+    assert phi["parameters"] == ["r"]
+    assert phi[UNITS_KEY] == {"r": "cm", "B": "1/cm"}
+    run_simulation(conn)
+    assert named(conn, "reactor").properties["center"] == pytest.approx(5e13 * 6.28)
+
+
+def test_editing_a_function_line_replaces_its_parameter_units(conn):
+    worksheet.apply(conn, FLUX_SHEET)
+    worksheet.apply(conn, FLUX_SHEET.replace("phi(r [cm])", "phi(r)"))
+    assert named(conn, "phi").properties[UNITS_KEY] == {"B": "1/cm"}
+
+
+def test_read_puts_functions_and_their_constants_first(conn):
+    worksheet.apply(conn, FLUX_SHEET)
+    text = worksheet.read(conn)
+    first_block = text.split("\n\n")[0].splitlines()
+    assert first_block == [
+        "phi(r [cm]) = A * sin(B * r) / r",
+        "phi.A = 50000000000000.0",
+        "phi.B = 0.0628 1/cm",
+    ]
+    assert "reactor.center = phi(0)" in text
+
+
+def test_reading_and_reapplying_functions_is_a_no_op(conn):
+    worksheet.apply(conn, FLUX_SHEET)
+    before = sorted((m.id, sorted(m.properties)) for m in list_motes(conn))
+    applied = worksheet.apply(conn, worksheet.read(conn))
+    assert applied.deleted == () and not applied.problems
+    assert sorted((m.id, sorted(m.properties)) for m in list_motes(conn)) == before
+
+
+def test_a_function_whose_line_is_gone_stops_being_one(conn):
+    worksheet.apply(conn, "f(x) = 2 * x\nm.y = 3")
+    applied = worksheet.apply(conn, "m.y = 3")
+    assert applied.deleted == ("f()",)
+    assert not any(m.properties.get("name") == "f" for m in list_motes(conn))
+
+
+def test_a_gone_function_keeps_its_mote_while_it_holds_constants(conn):
+    worksheet.apply(conn, FLUX_SHEET)
+    applied = worksheet.apply(conn, "phi.A = 5e13\nphi.B = 0.0628 1/cm")
+    assert "phi()" in applied.deleted
+    phi = named(conn, "phi").properties
+    assert "function" not in phi and "parameters" not in phi
+    assert phi[UNITS_KEY] == {"B": "1/cm"}

@@ -48,6 +48,7 @@ surface can say so rather than implying a worksheet is the whole garden.
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
 | `bd.sigma <= 250` | a **check**: evaluated, never solved (`core/formula.py`) |
 | `bd.R1 + bd.R2 ?= bd.W` | an **equality check**: stored as `==` with `check: true` |
+| `phi(r [cm]) = A * sin(B * r) / r` | a **function**: the mote `phi` with that `function` body, `parameters: [r]` and `cm` for `r` in its `units` |
 | `... ! ΣFx` | names the rule that line makes |
 | (blank) | ignored |
 
@@ -86,6 +87,7 @@ import sqlite3
 from dataclasses import dataclass, field, replace
 
 from core import command_bar
+from core import functions as functions_repo
 from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import rules as rules_repo
@@ -95,12 +97,16 @@ from core import undo
 from core import species as species_repo
 from core import units as units_repo
 from core.entities import Mote
-from core.formula import MATH_CONSTANTS, TICK_NAME, FormulaError, parse_equation
+from core.formula import (
+    MATH_CONSTANTS, TICK_NAME, FormulaError, function_name_problem, parse_equation,
+    parse_expression,
+)
 
 # What a line turned out to be.
 GIVEN = "given"
 UNKNOWN = "unknown"
 EQUATION = "equation"
+FUNCTION = "function"
 BLANK = "blank"
 
 COMMENT_MARKER = "!"
@@ -122,6 +128,11 @@ UNKNOWN_MARKER = "?"
 _RELATION_RE = re.compile(r"^(?P<lhs>.+?)\s*(?P<op>\?=|==|<=|>=|<|>)\s*(?P<rhs>.+)$")
 _ASSIGN_RE = re.compile(r"^(?P<lhs>[^=<>]+?)\s*=\s*(?P<rhs>.+)$")
 _TARGET_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*$")
+# `phi(r [cm], z) = body`: a call on the left of a single `=`. Unambiguous,
+# since an assignment's left side is otherwise always `mote.key`.
+_FUNCTION_RE = re.compile(
+    r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<parameters>[^()]*)\)\s*=(?!=)\s*(?P<body>.+)$")
+_PARAMETER_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*(?:\[\s*(?P<unit>[^\]]+?)\s*\])?$")
 
 
 @dataclass(frozen=True)
@@ -141,6 +152,7 @@ class Line:
     free: bool = False      # whether this line makes `key` a freedom of `mote`
     spread: object = None   # a given's ±: a number in `unit`, or "2%"
     check: bool = False     # written `?=`: an equality checked, never solved
+    parameters: tuple[tuple[str, str | None], ...] = ()  # a function's, with units
     problem: str = ""
 
     @property
@@ -167,6 +179,10 @@ class Worksheet:
     @property
     def equations(self) -> tuple[Line, ...]:
         return self._of(EQUATION)
+
+    @property
+    def functions(self) -> tuple[Line, ...]:
+        return self._of(FUNCTION)
 
     def _of(self, kind: str) -> tuple[Line, ...]:
         return tuple(line for line in self.lines if line.kind == kind and line.ok)
@@ -214,6 +230,9 @@ def _split_comment(raw: str) -> tuple[str, str]:
 
 
 def _read(number: int, text: str, body: str, name: str) -> Line:
+    function = _FUNCTION_RE.match(body)
+    if function:
+        return _function(number, text, function)
     relation = _RELATION_RE.match(body)
     if relation and relation.group("op") == CHECK_MARKER:
         lhs, rhs = relation.group("lhs"), relation.group("rhs")
@@ -248,6 +267,33 @@ def _read(number: int, text: str, body: str, name: str) -> Line:
     mote, key = _target(lhs)
     return Line(number, text, GIVEN, mote=mote, key=key, value=value, unit=unit, name=name,
                 spread=spread)
+
+
+def _function(number: int, text: str, match: re.Match) -> Line:
+    """`phi(r [cm]) = body`. The name and every parameter are checked here,
+    and the body parsed, so a line that could never be called says so as it
+    is typed rather than when something first calls it."""
+    name = match.group("name")
+    problem = function_name_problem(name)
+    if problem:
+        raise FormulaError(problem)
+    parameters = []
+    for raw in (part.strip() for part in match.group("parameters").split(",")):
+        if not raw:
+            continue
+        parameter = _PARAMETER_RE.match(raw)
+        if parameter is None:
+            raise FormulaError(f"{raw!r} is not a parameter -- write `r` or `r [cm]`")
+        unit = parameter.group("unit")
+        if unit and not units_repo.is_unit(unit):
+            raise FormulaError(f"{unit!r} is not a unit (parameter {parameter.group('name')})")
+        parameters.append((parameter.group("name"), unit))
+    names = [p for p, _unit in parameters]
+    if len(set(names)) != len(names):
+        raise FormulaError(f"{name}() repeats a parameter name")
+    body = match.group("body").strip()
+    parse_expression(body)  # raises FormulaError, which _line() reports
+    return Line(number, text, FUNCTION, mote=name, relation=body, parameters=tuple(parameters))
 
 
 def _as_number(rhs: str) -> tuple[float | int | None, str | None]:
@@ -307,6 +353,7 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
     created: list[str] = []
     problems = list(sheet.problems)
     written_rules: set[str] = set()
+    written_functions: set[str] = set()
     givens = 0
 
     # Per line, because the two failures that can only be found now -- a
@@ -314,6 +361,11 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
     # to one line and must not cost the other seven. Nothing is deleted
     # below unless every line was written, though: a line that failed is a
     # line whose rule would look abandoned.
+    for line in sheet.functions:
+        try:
+            written_functions.add(_write_function(conn, index, created, line))
+        except FormulaError as e:
+            problems.append(f"line {line.number}: {e}")
     for line in sheet.givens:
         try:
             _write_given(conn, index, created, line)
@@ -339,6 +391,7 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
                 continue
             motes_repo.delete_mote(conn, rule.mote.id)
             deleted.append(rule.name)
+        deleted.extend(_unwrite_functions(conn, written_functions))
 
     return Applied(
         motes_created=tuple(created),
@@ -401,6 +454,66 @@ def _write_given(conn, index, created: list[str], line: Line) -> None:
     motes_repo.update_mote(conn, mote_id, new)
     if not spreads and uncertainty_repo.UNCERTAINTY_KEY in properties:
         motes_repo.delete_property(conn, mote_id, uncertainty_repo.UNCERTAINTY_KEY)
+
+
+def _write_function(conn, index, created: list[str], line: Line) -> str:
+    """The function mote this line is, made or updated, and its id. The
+    line is the whole account of the function, so a parameter's unit it no
+    longer declares -- or a parameter it no longer has -- leaves `units`."""
+    mote_id = _resolve(conn, index, created, line.mote)
+    properties = motes_repo.get_mote(conn, mote_id).properties
+    unit_map = units_repo.parse_units_property(properties.get(units_repo.UNITS_KEY))
+    try:
+        old = functions_repo.parameters_of(properties)
+    except functions_repo.FunctionDefinitionError:
+        old = []
+    for parameter in old:
+        unit_map.pop(parameter, None)
+    for parameter, unit in line.parameters:
+        unit_map.pop(parameter, None)
+        if unit:
+            unit_map[parameter] = unit
+    new = {
+        functions_repo.FUNCTION_KEY: line.relation,
+        functions_repo.PARAMETERS_KEY: [p for p, _unit in line.parameters],
+    }
+    if unit_map:
+        new[units_repo.UNITS_KEY] = unit_map
+    motes_repo.update_mote(conn, mote_id, new)
+    if not unit_map and units_repo.UNITS_KEY in properties:
+        motes_repo.delete_property(conn, mote_id, units_repo.UNITS_KEY)
+    return mote_id
+
+
+def _unwrite_functions(conn, written: set[str]) -> list[str]:
+    """Every function whose line is gone stops being one: its body and
+    parameters go, and the mote too when nothing else is left on it. Its
+    constants are givens with lines of their own, so a mote still holding
+    one is kept. Named `phi()` in what was deleted."""
+    gone = []
+    for mote in motes_repo.list_motes(conn):
+        if mote.id in written or not functions_repo.is_function(mote.properties):
+            continue
+        name = mote.properties.get("name") or mote.id[:8]
+        try:
+            parameters = functions_repo.parameters_of(mote.properties)
+        except functions_repo.FunctionDefinitionError:
+            parameters = []
+        rest = {k: v for k, v in mote.properties.items() if k not in (
+            "name", functions_repo.FUNCTION_KEY, functions_repo.PARAMETERS_KEY)}
+        unit_map = {k: v for k, v in units_repo.parse_units_property(
+            rest.pop(units_repo.UNITS_KEY, None)).items() if k not in parameters}
+        if not rest and not unit_map:
+            motes_repo.delete_mote(conn, mote.id)
+        else:
+            for key in (functions_repo.FUNCTION_KEY, functions_repo.PARAMETERS_KEY):
+                motes_repo.delete_property(conn, mote.id, key)
+            if unit_map:
+                motes_repo.update_mote(conn, mote.id, {units_repo.UNITS_KEY: unit_map})
+            else:
+                motes_repo.delete_property(conn, mote.id, units_repo.UNITS_KEY)
+        gone.append(f"{name}()")
+    return gone
 
 
 def _write_rule(conn, index, created: list[str], line: Line) -> str:
@@ -559,19 +672,47 @@ def read(conn: sqlite3.Connection) -> str:
     rules = _existing_rules(conn)[0]
     free = simulation.garden_freedoms(conn)
     rendered = [_render(rule, motes, free) for rule in rules]
+    functions = _render_functions(motes)
     # Read off the *qualified* relations, not the stored equations: a rule
     # written elsewhere carries bare names, and which mote those belong to
-    # is exactly what rendering has just decided.
-    referenced = {name for _line, relation in rendered for name in _bases(relation)}
+    # is exactly what rendering has just decided. A function's constants
+    # are inputs too, and go with it, in a leading block of definitions.
+    called = {name for name, _line in functions}
+    referenced = {name for _line, relation in rendered for name in _bases(relation)} | called
     inputs = [
         *_render_givens(motes, referenced, free),
         *_render_unknowns(motes, referenced, free, rendered),
     ]
     blocks = []
+    if functions:
+        blocks.append("\n".join([
+            *(line for _name, line in functions),
+            *(line for name, line in inputs if name in called),
+        ]))
     for names, equations in _calculations(rendered):
-        block = [line for name, line in inputs if name in names]
+        block = [line for name, line in inputs if name in names and name not in called]
         blocks.append("\n".join([*block, *_in_order(equations)]))
     return "\n\n".join(blocks)
+
+
+def _render_functions(motes: dict[str, Mote]) -> list[tuple[str, str]]:
+    """`phi(r [cm]) = body` for every function mote, by name. A function
+    whose parameters cannot be read is still rendered, with what it has,
+    so applying the sheet back cannot delete it behind the reader's back."""
+    lines = []
+    for mote in sorted(motes.values(), key=lambda m: str(m.properties.get("name") or "")):
+        name = mote.properties.get("name")
+        if not functions_repo.is_function(mote.properties) or not isinstance(name, str):
+            continue
+        try:
+            parameters = functions_repo.parameters_of(mote.properties)
+        except functions_repo.FunctionDefinitionError:
+            parameters = []
+        unit_map = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+        shown = ", ".join(
+            f"{p} [{unit_map[p]}]" if p in unit_map else p for p in parameters)
+        lines.append((name, f"{name}({shown}) {ASSIGN} {functions_repo.body_of(mote.properties)}"))
+    return lines
 
 
 def _calculations(rendered: list[tuple[str, str]]) -> list[tuple[set[str], list[tuple[str, str]]]]:
@@ -640,6 +781,7 @@ def calculation_mote_ids(conn: sqlite3.Connection) -> set[str]:
     free = simulation.garden_freedoms(conn)
     rendered = [_render(rule, motes, free) for rule in _existing_rules(conn)[0]]
     referenced = {name for _line, relation in rendered for name in _bases(relation)}
+    referenced |= {name for name, _line in _render_functions(motes)}
     return {
         mote.id for mote in motes.values()
         if isinstance(mote.properties.get("name"), str)
