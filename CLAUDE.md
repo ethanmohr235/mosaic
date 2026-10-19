@@ -57,42 +57,12 @@ what is still to do, lives in the docs; the short map:
   Home rows; SVG images and surface plots in `.tex` export; the Mosaic
   rename of code (an open question).
 
-## Split of work: cloud backend, local frontend
-
-Two sessions work in parallel:
-- A **cloud session** does backend work that pytest can verify:
-  `core/`, `cli/`, `mcp_server/`, their tests and their docs.
-- A **local session** does the console frontend and app ports (U2–U9),
-  because those need a display for the pywebview smoke tests and
-  screenshots.
-
-**The cloud session does not touch:**
-- `console/`, any `*/frontend/`, `frontend_shared/`, `window_launcher.py`,
-  `scripts/*_smoke_test.py` or the per-app `*/api.py` bridges
-- `core/commands.py` and `RESERVED_VERBS` in `core/reserved.py`, which
-  belong to the console grammar
-
-When a roadmap phase needs UI, build its `core/` part with tests and a
-CLI/MCP surface. Then write down the UI it needs under *Handoff to
-frontend* in the PR description.
-
-**Branch protocol for the cloud session:**
-- Work on `cloud/backend`, rebased or merged on `master` often.
-- Keep one draft PR open for it (`cloud/backend` → `master`).
-- Keep its description current as the status board:
-  - phases done, in progress and next
-  - decisions the user made
-  - questions waiting on the user
-  - *Handoff to frontend*
-- Don't merge to `master` yourself. The user or the local session
-  merges.
-
 ## Environment notes
 
 - `gardens/` (the user's real data) is gitignored and not in the repo.
   Seed test gardens in tests (`tests/conftest.py` points `GARDENS_DIR`
   at a temp dir).
-- pywebview, GTK and WebKit windows can't run without a display. Don't
-  try to run `scripts/*_smoke_test.py` in the cloud.
+- pywebview, GTK and WebKit windows need a display. After touching
+  `console/`, run `.venv/bin/python scripts/console_smoke_test.py`.
 - Locally, `python3` on PATH is conda. The app runs from `.venv`, which
   is built from `/usr/bin/python3`.
