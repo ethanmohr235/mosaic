@@ -22,6 +22,13 @@ def named(conn, name: str):
     return next(m for m in list_motes(conn) if m.properties.get("name") == name)
 
 
+def apply(conn, sheet: str):
+    """Apply `sheet` with the garden's own lines first. Applying replaces,
+    so a sheet must carry the function motes made here directly, or they
+    would stop being functions -- read() gives exactly those lines."""
+    return worksheet.apply(conn, f"{worksheet.read(conn)}\n{sheet}")
+
+
 def flux(conn, **extra) -> str:
     return create_mote(conn, {
         "name": "phi", "function": "A * sin(B * r) / r", "parameters": "r",
@@ -30,7 +37,7 @@ def flux(conn, **extra) -> str:
 
 
 def solve(conn, sheet: str, solver: str = "linear"):
-    applied = worksheet.apply(conn, sheet)
+    applied = apply(conn, sheet)
     assert not applied.problems, applied.problems
     return run_simulation(conn, solver=solver)
 
@@ -98,7 +105,7 @@ def test_an_unknown_argument_stays_linear(conn):
 
 def test_newton_solves_through_a_nonlinear_body(conn):
     create_mote(conn, {"name": "sq", "function": "x * x", "parameters": "x"})
-    applied = worksheet.apply(conn, "s.x = 1\ns.x = ?\nsq(s.x) == 9")
+    applied = apply(conn, "s.x = 1\ns.x = ?\nsq(s.x) == 9")
     assert not applied.problems, applied.problems
     run_simulation(conn, solver="newton")
     assert named(conn, "s").properties["x"] == pytest.approx(3)
@@ -121,14 +128,14 @@ def test_a_parameter_shadows_t_inside_the_body(conn):
 
 def test_the_wrong_number_of_arguments_names_the_parameters(conn):
     flux(conn)
-    worksheet.apply(conn, "m.y = phi(1, 2)")
+    apply(conn, "m.y = phi(1, 2)")
     with pytest.raises(SimulationError, match=r"phi\(\) takes 1 argument \(r\), got 2"):
         run_simulation(conn)
 
 
 def test_recursion_is_refused(conn):
     create_mote(conn, {"name": "loop", "function": "loop(x)", "parameters": "x"})
-    worksheet.apply(conn, "m.y = loop(1)")
+    apply(conn, "m.y = loop(1)")
     with pytest.raises(SimulationError, match="cannot be recursive"):
         run_simulation(conn)
 
@@ -136,29 +143,30 @@ def test_recursion_is_refused(conn):
 def test_two_functions_of_one_name_is_a_hard_error(conn):
     flux(conn)
     flux(conn)
-    worksheet.apply(conn, "m.y = phi(1)")
+    apply(conn, "m.y = phi(1)")
     with pytest.raises(SimulationError, match="'phi' matches 2 motes"):
         run_simulation(conn)
 
 
 def test_a_mote_without_a_body_is_not_a_function(conn):
     create_mote(conn, {"name": "phi", "A": 1})
-    worksheet.apply(conn, "m.y = phi(1)")
+    apply(conn, "m.y = phi(1)")
     with pytest.raises(SimulationError, match="unknown function 'phi'"):
         run_simulation(conn)
 
 
 def test_an_error_in_the_body_says_which_function(conn):
     create_mote(conn, {"name": "f", "function": "x * missing", "parameters": "x"})
-    worksheet.apply(conn, "m.y = f(1)")
+    apply(conn, "m.y = f(1)")
     with pytest.raises(SimulationError, match=r"in f\(\):.*'missing'"):
         run_simulation(conn)
 
 
 def test_a_function_is_not_itself_solved(conn):
     flux(conn)
+    apply(conn, "reactor.r = 10 cm\nreactor.flux = phi(reactor.r)")
     before = named(conn, "phi").properties
-    solve(conn, "reactor.r = 10 cm\nreactor.flux = phi(reactor.r)")
+    run_simulation(conn)
     assert named(conn, "phi").properties == before
 
 
@@ -172,7 +180,7 @@ def test_the_formula_level_error_for_an_unknown_name():
 # ---- the unit check and solve health ----
 
 def unit_problems(conn, sheet: str) -> list[str]:
-    applied = worksheet.apply(conn, sheet)
+    applied = apply(conn, sheet)
     assert not applied.problems, applied.problems
     return check_garden(conn).problems
 

@@ -23,6 +23,13 @@ def named(conn, name: str):
     return next(m for m in list_motes(conn) if m.properties.get("name") == name)
 
 
+def apply(conn, sheet: str):
+    """Apply `sheet` with the garden's own lines first. Applying replaces,
+    so a sheet must carry the function motes made here directly, or they
+    would stop being functions -- read() gives exactly those lines."""
+    return worksheet.apply(conn, f"{worksheet.read(conn)}\n{sheet}")
+
+
 # ---- the numerics ----
 
 @pytest.mark.parametrize("f, expected", [
@@ -68,7 +75,7 @@ FLUX = {"name": "phi", "function": "A * sin(B * r) / r", "parameters": "r",
 
 def test_a_call_at_zero_over_zero_takes_the_limit(conn):
     create_mote(conn, FLUX)
-    worksheet.apply(conn, "reactor.center = phi(0)")
+    apply(conn, "reactor.center = phi(0)")
     result = run_simulation(conn)
     # A * B, with B in 1/m: 5e13 * 6.28
     assert named(conn, "reactor").properties["center"] == pytest.approx(5e13 * 6.28)
@@ -79,7 +86,7 @@ def test_a_call_at_zero_over_zero_takes_the_limit(conn):
 
 def test_the_limit_agrees_with_sinc(conn):
     create_mote(conn, FLUX)
-    worksheet.apply(conn, "reactor.a = phi(0)\nreactor.b = phi.A * phi.B * sinc(0)")
+    apply(conn, "reactor.a = phi(0)\nreactor.b = phi.A * phi.B * sinc(0)")
     result = run_simulation(conn)
     props = named(conn, "reactor").properties
     assert props["a"] == pytest.approx(props["b"], rel=1e-9)
@@ -88,7 +95,7 @@ def test_the_limit_agrees_with_sinc(conn):
 
 def test_a_call_away_from_the_singularity_takes_none(conn):
     create_mote(conn, FLUX)
-    worksheet.apply(conn, "reactor.edge = phi(10)")
+    apply(conn, "reactor.edge = phi(10)")
     result = run_simulation(conn)
     assert result.limits == []
     assert "limit" not in result.summary
@@ -96,7 +103,7 @@ def test_a_call_away_from_the_singularity_takes_none(conn):
 
 def test_the_limit_is_along_whichever_parameter_settles(conn):
     create_mote(conn, {"name": "g", "function": "sin(a * x) / x", "parameters": "a, x"})
-    worksheet.apply(conn, "m.y = g(3, 0)")
+    apply(conn, "m.y = g(3, 0)")
     result = run_simulation(conn)
     assert named(conn, "m").properties["y"] == pytest.approx(3.0)
     [limit] = result.limits
@@ -106,20 +113,20 @@ def test_the_limit_is_along_whichever_parameter_settles(conn):
 
 def test_a_call_with_no_limit_fails_and_says_why(conn):
     create_mote(conn, {"name": "sgn", "function": "abs(x) / x", "parameters": "x"})
-    worksheet.apply(conn, "m.y = sgn(0)")
+    apply(conn, "m.y = sgn(0)")
     with pytest.raises(SimulationError, match=r"in sgn\(\): 0/0 at x = 0, and no limit"):
         run_simulation(conn)
 
 
 def test_a_plain_rule_at_zero_over_zero_is_still_an_error(conn):
-    worksheet.apply(conn, "reactor.r = 0\nreactor.flux = sin(reactor.r) / reactor.r")
+    apply(conn, "reactor.r = 0\nreactor.flux = sin(reactor.r) / reactor.r")
     with pytest.raises(SimulationError, match="0/0 is indeterminate.*function"):
         run_simulation(conn)
 
 
 def test_a_time_series_reports_its_limits(conn):
     create_mote(conn, FLUX)
-    worksheet.apply(conn, "reactor.center = phi(0)")
+    apply(conn, "reactor.center = phi(0)")
     preview = run_time_series(conn, 2)
     assert [limit.approach for limit in preview.limits] == ["r → 0 cm"]
     assert "came from a limit" in preview.steps[0].summary
@@ -127,7 +134,7 @@ def test_a_time_series_reports_its_limits(conn):
 
 def test_provenance_records_the_limit(conn):
     create_mote(conn, FLUX)
-    worksheet.apply(conn, "reactor.center = phi(0)")
+    apply(conn, "reactor.center = phi(0)")
     journal, error = solve_journal(conn)
     assert error is None
     [derivation] = journal.derivations
