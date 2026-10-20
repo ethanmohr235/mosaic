@@ -270,7 +270,7 @@ def run(conn: sqlite3.Connection, line: SimLine) -> SimRun:
                  else PINNED if (mote_id, key) in freedoms else GIVEN)
         rows.append(Row(
             mote_id=mote_id, key=key, ref=garden.text_of(mote_id, key), state=state,
-            unit=_unit(start.get(mote_id, {}), key),
+            unit=_unit(start.get(mote_id, {}), key, garden.inferred.get(mote_id)),
             start=_number(start.get(mote_id, {}).get(key)),
             series=tuple(series[(mote_id, key)]),
             vs=tuple(vs_series[(mote_id, key)]) if vs_series is not None else None,
@@ -364,8 +364,8 @@ def _number(value) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _unit(properties: dict, key: str) -> str | None:
-    raw = units_repo.parse_units_property(properties.get(units_repo.UNITS_KEY)).get(key)
+def _unit(properties: dict, key: str, inferred: dict[str, str] | None = None) -> str | None:
+    raw = simulation_repo.units_for(properties, inferred).get(key)
     return units_repo.format_unit(raw) if raw else None
 
 

@@ -220,7 +220,8 @@ def test_the_result_unit_is_inferred_through_the_body(conn):
     create_mote(conn, {"name": "twice", "function": "2 * x", "parameters": "x",
                        UNITS_KEY: {"x": "m"}})
     solve(conn, "m.r = 3 m\nm.d = twice(m.r)")
-    assert named(conn, "m").properties[UNITS_KEY]["d"] == "m"
+    from core.simulation import inferred_units
+    assert inferred_units(conn)[named(conn, "m").id]["d"] == "m"
 
 
 def test_health_reports_a_function_no_call_can_reach(conn):

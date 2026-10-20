@@ -138,7 +138,8 @@ def kinds_of(conn, mote, species_id: str | None) -> dict:
     if template is not None and all(s.id != template.id for s in siblings):
         siblings = siblings + [template]
     vocabulary = enum_vocabulary(siblings)
-    declared_units = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+    declared_units = simulation.units_for(
+        mote.properties, simulation.inferred_units(conn).get(mote.id))
 
     kinds = {}
     for key, value in mote.properties.items():

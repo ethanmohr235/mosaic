@@ -38,6 +38,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass, field
 
+from core import simulation
 from core import units as units_repo
 from core.entities import Mote
 from core.motes import list_motes
@@ -250,12 +251,13 @@ def figure_from_spec(
     `should_cancel` is polled between points, and a cancelled figure comes
     back with `cancelled` set."""
     motes = list_motes(conn) if motes is None else motes
-    directory = _Directory(motes)
     mode = spec.get("mode") or "sweep"
     if mode not in _MODES:
         return Figure(name=name, view_id=view_id, error=f"unknown plot mode {mode!r}")
     try:
         ground = read_garden(conn, _scenario_ids(spec)) if ground is None else ground
+        directory = _Directory(motes, simulation.inferred_units_of(
+            ground.properties, ground.relationships, ground.rules))
         if mode == "surface":
             return _surface(spec, name, view_id, directory, ground, max_points, should_cancel)
         if mode == "correlate":
@@ -267,36 +269,35 @@ def figure_from_spec(
 
 
 class _Directory:
-    """Mote names and declared units, read once. Every label on a figure
-    wants both, and asking the garden per series would be one query per
-    curve for an answer that cannot change mid-figure."""
+    """Mote names and units, read once. Every label on a figure wants
+    both, and asking the garden per series would be one query per curve
+    for an answer that cannot change mid-figure. A unit is the declared
+    one, or else the one a solve infers (`inferred`, from
+    core/simulation.py::inferred_units)."""
 
-    def __init__(self, motes: list[Mote]) -> None:
+    def __init__(self, motes: list[Mote], inferred: dict[str, dict[str, str]] | None = None) -> None:
         self._motes = {m.id: m for m in motes}
+        self._inferred = inferred or {}
+
+    def _raw_unit(self, mote_id: str, key: str) -> str | None:
+        mote = self._motes.get(mote_id)
+        if mote is None:
+            return None
+        return simulation.units_for(mote.properties, self._inferred.get(mote_id)).get(key)
 
     def label(self, mote_id: str, key: str) -> str:
         mote = self._motes.get(mote_id)
         return f"{name_of(mote) if mote else mote_id[:8]}.{key}"
 
     def unit(self, mote_id: str, key: str) -> str | None:
-        mote = self._motes.get(mote_id)
-        if mote is None:
-            return None
-        raw = units_repo.parse_units_property(
-            mote.properties.get(units_repo.UNITS_KEY)
-        ).get(key)
+        raw = self._raw_unit(mote_id, key)
         return units_repo.format_unit(raw) if raw else None
 
     def dimension(self, mote_id: str, key: str) -> str | None:
         """What a property *measures*, which is the real question behind
         "may these two share an axis": `kohm` and `ohm` agree here and
         `ohm` and `volt` do not."""
-        mote = self._motes.get(mote_id)
-        if mote is None:
-            return None
-        raw = units_repo.parse_units_property(
-            mote.properties.get(units_repo.UNITS_KEY)
-        ).get(key)
+        raw = self._raw_unit(mote_id, key)
         if not raw:
             return None
         try:
@@ -742,7 +743,7 @@ def sensitivity(
     reference = probe(base)
     if reference is None:
         return []
-    directory = _Directory(list_motes(conn))
+    directory = _Directory(list_motes(conn), simulation.inferred_units(conn))
     rows = []
     for knob in knobs:
         value = float(knob["value"])

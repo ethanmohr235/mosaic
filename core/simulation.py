@@ -17,7 +17,7 @@ nonlinearity, `"newton"` is iterative and can solve that.
 import dataclasses
 import logging
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from core import incidence as incidence_repo
@@ -698,9 +698,7 @@ def run_simulation(
         raise SimulationError(str(e)) from e
 
     if case is None:
-        inferred_units = _infer_missing_units(view, result.equations, solved, model_cache)
-        properties = _apply_inferred_units(conn, view.properties, inferred_units)
-        changes = _write_back(conn, properties, solved)
+        changes = _write_back(conn, view.properties, solved)
     else:
         changes = _changes_for(view.properties, solved)
     logger.info("simulation solved %s values", len(solved))
@@ -1575,7 +1573,7 @@ def _dimension_context(
 def _infer_missing_units(
     view: _GardenView,
     equations: list[tuple[rules_repo.Rule, str]],
-    solved: dict[Unknown, float],
+    solved: Iterable[Unknown],
     model_cache: dict[str, PropertyProvider],
 ) -> dict[str, dict[str, str]]:
     """A reasonable unit for every solved freedom that doesn't already
@@ -1586,49 +1584,86 @@ def _infer_missing_units(
     *freedom* is different: the solver is about to write a number onto
     it regardless, and if the equation that produced it plainly names a
     dimension (`resistance == voltage / current`), leaving the result
-    unitless is simply losing information the garden already had. Only
-    ever adds a unit; never overwrites one a mote already declared.
+    unitless is simply losing information the garden already had. Never
+    replaces a unit a mote declares, and never stored: a unit worked out
+    once and saved would read as declared from then on, and stop
+    following the equation it came from (see `inferred_units`).
 
     One rule may not be the whole story for a value the solver backend
     (rather than the substitution loop) determined from several equations
     at once, so every equation naming the freedom is tried and the first
     one with a determinable dimension wins -- good enough for the common
-    case this exists for, and silent (not a guess) everywhere else."""
+    case this exists for, and silent (not a guess) everywhere else.
+
+    Repeated until nothing new is found, so a unit inferred for one value
+    feeds the next (`y == 2 * x` once `x` has one). Nothing is stored for
+    a later solve to read, so a chain has to be followed here or not at all."""
     inferred: dict[str, dict[str, str]] = {}
-    for mote_id, key in solved:
-        if view.units.get(mote_id, {}).get(key):
-            continue
-        if key in inferred.get(mote_id, {}):
+    keys = list(solved)
+    while True:
+        known = {mid: {**units, **inferred.get(mid, {})} for mid, units in view.units.items()}
+        known.update({mid: units for mid, units in inferred.items() if mid not in known})
+        found = _infer_pass(dataclasses.replace(view, units=known), equations, keys, model_cache)
+        if not found:
+            return inferred
+        for mote_id, units in found.items():
+            inferred.setdefault(mote_id, {}).update(units)
+
+
+def _infer_pass(
+    view: _GardenView,
+    equations: list[tuple[rules_repo.Rule, str]],
+    keys: list[Unknown],
+    model_cache: dict[str, PropertyProvider],
+) -> dict[str, dict[str, str]]:
+    """One pass of `_infer_missing_units`: a unit for each key in `keys`
+    that `view` holds none for and one of its equations pins down."""
+    found: dict[str, dict[str, str]] = {}
+    for mote_id, key in keys:
+        if view.units.get(mote_id, {}).get(key) or key in found.get(mote_id, {}):
             continue
         for rule, pair_mote_id in equations:
             if pair_mote_id != mote_id:
                 continue
-            ctx = _dimension_context(view, model_cache, mote_id)
-            unit_name = infer_unit(rule.equation, key, ctx)
+            unit_name = infer_unit(rule.equation, key, _dimension_context(view, model_cache, mote_id))
             if unit_name:
-                inferred.setdefault(mote_id, {})[key] = unit_name
+                found.setdefault(mote_id, {})[key] = unit_name
                 break
-    return inferred
+    return found
 
 
-def _apply_inferred_units(
-    conn: sqlite3.Connection,
-    properties: dict[str, dict],
-    inferred: dict[str, dict[str, str]],
-) -> dict[str, dict]:
-    """Merge newly-inferred units into `properties` and persist them, for
-    `_write_back()`'s benefit and the mote's own record alike. Returns an
-    updated properties dict rather than mutating in place, matching every
-    other helper in this module that touches `properties`."""
-    if not inferred:
-        return properties
-    updated = dict(properties)
-    for mote_id, units_by_key in inferred.items():
-        existing = parse_units_property(updated.get(mote_id, {}).get(UNITS_KEY))
-        merged = {**existing, **units_by_key}
-        updated[mote_id] = {**updated.get(mote_id, {}), UNITS_KEY: merged}
-        update_mote(conn, mote_id, {UNITS_KEY: merged})
-    return updated
+def inferred_units(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
+    """The unit a solve would infer for every freedom that declares none,
+    read off the garden's equations without solving it: `infer_unit`
+    reads dimensions, never values.
+
+    This is where a solved value's unit comes from on every surface that
+    shows one, since a solve writes the value and never the unit. Worked
+    out on each read, it follows the equations as they stand: retype a
+    given's unit and the result's unit follows it."""
+    return inferred_units_of(
+        {m.id: m.properties for m in list_motes(conn)}, list_relationships(conn),
+        rules_repo.list_rules(conn))
+
+
+def inferred_units_of(
+    properties: dict[str, dict], relationships: list[Relationship], rules: list[rules_repo.Rule]
+) -> dict[str, dict[str, str]]:
+    """`inferred_units` over a garden already read (a sweep's Ground), for
+    a caller that must not touch its connection."""
+    view = _build_view(properties, relationships)
+    pairs = _rule_instances(rules, view)
+    equations = [(r, m) for r, m in pairs if _operator_of(r) == "==" and not r.is_check]
+    freedoms = [(mote_id, key) for mote_id, keys in view.freedoms.items() for key in keys]
+    return _infer_missing_units(view, equations, freedoms, {})
+
+
+def units_for(
+    properties: dict, inferred: dict[str, str] | None = None
+) -> dict[str, str]:
+    """One mote's units as a surface shows them: what it declares, over
+    what `inferred_units` gives for it."""
+    return {**(inferred or {}), **parse_units_property(properties.get(UNITS_KEY))}
 
 
 @dataclass(frozen=True)

@@ -175,7 +175,7 @@ stored. `sim` and `plot` write nothing, and a note that waited for
 somebody to run `solve` showed nothing, or last week's number. Now:
 
 - **A value the solver determines is the live solve's**, in the unit its
-  mote declares, or else the unit a written solve would infer for it. An
+  mote declares, or else the unit a solve infers for it. An
   edited given shows on the next render, solved or not. Givens and every
   other property read as stored.
 - **A value the solver is free to determine but the solve did not find

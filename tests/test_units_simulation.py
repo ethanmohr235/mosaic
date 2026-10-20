@@ -11,7 +11,7 @@ from core.motes import create_mote, get_mote, update_mote
 from core.relationships import create_relationship
 from core.rules import APPLIES_TO
 from core.scenarios import OVERRIDES, VARIES
-from core.simulation import SimulationError, run_simulation, run_time_series
+from core.simulation import SimulationError, inferred_units, run_simulation, run_time_series
 from core.species import set_species
 
 
@@ -293,10 +293,10 @@ def test_a_solved_freedom_with_no_unit_is_given_one(conn):
 
     run_simulation(conn)
     assert prop(conn, element, "resistance") == pytest.approx(5.0)
-    assert get_mote(conn, element).properties["units"]["resistance"] == "ohm"
+    assert inferred_units(conn)[element]["resistance"] == "ohm"
 
 
-def test_the_inferred_unit_survives_a_second_run(conn):
+def test_a_solve_never_stores_the_unit_it_infers(conn):
     species = create_mote(conn, {"name": "Element", "freedoms": "resistance"})
     add_rule(conn, species, "Ohm", "resistance == voltage / current")
     element = create_mote(conn, {
@@ -308,7 +308,7 @@ def test_the_inferred_unit_survives_a_second_run(conn):
     run_simulation(conn)
     run_simulation(conn)
     assert prop(conn, element, "resistance") == pytest.approx(5.0)
-    assert get_mote(conn, element).properties["units"]["resistance"] == "ohm"
+    assert "resistance" not in get_mote(conn, element).properties["units"]
 
 
 def test_an_unnamed_dimension_falls_back_to_a_base_unit_product(conn):
@@ -322,7 +322,7 @@ def test_an_unnamed_dimension_falls_back_to_a_base_unit_product(conn):
 
     run_simulation(conn)
     assert prop(conn, trip, "speed") == pytest.approx(10.0)
-    assert get_mote(conn, trip).properties["units"]["speed"] == "m*s^-1"
+    assert inferred_units(conn)[trip]["speed"] == "m*s^-1"
 
 
 def test_a_dimensionless_result_gets_no_unit(conn):
@@ -461,3 +461,84 @@ def test_a_percentage_is_solved_as_a_ratio_and_written_back_as_a_percent(conn):
     run_simulation(conn)
     assert prop(conn, panel, "output") == pytest.approx(225.0)
     assert prop(conn, panel, "loss") == pytest.approx(77.5)
+
+
+# ---- inferred units are worked out on read, never stored ----
+
+from core import inspect as inspect_repo
+from core import plotview, worksheet
+from core.db import initialize_database
+
+LEAK = (
+    "m.a = 5 1/(cm*s)\n"
+    "m.r = 50 cm\n"
+    "m.leak = m.a * m.r\n"
+)
+
+
+def _named(conn, name):
+    from core.motes import list_motes
+    (mote,) = [m for m in list_motes(conn) if m.properties.get("name") == name]
+    return mote
+
+
+def test_the_inferred_unit_follows_a_corrected_given(conn):
+    # ne-homework-5: `1/cm*s` reads as s/cm. Once it is retyped, the
+    # result's unit has to follow -- a saved one used to stay at `s`.
+    worksheet.apply(conn, LEAK.replace("1/(cm*s)", "1/cm*s"))
+    run_simulation(conn)
+    m = _named(conn, "m")
+    assert inferred_units(conn)[m.id]["leak"] == "s"
+    worksheet.apply(conn, LEAK)
+    run_simulation(conn)
+    assert inferred_units(conn)[m.id]["leak"] == "Hz"
+    assert "leak" not in prop(conn, m.id, "units")
+
+
+def test_an_inferred_unit_follows_a_chain(conn):
+    worksheet.apply(conn, "m.x = 3 m\nm.y = m.x\nm.z = m.y\n")
+    assert inferred_units(conn)[_named(conn, "m").id] == {"y": "m", "z": "m"}
+
+
+def test_the_inspector_and_a_plot_show_the_inferred_unit(conn):
+    worksheet.apply(conn, LEAK)
+    run_simulation(conn)
+    m = _named(conn, "m")
+    assert inspect_repo.inspect(conn, m.id)["kinds"]["leak"]["unit"] == "Hz"
+    spec = {"mode": "sweep", "x": {"mote": m.id, "key": "r", "lo": 10, "hi": 50, "steps": 2},
+            "series": [{"mote": m.id, "key": "leak"}]}
+    (series,) = plotview.figure_from_spec(conn, spec).series
+    assert series.unit == "Hz"
+
+
+def _reopen(conn):
+    conn.execute("PRAGMA user_version = 0")
+    initialize_database(conn)
+
+
+def test_the_migration_drops_a_saved_unit_equal_to_the_inferred_one(conn):
+    worksheet.apply(conn, LEAK)
+    m = _named(conn, "m")
+    update_mote(conn, m.id, {"units": {**prop(conn, m.id, "units"), "leak": "Hz"}})
+    _reopen(conn)
+    assert "leak" not in prop(conn, m.id, "units")
+    assert prop(conn, m.id, "units")["a"] == "1/(cm*s)"
+
+
+def test_the_migration_keeps_a_saved_unit_that_differs(conn):
+    worksheet.apply(conn, LEAK)
+    m = _named(conn, "m")
+    update_mote(conn, m.id, {"units": {**prop(conn, m.id, "units"), "leak": "s"}})
+    _reopen(conn)
+    assert prop(conn, m.id, "units")["leak"] == "s"
+
+
+def test_the_migration_runs_once(conn):
+    # A unit declared after the migration ran stays, even where it equals
+    # the inferred one.
+    worksheet.apply(conn, LEAK)
+    m = _named(conn, "m")
+    initialize_database(conn)
+    update_mote(conn, m.id, {"units": {**prop(conn, m.id, "units"), "leak": "Hz"}})
+    initialize_database(conn)
+    assert prop(conn, m.id, "units")["leak"] == "Hz"

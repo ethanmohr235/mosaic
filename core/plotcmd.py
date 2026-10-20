@@ -26,6 +26,7 @@ it turns a line into the specification a saved view holds
 with `plot save` is exactly what `\\graph{…}` in a note re-solves."""
 import math
 import re
+import functools
 import shlex
 import sqlite3
 from dataclasses import dataclass, replace
@@ -413,8 +414,13 @@ class _Garden:
             return None
         return float(value)
 
+    @functools.cached_property
+    def inferred(self) -> dict[str, dict[str, str]]:
+        """The units a solve infers, for values that declare none."""
+        return simulation_repo.inferred_units(self.conn)
+
     def unit(self, mote_id: str, key: str) -> str | None:
-        return plotview._Directory([self.by_id[mote_id]]).unit(mote_id, key)
+        return plotview._Directory([self.by_id[mote_id]], self.inferred).unit(mote_id, key)
 
     def text_of(self, mote_id: str, key: str) -> str:
         """The ref a rewrite writes back: the name when it's unambiguous."""

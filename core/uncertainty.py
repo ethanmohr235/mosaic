@@ -39,7 +39,6 @@ from core import motes as motes_repo
 from core import relationships as rel_repo
 from core import rules as rules_repo
 from core import simulation
-from core import units as units_repo
 from core.formula import Unknown
 
 UNCERTAINTY_KEY = "uncertainty"
@@ -117,10 +116,9 @@ class Contribution:
 class Propagated:
     """A solved value and its ±, in the mote's declared unit (`unit`).
 
-    `unit` None means the property declares none, and the value is in
-    base SI -- which is what a result that has never been solved looks
-    like, since a solve is what infers and writes a result's unit. Solve
-    first, then ask."""
+    `unit` is the declared one, or else the one a solve infers
+    (core/simulation.py::inferred_units). None means neither: the value
+    is in base SI."""
     mote_id: str
     key: str
     label: str
@@ -164,6 +162,7 @@ def propagate(conn: sqlite3.Connection, solver: str = "linear") -> Report:
     rules = rules_repo.list_rules(conn)
     freedoms = simulation.garden_freedoms(conn)
     labels = {m.id: _name(m.properties, m.id) for m in motes}
+    inferred = simulation.inferred_units_of(properties, relationships, rules)
 
     inputs, problems = _inputs(properties, freedoms, labels)
     try:
@@ -211,8 +210,7 @@ def propagate(conn: sqlite3.Connection, solver: str = "linear") -> Report:
             unknown[0], unknown[1], f"{labels.get(unknown[0], unknown[0][:8])}.{unknown[1]}",
             value, math.sqrt(variance),
             tuple(sorted(parts, key=lambda c: -c.share)),
-            units_repo.parse_units_property(
-                properties[unknown[0]].get(units_repo.UNITS_KEY)).get(unknown[1]),
+            simulation.units_for(properties[unknown[0]], inferred.get(unknown[0])).get(unknown[1]),
         ))
     results.sort(key=lambda r: (r.label.casefold()))
     return Report(tuple(results), tuple(inputs), tuple(problems))

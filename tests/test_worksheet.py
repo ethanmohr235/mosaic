@@ -8,7 +8,7 @@ destructive thing here.
 """
 import pytest
 
-from core import worksheet
+from core import simulation, worksheet
 from core.motes import create_mote, get_mote, list_motes
 from core.relationships import create_relationship, list_relationships
 from core.rules import APPLIES_TO, EQUATION_KEY, FREEDOMS_KEY, list_rules, parse_freedoms
@@ -129,13 +129,14 @@ def test_eight_lines_need_no_relationships_but_the_applies_to(conn):
 
 def test_an_applied_worksheet_solves(conn):
     """The answer is in base SI, because `l` declares no unit of its own --
-    and the solve labels it `m`, so a surface can show the 100 inches the
+    and a solve infers `m` for it, so a surface can show the 100 inches the
     person typing in inches was after (see `core/units.py::convert`)."""
     worksheet.apply(conn, FEA)
     run_simulation(conn)
     bd = named(conn, "bd")
     assert bd.properties["l"] == pytest.approx(2.54)
-    assert bd.properties[UNITS_KEY]["l"] == "m"
+    assert "l" not in bd.properties[UNITS_KEY]
+    assert simulation.inferred_units(conn)[bd.id]["l"] == "m"
     assert convert(bd.properties["l"], "m", "in") == pytest.approx(100.0)
 
 

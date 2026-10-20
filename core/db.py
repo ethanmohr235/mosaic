@@ -156,6 +156,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
 
     conn.commit()
     _migrate_intervals(conn)
+    _drop_inferred_units(conn)
 
 
 # Tables a garden used to keep: a log of every simulation run, and then
@@ -254,6 +255,66 @@ def _migrate_intervals(conn: sqlite3.Connection) -> None:
         )
 
     conn.commit()
+
+
+# `PRAGMA user_version` once `_drop_inferred_units` has run. Every other
+# migration here is idempotent and needs no marker; this one cannot be: a
+# unit a person declares later can equal the inferred one, and must stay.
+_INFERRED_UNITS_DROPPED = 1
+
+
+def _drop_inferred_units(conn: sqlite3.Connection) -> None:
+    """Remove each solved value's unit that a solve once saved, now that a
+    solve never stores one (core/simulation.py::inferred_units).
+
+    A saved unit reads exactly like a declared one, so only a unit equal
+    to what the solve infers today is taken, which loses nothing: the same
+    unit is now worked out on every read. One that differs is kept. It may
+    be stale, like `s` left behind after a given's unit was corrected, but
+    it may as well be one somebody typed, and the worksheet shows both
+    kinds on the line that solves for the value. Runs once per garden."""
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= _INFERRED_UNITS_DROPPED:
+        return
+    import json
+
+    from core import simulation
+
+    for mote_id, units in _saved_inferred_units(conn, simulation).items():
+        conn.execute(
+            "UPDATE mote_properties SET value = ? WHERE mote_id = ? AND key = 'units'",
+            (json.dumps(units), mote_id),
+        )
+    conn.execute(f"PRAGMA user_version = {_INFERRED_UNITS_DROPPED}")
+    conn.commit()
+
+
+def _saved_inferred_units(conn: sqlite3.Connection, simulation) -> dict[str, dict[str, str]]:
+    """Each mote's `units` with the freedoms' inferred-looking entries
+    gone, for the motes that have any. Inferred against the garden with
+    every freedom's own unit set aside, since inference never replaces a
+    declared unit and every saved one reads as declared."""
+    from core import rules as rules_repo
+    from core.motes import list_motes
+    from core.relationships import list_relationships
+    from core.units import UNITS_KEY, parse_units_property
+
+    freedoms = simulation.garden_freedoms(conn)
+    stored = {m.id: m.properties for m in list_motes(conn)}
+    declared = {mid: parse_units_property(p.get(UNITS_KEY)) for mid, p in stored.items()}
+    bare = {
+        mid: {**p, UNITS_KEY: {k: u for k, u in declared[mid].items()
+                               if k not in freedoms.get(mid, set())}}
+        for mid, p in stored.items()
+    }
+    inferred = simulation.inferred_units_of(
+        bare, list_relationships(conn), rules_repo.list_rules(conn))
+    out = {}
+    for mote_id, keys in freedoms.items():
+        units = declared.get(mote_id, {})
+        dropped = {k for k in keys if k in units and inferred.get(mote_id, {}).get(k) == units[k]}
+        if dropped:
+            out[mote_id] = {k: u for k, u in units.items() if k not in dropped}
+    return out
 
 
 def _start_key(raw: dict, interval_repo) -> str | None:

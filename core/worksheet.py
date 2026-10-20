@@ -615,6 +615,7 @@ def preview(conn: sqlite3.Connection, text: str) -> list[Preview]:
     found here too, since they can only be found against a garden."""
     index = _by_name(conn)
     by_id = {m.id: m for m in motes_repo.list_motes(conn)}
+    inferred = simulation.inferred_units(conn)
     out = []
     for line in parse(text).lines:
         problem, value = line.problem, ""
@@ -623,7 +624,7 @@ def preview(conn: sqlite3.Connection, text: str) -> list[Preview]:
             if len(found) > 1:
                 problem = f"'{line.mote}' names {len(found)} motes -- rename all but one"
             elif found and (line.kind == UNKNOWN or (line.kind == EQUATION and line.free)):
-                value = _shown(by_id[found[0]].properties, line.key)
+                value = _shown(by_id[found[0]].properties, line.key, inferred.get(found[0]))
         out.append(Preview(line.number, _kind(line), problem, value))
     return out
 
@@ -641,11 +642,11 @@ def _kind(line: Line) -> str:
     return EQUATION if line.free else RELATION
 
 
-def _shown(properties: dict, key: str) -> str:
+def _shown(properties: dict, key: str, inferred: dict[str, str] | None = None) -> str:
     value = properties.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return ""
-    unit = units_repo.parse_units_property(properties.get(units_repo.UNITS_KEY)).get(key)
+    unit = simulation.units_for(properties, inferred).get(key)
     from core.calc import Quantity
     return Quantity(value, unit).text()
 

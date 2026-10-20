@@ -71,8 +71,9 @@ def test_units_are_the_motes_own(conn):
     update_mote(conn, named(conn, "m").id, {"uncertainty": {"b": 10}})
     run_simulation(conn)
     (c,) = uncertainty.propagate(conn).results
-    # ± 10 cm on b, reported in c's own declared unit.
-    assert c.unit == named(conn, "m").properties[UNITS_KEY]["c"]
+    # ± 10 cm on b, reported in the unit a solve infers for c.
+    from core.simulation import inferred_units
+    assert c.unit == inferred_units(conn)[named(conn, "m").id]["c"]
     from core.units import convert
     assert c.sigma == pytest.approx(convert(10, "cm", c.unit), rel=1e-6)
 
@@ -109,11 +110,12 @@ def test_has_uncertainty(conn):
     assert uncertainty.has_uncertainty(conn)
 
 
-def test_an_unsolved_result_is_in_base_units_and_says_so(conn):
+def test_an_unsolved_result_is_in_the_unit_a_solve_infers(conn):
+    # Inferred from the equations, so a result never written still says m.
     worksheet.apply(conn, BAR)
     with_spread(conn, "bd", x=0.5)
     (l,) = uncertainty.propagate(conn).results
-    assert l.unit is None
+    assert l.unit == "m"
     assert l.sigma == pytest.approx(0.8 * 0.5 * 0.0254, rel=1e-6)
 
 

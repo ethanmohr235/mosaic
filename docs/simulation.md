@@ -434,9 +434,8 @@ is ignored, since a result's ± is what this computes. An unreadable entry
 is reported, never dropped: a ± that vanished would make an answer look
 more certain than it is.
 
-Values and ± come back in each result's declared unit. A result that has
-never been solved declares none yet (a solve infers it), and comes back in
-base SI -- solve first.
+Values and ± come back in each result's declared unit, or else the one
+inferred for it (see *Inference*); a result with neither is in base SI.
 
 `\val`, `\given` and `\answers` print a value with its ± (`100.0 ± 0.54
 in`), the ± to two significant figures whatever the value is quoted to.
@@ -1424,25 +1423,35 @@ breaking the run.
 
 ### Inference
 
-A **freedom** the solver just determined is different from any other
-property: it is about to be written regardless, and if the equation that
-determined it names a dimension in plain sight, leaving the result
-unitless would throw away information the garden already had. So when a
-freedom has no `units` entry of its own, the solver looks at whichever
-equation determined it and, if that equation reduces to the bare freedom
-on one side (`resistance == voltage / current`), reads a unit straight
-off the dimension of the other side:
+A **freedom** is different from any other property: the solver writes a
+number onto it, and if the equation that determines it names a dimension
+in plain sight, showing the result unitless would throw away information
+the garden already had. So when a freedom has no `units` entry of its
+own, the equation that determines it is read and, if it reduces to the
+bare freedom on one side (`resistance == voltage / current`), a unit is
+read straight off the dimension of the other side:
 
 ```
 resistance:               <- solved, previously undeclared
 voltage:     10
 current:      2
 
-units:  {"voltage": "V", "current": "A"}     <- becomes {..., "resistance": "ohm"}
+units:  {"voltage": "V", "current": "A"}     <- resistance reads in ohm
 ```
 
-`resistance` comes out as `5`, in ohms, and the mote's `units` map is
-updated to say so -- both in the same write. A dimension with no name of
+`resistance` comes out as `5`, in ohms. **The inferred unit is never
+stored**: the solve writes `5` and leaves `units` as it was, and every
+surface that shows the value works the unit out again when it reads it
+(`inferred_units()`, which reads dimensions and solves nothing). A unit a
+solve saved would read as declared from then on and stop following its
+equation: retype a given from `1/cm*s` to `1/(cm*s)` and the result has
+to go from `s` to `Hz`, not keep the `s` it was first given. A garden
+from before this has its saved units dropped once, on open, where they
+equal what is inferred today (`core/db.py`, `PRAGMA user_version` 1); one
+that differs stays, and reads as declared.
+
+Inference repeats until it finds nothing new, so a unit inferred for one
+freedom feeds the next (`y == 2 * x` once `x` has one). A dimension with no name of
 its own (`distance / time`) falls back to the base-SI product, written
 in the same caret notation a person typing a unit by hand would use
 (`m*s^-1`) via `describe_expression()`, rather than the unicode
@@ -1452,8 +1461,7 @@ one a person named, once `format_unit()` renders either back with
 superscripts for display. Leaving the property silently unnamed would
 be worse than either.
 
-This only ever *adds* a unit, never overrides one a mote already
-declares, and only ever fires when the freedom is the **entire** left-
+This never overrides a unit a mote declares, and only ever fires when the freedom is the **entire** left-
 or right-hand side of the equation -- `voltage == 2 * resistance` says
 nothing safe about `resistance` in isolation, so a freedom buried inside
 a larger expression is left alone rather than guessed at. Like the

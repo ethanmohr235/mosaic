@@ -776,8 +776,9 @@ What the build decided within the settled plan above.
     the equation).
   - `+N more` appears once per mote, on its leftmost stub, counting the
     numeric properties no stub shows.
-  - A solved value with no declared unit shows the unit a written
-    solve would infer, in the base unit it was solved in.
+  - A solved value with no declared unit shows the unit a solve
+    infers, in the base unit it was solved in. Inferred units are never
+    stored (`simulation.md` → *Inference*).
   - A fault states its own counts in `solve_health`'s words. Health's
     blocks would blame the steps that did solve.
 - **What an equation reads is taken at the solved point**

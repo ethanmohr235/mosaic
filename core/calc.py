@@ -368,8 +368,8 @@ def _all_rows(conn: sqlite3.Connection, live=None) -> tuple[Row, ...]:
     would make this module import the one that imports it."""
     rows = []
     freedoms = simulation.garden_freedoms(conn)
-    stored = {m.id: m.properties for m in motes_repo.list_motes(conn)}
-    for mote_id, properties in (live.properties if live is not None else stored).items():
+    garden = live.properties if live is not None else _with_inferred_units(conn)
+    for mote_id, properties in garden.items():
         name = _name(properties, mote_id)
         sources = parse_source_property(properties.get(SOURCE_KEY))
         for key in sorted(set(properties) | freedoms.get(mote_id, set())):
@@ -378,6 +378,17 @@ def _all_rows(conn: sqlite3.Connection, live=None) -> tuple[Row, ...]:
                 continue
             rows.append(Row(mote_id, name, key, value, sources.get(key)))
     return tuple(sorted(rows, key=lambda r: (r.mote.casefold(), r.key)))
+
+
+def _with_inferred_units(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Every mote's stored properties, a solved value's unit filled in from
+    what a solve infers (a live solve's `properties` already are)."""
+    inferred = simulation.inferred_units(conn)
+    return {
+        m.id: ({**m.properties, units_repo.UNITS_KEY: simulation.units_for(m.properties, inferred[m.id])}
+               if m.id in inferred else m.properties)
+        for m in motes_repo.list_motes(conn)
+    }
 
 
 def _name(properties: dict, mote_id: str) -> str:
