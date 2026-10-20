@@ -1007,7 +1007,9 @@ a mote and a rule per line. Eight lines say the same thing.
 | --- | --- |
 | `bd.x = 80 in` | a **given**: the property, and `in` in the mote's `units` map |
 | `bd.l = sqrt(...)` | an **equation**: a rule mote, `applies_to bd`, and `l` free on `bd` |
+| `bd.l [m] = sqrt(...)` | an equation that declares `m` for `l`, refused if its right side is not a length |
 | `bd.Ax = ?` | an **unknown**: `Ax` free on `bd`, with no value |
+| `bd.Ax [N] = ?` | an unknown that declares `N` for `Ax` |
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
 | `bd.sigma <= 250` | a **check**: evaluated, never solved |
 | `b.R1 + b.R2 ?= b.W` | an **equality check**: stored as `==` with `check: true` |
@@ -1028,6 +1030,20 @@ only `=` also declares its left side a freedom. `=` is the assignment —
 some other reason, which is how a residual is written without the parser
 guessing which of two unknowns it determines. `= ?` is how the person who
 wrote that residual says which values it may determine.
+
+**`[unit]` on the left declares the unit of the value a `=` line solves
+for**, so the line that says what to solve for also says what the answer
+is measured in. The line is refused (struck in the margin as you type,
+and not written) when its right side has a different dimension:
+`reactor.leakage [s] = 4 * pi * reactor.r^2 * current(reactor.r)` says
+*left side is s but right side is Hz*. The check reads the garden as the
+whole sheet would leave it, so a given corrected a few lines up counts.
+Too few units to tell is not a problem. Leave the brackets off and the
+value declares nothing, so a unit it declared is taken away and the solve
+infers one (see [Inference](#inference)). `read()` writes `[unit]` back
+for every freedom that declares one, which is how a stale unit shows up.
+A given's unit stays after its number (`bd.x = 80 in`), and a unit on a
+`==` line, a check or a comparison is refused: those solve for nothing.
 
 **A rule a line makes is unnamed.** A name that copies its equation is a
 second account of it that drifts the moment the equation is edited — which

@@ -215,6 +215,19 @@ against it · `a` / `n` add override / new scenario (prefills `set
 | `^e` | In a note: insert `\begin{equation}` … `\end{equation}` with the caret (or the selection) inside |
 | `j` `k`, `g` `G` | Scroll (not typing) |
 
+Worksheet lines:
+
+| Line | Is |
+|---|---|
+| `bd.x = 80 in` · `bd.x = 80 ± 0.5 in` | Given (with a ±; `± 2%` relative) |
+| `bd.l = sqrt(bd.x^2 + bd.y^2)` | Equation: solve for `bd.l` |
+| `bd.l [m] = …` | …and declare its unit (refused if the right side disagrees) |
+| `bd.Ax = ?` · `bd.Ax [N] = ?` | Unknown: free to solve, no equation of its own |
+| `bd.Ax + bd.Bx == 0` | Relation: frees nothing |
+| `bd.s <= 250` · `b.R1 + b.R2 ?= b.W` | Check: evaluated, never solved |
+| `phi(r [cm]) = A * sin(B * r) / r` | Function |
+| `… ! ΣFx` | Names the rule |
+
 Read pane: `j` `k` `g` `G` `space` scroll · click a link to select its mote.
 Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
 `n` new note (prefills `edit `).

@@ -1658,6 +1658,17 @@ def inferred_units_of(
     return _infer_missing_units(view, equations, freedoms, {})
 
 
+def dimension_problems(
+    properties: dict[str, dict], relationships: list[Relationship],
+    equations: list[tuple[str, str]],
+) -> list[list[str]]:
+    """`check_equation`'s problems for each `(mote id, equation)`, against
+    a garden given as its properties -- one not yet written, as the
+    worksheet checks the garden a sheet would leave (core/worksheet.py)."""
+    view = _build_view(properties, relationships)
+    return [check_equation(text, _dimension_context(view, {}, mote_id)) for mote_id, text in equations]
+
+
 def units_for(
     properties: dict, inferred: dict[str, str] | None = None
 ) -> dict[str, str]:

@@ -44,7 +44,9 @@ surface can say so rather than implying a worksheet is the whole garden.
 | `bd.x = 80 in` | a **given**: the property, and `in` in the mote's `units` map |
 | `bd.x = 80 ± 0.5 in` | a given with a ±, written to its `uncertainty` entry (`+-` also works; `± 2%` is relative) |
 | `bd.l = sqrt(...)` | an **equation**: a rule mote, `applies_to bd`, and `l` free on `bd` |
+| `bd.l [m] = sqrt(...)` | an equation that declares `m` for `l`, refused if its right side is not a length |
 | `bd.Ax = ?` | an **unknown**: `Ax` free on `bd`, with no value |
+| `bd.Ax [N] = ?` | an unknown that declares `N` for `Ax` |
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
 | `bd.sigma <= 250` | a **check**: evaluated, never solved (`core/formula.py`) |
 | `bd.R1 + bd.R2 ?= bd.W` | an **equality check**: stored as `==` with `check: true` |
@@ -69,6 +71,13 @@ which to solve for -- and guessing is exactly what the engine refuses to
 do. `bd.Ax = ?` is how the person who wrote the residual says which
 values it is allowed to determine, and it is what makes the projection
 complete: every freedom either heads an assignment line or has a `= ?` one.
+
+`[unit]` on the left of a `=` is the unit of the value that line solves
+for, written into the mote's `units` map; the line is refused when its
+right side contradicts it (`_unit_problems`, against the garden as the
+whole sheet would leave it). Without the brackets the value declares no
+unit, and a solve infers one -- a line is the whole account of its value,
+as a given's line is of its ±.
 
 `?=` is the worksheet's spelling of an equality that is checked rather
 than solved -- `ΣFy` verifying the reactions two moment equations found.
@@ -128,6 +137,8 @@ UNKNOWN_MARKER = "?"
 _RELATION_RE = re.compile(r"^(?P<lhs>.+?)\s*(?P<op>\?=|==|<=|>=|<|>)\s*(?P<rhs>.+)$")
 _ASSIGN_RE = re.compile(r"^(?P<lhs>[^=<>]+?)\s*=\s*(?P<rhs>.+)$")
 _TARGET_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*$")
+# `bd.Ax [N]`: the unit a `=` line declares for the value it solves for.
+_DECLARED_RE = re.compile(r"^(?P<target>[^\[\]]+?)\s*\[\s*(?P<unit>[^\[\]]*?)\s*\]\s*$")
 # `phi(r [cm], z) = body`: a call on the left of a single `=`. Unambiguous,
 # since an assignment's left side is otherwise always `mote.key`.
 _FUNCTION_RE = re.compile(
@@ -234,6 +245,10 @@ def _read(number: int, text: str, body: str, name: str) -> Line:
     if function:
         return _function(number, text, function)
     relation = _RELATION_RE.match(body)
+    if relation and "[" in relation.group("lhs"):
+        raise FormulaError(
+            "a unit belongs to the value a `=` line solves for -- write "
+            "`bd.l [m] = ...`, or declare it on the line that gives or solves the value")
     if relation and relation.group("op") == CHECK_MARKER:
         lhs, rhs = relation.group("lhs"), relation.group("rhs")
         line = _equation(number, text, f"{lhs.strip()} == {rhs.strip()}", name, lhs, assigns=False)
@@ -247,10 +262,11 @@ def _read(number: int, text: str, body: str, name: str) -> Line:
             f"{body!r} is not a worksheet line -- write `bd.x = 80 in` for a given, "
             f"`bd.l = sqrt(bd.x^2 + bd.y^2)` for an equation"
         )
-    lhs, rhs = assignment.group("lhs"), assignment.group("rhs")
+    lhs, declared = _declared_unit(assignment.group("lhs"))
+    rhs = assignment.group("rhs")
     if rhs.strip() == UNKNOWN_MARKER:
         mote, key = _target(lhs)
-        return Line(number, text, UNKNOWN, mote=mote, key=key, name=name, free=True)
+        return Line(number, text, UNKNOWN, mote=mote, key=key, unit=declared, name=name, free=True)
     spread = None
     with_spread = _SPREAD_RE.match(rhs)
     if with_spread:
@@ -263,10 +279,33 @@ def _read(number: int, text: str, body: str, name: str) -> Line:
             raise FormulaError(
                 f"only a given can carry a ± -- {rhs!r} is not a number; an "
                 f"equation's ± is propagated from its inputs, never written")
-        return _equation(number, text, f"{lhs} == {rhs}", name, lhs, assigns=True)
+        line = _equation(number, text, f"{lhs} == {rhs}", name, lhs, assigns=True)
+        if declared and not line.free:
+            raise FormulaError(
+                f"{lhs.strip()!r} is not one property, so `[{declared}]` has no value to "
+                f"declare -- write `<mote>.<property> [unit] = ...`")
+        return replace(line, unit=declared)
+    if declared:
+        raise FormulaError(
+            f"a given's unit goes after its number -- write `{lhs.strip()} = {rhs.strip()} "
+            f"{declared}`")
     mote, key = _target(lhs)
     return Line(number, text, GIVEN, mote=mote, key=key, value=value, unit=unit, name=name,
                 spread=spread)
+
+
+def _declared_unit(lhs: str) -> tuple[str, str | None]:
+    """`bd.l [m]` as (`bd.l`, `m`); a left side with no `[unit]` as
+    itself and None. The unit is checked here, as a parameter's is."""
+    match = _DECLARED_RE.match(lhs)
+    if match is None:
+        return lhs, None
+    unit = match.group("unit")
+    if not unit:
+        raise FormulaError("`[]` names no unit -- write `bd.l [m] = ...`, or leave the brackets off")
+    if not units_repo.is_unit(unit):
+        raise FormulaError(f"{unit!r} is not a unit")
+    return match.group("target"), unit
 
 
 def _function(number: int, text: str, match: re.Match) -> Line:
@@ -349,6 +388,9 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
     are gone. See the module docstring: this replaces the garden's
     `once`-scoped equations rather than adding to them."""
     sheet = parse(text)
+    refused = _unit_problems(conn, sheet)
+    sheet = Worksheet(tuple(replace(line, problem=refused[line.number])
+                            if line.number in refused else line for line in sheet.lines))
     index = _by_name(conn)
     created: list[str] = []
     problems = list(sheet.problems)
@@ -374,7 +416,9 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
             problems.append(f"line {line.number}: {e}")
     for line in sheet.unknowns:
         try:
-            _free(conn, _resolve(conn, index, created, line.mote), line.key)
+            mote_id = _resolve(conn, index, created, line.mote)
+            _free(conn, mote_id, line.key)
+            _declare_unit(conn, mote_id, line.key, line.unit)
         except FormulaError as e:
             problems.append(f"line {line.number}: {e}")
     for line in sheet.equations:
@@ -540,7 +584,9 @@ def _write_rule(conn, index, created: list[str], line: Line) -> str:
         if not line.check:
             motes_repo.delete_property(conn, rule_id, rules_repo.CHECK_KEY)
     if line.free:
-        _free(conn, _resolve(conn, index, created, line.mote), line.key)
+        mote_id = _resolve(conn, index, created, line.mote)
+        _free(conn, mote_id, line.key)
+        _declare_unit(conn, mote_id, line.key, line.unit)
     return rule_id
 
 
@@ -575,6 +621,84 @@ def _free(conn, mote_id: str, key: str) -> None:
     if key not in freedoms:
         motes_repo.update_mote(
             conn, mote_id, {rules_repo.FREEDOMS_KEY: [*freedoms, key]})
+
+
+def _declare_unit(conn, mote_id: str, key: str, unit: str | None) -> None:
+    """The unit a `=` line declares for the value it solves for, or none.
+    The line is the whole account of that value, so one written without
+    `[unit]` takes a declared unit away and leaves the solve to infer it,
+    as `_write_given` takes away a ± its line no longer carries."""
+    properties = motes_repo.get_mote(conn, mote_id).properties
+    unit_map = units_repo.parse_units_property(properties.get(units_repo.UNITS_KEY))
+    if unit_map.get(key) == unit:
+        return
+    if unit:
+        unit_map[key] = unit
+    elif key not in unit_map:
+        return
+    else:
+        del unit_map[key]
+    if unit_map:
+        motes_repo.update_mote(conn, mote_id, {units_repo.UNITS_KEY: unit_map})
+    else:
+        motes_repo.delete_property(conn, mote_id, units_repo.UNITS_KEY)
+
+
+# ---- checking a declared unit ----
+
+
+def _unit_problems(conn: sqlite3.Connection, sheet: Worksheet) -> dict[int, str]:
+    """Each line whose declared unit its right side contradicts, by line
+    number, in the dimension checker's own words. Checked against the
+    garden as the whole sheet would leave it -- its givens' units and its
+    functions included -- so a line is judged the same typed as applied.
+    Not enough units to tell is no problem, as for `check_equation`."""
+    lines = [line for line in sheet.equations if line.unit]
+    if not lines:
+        return {}
+    properties, ids = _as_applied(conn, sheet)
+    found = simulation.dimension_problems(
+        properties, rel_repo.list_relationships(conn),
+        [(ids[line.mote], line.relation) for line in lines])
+    return {line.number: "; ".join(problems) for line, problems in zip(lines, found) if problems}
+
+
+def _as_applied(conn: sqlite3.Connection, sheet: Worksheet) -> tuple[dict[str, dict], dict[str, str]]:
+    """The garden's properties with the sheet laid over them, unwritten,
+    and the mote id behind each name. A name the garden lacks gets a
+    stand-in mote, as applying would create one."""
+    properties = {m.id: dict(m.properties) for m in motes_repo.list_motes(conn)}
+    ids: dict[str, str] = {}
+    for mote_id, props in properties.items():
+        if isinstance(props.get("name"), str):
+            ids.setdefault(props["name"], mote_id)
+
+    def mote(name: str) -> dict:
+        if name not in ids:
+            ids[name] = f"worksheet:{name}"
+            properties[ids[name]] = {"name": name}
+        return properties[ids[name]]
+
+    def units(props: dict) -> dict[str, str]:
+        props[units_repo.UNITS_KEY] = units_repo.parse_units_property(props.get(units_repo.UNITS_KEY))
+        return props[units_repo.UNITS_KEY]
+
+    for line in sheet.functions:
+        props = mote(line.mote)
+        props[functions_repo.FUNCTION_KEY] = line.relation
+        props[functions_repo.PARAMETERS_KEY] = [p for p, _unit in line.parameters]
+        units(props).update({p: unit for p, unit in line.parameters if unit})
+    for line in sheet.givens:
+        props = mote(line.mote)
+        props[line.key] = line.value
+        if line.unit:
+            units(props)[line.key] = line.unit
+    for line in (*sheet.unknowns, *(e for e in sheet.equations if e.free)):
+        declared = units(mote(line.mote))
+        declared.pop(line.key, None)
+        if line.unit:
+            declared[line.key] = line.unit
+    return properties, ids
 
 
 def _existing_rules(conn: sqlite3.Connection) -> tuple[list[rules_repo.Rule], int]:
@@ -616,9 +740,11 @@ def preview(conn: sqlite3.Connection, text: str) -> list[Preview]:
     index = _by_name(conn)
     by_id = {m.id: m for m in motes_repo.list_motes(conn)}
     inferred = simulation.inferred_units(conn)
+    sheet = parse(text)
+    refused = _unit_problems(conn, sheet)
     out = []
-    for line in parse(text).lines:
-        problem, value = line.problem, ""
+    for line in sheet.lines:
+        problem, value = line.problem or refused.get(line.number, ""), ""
         if not problem and line.mote:
             found = index.get(line.mote, [])
             if len(found) > 1:
@@ -806,15 +932,17 @@ def _render(
     name = anchor.properties.get("name") if anchor else None
     if isinstance(name, str) and name.isidentifier():
         relation = _qualify(relation, name)
+    anchor_units = units_repo.parse_units_property(
+        anchor.properties.get(units_repo.UNITS_KEY)) if anchor else {}
     line = (_as_check(relation) if rule.is_check
-            else _as_assignment(relation, free.get(rule.target_id, set())))
+            else _as_assignment(relation, free.get(rule.target_id, set()), anchor_units))
     declared = rule.mote.properties.get("name")
     if isinstance(declared, str) and declared.strip():
         line = f"{line}  {COMMENT_MARKER} {declared.strip()}"
     return line, relation
 
 
-def _as_assignment(relation: str, free: set[str]) -> str:
+def _as_assignment(relation: str, free: set[str], declared: dict[str, str] | None = None) -> str:
     """`bd.l == sqrt(...)` written back as `bd.l = ...`, which is how it was
     typed.
 
@@ -830,7 +958,13 @@ def _as_assignment(relation: str, free: set[str]) -> str:
     target = _TARGET_RE.match(match.group("lhs"))
     if target is None or target.group(2) not in free:
         return relation
-    return f"{match.group('lhs').strip()} {ASSIGN} {match.group('rhs').strip()}"
+    return f"{_with_unit(match.group('lhs').strip(), (declared or {}).get(target.group(2)))} " \
+           f"{ASSIGN} {match.group('rhs').strip()}"
+
+
+def _with_unit(target: str, unit: str | None) -> str:
+    """`bd.l [m]`, the left side of a `=` line whose value declares a unit."""
+    return f"{target} [{unit}]" if unit else target
 
 
 def _as_check(relation: str) -> str:
@@ -893,9 +1027,11 @@ def _render_unknowns(
         name = mote.properties.get("name")
         if not isinstance(name, str) or name not in referenced:
             continue
+        declared = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
         for key in sorted(free.get(mote.id, set())):
             if (name, key) not in headed:
-                lines.append((name, f"{name}.{key} {ASSIGN} {UNKNOWN_MARKER}"))
+                target = _with_unit(f"{name}.{key}", declared.get(key))
+                lines.append((name, f"{target} {ASSIGN} {UNKNOWN_MARKER}"))
     return lines
 
 

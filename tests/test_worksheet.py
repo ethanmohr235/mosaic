@@ -510,3 +510,83 @@ def test_a_gone_function_keeps_its_mote_while_it_holds_constants(conn):
     phi = named(conn, "phi").properties
     assert "function" not in phi and "parameters" not in phi
     assert phi[UNITS_KEY] == {"B": "1/cm"}
+
+
+# ---- a declared unit: `m.k [unit] = ...` ----
+
+LEAK = """phi.A = 5e13 1/(cm*s)
+reactor.r = 50 cm
+reactor.leak [1/s] = phi.A * reactor.r"""
+
+
+def test_a_unit_on_the_left_is_the_unit_of_what_the_line_solves_for():
+    line = worksheet.parse("r.leak [1/s] = 4 * r.x").lines[0]
+    assert (line.kind, line.free, line.unit, line.relation) == (
+        worksheet.EQUATION, True, "1/s", "r.leak == 4 * r.x")
+
+
+def test_an_unknown_can_declare_its_unit():
+    line = worksheet.parse("bd.Ax [N] = ?").lines[0]
+    assert (line.kind, line.unit) == (worksheet.UNKNOWN, "N")
+
+
+@pytest.mark.parametrize("text, problem", [
+    ("bd.x [in] = 80", "goes after its number"),
+    ("bd.a [m] + bd.b == 0", "a unit belongs to the value"),
+    ("bd.a [m] ?= bd.b", "a unit belongs to the value"),
+    ("r.leak [bogus] = 2 * r.x", "'bogus' is not a unit"),
+    ("r.leak [] = r.x", "names no unit"),
+])
+def test_a_misplaced_or_unknown_unit_is_refused(text, problem):
+    assert problem in worksheet.parse(text).lines[0].problem
+
+
+def test_applying_a_declared_unit_writes_it(conn):
+    assert worksheet.apply(conn, LEAK).problems == ()
+    assert named(conn, "reactor").properties[UNITS_KEY] == {"r": "cm", "leak": "1/s"}
+
+
+def test_a_declared_unit_round_trips(conn):
+    worksheet.apply(conn, LEAK + "\nbd.Ax [N] = ?\nbd.Ax + bd.B == 0\nbd.B = 2 N")
+    text = worksheet.read(conn)
+    assert "reactor.leak [1/s] = phi.A * reactor.r" in text
+    assert "bd.Ax [N] = ?" in text
+    assert worksheet.apply(conn, text).deleted == ()
+
+
+def test_a_unit_its_right_side_contradicts_is_refused(conn):
+    sheet = LEAK.replace("[1/s]", "[s]")
+    (problem,) = [p for p in worksheet.preview(conn, sheet) if p.problem]
+    assert problem.number == 3 and "different dimensions" in problem.problem
+    applied = worksheet.apply(conn, sheet)
+    assert applied.problems and "line 3" in applied.problems[0]
+    assert "leak" not in named(conn, "reactor").properties.get(UNITS_KEY, {})
+    assert equations_of(conn) == []
+
+
+def test_the_check_reads_the_sheet_not_the_garden(conn):
+    # The garden still says s/cm; the sheet being typed corrects it.
+    worksheet.apply(conn, LEAK.replace("1/(cm*s)", "1/cm*s").replace(" [1/s]", ""))
+    assert not [p for p in worksheet.preview(conn, LEAK) if p.problem]
+
+
+def test_leaving_the_brackets_off_clears_a_declared_unit(conn):
+    worksheet.apply(conn, LEAK)
+    worksheet.apply(conn, LEAK.replace(" [1/s]", ""))
+    assert "leak" not in named(conn, "reactor").properties[UNITS_KEY]
+    assert simulation.inferred_units(conn)[named(conn, "reactor").id]["leak"] == "Hz"
+
+
+def test_a_stale_unit_reads_back_and_is_flagged(conn):
+    # ne-homework-5: an `s` a solve once saved, behind a corrected given.
+    worksheet.apply(conn, LEAK)
+    reactor = named(conn, "reactor")
+    from core.motes import update_mote
+    update_mote(conn, reactor.id, {UNITS_KEY: {"r": "cm", "leak": "s"}})
+    text = worksheet.read(conn)
+    assert "reactor.leak [s] = " in text
+    assert [p.number for p in worksheet.preview(conn, text) if p.problem]
+    assert worksheet.apply(conn, text.replace("[s]", "[1/s]")).problems == ()
+    run_simulation(conn)
+    assert named(conn, "reactor").properties[UNITS_KEY]["leak"] == "1/s"
+    assert named(conn, "reactor").properties["leak"] == pytest.approx(2.5e15)
