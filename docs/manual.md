@@ -228,6 +228,9 @@ Worksheet lines:
 | `phi(r [cm]) = A * sin(B * r) / r` | Function |
 | `… ! ΣFx` | Names the rule |
 
+Margin: `=` given · `←` solves for its left side · `?` unknown · `≡`
+relation · `✓` check · `ƒ` function · `!` can't be written (hover: why).
+
 Read pane: `j` `k` `g` `G` `space` scroll · click a link to select its mote.
 Notes pane: `j` `k` move · `⏎` / click select (the `@sel` panes follow) ·
 `n` new note (prefills `edit `).

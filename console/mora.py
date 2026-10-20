@@ -115,7 +115,8 @@ class MoraApi:
     @locked
     def preview(self, text: str) -> dict[str, Any]:
         return self._answer("preview", lambda: {"lines": [
-            {"number": p.number, "kind": p.kind, "problem": p.problem, "value": p.value}
+            {"number": p.number, "kind": p.kind, "problem": p.problem, "value": p.value,
+             "title": p.title}
             for p in worksheet_repo.preview(self._session.conn, text or "")]})
 
     @locked

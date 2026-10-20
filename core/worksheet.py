@@ -732,6 +732,7 @@ class Preview:
     kind: str
     problem: str = ""
     value: str = ""
+    title: str = ""     # what the margin mark means, for its hover
 
 
 def preview(conn: sqlite3.Connection, text: str) -> list[Preview]:
@@ -751,8 +752,24 @@ def preview(conn: sqlite3.Connection, text: str) -> list[Preview]:
                 problem = f"'{line.mote}' names {len(found)} motes -- rename all but one"
             elif found and (line.kind == UNKNOWN or (line.kind == EQUATION and line.free)):
                 value = _shown(by_id[found[0]].properties, line.key, inferred.get(found[0]))
-        out.append(Preview(line.number, _kind(line), problem, value))
+        out.append(Preview(line.number, _kind(line), problem, value, _title(line)))
     return out
+
+
+def _title(line: Line) -> str:
+    """What a line's margin mark says, spelled out for its hover."""
+    kind = _kind(line)
+    target = _with_unit(f"{line.mote}.{line.key}", line.unit)
+    if kind == FUNCTION:
+        parameters = ", ".join(_with_unit(p, unit) for p, unit in line.parameters)
+        return f"function of {parameters}" if parameters else "function"
+    return {
+        GIVEN: "given",
+        UNKNOWN: f"free: solved for {target} by a relation",
+        EQUATION: f"solves for {target}",
+        RELATION: "relation: frees nothing; a `= ?` line says what it solves for",
+        CHECK: "check: evaluated, never solved",
+    }.get(kind, "")
 
 
 RELATION, CHECK = "relation", "check"
@@ -763,7 +780,8 @@ def _kind(line: Line) -> str:
     that frees a value, a relation that frees nothing, and a check."""
     if line.kind != EQUATION:
         return line.kind
-    if line.check:
+    match = _RELATION_RE.match(line.relation)
+    if line.check or (match and match.group("op") != "=="):
         return CHECK
     return EQUATION if line.free else RELATION
 

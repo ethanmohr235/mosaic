@@ -590,3 +590,15 @@ def test_a_stale_unit_reads_back_and_is_flagged(conn):
     run_simulation(conn)
     assert named(conn, "reactor").properties[UNITS_KEY]["leak"] == "1/s"
     assert named(conn, "reactor").properties["leak"] == pytest.approx(2.5e15)
+
+
+def test_preview_says_what_each_mark_means(conn):
+    sheet = ("phi(r [cm]) = 2 * r\nbd.x = 3 m\nbd.l [m] = bd.x\nbd.A = ?\n"
+             "bd.A + bd.l == 0\nbd.l <= 9")
+    titles = [p.title for p in worksheet.preview(conn, sheet)]
+    assert titles == [
+        "function of r [cm]", "given", "solves for bd.l [m]",
+        "free: solved for bd.A by a relation",
+        "relation: frees nothing; a `= ?` line says what it solves for",
+        "check: evaluated, never solved",
+    ]

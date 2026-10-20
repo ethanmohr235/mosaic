@@ -5,8 +5,11 @@
  *   bd.x = 80 in            a given          bd.l = ?           an unknown
  *   bd.l = sqrt(…)          an equation      bd.Ax + bd.Bx == 0 a relation
  *   bd.sigma <= 250         a check          … ! ΣFx            names the rule
+ *   phi(r [cm]) = …         a function       bd.l [m] = …       declares l's unit
  *
- * Typing only parses (api.mora.preview): the margin marks each line's kind,
+ * Typing only parses (api.mora.preview): the margin marks each line's kind
+ * (`←` solves for its left side, `≡` frees nothing, `ƒ` a function), with
+ * what the mark means on hover,
  * a line that can't be written is struck in --fault with the reason on
  * hover, and an unknown or an equation shows the value the garden holds for
  * it now, faded after the line. `esc` applies the whole sheet
@@ -17,7 +20,7 @@ import { createEditor } from "../editor.js";
 
 const HINTS = [["i ⏎", "edit"], ["j k", "scroll"], ["^f", "find"]];
 const EDIT_HINTS = [["esc", "apply"], ["^f", "find / replace"], ["^z", "undo typing"]];
-const MARKS = { given: "=", unknown: "?", equation: "ƒ", relation: "≡", check: "✓", blank: "" };
+const MARKS = { given: "=", unknown: "?", equation: "←", relation: "≡", check: "✓", function: "ƒ", blank: "" };
 const PREVIEW_MS = 150;
 
 function message(err) {
@@ -36,7 +39,10 @@ function create(ctx) {
     const line = st.lines[index];
     if (!line) return null;
     if (line.problem) return { cls: "ws-problem", mark: "!", title: line.problem };
-    return { cls: `ws-${line.kind}`, mark: MARKS[line.kind] || "", after: line.value ? `  = ${line.value}` : "" };
+    return {
+      cls: `ws-${line.kind}`, mark: MARKS[line.kind] || "", title: line.title || "",
+      after: line.value ? `  = ${line.value}` : "",
+    };
   }
 
   function onInput() {

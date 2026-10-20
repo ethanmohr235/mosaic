@@ -304,8 +304,10 @@ scroll, `g` `G` top and end.
 The garden's calculation as lines of text (`docs/simulation.md` → *The
 worksheet*), on the blueprint surface. Editing is modal as in a note.
 While you type each line is only read: the margin marks it (`=` given,
-`?` unknown, `ƒ` equation, `≡` relation, `✓` check, `!` a line that
-can't be written, struck through, with why on hover), and an unknown or
+`?` unknown, `←` an equation that solves for its left side, `≡` a
+relation that frees nothing, `✓` check, `ƒ` function, `!` a line that
+can't be written, struck through; hovering a line says what its mark
+means, or why it can't be written), and an unknown or
 an equation shows the garden's current value after it, faded. **`esc`
 applies the whole sheet** as one undo step and logs what it made and
 deleted; with `live` on, a solve follows. A sheet that applied cleanly

@@ -167,7 +167,7 @@ def test_an_unchanged_sheet_writes_nothing_to_undo(conn, bar):
 def test_preview_reads_each_line(conn, bar):
     lines = worksheet.preview(conn, "bd.x = 3 m\nbd.l = ?\nbd.l = sqrt(bd.x^2)\nbd.l <= 10\n"
                                     "bd.a ?= bd.b\n\nwhat is this")
-    assert [p.kind for p in lines] == ["given", "unknown", "equation", "relation", "check",
+    assert [p.kind for p in lines] == ["given", "unknown", "equation", "check", "check",
                                        "blank", "blank"]
     assert lines[1].value == "5 m" and lines[2].value == "5 m"
     assert lines[6].problem
