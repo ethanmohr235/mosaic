@@ -392,6 +392,11 @@ numbered independently, because a reader looking for Figure 2 should not
 have to know how many equations came before it. `\rule` shares the equation
 counter, since what it prints *is* a numbered equation.
 
+**By number, no label.** `\ref{eq:3}`, `\ref{fig:2}` and `\ref{tab:1}` reach
+the third equation, second figure and first table by position. A `\label`
+of the same name wins. Position moves when a block is inserted above, so
+use a `\label` for anything that must keep pointing at the same block.
+
 Every `\begin{equation}` is numbered whether or not it is labelled, so the
 numbers a reader sees do not shift the day somebody adds a label.
 

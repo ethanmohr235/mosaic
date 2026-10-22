@@ -431,6 +431,11 @@ _COUNTERS: dict[type, str] = {
 }
 
 
+# The prefix `\ref{eq:3}` / `\ref{fig:2}` / `\ref{tab:1}` uses to reach a
+# block by its number when it has no `\label`.
+_NUMBER_PREFIX = {EQUATION_LABEL: "eq", FIGURE_LABEL: "fig", TABLE_LABEL: "tab"}
+
+
 def numbered(document: Document) -> Document:
     """The document with every numbered block numbered and every `\\label`
     collected, plus a diagnostic for a duplicate label or a `\\ref` to one
@@ -445,6 +450,7 @@ def numbered(document: Document) -> Document:
     counters: dict[str, int] = {}
     blocks: list[Block] = []
     labels: dict[str, Label] = {}
+    positional: dict[str, Label] = {}
     # Anything this pass is about to work out again is dropped first, which
     # is what makes running it twice safe. A `\ref` in an included note may
     # point at a `\label` in the note that included it, so the first pass
@@ -460,6 +466,8 @@ def numbered(document: Document) -> Document:
         counters[kind] = counters.get(kind, 0) + 1
         block = dataclasses.replace(block, number=counters[kind])
         blocks.append(block)
+        positional[f"{_NUMBER_PREFIX[kind]}:{counters[kind]}"] = Label(
+            kind, counters[kind], block.line)
         if block.label:
             if block.label in labels:
                 diagnostics.append(Diagnostic(
@@ -468,6 +476,11 @@ def numbered(document: Document) -> Document:
                     f"cannot say which one was meant",
                 ))
             labels.setdefault(block.label, Label(kind, counters[kind], block.line))
+
+    # `\ref{eq:3}` finds the third equation by position; a `\label` of the
+    # same name wins, so a name the author chose is never shadowed.
+    for name, label in positional.items():
+        labels.setdefault(name, label)
 
     document = Document(blocks, diagnostics, labels)
     document.diagnostics.extend(_dangling_refs(document))
