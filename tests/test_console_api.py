@@ -8,6 +8,7 @@ import pytest
 from console import state as state_repo
 from console.api import Api
 from console.session import Session
+from core import commands
 from core import motes as motes_repo
 from core import undo
 from core.gardens import create_garden, garden_exists
@@ -26,7 +27,7 @@ MOTION_BRIDGE = {"sim", "rewrite", "rule", "scenarios"}  # U5
 MORA_BRIDGE = {"open", "render", "save", "notes", "worksheet", "preview", "apply", "paste_image"}  # U6
 MONASTERY_BRIDGE = {"view", "rewrite", "edit", "skip", "slot", "follow"}  # U7
 MONARCH_BRIDGE = {"view", "flow", "rewrite", "pins", "pin", "unpin"}  # U8, graph --flow
-HOME_BRIDGE = {"gardens", "garden"}  # U9
+HOME_BRIDGE = {"gardens", "garden", "sync"}  # U9
 
 
 @pytest.fixture
@@ -1094,3 +1095,19 @@ def test_sync_status_is_none_until_signed_in_then_marks_and_asks_to_refresh(api,
     assert pending["state"] == "pending" and pending["label"].startswith("↑")
     sync_status.write(sync_status.Report(ok=False, error="can't reach http://x"))
     assert api.sync_status()["state"] == "offline"
+
+
+def test_the_sync_pane_asks_its_questions_first(api):
+    from core import sync_account, sync_status
+    assert api.home.sync("sync")["account"] is None
+    sync_account.save(sync_account.Account("http://x", "cartographer", "t"))
+    sync_status.write(sync_status.Report(
+        gardens=[sync_status.GardenState("test", sync_status.PENDING, "id", pending=1)],
+        conflicts=[sync_status.Conflict("scratch", "sid", "compass")]))
+    pane = api.home.sync("sync")
+    assert pane["conflicts"] == [{"name": "scratch",
+                                  "question": "compass also has a garden named 'scratch': merge or rename?"}]
+    assert [(r["name"], r["state"]) for r in pane["rows"]] == [("test", "pending")]
+    assert pane["account"]["device"] == "cartographer" and pane["current"] == "test"
+    assert "a command" in api.home.sync("sync now")["error"]
+    assert commands.resolve_view("sync") == ("sync", "sync")

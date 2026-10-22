@@ -300,8 +300,23 @@ Mouse: drag empty space to pan · wheel zooms · hover a stub lights its sibling
 | `n`, `r` | New, rename (prefills `garden …`) |
 | `d` `d` | Remove (`garden rm`; `garden restore` brings it back) |
 | `z` | Archive / unarchive |
-| `s`, `E`, `I` | Sync (prefills), export (file dialog), import (prefills) |
+| `s`, `E`, `I` | Keep local / share again (prefills `sync local\|share`), export (file dialog), import (prefills) |
 | `Z` | Show / fold archived |
+
+Marks: `●` open here · `!` ownership problem · sync `⇅` synced, `↑` to send, `○` local, `?` name clash, `…` waiting, `×` failed.
+
+**Sync** (`sync`; or click the top bar's sync mark)
+
+| Key | Does |
+|---|---|
+| `j` `k` / click | Move |
+| `m` | Merge: this garden joins the server's of the same name (a clash row) |
+| `r` | Rename this one out of the way (prefills `sync rename`; a clash row) |
+| `l` | Keep the garden on this machine / share it again |
+| `n` | `sync now` |
+| `⏎` | `cd` there |
+
+Top bar: `synced` · `↑N` not sent yet · `offline` · `? N` clashes to answer.
 
 `garden` pane: `⏎` or a click on a garden named there `cd`s.
 

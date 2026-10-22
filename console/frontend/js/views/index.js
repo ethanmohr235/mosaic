@@ -91,9 +91,10 @@ import month from "./month.js";
 import graph from "./graph.js";
 import gardens from "./gardens.js";
 import garden from "./garden.js";
+import sync from "./sync.js";
 
 export const VIEWS = [log, table, props, plot, fit, sim, rule, scenarios, edit, read, notes, worksheet,
-  agenda, week, month, graph, gardens, garden];
+  agenda, week, month, graph, gardens, garden, sync];
 
 export function viewById(id) {
   return VIEWS.find((view) => view.id === id) || null;

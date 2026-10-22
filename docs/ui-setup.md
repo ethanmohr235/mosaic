@@ -451,8 +451,9 @@ bar's breadcrumb is the open garden's ownership path
 
 | Line | Pane |
 |---|---|
-| `gardens [--archived]` | every garden: owned ones under their owner's garden, with the cover's name, due and status and the mote count; then loose gardens; then archived ones, folded unless `--archived`. `●` is the open garden, `⇅` syncs, `!` has an ownership problem (listed under the tree) |
-| `garden [‹name›]` | one garden (none: the open one): its path, owner and cover, what it owns, counts, size and file, last change, sync, why it is archived, and its problems. It follows the tree's cursor |
+| `gardens [--archived]` | every garden: owned ones under their owner's garden, with the cover's name, due and status and the mote count; then loose gardens; then archived ones, folded unless `--archived`. `●` is the open garden, `!` has an ownership problem (listed under the tree), and the garden's sync state from the last pass: `⇅` synced, `↑` to send, `○` kept local, `?` a name clash, `…` waiting, `×` failed |
+| `garden [‹name›]` | one garden (none: the open one): its path, owner and cover, what it owns, counts, size and file, last change, sync state (what is waiting to send, held, and why), why it is archived, and its problems. It follows the tree's cursor |
+| `sync` | every garden's sync state on this machine: name clashes to answer first, then one row per garden, the machine and who is syncing (`m` merge, `r` rename, `l` local / share, `n` sync now) |
 
 | Key | Does |
 |---|---|
@@ -461,7 +462,7 @@ bar's breadcrumb is the open garden's ownership path
 | `n`, `r` | `garden new …`, `garden rename ‹garden› …` on the command line |
 | `d` `d` | `garden rm ‹garden›` (runs; `garden restore` brings it back) |
 | `z` | Archive / unarchive |
-| `s` | `garden sync ‹garden› …` on the command line |
+| `s` | `sync local ‹garden›` (or `sync share` for one kept local) on the command line |
 | `E`, `I` | Export (asks where), `garden import …` |
 | `Z` | Show / fold the archived gardens |
 

@@ -71,7 +71,7 @@ def builtin_layout(name: str) -> BuiltinLayout | None:
 # A pane's view is named for its verb (docs/console.md -> Polish and
 # unification), except the three below. Bare verbs open their view with no
 # arguments; the others answer their whole line (`find status:open --sort due`).
-BARE_VIEW_VERBS = frozenset({"log", "scenarios", "worksheet"})
+BARE_VIEW_VERBS = frozenset({"log", "scenarios", "worksheet", "sync"})
 LINE_VIEW_VERBS = frozenset({"find", "open", "plot", "fit", "sim", "rule", "why", "edit", "read", "notes",
                              "agenda", "week", "month", "graph", "gardens", "garden"})
 _VIEW_NOT_NAMED_FOR_VERB = {"find": "table", "open": "props", "why": "rule"}

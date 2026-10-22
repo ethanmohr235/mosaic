@@ -960,6 +960,7 @@ h1.doc-heading { border-bottom: var(--border) solid var(--paper-rule); padding-b
 /* gardens and garden (U9) */
 .topbar .breadcrumb .crumb.up { cursor: pointer; }
 .topbar .breadcrumb .crumb.up:hover { color: var(--fg); }
+.sync-mark { cursor: pointer; }
 .home-garden { white-space: pre; }
 .home-garden.current { color: var(--bright); font-weight: var(--w-bold); }
 .home-link { color: var(--fg); cursor: pointer; text-decoration: underline dotted var(--line-strong); }

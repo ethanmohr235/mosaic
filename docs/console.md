@@ -162,9 +162,12 @@ this table by the roadmap phase that builds them.
   selection, re-run when the selection changes.
 - **Every** pane re-runs its command after any write made from the
   window (command line, props edit, a view's own edit).
-- Writes from outside the window (MCP, CLI, sync) are picked up when
-  the window regains focus, and by an explicit
-  `refresh`.
+- Writes from outside the window (MCP, CLI) are picked up when the
+  window regains focus, and by an explicit `refresh`, which also pokes
+  the sync worker when the console hosts it.
+- A sync pass that brings changes into the open garden re-runs every
+  pane at once. The shell polls `sync_status()` every 4 s, and the same
+  poll feeds the top bar's sync mark.
 - Re-running must be cheap enough for this. A view that's too slow to
   re-run gets a cache in its API namespace, not a stale-output mode.
 
@@ -856,6 +859,33 @@ What the build decided within the settled plan above.
   pane lists such a freedom even when no property holds it.
 - **The sim header ends `preview — solve writes`.** There is no key that
   writes a tick.
+
+### Sync in the console (2026-10-22)
+
+Every garden syncs through one account per machine
+(`docs/architecture.md` -> *Sync*). The console's part:
+
+- **The worker.** The console hosts the machine's sync worker unless a
+  service already does (`console/app.py`). The open garden is held
+  (`gardens.hold`), so a pass never renames or trashes it underneath the
+  window; that garden waits for the next pass.
+- **The top bar** shows the sync mark with the shell state: `synced`
+  (dim), `↑N` changes in the open garden not sent yet, `offline` (fault)
+  or `? N` name clashes to answer (warn). The hover says more, and a
+  click opens the `sync` pane. There is no mark when the machine isn't
+  signed in.
+- **The `sync` pane** (`views/sync.js`, `core/sync_commands.py::pane`)
+  lists name clashes first, each asking its question ("compass also has
+  a garden named 'x': merge or rename?"). Then come one row per garden
+  (state, to send, held, detail), the machine, the last pass and who is
+  syncing. `m` merges, `r` prefills `sync rename`, `l` keeps a garden
+  local or shares it again, `n` runs `sync now`, `⏎` `cd`s.
+- **Home** marks each garden's sync state: `⇅` synced, `↑` to send, `○`
+  local, `?` clash, `…` waiting, `×` failed. The `garden` pane shows the
+  state, what is waiting and why. In the tree, `s` prefills
+  `sync local|share ‹garden›`.
+- **Signing in is the CLI's** (`monoss sync login`). The console never
+  asks for the server's secret, so it never enters a line's history.
 
 ### Visual system
 

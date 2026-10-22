@@ -3,15 +3,18 @@
 
     gardens(command)     what a `gardens [--archived]` line shows
     garden(command)      what a `garden [‹name›]` line shows (none: the open one)
+    sync(command)        what the `sync` line shows (core/sync_commands.py)
 
-Both are answered by core/home.py. Reading the tree opens every garden,
+The first two are answered by core/home.py. Reading the tree opens every garden,
 so a pane asks on run, never per keystroke. Nothing here writes: a
-`garden …` action is a command the root API runs (console/api.py)."""
+`garden …` or `sync …` action is a command the root API runs
+(console/api.py)."""
 import logging
 from typing import Any
 
 from console.session import Session, locked
 from core import home
+from core import sync_commands
 from core.command_bar import CommandError
 
 logger = logging.getLogger(__name__)
@@ -40,6 +43,14 @@ class HomeApi:
                 raise CommandError(f"`garden {line.action}` is a command, not a pane")
             name = line.args[0] if line.args else self._session.garden
             return {**home.detail(name), "current": name == self._session.garden}
+        return self._answer(command, answer)
+
+    @locked
+    def sync(self, command: str) -> dict[str, Any]:
+        def answer():
+            if sync_commands.parse((command or "").split()[1:]).action != sync_commands.SHOW:
+                raise CommandError("`sync …` with an action is a command, not a pane")
+            return {**sync_commands.pane(), "current": self._session.garden}
         return self._answer(command, answer)
 
     def _answer(self, what: str, compute) -> dict[str, Any]:

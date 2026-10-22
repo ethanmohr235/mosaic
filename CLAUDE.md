@@ -52,6 +52,12 @@ what is still to do, lives in the docs; the short map:
   the tree with solve and check marks; archive is read-only in the console
   too; cross-garden search.
 - **Time:** agenda, week, month, plan-my-week, `worked`, `budget`.
+- **Sync (2026-10-22):** one account per machine syncs every garden
+  through the self-hosted server (`sync_server/`). The parts are the merge
+  (`core/merge.py`, stamps in `core/stamps.py`), the all-gardens pass with
+  renames, trash and name clashes (`core/sync_all.py`), the worker
+  (`core/sync_worker.py`: `monoss sync daemon` or inside the console),
+  and the `sync` verb and pane. Login is CLI-only (`monoss sync login`).
 - **Still to do** (`roadmap.md`): the project variables pane; `fit` and
   `--data` over a time axis; document health and the submitted revision on
   Home rows; SVG images and surface plots in `.tex` export; the Mosaic

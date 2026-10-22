@@ -6,7 +6,9 @@
  * with `*` when the tree has drifted from it), the playhead (`tick 12/49
  * ▶`) and `live` when a sim pane has them, then `unsaved layout` in
  * --warn, and `sel X +N · linked in N panes` or the pane count. A tab
- * click switches layout, like its number key. */
+ * click switches layout, like its number key. The sync mark (`synced`,
+ * `↑3` to send, `offline`, `? 1` to answer) sits with the shell state;
+ * a click opens the `sync` pane. */
 
 export function createTopbar({ root, store, panes, actions, components, onRun = () => {} }) {
   const { h } = components;
@@ -51,6 +53,14 @@ export function createTopbar({ root, store, panes, actions, components, onRun = 
       tag.title = store.state.archived;
       parts.push(tag);
     }
+    const sync = store.state.sync;
+    if (sync) {
+      const level = { offline: "lvl-fault", conflict: "lvl-warn" }[sync.state] || "dim";
+      const tag = h("span", `sync-mark ${level}`, sync.label);
+      tag.title = sync.title;
+      tag.addEventListener("click", () => onRun("sync"));
+      parts.push(tag);
+    }
     return parts;
   }
 
@@ -81,7 +91,7 @@ export function createTopbar({ root, store, panes, actions, components, onRun = 
     );
   }
 
-  ["layout", "garden", "selection", "panes", "playhead", "live", "archived"].forEach((event) => store.subscribe(event, render));
+  ["layout", "garden", "selection", "panes", "playhead", "live", "archived", "sync"].forEach((event) => store.subscribe(event, render));
   render();
   return { render };
 }

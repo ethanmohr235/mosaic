@@ -43,6 +43,9 @@ export function createStore() {
     log: [],
     live: false,
     archived: null,
+    // The top bar's sync mark (console/api.py::sync_status), or null when
+    // this machine isn't signed in.
+    sync: null,
     // One shared playhead (docs/console.md → Settled for U5): every Motion
     // pane reads `tick`; the sim pane that last ran or was focused owns it
     // and publishes its tick `count` and `run` ({ticks, scenario, solver}).
@@ -158,6 +161,14 @@ function sessionOps(state, emit) {
       state.playhead = { tick: 0, count: 0, playing: false, run: null, owner: null };
       state.drafts = new Map();
       emit("garden", boot);
+    },
+
+    /** The latest sync mark ({state, label, title}), or null. */
+    setSync(badge) {
+      const next = badge ? { state: badge.state, label: badge.label, title: badge.title } : null;
+      if (JSON.stringify(next) === JSON.stringify(state.sync)) return;
+      state.sync = next;
+      emit("sync", next);
     },
 
     /** The open garden was archived or un-archived (why, or null). */

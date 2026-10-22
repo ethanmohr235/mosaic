@@ -9,11 +9,16 @@
  * Every act is a command:
  *   ⏎  cd ‹garden›            z  garden archive|unarchive ‹garden›
  *   n  garden new …           r  garden rename ‹garden› …
- *   d d  garden rm ‹garden› (runs) s  garden sync ‹garden› …
- *   E  garden export ‹garden› (a file dialog)   I  garden import … */
+ *   d d  garden rm ‹garden› (runs) s  sync local|share ‹garden› (prefills)
+ *   E  garden export ‹garden› (a file dialog)   I  garden import …
+ * The marks: ● open here, ! an ownership problem, and the garden's sync
+ * state from the last pass (views/sync.js: ⇅ synced, ↑ to send, ○ kept
+ * local, ? a name clash, … waiting, × failed). */
+
+import { syncMark } from "./sync.js";
 
 const HINTS = [["j k", "move"], ["⏎", "open (cd)"], ["n", "new"], ["r", "rename"], ["d d", "remove"],
-  ["z", "archive"], ["s", "sync"], ["E I", "export, import"], ["Z", "show archived"]];
+  ["z", "archive"], ["s", "local / share"], ["E I", "export, import"], ["Z", "show archived"]];
 
 function message(err) {
   return String(err && err.message ? err.message : err);
@@ -56,7 +61,7 @@ function create(ctx) {
         { key: "motes", label: "motes", width: "7ch", align: "right",
           render: (r) => (r.motes === null ? h("span", "lvl-warn", "?") : String(r.motes)) },
         { key: "marks", label: "", width: "4ch", render: (r) => h("span", r.problems.length ? "lvl-warn" : "dim",
-          `${r.current ? "●" : ""}${r.syncing ? "⇅" : ""}${r.problems.length ? "!" : ""}`) },
+          `${r.current ? "●" : ""}${syncMark(r.sync)}${r.problems.length ? "!" : ""}`) },
       ],
       groups, rowKey: (r) => r.key,
       selected: st.armed !== null ? [st.rows[st.armed].key] : [],
@@ -106,7 +111,7 @@ function create(ctx) {
     r: on((r) => ctx.prefill(`garden rename ${arg(r.garden)} `)),
     d: remove,
     z: on((r) => ctx.runCommand(`garden ${r.archived ? "unarchive" : "archive"} ${arg(r.garden)}`)),
-    s: on((r) => ctx.prefill(`garden sync ${arg(r.garden)} `)),
+    s: on((r) => ctx.prefill(`sync ${r.sync === "local" ? "share" : "local"} ${arg(r.garden)}`)),
     E: on((r) => ctx.runCommand(`garden export ${arg(r.garden)}`)),
     I: () => ctx.prefill("garden import "),
     Z: () => ctx.setCommand(st.command.includes("--archived") ? "gardens" : "gardens --archived"),

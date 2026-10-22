@@ -47,8 +47,10 @@ function create(ctx) {
         ...["due", "status", "author", "revision"].filter((k) => p.owner[k]).map((k) => h("span", "dim", ` · ${k} ${p.owner[k]}`))]
       : h("span", "dim", "loose");
     const owns = p.owns.length ? p.owns.flatMap((g, i) => (i ? [", ", link(g)] : [link(g)])) : h("span", "dim", "nothing");
-    const sync = p.sync ? [p.sync.url, h("span", "dim", ` · auto ${p.sync.auto ? "on" : "off"}`)]
-      : h("span", "dim", "off");
+    const sync = p.sync ? [h("span", p.sync.state === "error" || p.sync.state === "conflict" ? "lvl-warn" : "", p.sync.state),
+      ...[p.sync.pending ? ` · ${p.sync.pending} to send` : "", p.sync.held ? ` · ${p.sync.held} held` : "",
+        p.sync.detail ? ` · ${p.sync.detail}` : ""].filter(Boolean).map((t) => h("span", "dim", t))]
+      : h("span", "dim", "not synced");
     const pairs = [
       ["path", crumbs],
       ["owner", owner],

@@ -24,6 +24,7 @@ from core import sync
 from core import sync_account
 from core import sync_remote
 from core import sync_status
+from core import sync_worker
 from core.command_bar import CommandError
 from core.sync_all import sync_all
 from core.sync_status import Report
@@ -184,14 +185,33 @@ def summary(report: Report) -> str:
 # ---- the pane and `monoss sync status` ----
 
 def view() -> dict[str, Any]:
-    """The `sync` pane: who this machine is, the last pass, and every
-    garden's row, conflicts first."""
+    """Who this machine is and the last pass, as `monoss sync status` and
+    MCP read it."""
     account = sync_account.load()
-    last = sync_status.read()
     return {
         "command": SYNC_VERB,
         "account": {"url": account.url, "device": account.device_name} if account else None,
-        "last": last,
+        "last": sync_status.read(),
+    }
+
+
+def pane() -> dict[str, Any]:
+    """The `sync` pane: the questions to answer first, then one row per
+    garden from the last pass (a garden made since shows as not yet
+    synced), and who is doing the syncing."""
+    found = view()
+    last = found["last"] or {}
+    rows = {g["name"]: g for g in last.get("gardens", [])}
+    for name in gardens_repo.list_gardens():
+        rows.setdefault(name, {"name": name, "state": "new", "pending": 0, "held": 0, "detail": "not synced yet"})
+    worker = last.get("worker") or {}
+    return {
+        **found,
+        "conflicts": [{"name": c["name"], "question": c["question"]} for c in last.get("conflicts", [])],
+        "rows": sorted((r for r in rows.values() if r["state"] != sync_status.CONFLICT), key=lambda r: r["name"]),
+        "notes": last.get("notes", []),
+        "worker": {"running": sync_worker.running(), "kind": worker.get("kind")},
+        "finished": _local_time(last.get("finished")),
     }
 
 

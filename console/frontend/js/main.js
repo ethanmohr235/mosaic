@@ -22,6 +22,7 @@ import { createPlayer } from "./playhead.js";
 import { createTooltip } from "./tooltip.js";
 
 const FIRST_PANE = "log";
+const SYNC_POLL_MS = 4000;
 
 function initialTree(boot) {
   if (boot.working) return T.fromJSON(boot.working);
@@ -87,9 +88,21 @@ function wire(api) {
   createTooltip();
   createHintbar({ root: $("hintbar"), store, keys: shell.keys, components });
 
-  // Writes from outside the window (MCP, CLI, sync) show up when it
-  // regains focus, as Monolith does.
+  // Writes from outside the window (MCP, CLI) show up when it regains
+  // focus, as Monolith does; a sync pass that brings changes into the
+  // open garden re-runs the panes at once (docs/console.md -> Refresh).
   window.addEventListener("focus", () => store.emit("refresh"));
+  const pollSync = async () => {
+    try {
+      const badge = await api.sync_status();
+      store.setSync(badge);
+      if (badge && badge.refresh) store.emit("refresh");
+    } catch (err) {
+      console.warn("sync status failed", err);  // the next poll tries again
+    }
+  };
+  pollSync();
+  setInterval(pollSync, SYNC_POLL_MS);
   window.addEventListener("pagehide", () => autosave.flush());
   return { store, bootWorkspace };
 }

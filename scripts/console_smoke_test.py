@@ -1310,6 +1310,28 @@ def u9_checks(window):
     check("U9: project start gives a mote its garden; the breadcrumb shows and climbs the path",
           project_start_and_the_breadcrumb)
 
+    def sync_mark_and_pane():
+        from core import sync_account, sync_status
+        sync_account.save(sync_account.Account("http://127.0.0.1:9", "smoke", "t"))
+        sync_status.write(sync_status.Report(conflicts=[sync_status.Conflict("labnine", "sid", "compass")]))
+        assert wait_until(lambda: texts(window, "#topbar .sync-mark") == ["? 1"], timeout=10), \
+            texts(window, "#topbar .sync-mark")
+        panes = count(window, ".pane")
+        tile(window, "v")  # a pane of its own, so the layout the next checks reopen is untouched
+        assert wait_until(lambda: count(window, ".pane") == panes + 1), "^w v splits"
+        js(window, "document.querySelector('#topbar .sync-mark').click()")
+        question = "compass also has a garden named 'labnine': merge or rename?"
+        assert wait_until(lambda: question in texts(window, ".view-gardens .c-table-row")[0]), \
+            texts(window, ".view-gardens .c-table-row")
+        press(window, "Escape")  # the split left the caret on the command line
+        press(window, "x")
+        assert wait_until(lambda: count(window, ".pane") == panes), "x closes the sync pane"
+        sync_account.logout()
+        assert wait_until(lambda: texts(window, "#topbar .sync-mark") == [], timeout=10), "signed out: no mark"
+        no_errors(window)
+
+    check("sync: the top bar marks a name clash and opens the sync pane, which asks it", sync_mark_and_pane)
+
 
 def u4_restored_checks(window):
     def restored():
