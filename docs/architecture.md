@@ -926,8 +926,18 @@ follows unsaved typing (`modoc_bind.assemble(..., source=)`). Typing
 does not move the garden, so what a pause re-reads off it -- figures,
 the one live solve a note's values and `\work` read, the units a
 worksheet line shows -- is memoised until any write to it
-(`core/document.py::GardenMemo`, keyed on SQLite's change counters).
-Nothing about a solve is stored: the memo is the window's, in memory.
+(`core/document.py::GardenMemo`, keyed on SQLite's change counters),
+bar one: the note's own autosave, whose text is a string and so never
+a quantity, is carried past (`GardenMemo.keeping`). Without that, every
+pause re-ran each `\graph`'s sweep. A new note is a new mote, and is a
+write like any other. Nothing about a solve is stored: the memo is the
+window's, in memory.
+
+The read pane redraws only the blocks a draft changed: each block's node
+is kept by its payload, so the maths and plots around an edit are never
+rebuilt. Offscreen blocks skip layout and paint (`content-visibility`),
+each drawn in full once first so it keeps its real height. The editor
+mirrors its text one block per line, so a keystroke lays out one line.
 A note saves on every pause in typing, and one editing session folds
 into one undo step (the session's `UndoManager.push` coalescing key).
 # The calendar

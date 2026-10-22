@@ -95,7 +95,13 @@ class MoraApi:
     @locked
     def save(self, note_id: str | None, name: str, source: str, session: str = "") -> dict[str, Any]:
         def answer():
-            saved_id, command = document.save(self._session.conn, note_id, source or "", name=name)
+            conn = self._session.conn
+            if note_id is None:
+                # A new note is a new mote, and a name in scope can move a solve.
+                saved_id, command = document.save(conn, None, source or "", name=name)
+            else:
+                with self._memo.keeping(conn):
+                    saved_id, command = document.save(conn, note_id, source or "", name=name)
             key = ("note", saved_id, session) if session else None
             self._session.undo.push(command, coalesce_key=key, coalesce_window=_SESSION_WINDOW)
             return {"noteId": saved_id, "created": note_id is None}

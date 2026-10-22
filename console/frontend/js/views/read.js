@@ -27,7 +27,11 @@ function create(ctx) {
   const { api, store, components } = ctx;
   const { h } = components;
   const st = { command: "", seq: 0, drawSeq: 0, note: null, payload: null, error: null, empty: false };
-  let root = null, page = null, resize = null, draftTimer = 0, renderSeq = 0, lastTop = 0;
+  let root = null, page = null, article = null, resize = null, draftTimer = 0, renderSeq = 0, lastTop = 0;
+  // The page as last drawn, one entry per block: {key, node, figures}. A
+  // block's key is its payload, so a redraw builds only the blocks whose
+  // payload changed and leaves every other node -- KaTeX, plots -- in place.
+  let drawn = [];
   const figures = [];
   const offs = [];
   const typeset = new Map();
@@ -180,17 +184,58 @@ function create(ctx) {
 
   /* ---- drawing ---- */
 
-  function drawFigures() {
-    for (const { area, figure } of figures) {
+  function drawFigures(list = drawn.flatMap((d) => d.figures)) {
+    for (const { area, figure } of list) {
       const width = area.clientWidth;
       if (width < 40) continue;
       drawPlot(area, figureModel(figure, width, FIGURE_H));
     }
   }
 
-  /** A redraw keeps the reader where they were: the new article is built
-   * off the page, its images decoded (an undecoded <img> is 0px tall and
-   * would clamp the scroll), and only then swapped into the same page. */
+  /** What the page shows, in order, as [key, make]: the blocks, a note
+   * for an empty one, and the problems at the end. */
+  function parts(payload) {
+    const out = payload.blocks.map((b) => [JSON.stringify(b), () => block(b)]);
+    if (!out.length) {
+      const text = st.note && st.note.exists ? "(empty)" : "(new)";
+      out.push([`empty:${text}`, () => h("p", "doc-note", text)]);
+    }
+    const problems = payload.problems;
+    if (problems.length) {
+      out.push([`problems:${JSON.stringify(problems)}`, () => h("div", "doc-problems", [
+        h("div", "doc-section-head", `${problems.length} problem${problems.length === 1 ? "" : "s"}`),
+        ...problems.map((p) => h("div", "doc-problem", [h("span", "doc-note", p.line ? `line ${p.line}  ` : ""), p.message]))])]);
+    }
+    return out;
+  }
+
+  /** Each part's node from the last drawing if it says the same thing
+   * (a block can repeat, so each old node is taken once), else a new one. */
+  function reuse(list) {
+    const pool = new Map();
+    for (const d of drawn) pool.set(d.key, [...(pool.get(d.key) || []), d]);
+    return list.map(([key, make]) => {
+      const old = (pool.get(key) || []).shift();
+      if (old) return old;
+      const node = make();
+      return { key, node, figures: figures.splice(0) };
+    });
+  }
+
+  /** Bring `parent`'s children to `nodes`, moving none that stays put. */
+  function place(parent, nodes) {
+    const keep = new Set(nodes);
+    for (const child of [...parent.children]) if (!keep.has(child)) child.remove();
+    let at = parent.firstChild;
+    for (const node of nodes) {
+      if (node === at) at = at.nextSibling;
+      else parent.insertBefore(node, at);
+    }
+  }
+
+  /** A redraw keeps the reader where they were: changed blocks are built
+   * off the page, their images decoded (an undecoded <img> is 0px tall and
+   * would clamp the scroll), and only then put into the same article. */
   function render() {
     if (!root) return;
     const seq = ++renderSeq;
@@ -198,27 +243,32 @@ function create(ctx) {
     if (st.empty) return root.replaceChildren(h("div", "plot-empty", "select a note, or: read ‹name›"));
     if (!st.payload) return;
     figures.length = 0;
-    const blocks = st.payload.blocks.map(block);
-    if (!blocks.length) blocks.push(h("p", "doc-note", st.note && st.note.exists ? "(empty)" : "(new)"));
-    const problems = st.payload.problems;
-    if (problems.length) {
-      blocks.push(h("div", "doc-problems", [h("div", "doc-section-head", `${problems.length} problem${problems.length === 1 ? "" : "s"}`),
-        ...problems.map((p) => h("div", "doc-problem", [h("span", "doc-note", p.line ? `line ${p.line}  ` : ""), p.message]))]));
-    }
-    const article = h("article", "doc", blocks);
-    const images = [...article.querySelectorAll("img")].map((img) => img.decode().catch(() => {}));
+    const next = reuse(parts(st.payload));
+    const kept = new Set(drawn);
+    const fresh = next.filter((d) => !kept.has(d));
+    const images = fresh.flatMap((d) => [...d.node.querySelectorAll("img")]).map((img) => img.decode().catch(() => {}));
     Promise.all(images).then(() => {
       if (seq !== renderSeq || !root) return;
       if (!page || page.parentNode !== root) {
         const p = h("div", "doc-page scroll");
         p.addEventListener("scroll", () => { lastTop = p.scrollTop; });
         page = p;
+        article = h("article", "doc");
+        page.appendChild(article);
         root.replaceChildren(page);
       }
-      page.replaceChildren(article);
+      place(article, next.map((d) => d.node));
+      drawn = next;
       page.scrollTop = lastTop;
-      drawFigures();
+      drawFigures(fresh.flatMap((d) => d.figures));
+      settle(fresh.map((d) => d.node));
     });
+  }
+
+  /** Let blocks be skipped while offscreen (shell.css) once they have been
+   * drawn in full, so each is skipped at the height it really has. */
+  function settle(nodes) {
+    requestAnimationFrame(() => requestAnimationFrame(() => nodes.forEach((n) => n.classList.add("doc-settled"))));
   }
 
   function summary() {
@@ -319,7 +369,8 @@ function create(ctx) {
       if (resize) resize.disconnect();
       st.seq += 1;
       st.drawSeq += 1;
-      root = page = resize = null;
+      root = page = article = resize = null;
+      drawn = [];
     },
     hints: () => (st.payload ? HINTS : []),
     onKey,

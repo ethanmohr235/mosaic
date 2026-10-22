@@ -19,7 +19,9 @@ call, so the read pane shows unsaved typing. `\\include`d notes are read
 as stored."""
 import base64
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Iterator
 
 from core import calc
 from core import derivations
@@ -132,17 +134,31 @@ class GardenMemo:
         self._inferred: dict[str, dict[str, str]] | None = None
         self._at: tuple | None = None
 
-    def _check(self, conn: sqlite3.Connection) -> None:
+    @staticmethod
+    def _fingerprint(conn: sqlite3.Connection) -> tuple:
         # `total_changes` counts this connection's writes, `data_version`
         # moves on another's commit (the MCP server, a sync): between them,
         # every write. The connection itself, so a garden switch is one too.
-        fingerprint = (conn, conn.total_changes,
-                       conn.execute("PRAGMA data_version").fetchone()[0])
+        return (conn, conn.total_changes, conn.execute("PRAGMA data_version").fetchone()[0])
+
+    def _check(self, conn: sqlite3.Connection) -> None:
+        fingerprint = self._fingerprint(conn)
         if fingerprint != self._at:
             self._drawn.clear()
             self._explainer = None
             self._inferred = None
             self._at = fingerprint
+
+    @contextmanager
+    def keeping(self, conn: sqlite3.Connection) -> Iterator[None]:
+        """Around a write none of this reads -- a note's own text, which is
+        a string and so never a quantity -- so the autosave on every pause
+        doesn't re-solve the garden and re-run every sweep after it. Only
+        what was current before the write is carried past it."""
+        current = self._fingerprint(conn) == self._at
+        yield
+        if current:
+            self._at = self._fingerprint(conn)
 
     def __call__(self, conn, ref: str, *, motes=None) -> plotview.Figure:
         self._check(conn)

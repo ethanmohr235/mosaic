@@ -65,7 +65,9 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
   /* ---- the mirror ---- */
 
   // Each line's markup as last painted, so a keystroke rewrites only the
-  // lines it changed rather than the whole mirror (and the layout under it).
+  // lines it changed rather than the whole mirror. Each line is a block of
+  // its own (shell.css), so it is also the only line laid out again: as
+  // inline runs of one <pre>, every keystroke re-flowed all of them.
   const painted = { lines: [], marks: [] };
 
   function paint() {
@@ -94,31 +96,28 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
       if (gutter) marks.push(`<span class="mark ${deco.cls || ""}">${escapeHtml(deco.mark || "")}</span>`);
       offset = end + 1;
     });
-    patch(mirror, painted.lines, html, "\n");
+    patch(mirror, painted.lines, html);
     painted.lines = html;
     if (gutter) {
-      patch(margin, painted.marks, marks, "");
+      patch(margin, painted.marks, marks);
       painted.marks = marks;
     }
   }
 
-  /** Bring `node` (children `old`, each followed by `sep`) to `next`,
-   * touching only the run between their common head and tail. */
-  function patch(node, old, next, sep) {
+  /** Bring `node` (children `old`) to `next`, touching only the run
+   * between their common head and tail. */
+  function patch(node, old, next) {
     const max = Math.min(old.length, next.length);
     let head = 0;
     while (head < max && old[head] === next[head]) head += 1;
     let tail = 0;
     while (tail < max - head && old[old.length - 1 - tail] === next[next.length - 1 - tail]) tail += 1;
     const kids = node.children;
-    for (let i = old.length - tail - 1; i >= head; i -= 1) {
-      if (sep) kids[i].nextSibling.remove();
-      kids[i].remove();
-    }
+    for (let i = old.length - tail - 1; i >= head; i -= 1) kids[i].remove();
     const fresh = next.slice(head, next.length - tail);
     if (!fresh.length) return;
     const tpl = document.createElement("template");
-    tpl.innerHTML = fresh.map((x) => x + sep).join("");
+    tpl.innerHTML = fresh.join("");
     node.insertBefore(tpl.content, kids[head] || null);
   }
 

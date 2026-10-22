@@ -414,7 +414,8 @@ What the build decided within the settled plan above.
   pushed with the same coalescing key, so the session is one undo step.
   `esc` logs `saved ‹note›` and re-runs the panes.
 - **Drafts** are store state (`store.setDraft`, the `draft` event), keyed
-  by note id (or `new:‹name›`); a read pane re-renders 0.18 s after one.
+  by note id (or `new:‹name›`); a read pane re-renders 0.18 s after one,
+  rebuilding only the blocks whose payload changed.
 - **Problems** come from rendering the draft and underline their lines in
   the editor (hover for the message).
 - **Images** (2026-10-04): `^v` with an image on the clipboard stores it

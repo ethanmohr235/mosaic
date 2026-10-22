@@ -150,6 +150,19 @@ def test_the_memo_solves_once_until_the_garden_moves(conn, bar):
     assert memo.explainer(conn) is not first
 
 
+def test_the_memo_outlives_a_save_of_the_note_only(conn, bar):
+    memo = document.GardenMemo()
+    note_id = note(conn, "first")
+    first = memo.explainer(conn)
+    with memo.keeping(conn):
+        document.save(conn, note_id, "second")
+    assert memo.explainer(conn) is first
+    create_mote(conn, {"name": "moved"})
+    with memo.keeping(conn):
+        document.save(conn, note_id, "third")
+    assert memo.explainer(conn) is not first
+
+
 # ---- the worksheet ----
 
 def test_applying_a_worksheet_is_one_undo_step(conn):
