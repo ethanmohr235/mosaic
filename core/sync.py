@@ -19,20 +19,13 @@ have pushed, replaying their ops through the ordinary core/motes.py and
 core/relationships.py primitives (with core.oplog.suppressed() active,
 so replay doesn't re-log itself and loop back out).
 
-Conflict policy, deliberately simple for one person's own devices:
-  - a create is skipped if the id already exists locally (first writer
-    wins -- ids are uuid4, so a real collision across devices is not
-    expected outside of a clone())
-  - a property/relationship edit is last-write-wins by timestamp,
-    compared against the target's own `updated_at`, so two devices
-    editing *different* properties on the same mote never conflict at
-    all
-  - a delete always wins over anything that arrives referencing the
-    now-missing entity ("delete_won", recorded but not treated as an
-    error)
-No vector clocks: this assumes each device's OS clock is roughly
-correct, which is reasonable for one person's own devices and is not
-worth the complexity of building around for v1.
+Replay is core/merge.py's: every op carries its stamp (core/stamps.py),
+and a garden is a function of the stamps alone -- latest write wins per
+property, a delete beats anything older than it, and an op that can't
+land yet (its mote hasn't arrived, or is deleted and the op is newer)
+is held rather than refused. So any two devices that have pulled the
+same ops hold the same garden, whatever order the ops came in, and no
+op ever stops the ones behind it.
 """
 import json
 import sqlite3
@@ -41,12 +34,13 @@ from pathlib import Path
 from typing import Any
 
 from core import gardens as gardens_repo
+from core import merge
 from core import motes as motes_repo
 from core import oplog
-from core import relationships as rel_repo
 from core import sync_remote
 from core.db import get_connection, initialize_database
 from core.device import get_device_id
+from core.stamps import Stamp, format_ts
 
 # Reserved key in sync_state (never a real device_id, which is always a
 # uuid4) holding how far this garden has paged through the server's
@@ -90,14 +84,6 @@ def _set_server_cursor(conn: sqlite3.Connection, since_id: int) -> None:
     _set_state(conn, _SERVER_CURSOR_KEY, since_id)
 
 
-def _mote_exists(conn: sqlite3.Connection, mote_id: str) -> bool:
-    return conn.execute("SELECT 1 FROM motes WHERE id = ?", (mote_id,)).fetchone() is not None
-
-
-def _relationship_exists(conn: sqlite3.Connection, rel_id: str) -> bool:
-    return conn.execute("SELECT 1 FROM relationships WHERE id = ?", (rel_id,)).fetchone() is not None
-
-
 def _row_to_op(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "op_id": row["op_id"],
@@ -122,8 +108,8 @@ def _backfill_orphans(conn: sqlite3.Connection, device_id: str) -> None:
     existed, since the next push just sends the missing rows as new ones.
 
     Only runs while this device has never pulled from a remote. A
-    replayed create is never logged locally on purpose (oplog.suppressed()
-    in pull(), so replay doesn't loop back out as if it were new local
+    replayed create is never logged locally on purpose (oplog.replaying()
+    in core/merge.py, so replay doesn't loop back out as if it were new local
     history) -- so "no local create row" stops meaning "predates oplog"
     the moment a second device's history has ever been merged in; it as
     often just means "I received this from someone else." Only while
@@ -147,17 +133,17 @@ def _backfill_orphans(conn: sqlite3.Connection, device_id: str) -> None:
     existing_ts = [r["ts"] for r in conn.execute(
         "SELECT ts FROM oplog WHERE device_id = ?", (device_id,)
     )]
-    anchor = (
-        (datetime.fromisoformat(min(existing_ts)) - timedelta(seconds=1)).isoformat()
-        if existing_ts else datetime(1970, 1, 1, tzinfo=timezone.utc).isoformat()
+    anchor = format_ts(
+        datetime.fromisoformat(min(existing_ts)) - timedelta(seconds=1)
+        if existing_ts else datetime(1970, 1, 1, tzinfo=timezone.utc)
     )
 
     orphan_motes = [r["id"] for r in conn.execute("SELECT id FROM motes") if r["id"] not in logged_motes]
     if orphan_motes:
         props = motes_repo._properties_by_mote(conn, orphan_motes)
         for mote_id in orphan_motes:
-            oplog.append(conn, device_id, "mote", mote_id, "create_mote",
-                         {"id": mote_id, "properties": props.get(mote_id, {})}, ts=anchor)
+            oplog.append(conn, "mote", mote_id, "create_mote",
+                         {"id": mote_id, "properties": props.get(mote_id, {})}, Stamp(anchor, device_id))
             create_ts[mote_id] = anchor
 
     orphan_rels = [r for r in conn.execute("SELECT * FROM relationships") if r["id"] not in logged_rels]
@@ -169,9 +155,9 @@ def _backfill_orphans(conn: sqlite3.Connection, device_id: str) -> None:
         # just after the synthetic anchor, or replay would fail the
         # exact same way against a mote that hasn't "arrived" yet.
         rel_ts = max(create_ts.get(rel["from_id"], anchor), create_ts.get(rel["to_id"], anchor))
-        oplog.append(conn, device_id, "relationship", rel["id"], "create_relationship",
+        oplog.append(conn, "relationship", rel["id"], "create_relationship",
                      {"id": rel["id"], "from_id": rel["from_id"], "to_id": rel["to_id"],
-                      "type": rel["type"]}, ts=rel_ts)
+                      "type": rel["type"]}, Stamp(rel_ts, device_id))
 
     if orphan_motes or orphan_rels:
         conn.commit()
@@ -215,142 +201,54 @@ def push(
     return {"pushed": len(rows), **result}
 
 
-def _apply_op(conn: sqlite3.Connection, op: dict[str, Any]) -> dict[str, Any] | None:
-    """Replay one remote op. Returns a note describing what was skipped
-    and why, or None if it applied cleanly."""
-    action = op["action"]
-    payload = op["payload"]
-    ts = op["ts"]
-
-    if action == "create_mote":
-        if not _mote_exists(conn, payload["id"]):
-            motes_repo.create_mote(conn, payload["properties"], id=payload["id"])
-        return None
-
-    if action == "set_property":
-        mote_id, key, value = payload["mote_id"], payload["key"], payload["value"]
-        if not _mote_exists(conn, mote_id):
-            return {"reason": "delete_won", "entity": mote_id}
-        local = conn.execute(
-            "SELECT updated_at FROM mote_properties WHERE mote_id = ? AND key = ?", (mote_id, key)
-        ).fetchone()
-        if local is not None and local["updated_at"] is not None and local["updated_at"] >= ts:
-            return {"reason": "shadowed", "entity": f"{mote_id}.{key}"}
-        motes_repo.update_mote(conn, mote_id, {key: value})
-        return None
-
-    if action == "delete_property":
-        mote_id, key = payload["mote_id"], payload["key"]
-        local = conn.execute(
-            "SELECT updated_at FROM mote_properties WHERE mote_id = ? AND key = ?", (mote_id, key)
-        ).fetchone()
-        if local is None:
-            return None
-        if local["updated_at"] is not None and local["updated_at"] >= ts:
-            return {"reason": "shadowed", "entity": f"{mote_id}.{key}"}
-        motes_repo.delete_property(conn, mote_id, key)
-        return None
-
-    if action == "delete_mote":
-        motes_repo.delete_mote(conn, payload["id"])
-        return None
-
-    if action == "create_relationship":
-        if not _relationship_exists(conn, payload["id"]):
-            rel_repo.create_relationship(
-                conn, payload["from_id"], payload["to_id"], payload["type"], id=payload["id"]
-            )
-        return None
-
-    if action == "update_relationship":
-        rel_id = payload["id"]
-        if not _relationship_exists(conn, rel_id):
-            return {"reason": "delete_won", "entity": rel_id}
-        local = conn.execute(
-            "SELECT updated_at FROM relationships WHERE id = ?", (rel_id,)
-        ).fetchone()
-        if local is not None and local["updated_at"] is not None and local["updated_at"] >= ts:
-            return {"reason": "shadowed", "entity": rel_id}
-        fields = {k: v for k, v in payload.items() if k != "id"}
-        if "type" in fields:
-            fields["type_"] = fields.pop("type")
-        rel_repo.update_relationship(conn, rel_id, **fields)
-        return None
-
-    if action == "delete_relationship":
-        rel_repo.delete_relationship(conn, payload["id"])
-        return None
-
-    raise ValueError(f"Unknown oplog action: {action!r}")
+def _fetch(
+    sync_dir: str | Path, garden: str, self_id: str, since_id: int, baseline: dict[str, int]
+) -> tuple[list[dict[str, Any]], int]:
+    """Every op from another device after `since_id` that this garden
+    hasn't replayed yet, and the cursor after the last page."""
+    pending: dict[tuple[str, int], dict[str, Any]] = {}
+    while True:
+        page, next_since_id = sync_remote.pull_page(sync_dir, garden, self_id, since_id)
+        if not page:
+            return list(pending.values()), since_id
+        for op in page:
+            if op["seq"] > baseline.get(op["device_id"], 0):
+                pending[(op["device_id"], op["seq"])] = op
+        since_id = next_since_id
 
 
 def pull(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
     """Replay every op from every other device that we haven't applied
-    yet. Ops are merged and sorted by timestamp before replay (not
-    applied batch-by-batch) so a relationship created moments after its
-    mote, even from a different device, is very likely to land in the
-    right order -- this relies on the same roughly-synced-clocks
-    assumption noted at the top of this module.
+    yet (core/merge.py). Ops are replayed in stamp order, which only
+    saves holding a relationship whose mote is in the same pull: the
+    result doesn't depend on the order.
 
-    The per-device `seq` baseline filter below matters even against the
+    The per-device `seq` baseline filter matters even against the
     server: its own cursor is coarser than per-device seq, so a resend
-    (push(resend=True), see the migration note above) can hand back ops
-    a device already applied -- this filter silently no-ops those."""
+    (push(resend=True)) can hand back ops a device already applied --
+    this filter silently no-ops those."""
     sync_dir = _resolve_sync_dir(garden, sync_dir)
-    self_id = get_device_id()
     baseline = _all_state(conn)
-    pending: dict[tuple[str, int], dict[str, Any]] = {}
-
-    since_id = _get_server_cursor(conn)
-    next_since_id = since_id
-    while True:
-        page, next_since_id = sync_remote.pull_page(sync_dir, garden, self_id, next_since_id)
-        if not page:
-            break
-        for op in page:
-            if op["seq"] > baseline.get(op["device_id"], 0):
-                pending[(op["device_id"], op["seq"])] = op
-
-    ordered = sorted(pending.values(), key=lambda o: (o["ts"], o["device_id"], o["seq"]))
+    ops, cursor = _fetch(sync_dir, garden, get_device_id(), _get_server_cursor(conn), baseline)
+    ops.sort(key=lambda o: (Stamp.of(o["ts"], o["device_id"]), o["seq"]))
 
     applied = 0
     skipped: list[dict[str, Any]] = []
     advanced: dict[str, int] = {}
-    stalled: set[str] = set()
-    # An op left unapplied because its device stalled must still be
-    # fetchable on the *next* pull -- the server has no notion of "ops
-    # this device hasn't seen yet" beyond the cursor we hand it, so
-    # advancing the cursor past a stalled op would lose it for good. The
-    # cursor only ever advances up to the earliest unresolved op, leaving
-    # it (and everything after it) to be re-fetched and re-attempted on a
-    # later pull.
-    unresolved_since_id: int | None = None
-    with oplog.suppressed():
-        for op in ordered:
-            dev = op["device_id"]
-            if dev in stalled:
-                if "server_id" in op:
-                    unresolved_since_id = min(unresolved_since_id or op["server_id"], op["server_id"])
-                continue
-            try:
-                note = _apply_op(conn, op)
-            except sqlite3.IntegrityError as e:
-                skipped.append({"device_id": dev, "seq": op["seq"], "reason": str(e)})
-                stalled.add(dev)
-                if "server_id" in op:
-                    unresolved_since_id = min(unresolved_since_id or op["server_id"], op["server_id"])
-                continue
+    for op in ops:
+        note = merge.apply(conn, op)
+        advanced[op["device_id"]] = max(advanced.get(op["device_id"], 0), op["seq"])
+        if note is None:
             applied += 1
-            advanced[dev] = op["seq"]
-            if note is not None:
-                skipped.append({"device_id": dev, "seq": op["seq"], **note})
+        else:
+            skipped.append({"device_id": op["device_id"], "seq": op["seq"], **note})
 
+    held = merge.retry_held(conn)
     for dev, seq in advanced.items():
         _set_state(conn, dev, seq)
-    cursor = next_since_id if unresolved_since_id is None else unresolved_since_id - 1
     _set_server_cursor(conn, cursor)
     conn.commit()
-    return {"applied": applied, "skipped": skipped}
+    return {"applied": applied, "skipped": skipped, "held": held}
 
 
 def run(
@@ -381,6 +279,7 @@ def status(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = 
         "local_ops": own_total,
         "local_ops_pushed": own_pushed,
         "local_ops_pending": own_total - own_pushed,
+        "held": merge.held_count(conn),
         "remotes": remotes,
     }
 
@@ -401,7 +300,10 @@ def init(garden: str, sync_dir: str | Path, clone: bool = False) -> dict[str, An
             )
         gardens_repo.create_garden(garden)
 
+    previous = gardens_repo.get_sync_dir(garden)
     gardens_repo.set_sync_dir(garden, str(sync_dir))
+    if previous is not None and previous != str(sync_dir):
+        _forget_progress(garden)
 
     cloned = False
     if has_history:
@@ -414,3 +316,16 @@ def init(garden: str, sync_dir: str | Path, clone: bool = False) -> dict[str, An
             conn.close()
 
     return {"garden": garden, "sync_dir": str(sync_dir), "cloned": cloned}
+
+
+def _forget_progress(garden: str) -> None:
+    """A different server knows none of this garden's push or pull
+    progress: start both over. Re-sending is safe (the server ignores
+    duplicates) and so is re-applying (core/merge.py)."""
+    conn = get_connection(garden)
+    try:
+        initialize_database(conn)
+        conn.execute("DELETE FROM sync_state")
+        conn.commit()
+    finally:
+        conn.close()

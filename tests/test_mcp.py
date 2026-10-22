@@ -597,7 +597,7 @@ def test_sync_push_then_status_shows_nothing_pending(sync_dir):
 
 def test_sync_pull_with_no_other_device_is_a_noop(sync_dir):
     sync("init", GARDEN, sync_dir=sync_dir)
-    assert sync("pull", GARDEN) == {"applied": 0, "skipped": []}
+    assert sync("pull", GARDEN) == {"applied": 0, "skipped": [], "held": 0}
 
 
 def test_sync_run_pushes_and_pulls_in_one_call(sync_dir):
@@ -606,7 +606,7 @@ def test_sync_run_pushes_and_pulls_in_one_call(sync_dir):
 
     result = sync("run", GARDEN)
     assert result["push"]["pushed"] == 1
-    assert result["pull"] == {"applied": 0, "skipped": []}
+    assert result["pull"] == {"applied": 0, "skipped": [], "held": 0}
 
 
 # ---- the worksheet and solve health ----

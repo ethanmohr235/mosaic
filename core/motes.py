@@ -3,10 +3,10 @@ import json
 import re
 import sqlite3
 
-from core import oplog
+from core import oplog, stamps
 from core.db import generate_uuid
-from core.device import get_device_id
 from core.entities import Mote
+from core.stamps import Stamp
 
 # Matches "key = value" (or "key=value"), e.g. "priority = high" --
 # structured equality on a specific property, for an LLM's MCP call
@@ -54,24 +54,31 @@ def _load_properties(conn: sqlite3.Connection, mote_id: str) -> dict:
     return _properties_by_mote(conn, [mote_id]).get(mote_id, {})
 
 
+def _stamp(*floors: Stamp | None) -> Stamp:
+    """The replayed op's stamp, or a fresh local one later than `floors`
+    (core/stamps.py)."""
+    return oplog.replay_stamp() or stamps.next_local(*floors)
+
+
 def create_mote(conn: sqlite3.Connection, properties: dict | None = None, id: str | None = None) -> str:
     properties = properties or {}
     cur = conn.cursor()
 
     mote_id = id or generate_uuid()
-    cur.execute("INSERT INTO motes (id) VALUES (?)", (mote_id,))
+    # An id given back (undo of a delete) must beat its own delete.
+    stamp = _stamp(stamps.death(conn, "mote", mote_id), stamps.newest_property_death(conn, mote_id))
+    cur.execute(
+        "INSERT INTO motes (id, created_at, created_by) VALUES (?, ?, ?)",
+        (mote_id, stamp.ts, stamp.device),
+    )
 
-    ts = oplog.now_iso()
     for key, value in properties.items():
         cur.execute(
-            "INSERT INTO mote_properties (mote_id, key, value, updated_at) VALUES (?, ?, ?, ?)",
-            (mote_id, key, _encode_value(value), ts)
+            "INSERT INTO mote_properties (mote_id, key, value, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)",
+            (mote_id, key, _encode_value(value), stamp.ts, stamp.device)
         )
 
-    oplog.append(
-        conn, get_device_id(), "mote", mote_id, "create_mote",
-        {"id": mote_id, "properties": properties}, ts=ts,
-    )
+    oplog.append(conn, "mote", mote_id, "create_mote", {"id": mote_id, "properties": properties}, stamp)
     conn.commit()
     return mote_id
 
@@ -177,33 +184,48 @@ def copy_mote(
 
 
 def delete_mote(conn: sqlite3.Connection, id: str) -> bool:
+    """The delete cascades to the mote's properties and relationships. Its
+    tombstone, stamped after all of them, keeps them from coming back
+    from a device that hadn't seen this yet; each relationship it takes
+    also keeps the stamp of its own last write (core/merge.py::_retire),
+    so an older write to it, moving it elsewhere, still loses."""
     cur = conn.cursor()
+    if cur.execute("SELECT 1 FROM motes WHERE id=?", (id,)).fetchone() is None:
+        return False
+    stamp = _stamp(stamps.newest_child(conn, id))
+    for row in cur.execute(
+        "SELECT id, updated_at, updated_by FROM relationships WHERE from_id=? OR to_id=?", (id, id)
+    ).fetchall():
+        stamps.bury(conn, "relationship", row["id"], Stamp.of(row["updated_at"], row["updated_by"]))
+    stamps.bury(conn, "mote", id, stamp)
     cur.execute("DELETE FROM motes WHERE id=?", (id,))
-    found = cur.rowcount > 0
-    if found:
-        oplog.append(conn, get_device_id(), "mote", id, "delete_mote", {"id": id})
+    oplog.append(conn, "mote", id, "delete_mote", {"id": id}, stamp)
     conn.commit()
-    return found
+    return True
 
 
 def update_mote(conn: sqlite3.Connection, mote_id: str, new_props: dict) -> None:
     """One oplog row per changed key, not one for the whole call --
     concurrent edits to *different* properties on the same mote from two
-    devices then merge with no conflict at all (core/sync.py)."""
+    devices then merge with no conflict at all (core/merge.py)."""
     cur = conn.cursor()
-    device_id = get_device_id()
 
     for key, value in new_props.items():
-        ts = oplog.now_iso()
+        stamp = _stamp(
+            stamps.property_stamp(conn, mote_id, key),
+            stamps.death(conn, "property", mote_id, key),
+            stamps.death(conn, "mote", mote_id),
+        )
         cur.execute("""
-            INSERT INTO mote_properties (mote_id, key, value, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO mote_properties (mote_id, key, value, updated_at, updated_by)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(mote_id, key)
-            DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-        """, (mote_id, key, _encode_value(value), ts))
+            DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at,
+                          updated_by = excluded.updated_by
+        """, (mote_id, key, _encode_value(value), stamp.ts, stamp.device))
         oplog.append(
-            conn, device_id, "mote", mote_id, "set_property",
-            {"mote_id": mote_id, "key": key, "value": value}, ts=ts,
+            conn, "mote", mote_id, "set_property",
+            {"mote_id": mote_id, "key": key, "value": value}, stamp,
         )
 
     conn.commit()
@@ -211,14 +233,12 @@ def update_mote(conn: sqlite3.Connection, mote_id: str, new_props: dict) -> None
 
 def delete_property(conn: sqlite3.Connection, mote_id: str, key: str) -> bool:
     cur = conn.cursor()
-    cur.execute(
-        "DELETE FROM mote_properties WHERE mote_id=? AND key=?", (mote_id, key)
-    )
-    found = cur.rowcount > 0
-    if found:
-        oplog.append(
-            conn, get_device_id(), "mote", mote_id, "delete_property",
-            {"mote_id": mote_id, "key": key},
-        )
+    current = stamps.property_stamp(conn, mote_id, key)
+    if current is None:
+        return False
+    stamp = _stamp(current)
+    cur.execute("DELETE FROM mote_properties WHERE mote_id=? AND key=?", (mote_id, key))
+    stamps.bury(conn, "property", mote_id, stamp, key)
+    oplog.append(conn, "mote", mote_id, "delete_property", {"mote_id": mote_id, "key": key}, stamp)
     conn.commit()
-    return found
+    return True

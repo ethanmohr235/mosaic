@@ -1,9 +1,10 @@
 import json
 
-from core import oplog
+from core import oplog, stamps
 from core.device import get_device_id
 from core.motes import create_mote, delete_mote, delete_property, update_mote
 from core.relationships import create_relationship, delete_relationship, update_relationship
+from core.stamps import Stamp
 
 
 def _ops(conn):
@@ -55,7 +56,31 @@ def test_relationship_primitives_log_ops_in_order(conn):
     assert actions == ["create_relationship", "update_relationship", "delete_relationship"]
 
 
-def test_suppressed_prevents_logging(conn):
-    with oplog.suppressed():
-        create_mote(conn, {"name": "ghost"})
+def test_replaying_prevents_logging_and_keeps_the_stamp(conn):
+    stamp = Stamp.of("2026-01-02T03:04:05+00:00", "other-device")
+    with oplog.replaying(stamp):
+        mote_id = create_mote(conn, {"name": "ghost"})
     assert _ops(conn) == []
+    assert stamps.property_stamp(conn, mote_id, "name") == stamp
+    assert stamps.mote_life(conn, mote_id) == stamp
+
+
+def test_a_local_write_is_stamped_after_what_it_overwrites(conn):
+    mote_id = create_mote(conn, {})
+    future = Stamp.of("2999-01-01T00:00:00+00:00", "fast-clock")
+    with oplog.replaying(future):
+        update_mote(conn, mote_id, {"a": "theirs"})
+    update_mote(conn, mote_id, {"a": "mine"})
+    assert stamps.property_stamp(conn, mote_id, "a") > future
+
+
+def test_deletes_leave_tombstones(conn):
+    a = create_mote(conn, {"k": 1})
+    b = create_mote(conn, {})
+    rel_id = create_relationship(conn, a, b, "knows")
+    delete_property(conn, a, "k")
+    assert stamps.death(conn, "property", a, "k") is not None
+    delete_relationship(conn, rel_id)
+    assert stamps.death(conn, "relationship", rel_id) is not None
+    delete_mote(conn, a)
+    assert stamps.death(conn, "mote", a) is not None

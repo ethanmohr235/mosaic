@@ -124,20 +124,43 @@ def initialize_database(conn: sqlite3.Connection) -> None:
 
     _drop_provenance(cursor)
 
-    # Sync (core/sync.py) needs to tell, for a property or relationship
-    # already stored locally, whether an incoming remote edit is newer --
-    # last-write-wins per field, not per whole mote. NULL on a row
-    # written before this column existed is treated as "very old" by the
-    # comparison, which is correct: it predates sync entirely.
-    cursor.execute("PRAGMA table_info(mote_properties)")
-    prop_columns = {row["name"] for row in cursor.fetchall()}
-    if "updated_at" not in prop_columns:
-        cursor.execute("ALTER TABLE mote_properties ADD COLUMN updated_at TEXT")
+    # Sync's merge (core/merge.py) orders every write by its stamp,
+    # (ts, device) -- see core/stamps.py. Each row keeps the stamp of the
+    # write that last set it; NULL on a row from before a column existed
+    # reads as the epoch, which is correct: it predates sync entirely.
+    for table, column in (
+        ("mote_properties", "updated_at"), ("mote_properties", "updated_by"),
+        ("relationships", "updated_at"), ("relationships", "updated_by"),
+        ("motes", "created_at"), ("motes", "created_by"),
+    ):
+        _add_column(cursor, table, column)
 
-    cursor.execute("PRAGMA table_info(relationships)")
-    rel_columns = {row["name"] for row in cursor.fetchall()}
-    if "updated_at" not in rel_columns:
-        cursor.execute("ALTER TABLE relationships ADD COLUMN updated_at TEXT")
+    # The latest delete of each mote, relationship and property (key ''
+    # for the first two), so a write older than it is refused wherever
+    # it arrives, in whatever order.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tombstones (
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        key TEXT NOT NULL DEFAULT '',
+        ts TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        PRIMARY KEY (entity_type, entity_id, key)
+    );
+    """)
+
+    # Remote ops that can't apply yet (core/merge.py): their mote hasn't
+    # arrived, or is deleted and they are newer than the delete, so an
+    # undo that brings it back must bring them too. Retried after every
+    # pull, and never in the way of the ops behind them.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS held_ops (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        waiting_on TEXT NOT NULL,
+        op TEXT NOT NULL
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_held_ops_waiting ON held_ops(waiting_on)")
 
     # `unknowns` was renamed `freedoms` when the declaration moved from
     # the species to the mote: these are the properties a thing is free
@@ -171,6 +194,13 @@ _PROVENANCE_TABLES = (
     "simulation_derivations",
     "simulation_runs",
 )
+
+
+def _add_column(cursor: sqlite3.Cursor, table: str, column: str) -> None:
+    """A TEXT column, added once. A no-op on a garden that has it."""
+    cursor.execute(f"PRAGMA table_info({table})")
+    if column not in {row["name"] for row in cursor.fetchall()}:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
 
 def _drop_provenance(cursor: sqlite3.Cursor) -> None:

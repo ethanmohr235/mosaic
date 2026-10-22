@@ -150,9 +150,11 @@ def sync(
       only needed when moving an already-synced garden onto a new, empty
       server.
     - "pull": apply other devices' changes. `skipped` lists anything not
-      applied as-is and why: "shadowed" means a local edit was already
-      newer (last-write-wins, per property); "delete_won" means the
-      entity this change targets was already deleted locally.
+      applied as-is and why: "shadowed" means something newer already
+      holds (last-write-wins, per property); "delete_won" means the change
+      is older than a delete of what it targets; "held" means it waits,
+      out of sight, for a mote that hasn't arrived or is deleted (an undo
+      of the delete brings it back). `held` counts everything waiting.
     - "run": push, then pull -- the everyday one-shot sync.
     - "status": the server it syncs through, how many local changes are
       still unpushed, and how far each other known device's changes have

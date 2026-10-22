@@ -1,10 +1,10 @@
 # core/relationships.py
 import sqlite3
 
-from core import oplog
+from core import oplog, stamps
 from core.db import generate_uuid
-from core.device import get_device_id
 from core.entities import Relationship
+from core.stamps import Stamp
 
 # Relationships programmatically modifying mote properties is the
 # simulation capability, and it is built: core/rules.py discovers rules
@@ -12,19 +12,31 @@ from core.entities import Relationship
 # Nothing about that lives here -- this module stays plain storage.
 
 
+def _stamp(*floors: Stamp | None) -> Stamp:
+    """The replayed op's stamp, or a fresh local one later than `floors`
+    (core/stamps.py)."""
+    return oplog.replay_stamp() or stamps.next_local(*floors)
+
+
 def create_relationship(
     conn: sqlite3.Connection, from_id: str, to_id: str, type_: str, id: str | None = None
 ) -> str:
     cur = conn.cursor()
     rel_id = id or generate_uuid()
-    ts = oplog.now_iso()
+    # An id given back (undo of a delete) must beat its own delete, and
+    # one between motes brought back must beat theirs.
+    stamp = _stamp(
+        stamps.death(conn, "relationship", rel_id),
+        stamps.death(conn, "mote", from_id),
+        stamps.death(conn, "mote", to_id),
+    )
     cur.execute(
-        "INSERT INTO relationships (id, from_id, to_id, type, updated_at) VALUES (?, ?, ?, ?, ?)",
-        (rel_id, from_id, to_id, type_, ts)
+        "INSERT INTO relationships (id, from_id, to_id, type, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?)",
+        (rel_id, from_id, to_id, type_, stamp.ts, stamp.device)
     )
     oplog.append(
-        conn, get_device_id(), "relationship", rel_id, "create_relationship",
-        {"id": rel_id, "from_id": from_id, "to_id": to_id, "type": type_}, ts=ts,
+        conn, "relationship", rel_id, "create_relationship",
+        {"id": rel_id, "from_id": from_id, "to_id": to_id, "type": type_}, stamp,
     )
     conn.commit()
     return rel_id
@@ -71,28 +83,31 @@ def update_relationship(
     if not fields:
         raise ValueError("update_relationship requires at least one field to update")
 
-    ts = oplog.now_iso()
-    set_clause = ", ".join(f"{col} = ?" for col in fields) + ", updated_at = ?"
-    cur = conn.cursor()
-    cur.execute(
+    current = stamps.relationship_stamp(conn, rel_id)
+    if current is None:
+        return False
+    stamp = _stamp(current, *(stamps.death(conn, "mote", fields[end]) for end in ("from_id", "to_id") if end in fields))
+    set_clause = ", ".join(f"{col} = ?" for col in fields) + ", updated_at = ?, updated_by = ?"
+    conn.execute(
         f"UPDATE relationships SET {set_clause} WHERE id=?",
-        (*fields.values(), ts, rel_id)
+        (*fields.values(), stamp.ts, stamp.device, rel_id)
     )
-    found = cur.rowcount > 0
-    if found:
-        oplog.append(
-            conn, get_device_id(), "relationship", rel_id, "update_relationship",
-            {"id": rel_id, **fields}, ts=ts,
-        )
+    # The whole relationship, not just what changed: replay treats a
+    # relationship as one value (core/merge.py), and two partial updates
+    # racing would otherwise merge differently on each device.
+    row = conn.execute("SELECT from_id, to_id, type FROM relationships WHERE id=?", (rel_id,)).fetchone()
+    oplog.append(conn, "relationship", rel_id, "update_relationship", {"id": rel_id, **dict(row)}, stamp)
     conn.commit()
-    return found
+    return True
 
 
 def delete_relationship(conn: sqlite3.Connection, rel_id: str) -> bool:
-    cur = conn.cursor()
-    cur.execute("DELETE FROM relationships WHERE id=?", (rel_id,))
-    found = cur.rowcount > 0
-    if found:
-        oplog.append(conn, get_device_id(), "relationship", rel_id, "delete_relationship", {"id": rel_id})
+    current = stamps.relationship_stamp(conn, rel_id)
+    if current is None:
+        return False
+    stamp = _stamp(current)
+    conn.execute("DELETE FROM relationships WHERE id=?", (rel_id,))
+    stamps.bury(conn, "relationship", rel_id, stamp)
+    oplog.append(conn, "relationship", rel_id, "delete_relationship", {"id": rel_id}, stamp)
     conn.commit()
-    return found
+    return True

@@ -91,6 +91,49 @@ nothing.
 `monoss project start|stop|tree|check|archive|unarchive`, `monoss search`;
 MCP `project_tree`, `start_project`, `archive_garden`, `search_gardens`.
 
+# Sync
+
+Devices share gardens through a self-hosted server (`sync_server/`, Postgres
+behind FastAPI) by exchanging oplog rows, never the `.db` file. Every write
+through the seven primitives in `core/motes.py` and `core/relationships.py`
+appends one op in the same transaction (`core/oplog.py`); a push sends this
+device's new ops and a pull replays everyone else's (`core/sync.py`).
+
+**Stamps** (`core/stamps.py`). Every op and every stored row carries the
+stamp of the write that last set it, `(ts, device_id)`, with `ts` as UTC
+ISO 8601 with microseconds. Replay writes the op's stamp, never the time it
+arrived (`oplog.replaying`). A local write is stamped after whatever it
+overwrites, even if this machine's clock is behind, so an edit always beats
+the value it replaced. Deletes leave their stamp in `tombstones`.
+
+**The merge** (`core/merge.py`) makes a garden a function of the stamps
+alone. So any two devices that have pulled the same ops hold the same
+garden, whatever order the ops came in:
+
+- A property holds its latest set or delete.
+- A mote is alive while its latest create beats its latest delete. A
+  create after a delete (undo) revives it.
+- A relationship is one value (its ends and type). Every create and
+  update writes all of it, and the latest wins.
+- A property or relationship counts only if it is newer than the latest
+  delete of its mote(s). Older ones went with the delete.
+- An op that can't land yet waits in `held_ops`: its mote hasn't arrived,
+  or the mote is deleted and the op is newer. A held op is retried after
+  every pull and never blocks the ops behind it. A revive releases what
+  was waiting on it, on every device alike.
+- A relationship taken out of sight keeps the stamp of its last write
+  (`_retire`), so an older write to it still loses, as it would where the
+  relationship is still in sight.
+
+`tests/test_sync_merge.py` checks this against an in-memory server
+(`tests/sync_fakes.py`): three devices with disagreeing clocks, random
+edits, deletes, links, moves, undos and syncs, across many seeds.
+
+A first clone replays the whole history. Measured 2026-10-22: 7,332 ops in
+3.4 s, so there are no snapshots. Images ride the oplog as base64 with their
+mote; moving them out (the `core/images.py` seam) is a later option if
+history grows heavy.
+
 # Species
 
 A mote can act as a "species" -- a shared type that other motes are declared instances of. A species is still just a mote; nothing marks it as special structurally. Membership is a relationship: a mote is an instance of a species by having an `instance_of` relationship pointing at it. `instance_of` is a reserved relationship type recognized by the engine and UI, the same way any type system needs some minimal way to express "is-a."

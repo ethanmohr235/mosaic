@@ -199,7 +199,10 @@ def test_delete_wins_over_a_racing_edit(sync_dir, tmp_path, monkeypatch):
 
     with as_device(monkeypatch, tmp_path / "a"):
         pulled = sync.pull(conn_a, "g", sync_dir)
-        assert pulled["skipped"] and pulled["skipped"][0]["reason"] == "delete_won"
+        # B's edit is newer than the delete, so it is held out of sight
+        # rather than dropped: an undo of the delete brings it back.
+        assert pulled["skipped"] and pulled["skipped"][0]["reason"] == "held"
+        assert pulled["held"] == 1
         assert get_mote(conn_a, mote_id) is None
 
     conn_a.close()
@@ -333,7 +336,7 @@ def test_backfill_is_idempotent(sync_dir, tmp_path, monkeypatch):
     conn_a.close()
 
 
-def test_self_heal_repairs_a_device_that_already_stalled(sync_dir, tmp_path, monkeypatch):
+def test_self_heal_repairs_a_device_holding_an_orphan_link(sync_dir, tmp_path, monkeypatch):
     conn_a = _new_device(monkeypatch, tmp_path / "a")
     with as_device(monkeypatch, tmp_path / "a"):
         orphan = create_mote(conn_a, {"name": "orphan"})
@@ -355,8 +358,8 @@ def test_self_heal_repairs_a_device_that_already_stalled(sync_dir, tmp_path, mon
     with as_device(monkeypatch, tmp_path / "b"):
         sync.init("g", sync_dir, clone=True)
         conn_b = db.get_connection("g")
-        # Stalled: the relationship's FK failure on the missing orphan
-        # skips everything queued after it in this pull.
+        # Held: the relationship waits for the orphan mote, which never
+        # shipped, without holding up anything else.
         assert len(list_motes(conn_b)) == 1
         assert list_relationships(conn_b) == []
 
