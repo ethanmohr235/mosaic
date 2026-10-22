@@ -1,421 +1,230 @@
-"""Two-device sync, simulated in one process: each "device" is its own
-gardens/ directory (so it gets its own database and its own device_id),
-and both point core/sync.py at one shared `sync_dir` standing in for
-whatever two real machines would actually sync through.
+"""Two machines and a real sync server, end to end: one account, every
+garden (core/sync_all.py). Each "machine" is its own gardens/ directory,
+so its own device id and account (tests/sync_fakes.py's Device); the
+server is the live one from tests/conftest.py, skipped without Docker.
 
-Every test below gets its `sync_dir` from the fixture of that name
-(tests/conftest.py): a live sync_server (sync_server/) backed by a real
-ephemeral Postgres, standing in for a real deployment. That fixture is
-skipped automatically where Docker isn't available to run testcontainers.
-
-core.device.get_device_id() and every core.gardens.py/core.db.py path
-read core.db.GARDENS_DIR fresh on every call, so switching which
-"device" is active is just repointing that one module attribute right
-before the calls that belong to it -- see as_device() below. An already-
-open sqlite3.Connection is unaffected by that switch; only which
-device_id a *new* write is attributed to depends on it.
+The merge itself, in every interleaving, is tests/test_sync_merge.py's.
 """
-import time
-from contextlib import contextmanager
+import pytest
 
 import core.db as db
-from core import sync
-from core.gardens import create_garden
-from core.motes import create_mote, delete_mote, get_mote, list_motes, update_mote
-from core.relationships import create_relationship, list_relationships, update_relationship
+from core import gardens as gardens_repo
+from core import sync_account, sync_commands, sync_remote
+from core.command_bar import CommandError
+from core.gardens import create_garden, delete_garden, garden_exists, rename_garden, restore_garden
+from core.motes import create_mote, list_motes
+from core.sync_all import sync_all
+from core.sync_status import CONFLICT, LOCAL, WAITING
+from tests.conftest import SYNC_SERVER_SECRET
+from tests.sync_fakes import Device, snapshot
 
 
-@contextmanager
-def as_device(monkeypatch, root):
-    monkeypatch.setattr(db, "GARDENS_DIR", root)
-    yield
+@pytest.fixture
+def machines(sync_server, tmp_path, monkeypatch):
+    """Two machines, each signed in to the server."""
+    pair = (Device(tmp_path / "compass", monkeypatch), Device(tmp_path / "cartographer", monkeypatch))
+    for machine in pair:
+        with machine.active():
+            sync_account.login(sync_server, SYNC_SERVER_SECRET, machine.root.name)
+    return pair
 
 
-def _new_device(monkeypatch, root):
-    with as_device(monkeypatch, root):
-        create_garden("g")
-        return db.get_connection("g")
+def _make(machine: Device, garden: str, *names: str) -> None:
+    with machine.active():
+        create_garden(garden)
+        conn = db.get_connection(garden)
+        for name in names:
+            create_mote(conn, {"name": name})
+        conn.close()
 
 
-def test_second_device_clones_existing_history(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        mote_a = create_mote(conn_a, {"name": "from A"})
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        result = sync.init("g", sync_dir, clone=True)
-        assert result["cloned"] is True
-        conn_b = db.get_connection("g")
-        assert get_mote(conn_b, mote_a) is not None
-
-    conn_a.close()
-    conn_b.close()
+def _pass(machine: Device, full: bool = False):
+    with machine.active():
+        return sync_all(full=full)
 
 
-def test_cloning_without_permission_is_refused(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        create_mote(conn_a, {"name": "from A"})
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
+def _names(machine: Device, garden: str) -> set[str]:
+    with machine.active():
+        conn = db.get_connection(garden)
         try:
-            sync.init("g", sync_dir)
-            assert False, "expected a ValueError without clone=True"
-        except ValueError:
-            pass
-
-    conn_a.close()
-
-
-def test_disjoint_edits_converge_both_ways(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        mote_a = create_mote(conn_a, {"name": "from A"})
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        mote_b = create_mote(conn_b, {"name": "from B"})
-        sync.push(conn_b, "g", sync_dir)
-        pulled = sync.pull(conn_b, "g", sync_dir)
-        # B's own history, echoed back by the shared folder, is skipped.
-        assert pulled["applied"] == 1
-        assert get_mote(conn_b, mote_a) is not None
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        pulled = sync.pull(conn_a, "g", sync_dir)
-        assert pulled["applied"] == 1
-        assert get_mote(conn_a, mote_b) is not None
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        assert len(list_motes(conn_a)) == 2
-    with as_device(monkeypatch, tmp_path / "b"):
-        assert len(list_motes(conn_b)) == 2
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_concurrent_edits_to_different_properties_both_survive(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        mote_id = create_mote(conn_a, {"name": "shared", "status": "draft"})
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        update_mote(conn_a, mote_id, {"status": "final"})
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        update_mote(conn_b, mote_id, {"name": "renamed by B"})
-        sync.push(conn_b, "g", sync_dir)
-        sync.pull(conn_b, "g", sync_dir)
-        merged = get_mote(conn_b, mote_id)
-        assert merged.properties == {"name": "renamed by B", "status": "final"}
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        sync.pull(conn_a, "g", sync_dir)
-        merged = get_mote(conn_a, mote_id)
-        assert merged.properties == {"name": "renamed by B", "status": "final"}
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_same_property_conflict_resolves_last_write_wins(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        mote_id = create_mote(conn_a, {"status": "draft"})
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        update_mote(conn_a, mote_id, {"status": "from A"})
-        sync.push(conn_a, "g", sync_dir)
-
-    time.sleep(0.01)  # ensure B's write has a strictly later timestamp
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        update_mote(conn_b, mote_id, {"status": "from B"})
-        sync.push(conn_b, "g", sync_dir)
-        pulled = sync.pull(conn_b, "g", sync_dir)
-        # A's now-older edit to the same key is shadowed, not applied.
-        assert pulled["skipped"] and pulled["skipped"][0]["reason"] == "shadowed"
-        assert get_mote(conn_b, mote_id).properties["status"] == "from B"
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        sync.pull(conn_a, "g", sync_dir)
-        assert get_mote(conn_a, mote_id).properties["status"] == "from B"
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_delete_wins_over_a_racing_edit(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        mote_id = create_mote(conn_a, {"status": "draft"})
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        delete_mote(conn_a, mote_id)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        # B hasn't seen A's delete yet, so this edit succeeds locally --
-        # the race is only visible once each side pulls the other's op.
-        update_mote(conn_b, mote_id, {"status": "edited by B, too late"})
-        sync.push(conn_b, "g", sync_dir)
-        pulled = sync.pull(conn_b, "g", sync_dir)
-        # B only pulls A's delete_mote op here, which applies cleanly --
-        # no skip note on this side.
-        assert pulled["skipped"] == []
-        assert get_mote(conn_b, mote_id) is None
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        pulled = sync.pull(conn_a, "g", sync_dir)
-        # B's edit is newer than the delete, so it is held out of sight
-        # rather than dropped: an undo of the delete brings it back.
-        assert pulled["skipped"] and pulled["skipped"][0]["reason"] == "held"
-        assert pulled["held"] == 1
-        assert get_mote(conn_a, mote_id) is None
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_relationship_sync_and_update(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        alice = create_mote(conn_a, {"name": "Alice"})
-        bob = create_mote(conn_a, {"name": "Bob"})
-        rel_id = create_relationship(conn_a, alice, bob, "knows")
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-        assert len(list_relationships(conn_b)) == 1
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        update_relationship(conn_a, rel_id, type_="likes")
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.pull(conn_b, "g", sync_dir)
-        rels = list_relationships(conn_b)
-        assert len(rels) == 1
-        assert rels[0].type == "likes"
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_push_with_nothing_new_is_a_noop(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        create_mote(conn_a, {})
-        sync.init("g", sync_dir)
-        first = sync.push(conn_a, "g", sync_dir)
-        assert first["pushed"] == 1
-        second = sync.push(conn_a, "g", sync_dir)
-        assert second == {"pushed": 0}
-
-    conn_a.close()
-
-
-# ---- backfilling history for motes/relationships that predate oplog
-# logging (core/sync.py::_backfill_orphans) ----
-#
-# A garden that had data before the oplog table's logging existed has
-# entities in `motes`/`relationships` with no corresponding create_*
-# oplog row -- never logged, because the logging code didn't exist yet.
-# `DELETE FROM oplog WHERE entity_id = ?` after an ordinary create is
-# how these tests fake that: the row/entity still exists, only its
-# create op is gone, which is the actual invariant push() has to repair
-# (not *why* it's missing).
-
-def test_backfill_logs_an_orphan_mote_and_relationship(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        safe = create_mote(conn_a, {"name": "safe"})
-        orphan = create_mote(conn_a, {"name": "orphan"})
-        rel_id = create_relationship(conn_a, orphan, safe, "knows")
-        conn_a.execute("DELETE FROM oplog WHERE entity_id IN (?, ?)", (orphan, rel_id))
-        conn_a.commit()
-
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-        mote_rows = conn_a.execute(
-            "SELECT action, ts FROM oplog WHERE entity_id = ?", (orphan,)
-        ).fetchall()
-        assert len(mote_rows) == 1 and mote_rows[0]["action"] == "create_mote"
-
-        safe_ts = conn_a.execute(
-            "SELECT ts FROM oplog WHERE entity_id = ? AND action = 'create_mote'", (safe,)
-        ).fetchone()["ts"]
-        assert mote_rows[0]["ts"] < safe_ts  # backfilled anchor sorts before real history
-
-        rel_rows = conn_a.execute(
-            "SELECT action FROM oplog WHERE entity_id = ?", (rel_id,)
-        ).fetchall()
-        assert len(rel_rows) == 1 and rel_rows[0]["action"] == "create_relationship"
-
-    conn_a.close()
-
-
-def test_orphan_backfill_end_to_end_matches_source(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        safe = create_mote(conn_a, {"name": "safe"})
-        orphan = create_mote(conn_a, {"name": "orphan"})
-        rel_id = create_relationship(conn_a, orphan, safe, "knows")
-        conn_a.execute("DELETE FROM oplog WHERE entity_id IN (?, ?)", (orphan, rel_id))
-        conn_a.commit()
-
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-        # Not just the one earliest mote -- the whole garden, which is
-        # the actual regression this fix targets.
-        assert len(list_motes(conn_b)) == 2
-        assert len(list_relationships(conn_b)) == 1
-        assert get_mote(conn_b, orphan).properties == {"name": "orphan"}
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_backfill_is_idempotent(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        orphan = create_mote(conn_a, {"name": "orphan"})
-        conn_a.execute("DELETE FROM oplog WHERE entity_id = ?", (orphan,))
-        conn_a.commit()
-
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-        count = conn_a.execute(
-            "SELECT COUNT(*) AS c FROM oplog WHERE entity_id = ? AND action = 'create_mote'",
-            (orphan,),
-        ).fetchone()["c"]
-        assert count == 1
-
-    conn_a.close()
-
-
-def test_self_heal_repairs_a_device_holding_an_orphan_link(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        orphan = create_mote(conn_a, {"name": "orphan"})
-        safe = create_mote(conn_a, {"name": "safe"})
-        create_relationship(conn_a, orphan, safe, "knows")
-        # Only the mote predates logging -- the relationship pointing at
-        # it was created (and logged) normally, exactly like the
-        # real-world garden this was diagnosed against.
-        conn_a.execute("DELETE FROM oplog WHERE entity_id = ?", (orphan,))
-        conn_a.commit()
-
-        sync.init("g", sync_dir)
-        # Simulate a push from before this fix existed: the gap ships
-        # as-is, with nothing to repair it downstream.
-        with monkeypatch.context() as old_push:
-            old_push.setattr(sync, "_backfill_orphans", lambda conn, device_id: None)
-            sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-        # Held: the relationship waits for the orphan mote, which never
-        # shipped, without holding up anything else.
-        assert len(list_motes(conn_b)) == 1
-        assert list_relationships(conn_b) == []
-
-    with as_device(monkeypatch, tmp_path / "a"):
-        sync.push(conn_a, "g", sync_dir)  # backfill runs for real this time
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.pull(conn_b, "g", sync_dir)
-        assert len(list_motes(conn_b)) == 2
-        assert len(list_relationships(conn_b)) == 1
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_backfill_relationship_referencing_a_non_orphan_mote(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        mote1 = create_mote(conn_a, {"name": "one"})
-        mote2 = create_mote(conn_a, {"name": "two"})
-        rel_id = create_relationship(conn_a, mote1, mote2, "knows")
-        # Only the relationship's own oplog row is missing -- both
-        # endpoints' create_mote rows are real and intact, so the
-        # backfilled ts must sort after both of *those*, not just after
-        # the generic anchor (the max()-not-flat-epsilon fix).
-        conn_a.execute("DELETE FROM oplog WHERE entity_id = ?", (rel_id,))
-        conn_a.commit()
-
-        sync.init("g", sync_dir)
-        sync.push(conn_a, "g", sync_dir)
-
-    with as_device(monkeypatch, tmp_path / "b"):
-        sync.init("g", sync_dir, clone=True)
-        conn_b = db.get_connection("g")
-        assert len(list_motes(conn_b)) == 2
-        rels = list_relationships(conn_b)
-        assert len(rels) == 1
-        assert rels[0].from_id == mote1 and rels[0].to_id == mote2
-
-    conn_a.close()
-    conn_b.close()
-
-
-def test_status_reports_local_and_remote_progress(sync_dir, tmp_path, monkeypatch):
-    conn_a = _new_device(monkeypatch, tmp_path / "a")
-    with as_device(monkeypatch, tmp_path / "a"):
-        create_mote(conn_a, {})
-        create_mote(conn_a, {})
-        sync.init("g", sync_dir)
-        before = sync.status(conn_a, "g", sync_dir)
-        assert before["local_ops"] == 2
-        assert before["local_ops_pending"] == 2
-
-        sync.push(conn_a, "g", sync_dir)
-        after = sync.status(conn_a, "g", sync_dir)
-        assert after["local_ops_pending"] == 0
-        assert after["sync_dir"] == str(sync_dir)
-
-    conn_a.close()
+            return {m.properties.get("name") for m in list_motes(conn)}
+        finally:
+            conn.close()
+
+
+def _has(machine: Device, garden: str) -> bool:
+    with machine.active():
+        return garden_exists(garden)
+
+
+def test_a_second_machine_gets_every_garden(machines):
+    a, b = machines
+    _make(a, "hw", "beam", "load")
+    _make(a, "notes", "lecture 1")
+    assert _pass(a, full=True).ok
+    report = _pass(b, full=True)
+    assert report.ok and not report.conflicts
+    assert _names(b, "hw") == {"beam", "load"} and _names(b, "notes") == {"lecture 1"}
+    with a.active():
+        ours = snapshot(db.get_connection("hw"))
+    with b.active():
+        assert snapshot(db.get_connection("hw")) == ours
+
+
+def test_edits_reach_the_other_machine_through_the_feed(machines):
+    a, b = machines
+    _make(a, "hw", "beam")
+    _pass(a, full=True)
+    _pass(b, full=True)
+    with a.active():
+        create_mote(db.get_connection("hw"), {"name": "added on compass"})
+    _pass(a)
+    report = _pass(b)  # not full: only what the feed names is pulled
+    assert "hw" in report.received
+    assert "added on compass" in _names(b, "hw")
+
+
+def test_a_rename_reaches_the_other_machine(machines):
+    a, b = machines
+    _make(a, "hw", "beam")
+    _pass(a, full=True)
+    _pass(b, full=True)
+    with a.active():
+        rename_garden("hw", "hw-4")
+    _pass(a)
+    _pass(b)
+    assert _has(b, "hw-4") and not _has(b, "hw")
+    assert _names(b, "hw-4") == {"beam"}
+
+
+def test_remove_and_restore_reach_the_other_machine(machines):
+    a, b = machines
+    _make(a, "hw", "beam")
+    _pass(a, full=True)
+    _pass(b, full=True)
+    with a.active():
+        delete_garden("hw")
+    _pass(a)
+    _pass(b)
+    assert not _has(b, "hw")
+    with b.active():
+        restore_garden("hw")
+    _pass(b)
+    _pass(a)
+    assert _has(a, "hw") and _names(a, "hw") == {"beam"}
+
+
+def test_a_name_clash_asks_and_merge_joins_the_two(machines):
+    a, b = machines
+    _make(a, "scratch", "from compass")
+    _make(b, "scratch", "from cartographer")
+    _pass(a, full=True)
+    report = _pass(b, full=True)
+    assert [c.name for c in report.conflicts] == ["scratch"]
+    assert report.conflicts[0].question == "compass also has a garden named 'scratch': merge or rename?"
+    assert {g.name: g.state for g in report.gardens}["scratch"] == CONFLICT
+
+    with b.active():
+        sync_commands.run(sync_commands.parse(["merge", "scratch"]))
+    _pass(a)
+    both = {"from compass", "from cartographer"}
+    assert _names(a, "scratch") == both and _names(b, "scratch") == both
+
+
+def test_a_name_clash_answered_by_renaming_keeps_both(machines):
+    a, b = machines
+    _make(a, "scratch", "from compass")
+    _make(b, "scratch", "from cartographer")
+    _pass(a, full=True)
+    _pass(b, full=True)
+    with b.active():
+        sync_commands.run(sync_commands.parse(["rename", "scratch", "scratch-b"]))
+    _pass(a)
+    assert _names(b, "scratch") == {"from compass"}
+    assert _names(b, "scratch-b") == {"from cartographer"}
+    assert _names(a, "scratch-b") == {"from cartographer"}
+
+
+def test_a_garden_kept_local_stays_home_and_asks_nothing(machines):
+    a, b = machines
+    _make(a, "testing", "compass's")
+    _make(b, "testing", "cartographer's")
+    with b.active():
+        sync_commands.run(sync_commands.parse(["local", "testing"]))
+    _pass(a, full=True)
+    report = _pass(b, full=True)
+    assert not report.conflicts
+    assert {g.name: g.state for g in report.gardens}["testing"] == LOCAL
+    assert _names(b, "testing") == {"cartographer's"}
+
+
+def test_a_garden_open_here_waits_before_moving_aside(machines):
+    a, b = machines
+    _make(a, "hw", "beam")
+    _pass(a, full=True)
+    _pass(b, full=True)
+    with a.active():
+        delete_garden("hw")
+    _pass(a)
+    with b.active():
+        held = gardens_repo.hold("hw")
+    report = _pass(b)
+    assert {g.name: g.state for g in report.gardens}["hw"] == WAITING and _has(b, "hw")
+    held.close()
+    _pass(b)
+    assert not _has(b, "hw")
+
+
+def test_a_legacy_garden_is_adopted_not_asked_about(machines):
+    a, b = machines
+    _make(a, "college", "exam 1")
+    _pass(a, full=True)
+    _make(b, "college", "homework 3")
+    with b.active():
+        # Synced the old way: one URL per garden, beside the .db.
+        db.garden_db_path("college").with_name("college.db.sync_dir").write_text("http://old@compass:8080/")
+    report = _pass(b, full=True)
+    assert not report.conflicts
+    _pass(a)
+    assert _names(a, "college") == {"exam 1", "homework 3"}
+    with b.active():
+        assert gardens_repo.legacy_sync_url("college") is None
+
+
+def test_a_machine_that_lost_a_file_clones_it_back_and_keeps_writing(machines):
+    a, b = machines
+    _make(a, "hw", "beam")
+    _pass(a, full=True)
+    _pass(b, full=True)
+    with a.active():
+        db.garden_db_path("hw").unlink()  # gone outside the app, not `garden rm`
+    _pass(a)
+    assert _names(a, "hw") == {"beam"}
+    with a.active():
+        create_mote(db.get_connection("hw"), {"name": "after the clone"})
+    _pass(a)
+    _pass(b)
+    # Numbered after its old ops, so the server kept it rather than
+    # dropping it as one it already had.
+    assert "after the clone" in _names(b, "hw")
+
+
+def test_a_revoked_machine_is_refused(machines):
+    a, b = machines
+    with a.active():
+        assert "revoked" in sync_commands.run(sync_commands.parse(["revoke", "cartographer"]))
+    report = _pass(b)
+    assert not report.ok and "login" in report.error
+    with b.active(), pytest.raises(CommandError):
+        sync_commands.run(sync_commands.parse(["devices"]))
+
+
+def test_signing_in_again_to_the_same_server_keeps_what_was_agreed(machines, sync_server):
+    a, _ = machines
+    _make(a, "hw")
+    _pass(a, full=True)
+    with a.active():
+        known = sync_account.load().known
+        sync_account.login(sync_server, SYNC_SERVER_SECRET, "compass")
+        assert sync_account.load().known == known
+        assert sync_remote.list_gardens(sync_account.load().remote())

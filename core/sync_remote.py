@@ -1,70 +1,119 @@
-"""Thin HTTP client for the sync_server transport (sync_server/app.py) --
-the only sync transport core/sync.py speaks. push()/pull()/init() there
-call straight through to the functions below wherever they'd write/list/
-read `.jsonl` files under an older, since-removed folder transport.
+# core/sync_remote.py
+"""Thin HTTP client for the sync server (sync_server/app.py) -- the only
+transport core/sync.py and core/sync_all.py speak. Everything here is one
+request; what to do with the answers is theirs.
 
-The auth token travels embedded in the sync_dir URL's userinfo
-(`https://<token>@host/path`), the same way a git remote carries
-credentials -- so core/gardens.py's set_sync_dir/get_sync_dir need no
-schema change: a sync_dir is still just one opaque string.
+A `Remote` is the server's URL and this device's own token, from the
+account core/sync_account.py keeps. The token is never in a URL.
 """
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 _TIMEOUT = 30.0
 
 
-def _split(sync_dir: str) -> tuple[str, str | None]:
-    """(base_url_without_credentials, bearer_token_or_None)."""
-    parts = urlsplit(str(sync_dir))
-    netloc = parts.hostname or ""
-    if parts.port:
-        netloc += f":{parts.port}"
-    base = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-    return base.rstrip("/"), parts.username
+class SyncError(Exception):
+    """The server said no, or couldn't be reached."""
 
 
-def _client(sync_dir: str | Path) -> httpx.Client:
-    sync_dir = str(sync_dir)
-    if not sync_dir.startswith(("http://", "https://")):
-        raise ValueError(
-            f"{sync_dir!r} is not a sync server URL -- point this garden at a "
-            "sync server instead (docker compose up, then `sync init "
-            '"http://<token>@host:8080/"`)'
-        )
-    base, token = _split(sync_dir)
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return httpx.Client(base_url=base, headers=headers, timeout=_TIMEOUT)
+class NameTaken(SyncError):
+    """A live garden on the server already has that name: `garden` is it."""
+
+    def __init__(self, garden: dict[str, Any]):
+        super().__init__(f"the server already has a garden named {garden['name']!r}")
+        self.garden = garden
 
 
-def push(sync_dir: str | Path, garden: str, device_id: str, ops: list[dict[str, Any]]) -> dict[str, Any]:
-    with _client(str(sync_dir)) as client:
-        resp = client.post(f"/gardens/{garden}/ops", json={"device_id": device_id, "ops": ops})
-        resp.raise_for_status()
-        return resp.json()
+@dataclass(frozen=True)
+class Remote:
+    url: str
+    token: str
+
+    def client(self, timeout: float = _TIMEOUT) -> httpx.Client:
+        return httpx.Client(base_url=self.url.rstrip("/"), timeout=timeout,
+                            headers={"Authorization": f"Bearer {self.token}"})
+
+
+def _check(resp: httpx.Response) -> dict[str, Any]:
+    if resp.status_code == 409:
+        detail = resp.json().get("detail") if resp.headers.get("content-type", "").startswith("application/json") else None
+        if isinstance(detail, dict) and "garden" in detail:
+            raise NameTaken(detail["garden"])
+    if resp.status_code == 401:
+        raise SyncError("the server refused this device's token -- `monoss sync login` again")
+    if resp.is_error:
+        raise SyncError(f"the server answered {resp.status_code}: {resp.text[:200]}")
+    return resp.json()
+
+
+def _call(remote: Remote, method: str, path: str, *, timeout: float = _TIMEOUT, **kwargs) -> dict[str, Any]:
+    try:
+        with remote.client(timeout) as client:
+            return _check(client.request(method, path, **kwargs))
+    except httpx.HTTPError as e:
+        raise SyncError(f"can't reach {remote.url}: {e}") from None
+
+
+def pair(url: str, secret: str, device_id: str, name: str) -> str:
+    """This device's own token, given the server's secret."""
+    try:
+        with httpx.Client(base_url=url.rstrip("/"), timeout=_TIMEOUT) as client:
+            resp = client.post("/devices", json={"device_id": device_id, "name": name},
+                               headers={"Authorization": f"Bearer {secret}"})
+    except httpx.HTTPError as e:
+        raise SyncError(f"can't reach {url}: {e}") from None
+    if resp.status_code == 401:
+        raise SyncError("the server refused that secret")
+    return _check(resp)["token"]
+
+
+def devices(remote: Remote) -> list[dict[str, Any]]:
+    return _call(remote, "GET", "/devices")["devices"]
+
+
+def revoke(remote: Remote, device_id: str) -> None:
+    _call(remote, "DELETE", f"/devices/{device_id}")
+
+
+def list_gardens(remote: Remote) -> list[dict[str, Any]]:
+    return _call(remote, "GET", "/gardens")["gardens"]
+
+
+def register(remote: Remote, garden_id: str, name: str) -> dict[str, Any]:
+    """Raises NameTaken when a live garden already has `name`."""
+    return _call(remote, "POST", "/gardens", json={"id": garden_id, "name": name})
+
+
+def patch(remote: Remote, garden_id: str, **fields: Any) -> dict[str, Any]:
+    """`name=`, `trashed=`. Raises NameTaken on a live name."""
+    return _call(remote, "PATCH", f"/gardens/{garden_id}", json=fields)
+
+
+def push(remote: Remote, garden_id: str, ops: list[dict[str, Any]]) -> dict[str, Any]:
+    return _call(remote, "POST", f"/gardens/{garden_id}/ops", json={"ops": ops})
 
 
 def pull_page(
-    sync_dir: str | Path, garden: str, self_device_id: str, since_id: int
+    remote: Remote, garden_id: str, since_id: int, exclude_device: str | None
 ) -> tuple[list[dict[str, Any]], int]:
-    """One page of ops after `since_id`, excluding our own device's ops.
-    Callers page by re-calling with the returned `next_since_id` until
-    the returned list is empty."""
-    with _client(str(sync_dir)) as client:
-        resp = client.get(
-            f"/gardens/{garden}/ops",
-            params={"since_id": since_id, "exclude_device": self_device_id},
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        return body["ops"], body["next_since_id"]
+    """One page of ops after `since_id`. Callers page by re-calling with
+    the returned `next_since_id` until the returned list is empty."""
+    params: dict[str, Any] = {"since_id": since_id}
+    if exclude_device is not None:
+        params["exclude_device"] = exclude_device
+    body = _call(remote, "GET", f"/gardens/{garden_id}/ops", params=params)
+    return body["ops"], body["next_since_id"]
 
 
-def has_history(sync_dir: str | Path, garden: str) -> bool:
-    with _client(str(sync_dir)) as client:
-        resp = client.get(f"/gardens/{garden}/ops", params={"limit": 1})
-        resp.raise_for_status()
-        return bool(resp.json()["ops"])
+def head(remote: Remote, garden_id: str) -> int:
+    """The highest seq this device has stored in the garden."""
+    return _call(remote, "GET", f"/gardens/{garden_id}/head")["seq"]
+
+
+def changes(remote: Remote, since: int, wait: float = 0) -> tuple[list[str], int]:
+    """Ids of gardens with anything new since `since`, and the next
+    cursor. `wait` holds the request open on the server (a long poll)."""
+    body = _call(remote, "GET", "/changes", params={"since": since, "wait": wait}, timeout=wait + _TIMEOUT)
+    return body["gardens"], body["cursor"]

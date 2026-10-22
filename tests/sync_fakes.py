@@ -17,37 +17,46 @@ from typing import Any, Iterator
 
 import core.db as db
 from core import stamps, sync, sync_remote
+from core.device import get_device_id
 from core.motes import list_motes
 from core.relationships import list_relationships
+from core.sync_remote import Remote
 
-URL = "http://token@fake-server/"
+REMOTE = Remote("http://fake-server", "token")
+GARDEN_ID = "00000000-0000-4000-8000-000000000001"
 
 
 @dataclass
 class FakeServer:
+    """One garden's ops, as sync_server keeps them. The pushing device is
+    whichever is active (the real server reads it off the token)."""
     page_limit: int = 7
     ops: list[dict[str, Any]] = field(default_factory=list)
 
-    def push(self, _url: str, garden: str, device_id: str, ops: list[dict]) -> dict:
+    def push(self, _remote: Remote, garden_id: str, ops: list[dict]) -> dict:
+        device_id = get_device_id()
         have = {(o["garden"], o["device_id"], o["seq"]) for o in self.ops}
-        fresh = [op for op in ops if (garden, device_id, op["seq"]) not in have]
+        fresh = [op for op in ops if (garden_id, device_id, op["seq"]) not in have]
         for op in fresh:
-            self.ops.append({**op, "garden": garden, "device_id": device_id, "server_id": len(self.ops) + 1})
+            self.ops.append({**op, "garden": garden_id, "device_id": device_id, "server_id": len(self.ops) + 1})
         return {"accepted": len(fresh), "duplicate": len(ops) - len(fresh)}
 
-    def pull_page(self, _url: str, garden: str, self_id: str, since_id: int) -> tuple[list[dict], int]:
+    def pull_page(self, _remote: Remote, garden_id: str, since_id: int,
+                  exclude: str | None) -> tuple[list[dict], int]:
         page = [o for o in self.ops
-                if o["garden"] == garden and o["server_id"] > since_id and o["device_id"] != self_id]
+                if o["garden"] == garden_id and o["server_id"] > since_id and o["device_id"] != exclude]
         page = page[: self.page_limit]
         return page, (page[-1]["server_id"] if page else since_id)
 
-    def has_history(self, _url: str, garden: str) -> bool:
-        return any(o["garden"] == garden for o in self.ops)
+    def head(self, _remote: Remote, garden_id: str) -> int:
+        device_id = get_device_id()
+        return max((o["seq"] for o in self.ops if o["garden"] == garden_id and o["device_id"] == device_id),
+                   default=0)
 
     def install(self, monkeypatch) -> None:
         monkeypatch.setattr(sync_remote, "push", self.push)
         monkeypatch.setattr(sync_remote, "pull_page", self.pull_page)
-        monkeypatch.setattr(sync_remote, "has_history", self.has_history)
+        monkeypatch.setattr(sync_remote, "head", self.head)
 
 
 @dataclass
@@ -77,7 +86,7 @@ class Device:
 
     def run(self, conn) -> dict:
         with self.active():
-            return sync.run(conn, self.garden, URL)
+            return sync.run(conn, REMOTE, GARDEN_ID)
 
 
 def snapshot(conn) -> tuple[dict, dict]:

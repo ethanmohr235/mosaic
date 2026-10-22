@@ -2,20 +2,22 @@ import pytest
 
 from core.db import garden_db_path
 from core.gardens import (
-    clear_sync_dir,
     create_garden,
     delete_garden,
+    ensure_garden_id,
     garden_exists,
-    get_auto_sync_enabled,
+    garden_id,
     get_default_garden,
-    get_sync_dir,
+    hold,
+    is_held,
+    is_local_only,
     list_gardens,
     rename_garden,
     resolve_garden,
     restore_garden,
-    set_auto_sync_enabled,
     set_default_garden,
-    set_sync_dir,
+    set_local_only,
+    trashed_garden_id,
 )
 
 
@@ -127,89 +129,45 @@ def test_resolve_garden_none_falls_back_when_preferred_deleted():
     assert garden_exists("default")
 
 
-# ---- sync-dir pointer survives delete/restore, but not a fresh re-create ----
-#
-# get_sync_dir/set_sync_dir (core/gardens.py) point a garden at a sync
-# server for core/sync.py -- just an opaque string here, since this layer
-# doesn't care what it contains. Deleting a garden trashes its .db by
-# renaming it aside; the sync-dir pointer must travel with it, otherwise a
-# later, unrelated garden created under the same name would silently
-# inherit it and start pushing/pulling through a sync server that has
-# nothing to do with it.
+# ---- sync identity: inside the .db, so it follows the file ----
 
-def test_delete_garden_trashes_the_sync_dir_pointer_too():
+def test_a_garden_id_is_made_once_and_follows_rename_trash_and_restore():
     create_garden("work")
-    set_sync_dir("work", "http://token@host/work")
-    delete_garden("work")
-    assert get_sync_dir("work") is None
+    assert garden_id("work") is None
+    made = ensure_garden_id("work")
+    assert ensure_garden_id("work") == made
+    rename_garden("work", "life")
+    assert garden_id("life") == made
+    delete_garden("life")
+    assert trashed_garden_id("life") == made
+    restore_garden("life")
+    assert garden_id("life") == made
 
 
-def test_restore_garden_brings_the_sync_dir_pointer_back():
+def test_a_fresh_garden_does_not_inherit_a_trashed_namesakes_id():
     create_garden("work")
-    set_sync_dir("work", "http://token@host/work")
-    delete_garden("work")
-    restore_garden("work")
-    assert get_sync_dir("work") == "http://token@host/work"
-
-
-def test_a_fresh_garden_does_not_inherit_a_deleted_namesakes_sync_dir():
-    create_garden("work")
-    set_sync_dir("work", "http://token@host/work")
+    ensure_garden_id("work")
     delete_garden("work")
     create_garden("work")
-    assert get_sync_dir("work") is None
+    assert garden_id("work") is None
 
 
-def test_clear_sync_dir_removes_it():
+def test_local_only_round_trips():
     create_garden("work")
-    set_sync_dir("work", "http://token@host/work")
-    clear_sync_dir("work")
-    assert get_sync_dir("work") is None
+    assert is_local_only("work") is False
+    set_local_only("work", True)
+    assert is_local_only("work") is True
+    set_local_only("work", False)
+    assert is_local_only("work") is False
 
 
-def test_clear_sync_dir_on_a_garden_without_one_is_a_noop():
+def test_a_held_garden_says_so_until_released():
     create_garden("work")
-    clear_sync_dir("work")
-    assert get_sync_dir("work") is None
-
-
-# ---- auto-sync flag: gates the console's lifecycle sync points, mirrors the
-# sync-dir pointer's own delete/restore behavior ----
-
-def test_get_auto_sync_enabled_defaults_true_when_unset():
-    create_garden("work")
-    assert get_auto_sync_enabled("work") is True
-
-
-def test_set_auto_sync_enabled_round_trips():
-    create_garden("work")
-    set_auto_sync_enabled("work", False)
-    assert get_auto_sync_enabled("work") is False
-    set_auto_sync_enabled("work", True)
-    assert get_auto_sync_enabled("work") is True
-
-
-def test_delete_garden_trashes_the_auto_sync_pointer_too():
-    create_garden("work")
-    set_auto_sync_enabled("work", False)
-    delete_garden("work")
-    assert get_auto_sync_enabled("work") is True  # back to absent-file default
-
-
-def test_restore_garden_brings_the_auto_sync_pointer_back():
-    create_garden("work")
-    set_auto_sync_enabled("work", False)
-    delete_garden("work")
-    restore_garden("work")
-    assert get_auto_sync_enabled("work") is False
-
-
-def test_a_fresh_garden_does_not_inherit_a_deleted_namesakes_auto_sync_setting():
-    create_garden("work")
-    set_auto_sync_enabled("work", False)
-    delete_garden("work")
-    create_garden("work")
-    assert get_auto_sync_enabled("work") is True
+    assert is_held("work") is False
+    handle = hold("work")
+    assert is_held("work") is True
+    handle.close()
+    assert is_held("work") is False
 
 
 # ---- rename ----
@@ -220,15 +178,6 @@ def test_rename_garden_moves_the_database():
     assert not garden_exists("work")
     assert garden_exists("life")
     assert list_gardens() == ["life"]
-
-
-def test_rename_garden_carries_the_auto_sync_pointer():
-    # The sidecars are named after the garden, so a rename that moved
-    # only the .db would silently reset this to its absent-file default.
-    create_garden("work")
-    set_auto_sync_enabled("work", False)
-    rename_garden("work", "life")
-    assert get_auto_sync_enabled("life") is False
 
 
 def test_rename_garden_follows_the_default_garden_pointer():
@@ -268,18 +217,3 @@ def test_rename_garden_refuses_an_invalid_name():
 def test_rename_garden_missing_raises():
     with pytest.raises(LookupError):
         rename_garden("nothing", "something")
-
-
-def test_rename_garden_refuses_while_the_garden_syncs(tmp_path):
-    # The sync server keys a garden's ops by its name, so renaming here
-    # would point this device at an empty op stream while the other
-    # devices kept writing to the old one.
-    create_garden("work")
-    set_sync_dir("work", str(tmp_path))
-    with pytest.raises(ValueError, match="syncing"):
-        rename_garden("work", "life")
-    assert garden_exists("work")
-
-    clear_sync_dir("work")
-    rename_garden("work", "life")
-    assert garden_exists("life")

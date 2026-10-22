@@ -471,11 +471,10 @@ the open garden's motes.
 | Command | Notes |
 |---|---|
 | `garden new ‹name›` | Name checked against the rule `core/db.py` enforces |
-| `garden rename ‹old› ‹new›` | Moves the `.db` and its sidecars (layouts and history too). Refused while the garden syncs -- the sync server keys its history by name. Renaming the open garden reopens the console on the new name |
-| `garden rm ‹name›` | Typed, asks for a second ⏎ (`d d` in the tree doesn't), then moves the file aside; `garden restore ‹name›` brings it back. The open garden can't be removed |
+| `garden rename ‹old› ‹new›` | Moves the `.db` and its sidecars (layouts and history too); the next sync renames it on every machine. Renaming the open garden reopens the console on the new name |
+| `garden rm ‹name›` | Typed, asks for a second ⏎ (`d d` in the tree doesn't), then moves the file aside; `garden restore ‹name›` brings it back. A synced garden is moved aside (and restored) on every machine. The open garden can't be removed |
 | `garden archive\|unarchive ‹name›` | Archives it and everything it owns (`archived: true` on its owner, or a marker mote in a loose garden) |
 | `garden export ‹name› [path]`, `garden import [path] ‹new name›` | JSON, `core/garden_io.py`'s format; without a path, a file dialog. Import always makes a new garden, and removes it again if the file fails |
-| `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Point it at a sync server, stop (the oplog stays), sync once (errors shown), or gate the automatic syncs on open, `cd` and close |
 | `project start @sel [‹garden›]`, `project stop @sel` | Give a mote a garden of its own (made, or a loose one adopted) / drop its claim. One undo each; neither deletes a garden |
 
 ### Tiling

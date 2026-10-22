@@ -1,14 +1,18 @@
-# Self-hosted sync server (sync_server/) for multi-device sync -- the
-# only sync transport MonOSS speaks (see core/sync.py's module docstring),
-# and sync_server/app.py for the API it serves.
+# Self-hosted sync server (sync_server/): one person's machines, every
+# garden (docs/architecture.md -> Sync).
 #
-# Usage: put POSTGRES_PASSWORD and MONOSS_SYNC_TOKEN in a .env file next
-# to this compose file (generate a token with:
+# Put POSTGRES_PASSWORD and MONOSS_SYNC_TOKEN in a .env file next to this
+# compose file (generate the token with:
 # `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`), then
-# `docker compose up -d`. Point a garden at it with:
-# `python cli/main.py sync init "http://<token>@your-host:8080/" [--clone]`
-# (the container speaks plain HTTP; put a TLS-terminating reverse proxy in
-# front and use https:// instead if it's reachable over an untrusted network)
+# `docker compose up -d`. The server migrates its own schema on start; back
+# its database up first when upgrading:
+# `docker compose exec postgres pg_dump -U monoss monoss_sync > backup.sql`.
+#
+# MONOSS_SYNC_TOKEN is the account's secret. It is asked for once per
+# machine, by `monoss sync login http://your-host:8080`, which pairs that
+# machine and hands it a token of its own (revoke one with `sync revoke`).
+# The container speaks plain HTTP: keep it on a private network (a
+# tailnet), or put a TLS-terminating proxy (`tailscale serve`) in front.
 services:
   postgres:
     image: postgres:16-alpine

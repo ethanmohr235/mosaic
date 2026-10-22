@@ -1,8 +1,10 @@
 # cli/main.py
 import argparse
+import getpass
 import json
 import logging
 import shlex
+import socket
 import sys
 from pathlib import Path
 
@@ -46,7 +48,9 @@ from core.gardens import (
     resolve_garden,
     restore_garden,
 )
-from core import sync as sync_repo
+from core import sync_account
+from core import sync_commands
+from core.sync_all import sync_all
 from core.db import DEFAULT_GARDEN, get_connection, initialize_database
 from cli.render import (
     BASE_UNIT_NOTE,
@@ -104,34 +108,30 @@ def build_parser() -> argparse.ArgumentParser:
     garden_rename.add_argument("new", help="New garden name")
 
     # ------------------ SYNC COMMANDS ------------------
-    # A sibling of `mote`/`rel`, not `garden`: push/pull/run/status need
-    # an open connection to the garden's own oplog, the same way those
-    # do. `init` is the one action that may need to create the garden
-    # first (cloning from existing sync history), so it's special-cased
-    # in main() the same way `garden` itself is.
-    sync_parser = subparsers.add_parser("sync", help="Sync a garden between devices")
+    # Every garden at once, through this machine's account
+    # (core/sync_commands.py), so none of these takes --garden. `login`
+    # is here and nowhere else: the server's secret is asked for, never
+    # typed into a line that history or MCP would keep.
+    sync_parser = subparsers.add_parser("sync", help="Sync every garden between your machines")
     sync_sub = sync_parser.add_subparsers(dest="action")
-    sync_init = sync_sub.add_parser("init", help="Point this garden at a sync server")
-    sync_init.add_argument(
-        "url",
-        help="The sync server's URL, as http(s)://<token>@host:port/ "
-             "(see docker-compose.yml for running one)",
-    )
-    sync_init.add_argument(
-        "--clone", action="store_true",
-        help="If the target already has history for this garden and it doesn't exist "
-             "locally yet, create it here from that history",
-    )
-    sync_push = sync_sub.add_parser("push", help="Write local changes out to the sync target")
-    sync_push.add_argument(
-        "--resend", action="store_true",
-        help="Resend this device's entire history -- only needed when moving an "
-             "already-synced garden onto a new, empty sync_dir",
-    )
-    sync_sub.add_parser("pull", help="Apply other devices' changes from the sync target")
-    sync_run = sync_sub.add_parser("run", help="push, then pull (the everyday one-shot sync)")
-    sync_run.add_argument("--resend", action="store_true", help="See `sync push --resend`")
-    sync_sub.add_parser("status", help="Show sync progress and any conflicts from the last pull")
+    sync_login = sync_sub.add_parser("login", help="Pair this machine with a sync server (asks for its secret)")
+    sync_login.add_argument("url", help="The server, e.g. http://compass.tailnet.ts.net:8080")
+    sync_login.add_argument("--name", help="What to call this machine (default: its hostname)")
+    sync_sub.add_parser("logout", help="Forget this machine's sync account")
+    sync_sub.add_parser("status", help="Every garden's state from the last pass, and name clashes to answer")
+    sync_sub.add_parser("now", help="Sync every garden now")
+    sync_merge = sync_sub.add_parser("merge", help="Answer a name clash: join this garden with the server's")
+    sync_merge.add_argument("name", help="Garden name")
+    sync_rename = sync_sub.add_parser("rename", help="Answer a name clash: rename this garden out of the way")
+    sync_rename.add_argument("name", help="Garden name")
+    sync_rename.add_argument("new", help="New name for the garden here")
+    sync_local = sync_sub.add_parser("local", help="Keep a garden on this machine only")
+    sync_local.add_argument("name", help="Garden name")
+    sync_share = sync_sub.add_parser("share", help="Sync a garden kept local again")
+    sync_share.add_argument("name", help="Garden name")
+    sync_sub.add_parser("devices", help="This account's devices")
+    sync_revoke = sync_sub.add_parser("revoke", help="Refuse a device's token")
+    sync_revoke.add_argument("device", help="Device name or id")
 
     # ------------------ MOTE COMMANDS ------------------
     mote_parser = subparsers.add_parser("mote", help="Manage motes")
@@ -512,48 +512,23 @@ def _handle_garden(args) -> None:
         print("Specify a garden action: create, list, delete, restore, rename")
 
 
-def _handle_sync_init(garden: str, args) -> None:
-    result = sync_repo.init(garden, args.url, clone=args.clone)
-    if result["cloned"]:
-        print(f"Garden {garden!r} synced to {args.url} (cloned existing history)")
-    else:
-        print(f"Garden {garden!r} now syncs through {args.url}")
-
-
-def _print_sync_notes(skipped: list[dict]) -> None:
-    for note in skipped:
-        print(f"  {note['reason']}: {note['entity']} (from device {note['device_id']})")
-
-
-def _handle_sync(conn, garden: str, args) -> None:
-    if args.action == "push":
-        result = sync_repo.push(conn, garden, resend=args.resend)
-        print(f"Pushed {result['pushed']} change(s)")
-
-    elif args.action == "pull":
-        result = sync_repo.pull(conn, garden)
-        print(f"Applied {result['applied']} change(s)")
-        _print_sync_notes(result["skipped"])
-
-    elif args.action == "run":
-        result = sync_repo.run(conn, garden, resend=args.resend)
-        print(f"Pushed {result['push']['pushed']} change(s), applied {result['pull']['applied']} change(s)")
-        _print_sync_notes(result["pull"]["skipped"])
-
+def _handle_sync(args) -> None:
+    if args.action == "login":
+        secret = getpass.getpass(f"Server secret for {args.url}: ")
+        name = args.name or socket.gethostname()
+        sync_account.login(args.url, secret, name)
+        print(f"{name} is signed in to {args.url}; syncing every garden...")
+        print(sync_commands.summary(sync_all(full=True)))
+    elif args.action == "logout":
+        print("Signed out." if sync_account.logout() else "Not signed in.")
     elif args.action == "status":
-        result = sync_repo.status(conn, garden)
-        if result["sync_dir"] is None:
-            print(f"Garden {garden!r} is not syncing -- run `sync init <url>` first")
-            return
-        print(f"Sync server: {result['sync_dir']}")
-        print(f"Local changes: {result['local_ops']} total, {result['local_ops_pending']} not yet pushed")
-        if not result["remotes"]:
-            print("No other device has synced with this garden yet.")
-        for remote in result["remotes"]:
-            print(f"  device {remote['device_id']}: {remote['last_applied_seq']} change(s) applied from it")
-
+        print(sync_commands.status_text())
+    elif args.action in sync_commands.ACTIONS:
+        words = [args.action] + [w for w in (getattr(args, "name", None), getattr(args, "new", None),
+                                             getattr(args, "device", None)) if w]
+        print(sync_commands.run(sync_commands.parse(words)))
     else:
-        print("Specify a sync action: init, push, pull, run, status")
+        print("Specify a sync action: login, logout, status, now, merge, rename, local, share, devices, revoke")
 
 
 def _handle_mote(conn, args) -> None:
@@ -1218,12 +1193,8 @@ def main() -> None:
             _handle_project(args)
             return
 
-        if args.command == "sync" and args.action == "init":
-            # Not resolve_garden(): that raises if the name doesn't exist
-            # yet, but init's whole job may be to create it (cloning from
-            # existing sync history onto a brand-new garden name).
-            garden = args.garden or get_default_garden() or DEFAULT_GARDEN
-            _handle_sync_init(garden, args)
+        if args.command == "sync":
+            _handle_sync(args)
             return
 
         garden = resolve_garden(args.garden)
@@ -1234,8 +1205,6 @@ def main() -> None:
                 _handle_mote(conn, args)
             elif args.command == "rel":
                 _handle_rel(conn, args)
-            elif args.command == "sync":
-                _handle_sync(conn, garden, args)
             elif args.command == "species":
                 _handle_species(conn, args)
             elif args.command == "modoc":

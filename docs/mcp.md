@@ -47,8 +47,9 @@ absolute path.
 ## Tools
 
 58 tools, grouped: gardens (`list_gardens`, `create_garden`, `export_garden`,
-`archive_garden`, `search_gardens`), `sync` (`action`: `init`, `push`, `pull`,
-`run`, `status`), projects (`project_tree`, `start_project`), motes
+`archive_garden`, `search_gardens`), `sync` (`action`: `status`, `now`; every
+garden at once -- signing in and answering a name clash stay with the user),
+projects (`project_tree`, `start_project`), motes
 (`list_motes`, `search_motes`, `get_mote`, `create_mote`, `update_mote`,
 `delete_property`, `delete_mote`), relationships (`list_relationships`, which
 takes `from_id`, `type` and `mote_id` for either endpoint, then

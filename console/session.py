@@ -16,11 +16,10 @@ import logging
 import sqlite3
 import threading
 from dataclasses import dataclass, field
-from typing import Callable, TypeVar
+from typing import IO, Callable, TypeVar
 
 from core import gardens as gardens_repo
 from core import projects as projects_repo
-from core import sync as sync_repo
 from core.db import get_connection, initialize_database
 from core.undo import UndoManager
 
@@ -31,31 +30,6 @@ logger = logging.getLogger(__name__)
 BUSY_TIMEOUT_MS = 5000
 
 F = TypeVar("F", bound=Callable)
-
-
-def best_effort_sync(garden: str, *, manual: bool = False) -> None:
-    """Push and pull `garden` on a background thread when it syncs: on the
-    console's lifecycle points (open, garden switch, close) only while its
-    auto-sync flag is on, and on `refresh` (`manual`) whatever the flag. Its own short-lived connection, so a slow
-    or offline sync server never blocks opening, switching or closing,
-    and the caller's connection may already be gone when it runs. Errors
-    are logged, not raised: this path is opportunistic, unlike `garden
-    sync ‹name› now`, which waits and reports a real failure."""
-    if gardens_repo.get_sync_dir(garden) is None:
-        return
-    if not manual and not gardens_repo.get_auto_sync_enabled(garden):
-        return
-
-    def _run() -> None:
-        conn = get_connection(garden)
-        try:
-            sync_repo.run(conn, garden)
-        except Exception:
-            logger.exception("garden sync failed for %r", garden)
-        finally:
-            conn.close()
-
-    threading.Thread(target=_run, daemon=True).start()
 
 
 def open_connection(garden: str) -> sqlite3.Connection:
@@ -74,52 +48,49 @@ class Session:
     undo: UndoManager = field(default_factory=UndoManager)
     # Why the open garden is archived (core/projects.py::archived_by), or None.
     archived: str | None = None
+    # The open garden's hold (core/gardens.py::hold): a sync pass never
+    # renames or trashes a garden open here.
+    held: IO[bytes] | None = None
 
     @classmethod
     def open(cls, garden: str | None = None) -> "Session":
         """`garden` None means the user's default (core/gardens.py::
-        resolve_garden), as for every app. A best-effort sync starts on
-        a background thread."""
+        resolve_garden), as for every app."""
         resolved = gardens_repo.resolve_garden(garden)
-        session = cls(resolved, open_connection(resolved))
+        session = cls(resolved, open_connection(resolved), held=gardens_repo.hold(resolved))
         session.sync_archive()
-        best_effort_sync(resolved)
         return session
 
     def switch(self, garden: str) -> None:
         """Move to another garden: new connection, fresh undo stack (an
         undo recorded against the old garden's connection means nothing
         in the new one). The new garden is opened before the old one is
-        closed, so an unknown name leaves the session as it was. Both
-        gardens get a best-effort sync: leaving is a close, arriving an
-        open."""
+        closed, so an unknown name leaves the session as it was."""
         with self.lock:
             resolved = gardens_repo.resolve_garden(garden)
             conn = open_connection(resolved)
-            previous = self.garden
             self._close_conn()
             self.garden, self.conn = resolved, conn
+            self.held = gardens_repo.hold(resolved)
             self.undo = UndoManager()
             self.sync_archive()
-        best_effort_sync(previous)
-        best_effort_sync(resolved)
 
     def rename(self, new: str) -> None:
         """Rename the garden this session has open, and reopen it under
         the new name (core/gardens.py::rename_garden moves the file and its
         sidecars). The undo stack starts fresh, as on a switch. A refused
-        rename (a bad or taken name, a garden that syncs) reopens the old
-        one and raises."""
+        rename (a bad or taken name) reopens the old one and raises."""
         with self.lock:
             old = self.garden
             self._close_conn()
             try:
                 gardens_repo.rename_garden(old, new)
             except Exception:
-                self.conn = open_connection(old)
+                self.conn, self.held = open_connection(old), gardens_repo.hold(old)
                 self.sync_archive()
                 raise
             self.garden, self.conn = new, open_connection(new)
+            self.held = gardens_repo.hold(new)
             self.undo = UndoManager()
             self.sync_archive()
 
@@ -148,15 +119,15 @@ class Session:
 
     def close(self) -> None:
         with self.lock:
-            if self.conn is None:
-                return
             self._close_conn()
-        best_effort_sync(self.garden)
 
     def _close_conn(self) -> None:
         if self.conn is not None:
             self.conn.close()
             self.conn = None
+        if self.held is not None:
+            self.held.close()
+            self.held = None
 
 
 def locked(method: F) -> F:

@@ -551,17 +551,18 @@ def test_preview_simulation_is_quiet_when_constraints_hold(box):
 
 
 # ---- sync ----
-# Just the MCP plumbing -- core/sync.py's own multi-device merge
-# behavior (tests/test_sync.py) is exercised there, since simulating a
-# second device needs switching GARDENS_DIR mid-test, which none of the
-# other tools here do.
+# Just the MCP plumbing -- the pass itself is tests/test_sync.py's.
 
 
-def test_sync_refuses_an_unknown_action_and_an_init_with_no_server():
-    with pytest.raises(ValueError, match="one of init, push, pull, run, status"):
-        sync("flush", GARDEN)
-    with pytest.raises(ValueError, match="needs sync_dir"):
-        sync("init", GARDEN)
+def test_sync_refuses_an_unknown_action():
+    with pytest.raises(ValueError, match="one of status, now"):
+        sync("flush")
+
+
+def test_sync_status_before_signing_in_says_so():
+    assert sync("status")["account"] is None
+    report = sync("now")
+    assert report["ok"] is False and "not signed in" in report["error"]
 
 
 def test_list_relationships_filters_by_either_endpoint_and_type():
@@ -576,37 +577,14 @@ def test_list_relationships_filters_by_either_endpoint_and_type():
     assert len(list_relationships(from_id=a["id"], garden=GARDEN)) == 1
 
 
-def test_sync_init_then_status_reports_the_server(sync_dir):
-    result = sync("init", GARDEN, sync_dir=sync_dir)
-    assert result["garden"] == GARDEN
-    assert result["cloned"] is False
-
-    status = sync("status", GARDEN)
-    assert status["sync_dir"] == sync_dir
-    assert status["remotes"] == []
-
-
-def test_sync_push_then_status_shows_nothing_pending(sync_dir):
+def test_sync_now_sends_every_garden(sync_server):
+    from core import sync_account
+    from tests.conftest import SYNC_SERVER_SECRET
     create_mote({"name": "Alice"}, GARDEN)
-    sync("init", GARDEN, sync_dir=sync_dir)
-
-    pushed = sync("push", GARDEN)
-    assert pushed["pushed"] == 1
-    assert sync("status", GARDEN)["local_ops_pending"] == 0
-
-
-def test_sync_pull_with_no_other_device_is_a_noop(sync_dir):
-    sync("init", GARDEN, sync_dir=sync_dir)
-    assert sync("pull", GARDEN) == {"applied": 0, "skipped": [], "held": 0}
-
-
-def test_sync_run_pushes_and_pulls_in_one_call(sync_dir):
-    create_mote({"name": "Alice"}, GARDEN)
-    sync("init", GARDEN, sync_dir=sync_dir)
-
-    result = sync("run", GARDEN)
-    assert result["push"]["pushed"] == 1
-    assert result["pull"] == {"applied": 0, "skipped": [], "held": 0}
+    sync_account.login(sync_server, SYNC_SERVER_SECRET, "laptop")
+    report = sync("now")
+    assert report["ok"] and {g["name"]: g["sent"] for g in report["gardens"]}[GARDEN] == 1
+    assert sync("status")["last"]["ok"] is True
 
 
 # ---- the worksheet and solve health ----

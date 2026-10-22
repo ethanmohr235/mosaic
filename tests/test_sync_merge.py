@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 
 from core import sync, undo
-from core.gardens import create_garden
+from core.gardens import create_garden, set_garden_id
 from core.motes import create_mote, delete_mote, delete_property, get_mote, list_motes, update_mote
 from core.relationships import (
     create_relationship,
@@ -15,7 +15,7 @@ from core.relationships import (
     list_relationships,
     update_relationship,
 )
-from tests.sync_fakes import URL, Device, FakeServer, snapshot
+from tests.sync_fakes import GARDEN_ID, REMOTE, Device, FakeServer, snapshot
 
 
 @pytest.fixture
@@ -34,11 +34,11 @@ def _join(devices: list[Device]) -> list:
     first, *rest = devices
     with first.active():
         create_garden(first.garden)
-        sync.init(first.garden, URL)
+        set_garden_id(first.garden, GARDEN_ID)
     conns = [first.conn()]
     for device in rest:
         with device.active():
-            sync.init(device.garden, URL, clone=True)
+            sync.clone(REMOTE, device.garden, GARDEN_ID)
         conns.append(device.conn())
     return conns
 
@@ -138,17 +138,6 @@ def test_undoing_a_delete_brings_back_what_was_newer_than_it(tmp_path, monkeypat
     assert get_mote(ca, m).properties == {"name": "M", "note": "B, after A's delete"}
 
 
-def test_switching_servers_starts_progress_over(tmp_path, monkeypatch, server):
-    (a,) = devices = _devices(tmp_path, monkeypatch, 0)
-    (ca,) = _join(devices)
-    with a.active():
-        create_mote(ca, {})
-        sync.push(ca, a.garden)
-        server.ops.clear()  # a fresh, empty server
-        sync.init(a.garden, URL + "other")
-        assert sync.push(ca, a.garden)["pushed"] == 1
-
-
 # ---- every interleaving: random edits, random syncs ----
 
 KEYS = ("k0", "k1", "k2")
@@ -174,7 +163,7 @@ class _Actor:
         create_mote(self.conn, {self.rng.choice(KEYS): self.rng.randint(0, 9)})
 
     def _sync(self, motes, rels):
-        sync.run(self.conn, self.device.garden, URL)
+        sync.run(self.conn, REMOTE, GARDEN_ID)
 
     def _set(self, motes, rels):
         update_mote(self.conn, self.rng.choice(motes), {self.rng.choice(KEYS): self.rng.randint(0, 99)})

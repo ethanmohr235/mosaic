@@ -1,5 +1,8 @@
 # core/gardens.py
+import fcntl
+import sqlite3
 from pathlib import Path
+from typing import IO
 
 from core import db
 from core.db import (
@@ -37,14 +40,12 @@ def delete_garden(name: str) -> None:
         trash.unlink()
     garden_db_path(name).rename(trash)
 
-    # The sidecars (the sync-dir pointer, the auto-sync flag, the
-    # console's UI state) are trashed alongside the .db, not left behind
-    # -- otherwise a brand-new, unrelated garden later created under this
-    # same name would silently inherit them, and with the sync pointer
-    # start pushing/pulling through a sync server that has nothing to do
-    # with it. restore_garden() below brings them back with the rest. A
-    # trashed sidecar from an older copy is dropped even when this copy
-    # has none, so a restore never pairs this .db with another's.
+    # The sidecar (the console's UI state) is trashed alongside the .db,
+    # not left behind -- otherwise a brand-new, unrelated garden later
+    # created under this same name would silently inherit it.
+    # restore_garden() below brings it back with the rest. A trashed
+    # sidecar from an older copy is dropped even when this copy has none,
+    # so a restore never pairs this .db with another's.
     for sidecar in _sidecar_paths(name):
         sidecar_trash = _trashed(sidecar)
         sidecar_trash.unlink(missing_ok=True)
@@ -69,7 +70,7 @@ def restore_garden(name: str) -> None:
 def _sidecar_paths(name: str) -> tuple[Path, ...]:
     """Every file beside a garden's .db that is named after it, and so
     belongs to it: deleted, restored and renamed with it."""
-    return (_sync_dir_path(name), _auto_sync_path(name), console_state_path(name))
+    return (console_state_path(name),)
 
 
 def _trashed(path: Path) -> Path:
@@ -104,28 +105,18 @@ def rename_garden(old: str, new: str) -> str:
 
     The .db is only half of a garden on disk: _sidecar_paths() sit
     beside it named after it, so a rename that moved only the database
-    would silently strand them -- the renamed
-    garden would come back unsynced, and a later garden reusing the old
-    name would inherit a sync server that has nothing to do with it.
-    Same reasoning as delete_garden()'s trashing of the sidecars.
+    would silently strand them, and a later garden reusing the old name
+    would inherit them. Same reasoning as delete_garden()'s trashing of
+    the sidecars.
 
-    Refused while the garden syncs: the sync server keys a garden's ops
-    by its name, so renaming here would point this device at a fresh,
-    empty op stream while the other devices kept writing to the old one
-    -- two halves of one garden that never converge again. Turning sync
-    off, renaming, then re-initing is the flow that actually works, and
-    it is better asked for than discovered."""
+    A synced garden renames freely: the server knows it by its id
+    (garden_id), and the next sync carries the new name to every device.
+    """
     validate_garden_name(new)
     if not garden_exists(old):
         raise LookupError(f"No such garden: {old!r}")
     if garden_exists(new):
         raise FileExistsError(f"Garden already exists: {new!r}")
-    if get_sync_dir(old) is not None:
-        raise ValueError(
-            f"Garden {old!r} is syncing through a sync server, which tracks it "
-            "by name. Disable sync, rename, then set sync up again."
-        )
-
     garden_db_path(old).rename(garden_db_path(new))
 
     for old_sidecar, new_sidecar in zip(_sidecar_paths(old), _sidecar_paths(new)):
@@ -164,53 +155,111 @@ def set_default_garden(name: str) -> None:
     _default_garden_config_path().write_text(name)
 
 
-def _sync_dir_path(name: str) -> Path:
-    path = garden_db_path(name)
-    return path.with_name(path.name + ".sync_dir")
+# ---- sync identity (core/sync_all.py) ----
+#
+# A garden's sync identity lives inside its own .db, in `garden_meta`, so
+# it follows the file through rename, trash and restore with no sidecar to
+# keep in step. Never oplogged: it says which garden on the server this
+# file is, and whether this machine shares it at all -- facts about this
+# copy, not knowledge in the garden.
+
+_META_TABLE = "CREATE TABLE IF NOT EXISTS garden_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+GARDEN_ID, LOCAL_ONLY = "garden_id", "local_only"
 
 
-def get_sync_dir(name: str) -> str | None:
-    """The sync server URL this garden syncs through (core/sync.py), or
-    None if `sync init` has never been run for it. Per garden, not per device --
-    a pointer file beside the garden's own .db, same pattern as
-    _default_garden_config_path() above."""
-    path = _sync_dir_path(name)
+def _read_meta(path: Path, key: str) -> str | None:
     if not path.exists():
         return None
-    return path.read_text().strip() or None
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute("SELECT value FROM garden_meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+    except sqlite3.DatabaseError:  # no table yet, or not a garden at all
+        return None
+    finally:
+        conn.close()
 
 
-def set_sync_dir(name: str, sync_dir: str) -> None:
-    _sync_dir_path(name).write_text(str(sync_dir))
+def _write_meta(name: str, key: str, value: str | None) -> None:
+    conn = get_connection(name)
+    try:
+        conn.execute(_META_TABLE)
+        if value is None:
+            conn.execute("DELETE FROM garden_meta WHERE key = ?", (key,))
+        else:
+            conn.execute("INSERT INTO garden_meta (key, value) VALUES (?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+        conn.commit()
+    finally:
+        conn.close()
 
 
-def clear_sync_dir(name: str) -> None:
-    """Stop syncing this garden -- removes the pointer set by
-    set_sync_dir() (core/sync.py::init) without touching the garden's own
-    data or its oplog history, so re-enabling sync later picks up right
-    where it left off."""
-    _sync_dir_path(name).unlink(missing_ok=True)
+def garden_id(name: str) -> str | None:
+    """Which garden on the sync server this one is, if it has been given
+    an id yet."""
+    return _read_meta(garden_db_path(name), GARDEN_ID)
 
 
-def _auto_sync_path(name: str) -> Path:
+def ensure_garden_id(name: str) -> str:
+    found = garden_id(name)
+    if found is None:
+        found = db.generate_uuid()
+        _write_meta(name, GARDEN_ID, found)
+    return found
+
+
+def set_garden_id(name: str, value: str) -> None:
+    _write_meta(name, GARDEN_ID, value)
+
+
+def trashed_garden_id(name: str) -> str | None:
+    """The sync id of the copy of `name` in the trash, if there is one."""
+    return _read_meta(_trash_path(name), GARDEN_ID)
+
+
+def is_local_only(name: str) -> bool:
+    """Whether this machine keeps the garden to itself (`sync local`)."""
+    return _read_meta(garden_db_path(name), LOCAL_ONLY) == "1"
+
+
+def set_local_only(name: str, local: bool) -> None:
+    _write_meta(name, LOCAL_ONLY, "1" if local else None)
+
+
+def hold(name: str) -> IO[bytes]:
+    """Mark the garden as open here until the returned file is closed: the
+    sync worker (core/sync_all.py) won't rename or trash a garden that is
+    held. A shared flock on the .db itself, so it travels with the file
+    and dies with the process; SQLite's own locks are a different kind and
+    unaffected."""
+    handle = garden_db_path(name).open("rb")
+    fcntl.flock(handle, fcntl.LOCK_SH)
+    return handle
+
+
+def is_held(name: str) -> bool:
     path = garden_db_path(name)
-    return path.with_name(path.name + ".auto_sync")
-
-
-def get_auto_sync_enabled(name: str) -> bool:
-    """Whether the lifecycle sync points (console/session.py::
-    best_effort_sync) should fire automatically. Defaults to True when absent, so a garden
-    that already had a sync dir configured keeps today's always-on
-    behavior. False doesn't touch the sync dir itself -- "Sync now"
-    still works either way."""
-    path = _auto_sync_path(name)
     if not path.exists():
-        return True
-    return path.read_text().strip() != "0"
+        return False
+    with path.open("rb") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        return False
 
 
-def set_auto_sync_enabled(name: str, enabled: bool) -> None:
-    _auto_sync_path(name).write_text("1" if enabled else "0")
+def legacy_sync_url(name: str) -> str | None:
+    """The per-garden server URL sync used before accounts (a
+    `‹name›.db.sync_dir` file), until core/sync_all.py adopts the garden."""
+    path = garden_db_path(name).with_name(f"{name}.db.sync_dir")
+    return (path.read_text().strip() or None) if path.exists() else None
+
+
+def drop_legacy_sync(name: str) -> None:
+    for suffix in (".sync_dir", ".auto_sync"):
+        garden_db_path(name).with_name(f"{name}.db{suffix}").unlink(missing_ok=True)
 
 
 def resolve_garden(name: str | None) -> str:

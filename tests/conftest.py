@@ -37,7 +37,7 @@ def conn():
 # skipped outright when Docker isn't reachable, rather than falling back
 # to a mock that wouldn't prove anything about the real transport.
 
-SYNC_SERVER_TOKEN = "test-token"
+SYNC_SERVER_SECRET = "test-secret"
 
 
 def _docker_available() -> bool:
@@ -57,8 +57,8 @@ DOCKER_AVAILABLE = _docker_available()
 def live_sync_server():
     """A real sync_server (sync_server/app.py), served over a real
     localhost socket by uvicorn and backed by a fresh, ephemeral
-    testcontainers Postgres -- yields the `http://<token>@host:port`
-    base URL to hand straight to core/sync.py as a sync_dir.
+    testcontainers Postgres -- yields its `http://host:port` base URL;
+    a device pairs with SYNC_SERVER_SECRET (core/sync_account.py::login).
 
     Fresh per call (own container, own port) so two tests never share
     history through reusing the same garden name.
@@ -74,7 +74,7 @@ def live_sync_server():
         prior_db_url = os.environ.get("DATABASE_URL")
         prior_token = os.environ.get("MONOSS_SYNC_TOKEN")
         os.environ["DATABASE_URL"] = pg.get_connection_url(driver=None)
-        os.environ["MONOSS_SYNC_TOKEN"] = SYNC_SERVER_TOKEN
+        os.environ["MONOSS_SYNC_TOKEN"] = SYNC_SERVER_SECRET
         try:
             sock = socket.socket()
             sock.bind(("127.0.0.1", 0))
@@ -89,7 +89,7 @@ def live_sync_server():
             while not server.started and time.monotonic() < deadline:
                 time.sleep(0.05)
             try:
-                yield f"http://{SYNC_SERVER_TOKEN}@127.0.0.1:{port}"
+                yield f"http://127.0.0.1:{port}"
             finally:
                 server.should_exit = True
                 thread.join(timeout=5)
@@ -105,12 +105,11 @@ def live_sync_server():
 
 
 @pytest.fixture
-def sync_dir():
-    """A live sync-server base URL -- the only transport core/sync.py
-    speaks. Kept as its own fixture (rather than inlining
-    live_sync_server() into every test) so every test in test_sync.py
-    that takes a `sync_dir` argument skips uniformly when Docker isn't
-    reachable, instead of each one repeating that check."""
+def sync_server():
+    """A live sync server's base URL. Kept as its own fixture (rather than
+    inlining live_sync_server() into every test) so every test that takes
+    a `sync_server` argument skips uniformly when Docker isn't reachable,
+    instead of each one repeating that check."""
     if not DOCKER_AVAILABLE:
         pytest.skip("Docker not available for testcontainers")
     with ExitStack() as stack:
@@ -124,11 +123,9 @@ def sync_dir():
 def wait_until(predicate, timeout: float = 2.0, interval: float = 0.02) -> bool:
     """Polls `predicate` (a zero-arg callable) until it's truthy or
     `timeout` elapses, returning the last value seen. console/session.py's
-    best_effort_sync() runs the console's open/switch/close sync on a
-    background thread (so a slow or offline sync server never blocks
-    the window), so a test asserting it fired has to give that thread a
-    moment rather than checking right after the call that started it
-    returns."""
+    the sync worker (core/sync_worker.py) runs on its own thread, so a
+    test asserting it did something has to give that thread a moment
+    rather than checking right after the call that started it returns."""
     deadline = time.monotonic() + timeout
     while True:
         result = predicate()

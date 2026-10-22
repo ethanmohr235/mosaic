@@ -88,7 +88,11 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `garden rm ‹name›` / `garden restore ‹name›` | Move aside (a typed one asks for a second ⏎; not the open one) / bring back |
 | `garden archive\|unarchive ‹name›` | Archive with everything it owns / undo that. An archived garden is read-only in the console (top bar: `archived · read-only`; writes and undo are refused) |
 | `garden export ‹name› [path]`, `garden import [path] ‹new›` | JSON out / into a new garden (no path: a file dialog) |
-| `garden sync ‹name› ‹url›\|off\|now\|auto on\|off` | Sync server on / off, sync once, automatic syncs |
+| `sync` | Every garden's sync state, and name clashes to answer |
+| `sync now` | Sync every garden now |
+| `sync merge ‹garden›` / `sync rename ‹garden› ‹new›` | Answer a name clash: join the server's garden of that name / rename this one out of the way |
+| `sync local ‹garden›` / `sync share ‹garden›` | Keep a garden on this machine only / sync it again |
+| `sync devices`, `sync revoke ‹device›` | This account's machines / refuse one's token |
 | `image add ‹path› [‹name›]`, `image rename ‹old› ‹new›` | Store a PNG/SVG for notes (`\image{name}`; auto-named `shot-NNN`), or rename one and every note that shows it (undoable) |
 | `plan [--days N] [--hours 9-17] [--block 2h] [--from ‹date›] [--apply]` | Place work blocks for open motes (`due` + `estimate`, not done), earliest deadline first, in free work hours. Alone it previews; `--apply` writes them (one undo step) |
 | `worked ‹mote› ‹duration› [‹date›]` | Log time spent (`90m`, `1.5h`) as an actual work block (undoable) |
@@ -98,7 +102,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `revisions`, `revisions diff ‹a› ‹b›`, `revisions export ‹rN› [‹path›] [--tex]` | List frozen revisions / values that changed / write one's PDF (or `.tex`) |
 | `project start @sel [‹garden›]`, `project stop @sel` | Give a mote its own garden / drop its claim (undoable) |
 | `layout save\|load\|rm ‹name›`, `layout list` | Pane layouts (a new one takes the lowest free slot 1–9) |
-| `refresh` | Re-read the garden (MCP/CLI/sync edits) |
+| `refresh` | Re-read the garden (MCP/CLI edits) |
 | `undo`, `redo` | Undo / redo the last write |
 | `log` | Command and error log |
 | anything else | Statement: `R1.x = 5 ohm`, `A -> B`, `A -> type -> B`, `R1 : Resistor`, `R1.x ?`, `delete R1` |
@@ -303,3 +307,12 @@ Mouse: drag empty space to pan · wheel zooms · hover a stub lights its sibling
 
 **Log**: `j` `k` scroll, `g` `G` top/bottom, click a mote to select it.
 **New pane**: the command line takes the caret; `⏎` runs into the pane, `esc` closes it.
+
+## Sync from the shell
+
+| Command | Does |
+|---|---|
+| `monoss sync login ‹url› [--name N]` | Pair this machine (asks for the server's secret), then sync everything |
+| `monoss sync logout` | Forget this machine's account |
+| `monoss sync status` | The last pass: each garden's state, clashes to answer |
+| `monoss sync now\|merge\|rename\|local\|share\|devices\|revoke …` | As the console's `sync …` |

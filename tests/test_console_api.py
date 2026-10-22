@@ -47,7 +47,7 @@ def test_boot_shape(api):
     assert boot["gardens"] == ["test"]
     assert boot["crumbs"] == ["test"]
     assert boot["archived"] is None
-    assert boot["verbs"][35] == {"verb": "cd", "usage": "cd ‹garden›",
+    assert boot["verbs"][36] == {"verb": "cd", "usage": "cd ‹garden›",
                                 "describe": "switch this workspace's garden"}
     assert (boot["layouts"], boot["active"], boot["working"], boot["history"], boot["live"]) == (
         [], None, None, [], False)
@@ -992,24 +992,16 @@ def test_project_start_and_stop_are_one_undo_each(api):
     assert api.boot()["crumbs"] == ["test"]
 
 
-def test_lifecycle_sync_respects_auto_sync_and_refresh_does_not(monkeypatch):
-    from console import session as session_module
+def test_the_open_garden_is_held_and_sync_lines_run(api):
     from core import gardens as gardens_repo
-    ran = []
-    monkeypatch.setattr(session_module.threading, "Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: ran.append(target)})())
-    create_garden("synced")
-    gardens_repo.set_sync_dir("synced", "http://example.invalid/")
-    gardens_repo.set_auto_sync_enabled("synced", False)
-    session_module.best_effort_sync("synced")
-    assert ran == []
-    session_module.best_effort_sync("synced", manual=True)
-    assert len(ran) == 1
-    gardens_repo.set_auto_sync_enabled("synced", True)
-    session_module.best_effort_sync("synced")
-    assert len(ran) == 2
-    session_module.best_effort_sync("test")  # no sync dir: nothing to do
-    assert len(ran) == 2
+    assert gardens_repo.is_held("test")
+    assert api.run("sync") == {"effect": "open_view", "view": "sync", "command": "sync"}
+    assert "not signed in" in api.run("sync now")["message"]
+    assert "stays on this machine" in api.run("sync local test")["message"]
+    assert "not an action" in api.run("sync flush")["message"]
+    create_garden("other")
+    api.run("cd other")
+    assert gardens_repo.is_held("other") and not gardens_repo.is_held("test")
 
 
 # ---- images ----

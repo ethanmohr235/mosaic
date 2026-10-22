@@ -11,7 +11,6 @@ subverbs (docs/console.md -> Settled for U9).
     garden archive|unarchive ‹name›
     garden export ‹name› ‹path›
     garden import ‹path› ‹new name›
-    garden sync ‹name› ‹url›|off|now|auto on|off
 
 The tree is core/projects.py's: owned gardens under their cover, then
 loose gardens, then -- folded unless `--archived` -- archived ones.
@@ -19,8 +18,9 @@ Reading it opens every garden, so a surface asks on open and refresh,
 never per keystroke.
 
 What used to be the Gardens window's bridge lives here now: the counts
-that tolerate a .db that isn't a garden, an import that never merges and
-cleans up after itself, and the sync switches. None of it is on a
+that tolerate a .db that isn't a garden, and an import that never merges
+and cleans up after itself. Sync is the `sync` verb's (core/sync_commands.py);
+Home only shows each garden's state from the last pass. None of it is on a
 garden's undo stack -- a garden-level act is not one garden's history --
 so removing is moved aside and `garden restore` brings it back."""
 import json
@@ -37,7 +37,7 @@ from core import garden_io
 from core import health as health_repo
 from core import gardens as gardens_repo
 from core import projects
-from core import sync as sync_repo
+from core import sync_status
 from core.command_bar import CommandError
 from core.db import garden_db_path, get_connection, initialize_database
 
@@ -55,7 +55,6 @@ ACTIONS = {
     "unarchive": "un-archive a garden",
     "export": "write a garden to a JSON file",
     "import": "a JSON file into a new garden (‹path› ‹new name›)",
-    "sync": "‹url›, off, now, auto on|off",
 }
 PROJECTS, LOOSE, ARCHIVED = "projects", "loose", "archived"
 
@@ -144,9 +143,10 @@ def gardens_view(show_archived: bool = False, current: str | None = None) -> dic
         troubled.setdefault(p.garden, []).append(p.message)
 
     groups = {PROJECTS: [], LOOSE: [], ARCHIVED: []}
+    sync_states = {name: row["state"] for name, row in _sync_states().items()}
     for node in nodes:
         group = ARCHIVED if node.archived else PROJECTS if node.children else LOOSE
-        groups[group].extend(_rows(node, 0, troubled, current))
+        groups[group].extend(_rows(node, 0, troubled, current, sync_states))
     archived = groups[ARCHIVED]
     return {
         "command": GARDENS_VERB + (f" {ARCHIVED_FLAG}" if show_archived else ""),
@@ -162,7 +162,18 @@ def gardens_view(show_archived: bool = False, current: str | None = None) -> dic
     }
 
 
-def _rows(node: projects.Node, depth: int, troubled: dict, current: str | None) -> list[dict]:
+def _sync_states(full: bool = False) -> dict[str, dict]:
+    """Each garden's row from the last sync pass (core/sync_status.py),
+    by name: `state` alone, or with `full` everything the pass knew."""
+    last = sync_status.read() or {}
+    rows = {g["name"]: g for g in last.get("gardens", [])}
+    if full:
+        return {name: {**row, "finished": last.get("finished")} for name, row in rows.items()}
+    return rows
+
+
+def _rows(node: projects.Node, depth: int, troubled: dict, current: str | None,
+          sync_states: dict[str, str]) -> list[dict]:
     owner = node.owner
     row = {
         "garden": node.garden,
@@ -171,7 +182,7 @@ def _rows(node: projects.Node, depth: int, troubled: dict, current: str | None) 
         "cover": owner.cover.to_json() if owner else None,
         "owner": {"garden": owner.garden, "moteId": owner.mote_id} if owner else None,
         "archived": node.archived,
-        "syncing": gardens_repo.get_sync_dir(node.garden) is not None,
+        "sync": sync_states.get(node.garden),
         "current": node.garden == current,
         "problems": troubled.get(node.garden, []),
         "health": None if node.archived else health(node.garden),
@@ -179,7 +190,7 @@ def _rows(node: projects.Node, depth: int, troubled: dict, current: str | None) 
     }
     out = [row]
     for child in node.children:
-        out.extend(_rows(child, depth + 1, troubled, current))
+        out.extend(_rows(child, depth + 1, troubled, current, sync_states))
     return out
 
 
@@ -208,7 +219,6 @@ def detail(name: str) -> dict:
     owner = projects.owner_of(name, claims)
     db_path = garden_db_path(name)
     stat = db_path.stat()
-    sync_dir = gardens_repo.get_sync_dir(name)
     return {
         "command": f"{GARDEN_VERB} {_quote(name)}",
         "garden": name,
@@ -217,7 +227,7 @@ def detail(name: str) -> dict:
         **counts(name),
         "bytes": stat.st_size,
         "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-        "sync": {"url": sync_dir, "auto": gardens_repo.get_auto_sync_enabled(name)} if sync_dir else None,
+        "sync": _sync_states(full=True).get(name),
         "owner": {"garden": owner.garden, "moteId": owner.mote_id, **owner.cover.to_json()} if owner else None,
         "owns": sorted(g for g, found in claims.items() if any(o.garden == name for o in found)),
         "archivedBy": projects.archived_by(name, known),
@@ -243,7 +253,7 @@ class GardenLine:
 
 
 _ARITY = {"new": (1, 1), "rename": (2, 2), "rm": (1, 1), "restore": (1, 1), "archive": (1, 1),
-          "unarchive": (1, 1), "export": (1, 2), "import": (1, 2), "sync": (2, 3)}
+          "unarchive": (1, 1), "export": (1, 2), "import": (1, 2)}
 
 
 def parse(args: Sequence[str]) -> GardenLine:
@@ -264,24 +274,13 @@ def parse(args: Sequence[str]) -> GardenLine:
     least, most = _ARITY[head]
     if not least <= len(rest) <= most:
         raise CommandError(f"garden {head} takes {_usage(head)}")
-    if head == "sync":
-        _check_sync(rest)
     return GardenLine(head, tuple(rest))
 
 
 def _usage(action: str) -> str:
     return {"new": "‹name›", "rename": "‹old› ‹new›", "rm": "‹name›", "restore": "‹name›",
             "archive": "‹name›", "unarchive": "‹name›", "export": "‹name› [‹path›]",
-            "import": "[‹path›] ‹new name›", "sync": "‹name› ‹url›|off|now|auto on|off"}[action]
-
-
-def _check_sync(rest: list[str]) -> None:
-    what = rest[1]
-    if what == "auto":
-        if len(rest) != 3 or rest[2] not in ("on", "off"):
-            raise CommandError("garden sync ‹name› auto on|off")
-    elif len(rest) != 2:
-        raise CommandError(f"garden takes {_usage('sync')}")
+            "import": "[‹path›] ‹new name›"}[action]
 
 
 def parse_text(command: str) -> GardenLine:
@@ -347,8 +346,6 @@ def run(line: GardenLine, current: str | None = None) -> Done:
         if len(a) < 2:
             raise CommandError("garden import needs a path")
         return Done(import_from(a[0], a[1]), created=a[1])
-    if line.action == "sync":
-        return Done(sync(a[0], a[1:]))
     raise CommandError(f"garden {line.action} is not an action")
 
 
@@ -391,37 +388,6 @@ def import_from(path: str, new_name: str) -> str:
     return f"imported {motes} motes and {rels} relationships into the new garden {new_name!r}"
 
 
-def sync(name: str, what: Sequence[str]) -> str:
-    """`‹url›` points the garden at a sync server, `off` stops syncing
-    (the oplog stays, so turning it back on resumes), `now` runs one sync
-    and surfaces its errors, `auto on|off` gates the console's open,
-    switch and close syncs."""
-    _exists(name)
-    head = what[0]
-    if head == "off":
-        gardens_repo.clear_sync_dir(name)
-        return f"{name!r} no longer syncs"
-    if head == "now":
-        conn = get_connection(name)
-        try:
-            result = sync_repo.run(conn, name)
-        finally:
-            conn.close()
-        return f"synced {name!r}: {_summary(result)}"
-    if head == "auto":
-        gardens_repo.set_auto_sync_enabled(name, what[1] == "on")
-        return f"auto-sync for {name!r} is {what[1]}"
-    sync_repo.init(name, head, clone=True)
-    return f"{name!r} syncs with {head}"
-
-
-def _summary(result: dict) -> str:
-    push, pull = result.get("push") or {}, result.get("pull") or {}
-    pushed = push.get("pushed", push.get("ops", 0))
-    pulled = pull.get("applied", pull.get("ops", 0))
-    return f"{pushed} sent, {pulled} received"
-
-
 # ---- completion -------------------------------------------------------------
 
 def choices(rest: str) -> list[tuple[str, str]]:
@@ -431,10 +397,6 @@ def choices(rest: str) -> list[tuple[str, str]]:
     if not done:
         return [(a, d) for a, d in ACTIONS.items()] + [(SHOW, "a garden's details")] + names
     action = done[0]
-    if action == "sync" and len(done) == 2:
-        return [("now", "sync once"), ("off", "stop syncing"), ("auto", "on|off")]
-    if action == "sync" and len(done) == 3 and done[2] == "auto":
-        return [("on", ""), ("off", "")]
     if action in ("new", "import") or (action == "rename" and len(done) == 2):
         return []
     if len(done) == 1:

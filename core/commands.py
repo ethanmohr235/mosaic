@@ -609,6 +609,10 @@ def complete(
         from core import home
         rows = [CompletionRow(v, d) for v, d in home.choices(rest)]
         return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
+    if word == "sync":
+        from core import sync_commands
+        rows = [CompletionRow(v, d) for v, d in sync_commands.choices(rest)]
+        return _complete_from(RESERVED_VERBS[word]["usage"], rows, rest, cursor)
     if word == "project":
         names = sorted({m.properties["name"] for m in motes_repo.list_motes(conn)
                         if isinstance(m.properties.get("name"), str)})

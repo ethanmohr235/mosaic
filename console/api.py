@@ -32,7 +32,7 @@ from console.mora import MoraApi
 from console.motion import MotionApi
 from console.mote import MoteApi
 from console.moxie import MoxieApi
-from console.session import Session, best_effort_sync, locked
+from console.session import Session, locked
 from core import commands
 from core import gardens as gardens_repo
 from core import fit as fit_repo
@@ -45,9 +45,11 @@ from core import planner as planner_repo
 from core import plotcmd
 from core import projects as projects_repo
 from core import submit as submit_repo
+from core import sync_commands
 from core import tectonic as tectonic_repo
 from core.command_bar import CommandError
 from core.reserved import RESERVED_VERBS
+from core.sync_all import sync_all
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +237,8 @@ class Api:
             return self._verb_fit(literal)
         if literal.kind == commands.VERB and literal.head == home_repo.GARDEN_VERB:
             return self._verb_garden(literal, confirm)
+        if literal.kind == commands.VERB and literal.head == sync_commands.SYNC_VERB:
+            return self._verb_sync(literal)
         if literal.kind == commands.VERB and literal.head in commands.LINE_VIEW_VERBS:
             # The literal line is the pane's command: `open @sel` keeps
             # following the selection rather than freezing on today's.
@@ -379,6 +383,23 @@ class Api:
                 "moteId": None, "moteName": None, "created": False,
                 "needsConfirm": False, "choices": [], "wrote": True}
 
+    def _verb_sync(self, parsed: commands.ParsedLine) -> dict:
+        """`sync` alone opens the sync pane; every other form acts and
+        says what it did (core/sync_commands.py). Renaming the open
+        garden out of a name clash reopens the workspace on the new name,
+        as `garden rename` does."""
+        line = sync_commands.parse(parsed.args)
+        if line.action == sync_commands.SHOW:
+            return {"effect": "open_view", "view": "sync", "command": parsed.text}
+        if line.action == "rename" and line.args[0] == self._session.garden:
+            self._session.rename(line.args[1])
+            self._state = state_repo.load(self._session.garden)
+            message = f"renamed to {line.args[1]!r} -- " + sync_commands.summary(sync_all())
+            return {"effect": "garden", "boot": self._boot_payload(), "message": message}
+        message = sync_commands.run(line)
+        return {"effect": "statement", "ok": True, "message": message, "moteId": None, "moteName": None,
+                "created": False, "needsConfirm": False, "choices": [], "wrote": False}
+
     def _verb_garden(self, parsed: commands.ParsedLine, confirm: bool) -> dict:
         """`garden [‹name›]` opens (or re-points) the detail pane with the
         literal line. Every other form acts on gardens, outside any one
@@ -503,13 +524,9 @@ class Api:
         self._state = state_repo.load(self._session.garden)
 
     def _refresh(self) -> str:
-        """Kick a best-effort sync; the shell re-runs every pane, which is
-        the "re-read the garden" half -- every read already goes to disk."""
-        garden = self._session.garden
-        best_effort_sync(garden, manual=True)
-        if gardens_repo.get_sync_dir(garden) is None:
-            return f"refreshed {garden}"
-        return f"refreshed {garden}; syncing in the background"
+        """The shell re-runs every pane, which is the whole of it -- every
+        read already goes to disk."""
+        return f"refreshed {self._session.garden}"
 
     def _save_state(self) -> None:
         state_repo.save(self._session.garden, self._state)

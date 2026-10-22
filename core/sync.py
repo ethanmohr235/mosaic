@@ -1,36 +1,27 @@
 # core/sync.py
-"""Multi-device sync, built on the oplog (core/oplog.py) rather than the
-garden's own .db file -- syncing a live SQLite file directly risks
+"""One garden's push and pull, built on the oplog (core/oplog.py) rather
+than the garden's .db file -- syncing a live SQLite file directly risks
 corruption from two writers; syncing an *append-only log of small
-immutable ops* through a sync server (sync_server/, via core/sync_remote.py)
-does not, because no device ever edits an op another device wrote.
+immutable ops* through the sync server (sync_server/, via
+core/sync_remote.py) does not, because no device ever edits an op another
+device wrote. core/sync_all.py decides which gardens to run this for.
 
-An earlier version of this module also supported syncing through a
-folder shared by a third-party tool (Syncthing, Dropbox, iCloud Drive),
-using the same append-only-ops idea but writing/reading `.jsonl` files
-directly. That transport was removed for being too dependent on the
-third-party tool's own propagation timing and health, with no way for
-MonOSS to tell a stale folder from a synced one. The self-hosted server
-is the only transport now.
+A push sends this device's oplog rows since the last push; a pull replays
+every other device's, through core/merge.py. Replay is the merge's: every
+op carries its stamp (core/stamps.py), and a garden is a function of the
+stamps alone -- latest write wins per property, a delete beats anything
+older than it, and an op that can't land yet (its mote hasn't arrived, or
+is deleted and the op is newer) is held rather than refused. So any two
+devices that have pulled the same ops hold the same garden, whatever
+order the ops came in, and no op ever stops the ones behind it.
 
-Each device periodically push()es its own new oplog rows out to the
-server as one more batch of ops, and pull()s in whatever other devices
-have pushed, replaying their ops through the ordinary core/motes.py and
-core/relationships.py primitives (with core.oplog.suppressed() active,
-so replay doesn't re-log itself and loop back out).
-
-Replay is core/merge.py's: every op carries its stamp (core/stamps.py),
-and a garden is a function of the stamps alone -- latest write wins per
-property, a delete beats anything older than it, and an op that can't
-land yet (its mote hasn't arrived, or is deleted and the op is newer)
-is held rather than refused. So any two devices that have pulled the
-same ops hold the same garden, whatever order the ops came in, and no
-op ever stops the ones behind it.
+Progress is per garden, in its `sync_state` table: how far this device
+has pushed (keyed by its own device id), how far it has replayed each
+other device, and the server's pull cursor.
 """
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 from core import gardens as gardens_repo
@@ -41,20 +32,21 @@ from core import sync_remote
 from core.db import get_connection, initialize_database
 from core.device import get_device_id
 from core.stamps import Stamp, format_ts
+from core.sync_remote import Remote
 
 # Reserved key in sync_state (never a real device_id, which is always a
-# uuid4) holding how far this garden has paged through the server's
-# global ops cursor -- see _get_server_cursor/_set_server_cursor below.
+# uuid4) holding how far this garden has paged through the server's ops.
 _SERVER_CURSOR_KEY = "__server_cursor__"
+BUSY_TIMEOUT_MS = 5000
 
 
-def _resolve_sync_dir(garden: str, sync_dir: str | Path | None, *, required: bool = True):
-    if sync_dir is not None:
-        return sync_dir
-    configured = gardens_repo.get_sync_dir(garden)
-    if configured is None and required:
-        raise ValueError(f"No sync folder configured for {garden!r} -- run sync init() first")
-    return configured
+def open_garden(name: str) -> sqlite3.Connection:
+    """A connection for syncing, which waits out the console's or the
+    MCP server's writes rather than failing on them."""
+    conn = get_connection(name)
+    conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+    initialize_database(conn)
+    return conn
 
 
 def _get_state(conn: sqlite3.Connection, device_id: str) -> int:
@@ -76,18 +68,9 @@ def _all_state(conn: sqlite3.Connection) -> dict[str, int]:
     return {r["remote_device_id"]: r["last_applied_seq"] for r in conn.execute("SELECT * FROM sync_state")}
 
 
-def _get_server_cursor(conn: sqlite3.Connection) -> int:
-    return _get_state(conn, _SERVER_CURSOR_KEY)
-
-
-def _set_server_cursor(conn: sqlite3.Connection, since_id: int) -> None:
-    _set_state(conn, _SERVER_CURSOR_KEY, since_id)
-
-
 def _row_to_op(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "op_id": row["op_id"],
-        "device_id": row["device_id"],
         "seq": row["seq"],
         "ts": row["ts"],
         "entity_type": row["entity_type"],
@@ -163,52 +146,33 @@ def _backfill_orphans(conn: sqlite3.Connection, device_id: str) -> None:
         conn.commit()
 
 
-def push(
-    conn: sqlite3.Connection,
-    garden: str,
-    sync_dir: str | Path | None = None,
-    *,
-    resend: bool = False,
-) -> dict[str, Any]:
-    """Write this device's oplog rows since the last push out to the sync
-    server as one new, immutable batch. A device only ever adds new
-    history, never edits existing history -- that is what makes this
-    safe to retry.
-
-    `resend=True` ignores this device's own push progress and resends
-    its entire local history -- needed the first time a garden already
-    synced through one sync_dir is pointed at a different, empty one
-    (see the migration note in core/sync.py's module docstring): without
-    it, a device that already pushed everything to the old sync_dir
-    would believe it has nothing left to push to the new one."""
-    sync_dir = _resolve_sync_dir(garden, sync_dir)
+def push(conn: sqlite3.Connection, remote: Remote, garden_id: str, *, resend: bool = False) -> dict[str, Any]:
+    """Send this device's oplog rows since the last push. A device only
+    ever adds new history, never edits existing history -- that is what
+    makes this safe to retry. `resend` sends the whole history again (the
+    server ignores what it has)."""
     device_id = get_device_id()
     _backfill_orphans(conn, device_id)
     last_pushed = 0 if resend else _get_state(conn, device_id)
-
     rows = conn.execute(
-        "SELECT * FROM oplog WHERE device_id = ? AND seq > ? ORDER BY seq",
-        (device_id, last_pushed),
+        "SELECT * FROM oplog WHERE device_id = ? AND seq > ? ORDER BY seq", (device_id, last_pushed)
     ).fetchall()
     if not rows:
         return {"pushed": 0}
-
-    to_seq = rows[-1]["seq"]
-    ops = [_row_to_op(row) for row in rows]
-    result = sync_remote.push(sync_dir, garden, device_id, ops)
-    _set_state(conn, device_id, to_seq)
+    result = sync_remote.push(remote, garden_id, [_row_to_op(row) for row in rows])
+    _set_state(conn, device_id, rows[-1]["seq"])
     conn.commit()
     return {"pushed": len(rows), **result}
 
 
 def _fetch(
-    sync_dir: str | Path, garden: str, self_id: str, since_id: int, baseline: dict[str, int]
+    remote: Remote, garden_id: str, since_id: int, exclude: str | None, baseline: dict[str, int]
 ) -> tuple[list[dict[str, Any]], int]:
-    """Every op from another device after `since_id` that this garden
-    hasn't replayed yet, and the cursor after the last page."""
+    """Every op after `since_id` this garden hasn't replayed yet, and the
+    cursor after the last page."""
     pending: dict[tuple[str, int], dict[str, Any]] = {}
     while True:
-        page, next_since_id = sync_remote.pull_page(sync_dir, garden, self_id, since_id)
+        page, next_since_id = sync_remote.pull_page(remote, garden_id, since_id, exclude)
         if not page:
             return list(pending.values()), since_id
         for op in page:
@@ -217,19 +181,18 @@ def _fetch(
         since_id = next_since_id
 
 
-def pull(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
-    """Replay every op from every other device that we haven't applied
-    yet (core/merge.py). Ops are replayed in stamp order, which only
-    saves holding a relationship whose mote is in the same pull: the
-    result doesn't depend on the order.
+def pull(conn: sqlite3.Connection, remote: Remote, garden_id: str) -> dict[str, Any]:
+    """Replay every op this garden hasn't applied yet (core/merge.py), in
+    stamp order -- which only saves holding a relationship whose mote is
+    in the same pull: the result doesn't depend on the order.
 
-    The per-device `seq` baseline filter matters even against the
-    server: its own cursor is coarser than per-device seq, so a resend
-    (push(resend=True)) can hand back ops a device already applied --
-    this filter silently no-ops those."""
-    sync_dir = _resolve_sync_dir(garden, sync_dir)
+    This device's own ops come back too until it has pushed here once (a
+    fresh clone, a merge), and the per-device `seq` baseline drops any op
+    already applied -- a resend hands some back."""
+    self_id = get_device_id()
     baseline = _all_state(conn)
-    ops, cursor = _fetch(sync_dir, garden, get_device_id(), _get_server_cursor(conn), baseline)
+    exclude = self_id if baseline.get(self_id, 0) > 0 else None
+    ops, cursor = _fetch(remote, garden_id, baseline.get(_SERVER_CURSOR_KEY, 0), exclude, baseline)
     ops.sort(key=lambda o: (Stamp.of(o["ts"], o["device_id"]), o["seq"]))
 
     applied = 0
@@ -245,87 +208,69 @@ def pull(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = No
 
     held = merge.retry_held(conn)
     for dev, seq in advanced.items():
-        _set_state(conn, dev, seq)
-    _set_server_cursor(conn, cursor)
+        _set_state(conn, dev, max(seq, baseline.get(dev, 0)))
+    _set_state(conn, _SERVER_CURSOR_KEY, cursor)
     conn.commit()
     return {"applied": applied, "skipped": skipped, "held": held}
 
 
-def run(
-    conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None, *, resend: bool = False
-) -> dict[str, Any]:
-    """push() then pull() -- the everyday one-shot sync. `resend` is for
-    moving an already-synced garden onto a new, empty sync_dir -- see
-    push()'s docstring."""
-    sync_dir = _resolve_sync_dir(garden, sync_dir)
-    return {"push": push(conn, garden, sync_dir, resend=resend), "pull": pull(conn, garden, sync_dir)}
+def run(conn: sqlite3.Connection, remote: Remote, garden_id: str) -> dict[str, Any]:
+    """push() then pull()."""
+    return {"push": push(conn, remote, garden_id), "pull": pull(conn, remote, garden_id)}
 
 
-def status(conn: sqlite3.Connection, garden: str, sync_dir: str | Path | None = None) -> dict[str, Any]:
-    sync_dir = _resolve_sync_dir(garden, sync_dir, required=False)
-    self_id = get_device_id()
-    state = _all_state(conn)
-    own_pushed = state.get(self_id, 0)
-    own_total = conn.execute(
-        "SELECT COUNT(*) AS n FROM oplog WHERE device_id = ?", (self_id,)
-    ).fetchone()["n"]
-    remotes = [
-        {"device_id": dev, "last_applied_seq": seq}
-        for dev, seq in state.items() if dev not in (self_id, _SERVER_CURSOR_KEY)
-    ]
-    return {
-        "device_id": self_id,
-        "sync_dir": str(sync_dir) if sync_dir else None,
-        "local_ops": own_total,
-        "local_ops_pushed": own_pushed,
-        "local_ops_pending": own_total - own_pushed,
-        "held": merge.held_count(conn),
-        "remotes": remotes,
-    }
-
-
-def init(garden: str, sync_dir: str | Path, clone: bool = False) -> dict[str, Any]:
-    """Point `garden` at a sync server. If the target already holds
-    history for it and there's no local garden by that name yet, the
-    caller must pass clone=True -- otherwise this would silently create
-    an empty garden that then quietly diverges from real history the
-    user clearly meant to join."""
-    has_history = sync_remote.has_history(sync_dir, garden)
-
-    if not gardens_repo.garden_exists(garden):
-        if has_history and not clone:
-            raise ValueError(
-                f"{str(sync_dir)!r} already has sync history for {garden!r} -- "
-                "pass clone=True to materialize it locally"
-            )
-        gardens_repo.create_garden(garden)
-
-    previous = gardens_repo.get_sync_dir(garden)
-    gardens_repo.set_sync_dir(garden, str(sync_dir))
-    if previous is not None and previous != str(sync_dir):
-        _forget_progress(garden)
-
-    cloned = False
-    if has_history:
-        conn = get_connection(garden)
-        try:
-            initialize_database(conn)
-            pull(conn, garden, sync_dir)
-            cloned = True
-        finally:
-            conn.close()
-
-    return {"garden": garden, "sync_dir": str(sync_dir), "cloned": cloned}
-
-
-def _forget_progress(garden: str) -> None:
-    """A different server knows none of this garden's push or pull
-    progress: start both over. Re-sending is safe (the server ignores
-    duplicates) and so is re-applying (core/merge.py)."""
-    conn = get_connection(garden)
+def clone(remote: Remote, name: str, garden_id: str) -> dict[str, Any]:
+    """Make the garden `name` here from the server's garden `garden_id`."""
+    gardens_repo.create_garden(name)
+    gardens_repo.set_garden_id(name, garden_id)
+    conn = open_garden(name)
     try:
-        initialize_database(conn)
-        conn.execute("DELETE FROM sync_state")
-        conn.commit()
+        continue_after(conn, sync_remote.head(remote, garden_id))
+        return pull(conn, remote, garden_id)
     finally:
         conn.close()
+
+
+def continue_after(conn: sqlite3.Connection, seq: int) -> None:
+    """Number this device's ops after `seq`, the highest it has stored on
+    the server for this garden from an earlier copy of it. Without this a
+    garden cloned or merged into again would reuse seqs the server
+    already holds, and it would keep the old ops and drop the new ones."""
+    if seq <= 0:
+        return
+    device_id = get_device_id()
+    # Through negatives, so no row ever lands on a seq another still holds.
+    conn.execute("UPDATE oplog SET seq = -seq WHERE device_id = ?", (device_id,))
+    conn.execute("UPDATE oplog SET seq = ? - seq WHERE device_id = ?", (seq, device_id))
+    top = conn.execute("SELECT COALESCE(MAX(seq), 0) AS n FROM oplog").fetchone()["n"]
+    conn.execute("DELETE FROM sqlite_sequence WHERE name = 'oplog'")
+    conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('oplog', ?)", (max(top, seq),))
+    conn.commit()
+
+
+def forget_progress(conn: sqlite3.Connection) -> None:
+    """Start push and pull progress over, as for a garden that has just
+    become a different garden on the server. Re-sending is safe (the
+    server ignores duplicates) and so is re-applying (core/merge.py)."""
+    conn.execute("DELETE FROM sync_state")
+    conn.commit()
+
+
+def pending(conn: sqlite3.Connection) -> int:
+    """This device's ops not yet pushed."""
+    device_id = get_device_id()
+    return conn.execute(
+        "SELECT COUNT(*) AS n FROM oplog WHERE device_id = ? AND seq > ?", (device_id, _get_state(conn, device_id))
+    ).fetchone()["n"]
+
+
+def status(conn: sqlite3.Connection) -> dict[str, Any]:
+    self_id = get_device_id()
+    state = _all_state(conn)
+    return {
+        "device_id": self_id,
+        "local_ops_pending": pending(conn),
+        "held": merge.held_count(conn),
+        "remotes": [{"device_id": dev, "last_applied_seq": seq}
+                    for dev, seq in state.items() if dev not in (self_id, _SERVER_CURSOR_KEY)],
+    }

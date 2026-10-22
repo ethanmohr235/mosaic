@@ -9,7 +9,8 @@ import pytest
 from core import home
 from core.command_bar import CommandError
 from core.db import get_connection
-from core.gardens import create_garden, garden_exists, get_auto_sync_enabled, get_sync_dir
+from core import sync_status
+from core.gardens import create_garden, garden_exists
 from core.motes import create_mote, list_motes
 
 
@@ -52,7 +53,7 @@ def test_the_tree_groups_projects_loose_and_folded_archived(semester):
 
     hw4 = next(r for g in view["groups"] for r in g["rows"] if r["garden"] == "hw4")
     assert hw4["label"] == "HW4" and hw4["cover"]["due"] == "2026-10-09" and hw4["cover"]["status"] == "todo"
-    assert hw4["current"] and hw4["motes"] == 1 and not hw4["syncing"]
+    assert hw4["current"] and hw4["motes"] == 1 and hw4["sync"] is None
     assert view["command"] == "gardens" and view["total"] == 4
 
 
@@ -98,8 +99,6 @@ def test_detail(semester):
     ("garden rename a b", "rename", ("a", "b")),
     ("garden export a", "export", ("a",)),
     ("garden import ~/a.json b", "import", ("~/a.json", "b")),
-    ("garden sync a now", "sync", ("a", "now")),
-    ("garden sync a auto off", "sync", ("a", "auto", "off")),
 ])
 def test_lines(text, action, args):
     line = home.parse_text(text)
@@ -109,8 +108,7 @@ def test_lines(text, action, args):
 @pytest.mark.parametrize("text, message", [
     ("garden rename a", "takes ‹old› ‹new›"),
     ("garden hw4 extra", "not an action"),
-    ("garden sync a auto maybe", "auto on|off"),
-    ("garden sync a", "takes"),
+    ("garden sync a now", "not an action"),  # sync is its own verb now
 ])
 def test_bad_lines(text, message):
     with pytest.raises(CommandError, match=message):
@@ -185,22 +183,21 @@ def test_a_failed_import_leaves_no_garden_behind(semester, tmp_path):
         run(f"garden import {tmp_path / 'missing.json'} imported")
 
 
-def test_sync_switches(semester, sync_dir):
-    fill("scratch", {"name": "Alice"})
-    assert "syncs with" in run(f"garden sync scratch {sync_dir}").message
-    assert get_sync_dir("scratch") == sync_dir and get_sync_dir("hw4") is None
-    assert home.detail("scratch")["sync"] == {"url": sync_dir, "auto": True}
-    run("garden sync scratch auto off")
-    assert get_auto_sync_enabled("scratch") is False
-    assert "sent" in run("garden sync scratch now").message
-    run("garden sync scratch off")
-    assert get_sync_dir("scratch") is None
+def test_rows_and_details_show_the_last_sync_pass(semester):
+    sync_status.write(sync_status.Report(gardens=[
+        sync_status.GardenState("scratch", sync_status.PENDING, "id-1", pending=2),
+        sync_status.GardenState("hw4", sync_status.SYNCED, "id-2"),
+    ]))
+    rows = {r["garden"]: r for g in home.gardens_view()["groups"] for r in g["rows"]}
+    assert rows["scratch"]["sync"] == "pending" and rows["hw4"]["sync"] == "synced"
+    assert rows["college"]["sync"] is None
+    detail = home.detail("scratch")["sync"]
+    assert detail["pending"] == 2 and detail["finished"]
 
 
 def test_completion(semester):
     values = [v for v, _ in home.choices("")]
     assert "new" in values and "hw4" in values
-    assert [v for v, _ in home.choices("sync hw4 ")] == ["now", "off", "auto"]
     assert home.choices("new ") == []
 
 

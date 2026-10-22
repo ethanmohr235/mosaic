@@ -50,9 +50,10 @@ from core import relationships as rel_repo
 from core import reserved as reserved_repo
 from core import simulation as simulation_repo
 from core import species as species_repo
-from core import sync as sync_repo
+from core import sync_commands
+from core.sync_all import sync_all
 from core import worksheet as worksheet_repo
-from core.db import DEFAULT_GARDEN, get_connection, initialize_database
+from core.db import get_connection, initialize_database
 
 # How long a write waits out a lock held by another process (the GUI,
 # the CLI) before giving up. core/db.py deliberately isn't touched: this
@@ -127,54 +128,27 @@ def export_garden(garden: str | None = None) -> dict[str, Any]:
 # own change log through it.
 
 
-SYNC_ACTIONS = ("init", "push", "pull", "run", "status")
+SYNC_ACTIONS = ("status", "now")
 
 
-def sync(
-    action: str,
-    garden: str | None = None,
-    sync_dir: str | None = None,
-    clone: bool = False,
-    resend: bool = False,
-) -> dict[str, Any]:
-    """Sync a garden between devices through a sync server. `action` is:
+def sync(action: str = "status") -> dict[str, Any]:
+    """Sync every garden on this machine with the user's other machines,
+    through their sync server. `action` is:
 
-    - "init": point the garden at the server (`sync_dir`, its
-      http(s)://<token>@host:port/ URL). If that target already holds sync
-      history for this garden and the garden doesn't exist locally yet,
-      pass `clone=True` to materialize it from that history -- otherwise
-      this refuses, rather than silently creating an empty garden that
-      would then diverge from history you clearly meant to join.
-    - "push": write this device's changes since the last push out as one
-      new batch. `resend=True` resends this device's entire history --
-      only needed when moving an already-synced garden onto a new, empty
-      server.
-    - "pull": apply other devices' changes. `skipped` lists anything not
-      applied as-is and why: "shadowed" means something newer already
-      holds (last-write-wins, per property); "delete_won" means the change
-      is older than a delete of what it targets; "held" means it waits,
-      out of sight, for a mote that hasn't arrived or is deleted (an undo
-      of the delete brings it back). `held` counts everything waiting.
-    - "run": push, then pull -- the everyday one-shot sync.
-    - "status": the server it syncs through, how many local changes are
-      still unpushed, and how far each other known device's changes have
-      been applied."""
+    - "status": the last sync pass -- each garden's state (`synced`,
+      `pending` with changes not yet sent, `local` kept on this machine,
+      `conflict`, `waiting`, `error`), how many remote changes are `held`
+      (waiting, out of sight, for a mote that hasn't arrived or is
+      deleted), and any name clashes the user has to answer.
+    - "now": run a full pass now and return it in the same shape.
+
+    Signing in, and answering a name clash (merge or rename), are the
+    user's to do in the console or the CLI, never from here."""
     if action not in SYNC_ACTIONS:
         raise ValueError(f"sync action must be one of {', '.join(SYNC_ACTIONS)}, not {action!r}")
-    if action == "init":
-        if not sync_dir:
-            raise ValueError("sync init needs sync_dir, the server's URL")
-        name = garden or gardens_repo.get_default_garden() or DEFAULT_GARDEN
-        return sync_repo.init(name, sync_dir, clone=clone)
-    with _connect(garden) as conn:
-        name = gardens_repo.resolve_garden(garden)
-        if action == "push":
-            return sync_repo.push(conn, name, resend=resend)
-        if action == "pull":
-            return sync_repo.pull(conn, name)
-        if action == "run":
-            return sync_repo.run(conn, name, resend=resend)
-        return sync_repo.status(conn, name)
+    if action == "now":
+        return sync_all().to_json()
+    return sync_commands.view()
 
 
 # ---- motes ----

@@ -93,11 +93,68 @@ MCP `project_tree`, `start_project`, `archive_garden`, `search_gardens`.
 
 # Sync
 
-Devices share gardens through a self-hosted server (`sync_server/`, Postgres
-behind FastAPI) by exchanging oplog rows, never the `.db` file. Every write
-through the seven primitives in `core/motes.py` and `core/relationships.py`
-appends one op in the same transaction (`core/oplog.py`); a push sends this
+One person's machines share every garden through a self-hosted server
+(`sync_server/`, Postgres behind FastAPI, `docker-compose.yml`). They
+exchange oplog rows, never the `.db` file. Every write through the seven
+primitives in `core/motes.py` and `core/relationships.py` appends one op in
+the same transaction (`core/oplog.py`). For one garden, a push sends this
 device's new ops and a pull replays everyone else's (`core/sync.py`).
+
+**The account** (`core/sync_account.py`). A machine pairs once:
+`monoss sync login ‹url›` asks for the server's secret (`MONOSS_SYNC_TOKEN`)
+and gets back a token of its own. The token is kept in `gardens/.sync.json`
+(mode 0600) and revoked with `sync revoke`. Login is CLI-only, so the secret
+never enters console history or MCP. The server stores only token hashes
+(`sync_server/auth.py`).
+
+**The server** stores ops and orders them; it never reads a payload.
+Gardens are known by an id, with a name that is unique among gardens not
+in the trash. Routes:
+
+- `POST /devices` pairs a device; `GET` lists them, `DELETE` revokes one.
+- `GET|POST /gardens` lists or registers gardens; `PATCH` renames, trashes
+  or restores one.
+- `POST|GET /gardens/{id}/ops` pushes or pulls; `GET .../head` gives this
+  device's highest seq.
+- `GET /changes?since=N&wait=S` long-polls for gardens with news. A push
+  `NOTIFY`s the waiters (`sync_server/notify.py`).
+
+`ops.id` and `gardens.meta_seq` share one sequence. Writers take an advisory
+lock, so ids commit in order and no cursor can skip one. The schema is a
+list of numbered migrations (`sync_server/db.py`). v2 kept every v1 op id,
+so old cursors stay valid.
+
+**Garden identity** lives in each `.db`'s `garden_meta` table: `garden_id`,
+and `local_only` for `sync local`. It follows the file through rename, trash
+and restore, and is never oplogged.
+
+**One pass** (`core/sync_all.py`) covers every garden on the machine:
+
+1. Read `/changes` and the garden list.
+2. Reconcile three views of each garden: this copy, the server's, and what
+   the last pass agreed on (`known` in the account).
+   - A garden new here is registered; one new on the server is cloned.
+   - A rename, trash or restore made on any machine is made on the others.
+   - A garden the console holds open (`gardens.hold`, a shared `flock` on
+     the `.db`) waits for the next pass.
+3. Push and pull each garden with something to send or receive.
+
+A name clash is a conflict and is never guessed. Nothing syncs under that
+name until `sync merge` (join the server's garden: the histories merge) or
+`sync rename` (move this one aside; the server's comes in) answers it.
+
+Edge cases:
+- A garden from before accounts (a `‹name›.db.sync_dir` file) is adopted
+  into the server garden of its name.
+- A device that clones or merges into a garden it pushed to before numbers
+  its new ops after the server's `head` (`sync.continue_after`). Otherwise
+  the server would keep the old ops under those numbers and drop the new
+  ones.
+
+Each pass writes `gardens/.sync_status.json` (`core/sync_status.py`): each
+garden's state (`synced`, `pending`, `local`, `conflict`, `waiting`,
+`error`), held ops, conflicts and notes. Home, the `sync` pane, `monoss sync
+status` and MCP read that file. The `sync` verb is `core/sync_commands.py`.
 
 **Stamps** (`core/stamps.py`). Every op and every stored row carries the
 stamp of the write that last set it, `(ts, device_id)`, with `ts` as UTC

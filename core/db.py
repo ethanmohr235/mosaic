@@ -162,6 +162,11 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_held_ops_waiting ON held_ops(waiting_on)")
 
+    # Facts about this copy of the garden, never synced: which garden on
+    # the sync server it is, and whether this machine shares it at all
+    # (core/gardens.py -> sync identity).
+    cursor.execute("CREATE TABLE IF NOT EXISTS garden_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+
     # `unknowns` was renamed `freedoms` when the declaration moved from
     # the species to the mote: these are the properties a thing is free
     # to have determined, not a solver's list of variables. Scoped to
