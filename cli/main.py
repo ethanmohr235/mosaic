@@ -4,6 +4,7 @@ import getpass
 import json
 import logging
 import shlex
+import signal
 import socket
 import sys
 from pathlib import Path
@@ -50,6 +51,7 @@ from core.gardens import (
 )
 from core import sync_account
 from core import sync_commands
+from core import sync_worker
 from core.sync_all import sync_all
 from core.db import DEFAULT_GARDEN, get_connection, initialize_database
 from cli.render import (
@@ -132,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_sub.add_parser("devices", help="This account's devices")
     sync_revoke = sync_sub.add_parser("revoke", help="Refuse a device's token")
     sync_revoke.add_argument("device", help="Device name or id")
+    sync_sub.add_parser("daemon", help="Run this machine's sync worker until stopped (for a systemd service)")
 
     # ------------------ MOTE COMMANDS ------------------
     mote_parser = subparsers.add_parser("mote", help="Manage motes")
@@ -523,12 +526,27 @@ def _handle_sync(args) -> None:
         print("Signed out." if sync_account.logout() else "Not signed in.")
     elif args.action == "status":
         print(sync_commands.status_text())
+    elif args.action == "daemon":
+        _run_sync_daemon()
     elif args.action in sync_commands.ACTIONS:
         words = [args.action] + [w for w in (getattr(args, "name", None), getattr(args, "new", None),
                                              getattr(args, "device", None)) if w]
         print(sync_commands.run(sync_commands.parse(words)))
     else:
-        print("Specify a sync action: login, logout, status, now, merge, rename, local, share, devices, revoke")
+        print("Specify a sync action: login, logout, status, now, merge, rename, local, share, devices, "
+              "revoke, daemon")
+
+
+def _run_sync_daemon() -> None:
+    worker = sync_worker.Worker.acquire(sync_worker.SERVICE)
+    if worker is None:
+        print("Another sync worker already runs on this machine.", file=sys.stderr)
+        sys.exit(1)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, lambda *_: worker.request_stop())
+    logging.getLogger(__name__).info("sync worker started")
+    worker.run_forever()
 
 
 def _handle_mote(conn, args) -> None:

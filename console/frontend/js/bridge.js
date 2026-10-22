@@ -11,7 +11,7 @@
 const ROOT_METHODS = [
   "boot", "run", "resolve", "complete", "history",
   "layout_put", "layout_get", "layout_delete", "layout_set_active",
-  "working_put", "undo", "redo", "refresh", "switch_garden", "shutdown",
+  "working_put", "undo", "redo", "refresh", "switch_garden", "shutdown", "sync_status",
 ];
 
 function pywebviewApi() {

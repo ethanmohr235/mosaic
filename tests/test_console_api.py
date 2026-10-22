@@ -17,7 +17,7 @@ TREE = {"split": "row", "sizes": [0.5, 0.5], "children": [{"command": "log"}, {"
 BRIDGE = {
     "boot", "run", "resolve", "complete", "history", "layout_put", "layout_put_slot", "layout_get",
     "layout_delete", "layout_set_active", "working_put", "undo", "redo",
-    "refresh", "switch_garden", "shutdown",
+    "refresh", "switch_garden", "shutdown", "sync_status",
 }
 # api.monolith (U2). The walk collects bare method names.
 MONOLITH_BRIDGE = {"table", "rewrite", "inspect"}  # + api.mote (U3)
@@ -1079,3 +1079,18 @@ def test_submit_with_no_note_is_an_error_not_a_crash(api):
     result = api.run("submit")
     assert result["effect"] == "error" and "no note" in result["message"]
     assert api.run("export")["effect"] == "error"
+
+
+def test_sync_status_is_none_until_signed_in_then_marks_and_asks_to_refresh(api, monkeypatch):
+    from core import sync_account, sync_status
+    assert api.sync_status() is None
+    sync_account.save(sync_account.Account("http://x", "here", "t"))
+    sync_status.write(sync_status.Report(received=["test"]))
+    first = api.sync_status()
+    assert first["state"] == "synced" and first["refresh"] is True
+    assert api.sync_status()["refresh"] is False  # the same pass, already seen
+    api.run("R1.x = 5 ohm")
+    pending = api.sync_status()
+    assert pending["state"] == "pending" and pending["label"].startswith("↑")
+    sync_status.write(sync_status.Report(ok=False, error="can't reach http://x"))
+    assert api.sync_status()["state"] == "offline"

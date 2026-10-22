@@ -16,6 +16,7 @@ server's secret never passes through the console's history or MCP.
 """
 import shlex
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Sequence
 
 from core import gardens as gardens_repo
@@ -192,6 +193,35 @@ def view() -> dict[str, Any]:
         "account": {"url": account.url, "device": account.device_name} if account else None,
         "last": last,
     }
+
+
+def badge(garden: str, conn) -> dict[str, Any] | None:
+    """The top bar's mark for the open garden, or None when this machine
+    isn't signed in: `state` (synced, pending, offline, conflict),
+    `label`, `title` (the hover), plus `finished` and `received` from the
+    last pass. Pending is counted live, so a write shows at once."""
+    if sync_account.load() is None:
+        return None
+    last = sync_status.read() or {"ok": True, "error": None, "conflicts": [], "finished": None, "received": []}
+    out = {"finished": last["finished"], "received": last.get("received", [])}
+    waiting = sync.pending(conn) if conn is not None else 0
+    if not last["ok"] and last.get("error"):
+        return {**out, "state": "offline", "label": "offline", "title": last["error"]}
+    if last["conflicts"]:
+        n = len(last["conflicts"])
+        return {**out, "state": "conflict", "label": f"? {n}",
+                "title": "; ".join(c["question"] for c in last["conflicts"]) + " -- `sync` to answer"}
+    if waiting:
+        return {**out, "state": "pending", "label": f"↑{waiting}",
+                "title": f"{waiting} change{'s' if waiting != 1 else ''} in {garden!r} not sent yet"}
+    return {**out, "state": "synced", "label": "synced",
+            "title": f"every garden synced; last pass {_local_time(last['finished'])}"}
+
+
+def _local_time(iso: str | None) -> str:
+    if not iso:
+        return "never"
+    return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def status_text() -> str:

@@ -9,6 +9,7 @@ names until the rename phase (docs/console.md -> Rename)."""
 from pathlib import Path
 
 from console.api import Api
+from core.sync_worker import CONSOLE, Worker
 from window_launcher import launch_window
 
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
@@ -24,7 +25,11 @@ DEFAULT_HTTP_PORT = 42009
 
 
 def launch(garden: str | None = None) -> None:
-    api = Api(garden)
+    # The machine's sync worker, unless a service already is
+    # (core/sync_worker.py). Started here, not in Api, so a test's Api
+    # never starts one.
+    worker = Worker.acquire(CONSOLE)
+    api = Api(garden, worker=worker.start() if worker else None)
     launch_window(
         name="Mosaic",
         frontend_dir=FRONTEND_DIR,

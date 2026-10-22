@@ -50,6 +50,7 @@ from core import tectonic as tectonic_repo
 from core.command_bar import CommandError
 from core.reserved import RESERVED_VERBS
 from core.sync_all import sync_all
+from core.sync_worker import Worker
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +72,12 @@ def _error(message: str) -> dict:
 
 
 class Api:
-    def __init__(self, garden: str | None = None):
+    def __init__(self, garden: str | None = None, worker: Worker | None = None):
         self._session = Session.open(garden)
+        # This machine's sync worker when the console hosts it (console/
+        # app.py), else None: a service has it, or this is a test.
+        self._worker = worker
+        self._sync_seen: str | None = None
         self._state = state_repo.load(self._session.garden)
         self._window = None  # set by window_launcher.launch_window
         # App namespaces over the same session (docs/console.md -> Architecture).
@@ -102,6 +107,22 @@ class Api:
     @locked
     def shutdown(self) -> None:
         self._session.close()
+        if self._worker is not None:
+            self._worker.stop()
+
+    @locked
+    def sync_status(self) -> dict | None:
+        """The top bar's sync mark (core/sync_commands.py::badge), polled
+        every few seconds; `refresh` says a pass since the last poll
+        brought changes into the open garden, so the shell re-runs its
+        panes (docs/console.md -> Refresh)."""
+        badge = sync_commands.badge(self._session.garden, self._session.conn)
+        if badge is None:
+            return None
+        finished = badge.pop("finished")
+        fresh = finished != self._sync_seen and self._session.garden in badge.pop("received")
+        self._sync_seen = finished
+        return {**badge, "refresh": fresh}
 
     # ---- the command line ----
 
@@ -524,8 +545,11 @@ class Api:
         self._state = state_repo.load(self._session.garden)
 
     def _refresh(self) -> str:
-        """The shell re-runs every pane, which is the whole of it -- every
-        read already goes to disk."""
+        """The shell re-runs every pane -- every read already goes to disk
+        -- and the sync worker, when the console hosts it, takes a pass."""
+        if self._worker is not None:
+            self._worker.poke()
+            return f"refreshed {self._session.garden}; syncing"
         return f"refreshed {self._session.garden}"
 
     def _save_state(self) -> None:

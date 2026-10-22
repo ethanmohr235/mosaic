@@ -151,6 +151,24 @@ Edge cases:
   the server would keep the old ops under those numbers and drop the new
   ones.
 
+Passes are one at a time per machine, whoever asks (a `flock` on
+`gardens/.sync.pass.lock`).
+
+**The worker** (`core/sync_worker.py`). There is one per machine, held with
+a `flock` on `gardens/.sync.lock`. It runs either as `monoss sync daemon`
+(the systemd user service in `scripts/monoss-sync.service`, which the home
+machine runs always) or as threads in the console. The console starts one
+only when no service holds the lock. A pass runs when any of these happens:
+
+- A garden's file changes and it has unsent ops, or a garden appears, goes
+  or is renamed. Files are polled every 2 s, then 3 s of quiet.
+- The `/changes` long poll answers.
+- `refresh` pokes it.
+- Five minutes pass.
+
+Offline, passes back off up to a minute. Closing the console sends what
+is waiting, bounded at 5 s.
+
 Each pass writes `gardens/.sync_status.json` (`core/sync_status.py`): each
 garden's state (`synced`, `pending`, `local`, `conflict`, `waiting`,
 `error`), held ops, conflicts and notes. Home, the `sync` pane, `monoss sync

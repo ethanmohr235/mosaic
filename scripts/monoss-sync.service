@@ -1,0 +1,27 @@
+# Mosaic's sync worker as a systemd *user* service (docs/architecture.md ->
+# Sync). Install once per machine that should sync with no console open
+# (the home machine):
+#
+#   cp scripts/monoss-sync.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now monoss-sync
+#   loginctl enable-linger "$USER"     # keep it running while logged out
+#
+# Sign the machine in first (`.venv/bin/python -m cli.main sync login ‹url›`).
+# Logs: `journalctl --user -u monoss-sync -f`. A console opened on this
+# machine sees the service holds the worker lock and only shows status.
+# %h is your home directory; edit the two paths if the repo lives elsewhere.
+
+[Unit]
+Description=Mosaic sync worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/Applications/monoss
+ExecStart=%h/Applications/monoss/.venv/bin/python -m cli.main sync daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

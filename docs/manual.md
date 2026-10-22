@@ -316,3 +316,4 @@ Mouse: drag empty space to pan · wheel zooms · hover a stub lights its sibling
 | `monoss sync logout` | Forget this machine's account |
 | `monoss sync status` | The last pass: each garden's state, clashes to answer |
 | `monoss sync now\|merge\|rename\|local\|share\|devices\|revoke …` | As the console's `sync …` |
+| `monoss sync daemon` | Run this machine's sync worker until stopped; `scripts/monoss-sync.service` runs it as a user service |

@@ -20,11 +20,14 @@ Then push and pull (core/sync.py) run for each garden with something to
 send or receive. A conflict is asked, never guessed: `sync merge` and
 `sync rename` (core/sync_commands.py) answer it.
 """
+import fcntl
 import logging
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
 
+from core import db
 from core import gardens as gardens_repo
 from core import merge
 from core import sync
@@ -61,13 +64,29 @@ class _Pass:
                                                detail=self.report.conflicts[-1].question))
 
 
-def sync_all(*, full: bool = False) -> Report:
+def sync_all(*, full: bool = False, worker: dict[str, Any] | None = None) -> Report:
     """Sync every garden. `full` runs push and pull for each one even if
-    the feed says nothing changed (the first pass after login does)."""
+    the feed says nothing changed (the first pass after login does).
+    `worker` is who is asking, for the status file. One pass at a time
+    per machine, whoever asks: the worker, `sync now`, MCP."""
+    with _one_pass_at_a_time():
+        return _sync_all(full, worker)
+
+
+@contextmanager
+def _one_pass_at_a_time() -> Iterator[None]:
+    path = db.GARDENS_DIR / ".sync.pass.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def _sync_all(full: bool, worker: dict[str, Any] | None) -> Report:
     account = sync_account.load()
     if account is None:
         report = Report(ok=False, error="not signed in -- run `monoss sync login ‹url›`")
-        sync_status.write(report)
+        sync_status.write(report, worker)
         return report
     p = _Pass(account, account.remote(), Report())
     try:
@@ -83,7 +102,7 @@ def sync_all(*, full: bool = False) -> Report:
         p.report.ok, p.report.error = False, str(e)
     finally:
         sync_account.save(account)
-        sync_status.write(p.report)
+        sync_status.write(p.report, worker)
     return p.report
 
 
