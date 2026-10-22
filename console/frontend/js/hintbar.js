@@ -6,8 +6,16 @@
 export function createHintbar({ root, store, keys, components }) {
   const { h } = components;
 
+  // Typing emits "hints" on every keystroke; the bar is redrawn only when
+  // what it says changed.
+  let shown = null;
+
   function render() {
-    root.replaceChildren(...keys.hints().map(([key, label]) =>
+    const hints = keys.hints();
+    const said = JSON.stringify(hints);
+    if (said === shown) return;
+    shown = said;
+    root.replaceChildren(...hints.map(([key, label]) =>
       h("span", "hint", [h("span", "hint-key", key), ` ${label}`])));
   }
 

@@ -22,7 +22,7 @@
 const LINE_SPLIT = /\n/;
 
 function escapeHtml(text) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 /**
@@ -64,27 +64,62 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
 
   /* ---- the mirror ---- */
 
+  // Each line's markup as last painted, so a keystroke rewrites only the
+  // lines it changed rather than the whole mirror (and the layout under it).
+  const painted = { lines: [], marks: [] };
+
   function paint() {
     const text = textarea.value;
     const ranges = [...highlight(text), ...st.matches.map(([s, e], i) => ({
-      start: s, end: e, cls: i === st.current ? "find-hit current" : "find-hit" }))];
+      start: s, end: e, cls: i === st.current ? "find-hit current" : "find-hit" }))]
+      .sort((a, b) => a.start - b.start);
     const lines = text.split(LINE_SPLIT);
     let offset = 0;
+    let next = 0;
+    let open = [];
     const html = [];
     const marks = [];
     lines.forEach((line, index) => {
       const start = offset;
       const end = offset + line.length;
+      // One sweep over the ranges (sorted by start), not a filter per line:
+      // `open` is every range begun before this line ends and not done.
+      while (next < ranges.length && ranges[next].start < end) open.push(ranges[next++]);
+      open = open.filter((r) => r.end > start);
       const deco = decorate(index) || {};
       html.push(`<span class="ln${deco.cls ? ` ${deco.cls}` : ""}"${deco.title ? ` title="${escapeHtml(deco.title)}"` : ""}>`
-        + segments(line, start, ranges.filter((r) => r.start < end && r.end > start))
+        + segments(line, start, open)
         + (deco.after ? `<span class="ln-after">${escapeHtml(deco.after)}</span>` : "")
         + "</span>");
       if (gutter) marks.push(`<span class="mark ${deco.cls || ""}">${escapeHtml(deco.mark || "")}</span>`);
       offset = end + 1;
     });
-    mirror.innerHTML = `${html.join("\n")}\n`;
-    if (gutter) margin.innerHTML = marks.join("");
+    patch(mirror, painted.lines, html, "\n");
+    painted.lines = html;
+    if (gutter) {
+      patch(margin, painted.marks, marks, "");
+      painted.marks = marks;
+    }
+  }
+
+  /** Bring `node` (children `old`, each followed by `sep`) to `next`,
+   * touching only the run between their common head and tail. */
+  function patch(node, old, next, sep) {
+    const max = Math.min(old.length, next.length);
+    let head = 0;
+    while (head < max && old[head] === next[head]) head += 1;
+    let tail = 0;
+    while (tail < max - head && old[old.length - 1 - tail] === next[next.length - 1 - tail]) tail += 1;
+    const kids = node.children;
+    for (let i = old.length - tail - 1; i >= head; i -= 1) {
+      if (sep) kids[i].nextSibling.remove();
+      kids[i].remove();
+    }
+    const fresh = next.slice(head, next.length - tail);
+    if (!fresh.length) return;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = fresh.map((x) => x + sep).join("");
+    node.insertBefore(tpl.content, kids[head] || null);
   }
 
   /** One line's text cut at every range boundary, each piece wearing
@@ -112,8 +147,9 @@ export function createEditor({ h, className = "", wrap = true, highlight = () =>
   /** Keep the caret's line on screen: the textarea never scrolls itself
    * (it is as tall as its text), so the scroller has to. */
   function revealCaret() {
-    const before = textarea.value.slice(0, textarea.selectionStart);
-    const index = before.split(LINE_SPLIT).length - 1;
+    const { value, selectionStart } = textarea;
+    let index = 0;
+    for (let i = value.indexOf("\n"); i !== -1 && i < selectionStart; i = value.indexOf("\n", i + 1)) index += 1;
     const line = mirror.children[index];
     if (!line) return;
     const top = line.offsetTop;

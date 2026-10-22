@@ -447,9 +447,9 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
     )
 
 
-def _by_name(conn: sqlite3.Connection) -> dict[str, list[str]]:
+def _by_name(conn: sqlite3.Connection, motes=None) -> dict[str, list[str]]:
     index: dict[str, list[str]] = {}
-    for mote in motes_repo.list_motes(conn):
+    for mote in motes if motes is not None else motes_repo.list_motes(conn):
         name = mote.properties.get("name")
         if isinstance(name, str) and name:
             index.setdefault(name, []).append(mote.id)
@@ -735,12 +735,16 @@ class Preview:
     title: str = ""     # what the margin mark means, for its hover
 
 
-def preview(conn: sqlite3.Connection, text: str) -> list[Preview]:
+def preview(
+    conn: sqlite3.Connection, text: str, inferred: dict[str, dict[str, str]] | None = None
+) -> list[Preview]:
     """Every line of `text`, read and not written. Ambiguous names are
-    found here too, since they can only be found against a garden."""
-    index = _by_name(conn)
-    by_id = {m.id: m for m in motes_repo.list_motes(conn)}
-    inferred = simulation.inferred_units(conn)
+    found here too, since they can only be found against a garden.
+    `inferred` is simulation.inferred_units, for a caller that has it."""
+    motes = motes_repo.list_motes(conn)
+    index = _by_name(conn, motes)
+    by_id = {m.id: m for m in motes}
+    inferred = simulation.inferred_units(conn) if inferred is None else inferred
     sheet = parse(text)
     refused = _unit_problems(conn, sheet)
     out = []

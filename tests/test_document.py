@@ -8,7 +8,7 @@ import pytest
 
 from core import document, modoc, undo, worksheet
 from core.command_bar import CommandError
-from core.motes import create_mote, get_mote, list_motes
+from core.motes import create_mote, get_mote, list_motes, update_mote
 from core.relationships import create_relationship, list_relationships
 from core.simulation import run_simulation
 
@@ -131,13 +131,23 @@ def test_notes_lists_and_filters(conn):
 def test_the_figure_memo_redraws_after_a_write(conn, bar, monkeypatch):
     calls = []
     monkeypatch.setattr(document.plotview, "figure", lambda conn, ref, motes=None: calls.append(ref) or ref)
-    memo = document.FigureMemo()
+    memo = document.GardenMemo()
     memo(conn, "A")
     memo(conn, "A")
     assert calls == ["A"]
     create_mote(conn, {"name": "moved"})
     memo(conn, "A")
     assert calls == ["A", "A"]
+
+
+def test_the_memo_solves_once_until_the_garden_moves(conn, bar):
+    memo = document.GardenMemo()
+    first = memo.explainer(conn)
+    document.render(conn, "", "\\val{bd.x}", draw=memo)
+    assert memo.explainer(conn) is first
+    assert memo.inferred_units(conn) is memo.inferred_units(conn)
+    update_mote(conn, list_motes(conn)[0].id, {"x": 7})
+    assert memo.explainer(conn) is not first
 
 
 # ---- the worksheet ----

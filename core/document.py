@@ -22,12 +22,14 @@ import sqlite3
 from dataclasses import dataclass
 
 from core import calc
+from core import derivations
 from core import formula_tex
 from core import images as images_repo
 from core import modoc
 from core import modoc_bind
 from core import motes as motes_repo
 from core import plotview
+from core import simulation
 from core import table as table_repo
 from core import undo
 from core.command_bar import CommandError
@@ -114,39 +116,59 @@ def notes(conn: sqlite3.Connection, text: str = "") -> list[dict]:
 
 # ---- rendering -------------------------------------------------------
 
-class FigureMemo:
-    """Every `\\graph` drawn once per state of the garden. A read pane
-    re-renders on every pause in typing, typing does not move the garden,
-    and a figure is a sweep -- so without this each keystroke would re-run
-    every sweep in the note. Invalidated by the garden's own last write,
-    so no writer has to remember to say so (moved from Mora's window)."""
-
-    _FINGERPRINT_SQL = """
-        SELECT (SELECT COUNT(*) FROM mote_properties),
-               (SELECT MAX(updated_at) FROM mote_properties),
-               (SELECT COUNT(*) FROM relationships),
-               (SELECT MAX(updated_at) FROM relationships)
-    """
+class GardenMemo:
+    """What a typing pane reads off the garden, worked out once per state
+    of it: every `\\graph` drawn, the one live solve a note's values,
+    `\\work` and sections read, and the units a worksheet line shows. The
+    edit and read panes re-render on every pause in typing, the worksheet
+    re-previews on every pause, and typing does not move the garden -- so
+    without this each pause re-solves it, and re-runs every sweep in the
+    note. Invalidated by any write to the garden, so no writer has to
+    remember to say so."""
 
     def __init__(self) -> None:
         self._drawn: dict[str, plotview.Figure] = {}
+        self._explainer: derivations.Explainer | None = None
+        self._inferred: dict[str, dict[str, str]] | None = None
         self._at: tuple | None = None
 
-    def __call__(self, conn, ref: str, *, motes=None) -> plotview.Figure:
-        fingerprint = tuple(conn.execute(self._FINGERPRINT_SQL).fetchone())
+    def _check(self, conn: sqlite3.Connection) -> None:
+        # `total_changes` counts this connection's writes, `data_version`
+        # moves on another's commit (the MCP server, a sync): between them,
+        # every write. The connection itself, so a garden switch is one too.
+        fingerprint = (conn, conn.total_changes,
+                       conn.execute("PRAGMA data_version").fetchone()[0])
         if fingerprint != self._at:
             self._drawn.clear()
+            self._explainer = None
+            self._inferred = None
             self._at = fingerprint
+
+    def __call__(self, conn, ref: str, *, motes=None) -> plotview.Figure:
+        self._check(conn)
         if ref not in self._drawn:
             self._drawn[ref] = plotview.figure(conn, ref, motes=motes)
         return self._drawn[ref]
 
+    def explainer(self, conn: sqlite3.Connection) -> "derivations.Explainer":
+        self._check(conn)
+        if self._explainer is None:
+            self._explainer = derivations.Explainer(conn)
+        return self._explainer
+
+    def inferred_units(self, conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
+        self._check(conn)
+        if self._inferred is None:
+            self._inferred = simulation.inferred_units(conn)
+        return self._inferred
+
 
 def render(conn: sqlite3.Connection, note_id: str, source: str, draw=None) -> dict:
     """The document `source` says, as the note `note_id`, against the
-    garden as it stands."""
+    garden as it stands. `draw` is a GardenMemo, or a bare figure drawer."""
     document = modoc_bind.assemble(conn, note_id, source=source)
-    resolution = modoc_bind.resolve(conn, note_id, document, draw=draw)
+    explainer = draw.explainer(conn) if isinstance(draw, GardenMemo) else None
+    resolution = modoc_bind.resolve(conn, note_id, document, draw=draw, explainer=explainer)
     motes, relationships, index = table_repo.read(conn)
     shape = _Shaper(document, resolution, index)
     found = modoc_bind.problems(document, resolution)

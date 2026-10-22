@@ -922,8 +922,12 @@ presentation rather than meaning; the list of commands it knows comes
 from `core/modoc.py`.
 
 The read pane renders the editor's *draft*, not the stored note, so it
-follows unsaved typing (`modoc_bind.assemble(..., source=)`); figures
-are memoised until the garden changes (`core/document.py::FigureMemo`).
+follows unsaved typing (`modoc_bind.assemble(..., source=)`). Typing
+does not move the garden, so what a pause re-reads off it -- figures,
+the one live solve a note's values and `\work` read, the units a
+worksheet line shows -- is memoised until any write to it
+(`core/document.py::GardenMemo`, keyed on SQLite's change counters).
+Nothing about a solve is stored: the memo is the window's, in memory.
 A note saves on every pause in typing, and one editing session folds
 into one undo step (the session's `UndoManager.push` coalescing key).
 # The calendar

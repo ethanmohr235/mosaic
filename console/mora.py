@@ -49,7 +49,7 @@ class MoraApi:
     def __init__(self, session: Session, live: Callable[[], bool] = lambda: False):
         self._session = session
         self._live = live
-        self._figures = document.FigureMemo()
+        self._memo = document.GardenMemo()
 
     @locked
     def open(self, command: str, selection: list[str] | None = None) -> dict[str, Any]:
@@ -88,8 +88,8 @@ class MoraApi:
         def answer():
             if note_id is None:
                 # A note not written yet renders against no mote of its own.
-                return document.render(self._session.conn, "", source or "", draw=self._figures)
-            return document.render(self._session.conn, note_id, source or "", draw=self._figures)
+                return document.render(self._session.conn, "", source or "", draw=self._memo)
+            return document.render(self._session.conn, note_id, source or "", draw=self._memo)
         return self._answer("render", answer)
 
     @locked
@@ -117,7 +117,8 @@ class MoraApi:
         return self._answer("preview", lambda: {"lines": [
             {"number": p.number, "kind": p.kind, "problem": p.problem, "value": p.value,
              "title": p.title}
-            for p in worksheet_repo.preview(self._session.conn, text or "")]})
+            for p in worksheet_repo.preview(self._session.conn, text or "",
+                                             self._memo.inferred_units(self._session.conn))]})
 
     @locked
     def apply(self, text: str) -> dict[str, Any]:

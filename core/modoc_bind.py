@@ -269,6 +269,7 @@ def resolve(
     note_id: str,
     document: modoc.Document,
     draw=None,
+    explainer: "derivations.Explainer | None" = None,
 ) -> Resolution:
     """Everything the note's macros come to, against the garden as it
     stands. There is no other thing they could come to: a note has one
@@ -278,13 +279,14 @@ def resolve(
     one caller: Mora re-resolves the whole note on every pause in typing,
     and a sweep is hundreds of solves. A window that knows the garden has
     not moved since the last keystroke can hand in a memo of its own
-    (mora/api.py::_Figures) rather than this module inventing a cache it
+    (core/document.py::GardenMemo) rather than this module inventing a cache it
     has no way to invalidate -- resolve() sees one connection for one
-    call and cannot know what happened between two of them."""
+    call and cannot know what happened between two of them. `explainer`
+    is the same bargain for the live solve (core/document.py::GardenMemo)."""
     anchor_id, diagnostics = modoc.anchor(conn, note_id)
     motes = list_motes(conn)
     # One live solve answers every value, `\work` and section in the note.
-    explainer = derivations.Explainer(conn)
+    explainer = explainer or derivations.Explainer(conn)
     garden = _Garden(conn, explainer.live)
 
     links = {

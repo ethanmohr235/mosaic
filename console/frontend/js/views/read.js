@@ -17,6 +17,7 @@ import { render as drawPlot, figureModel } from "../plot.js";
 const HINTS = [["j k", "scroll"], ["g G", "top / end"], ["click", "select a linked mote"]];
 const DRAFT_MS = 180;
 const FIGURE_H = 240;
+const TYPESET_CAP = 2000;
 
 function message(err) {
   return String(err && err.message ? err.message : err);
@@ -29,6 +30,7 @@ function create(ctx) {
   let root = null, page = null, resize = null, draftTimer = 0, renderSeq = 0, lastTop = 0;
   const figures = [];
   const offs = [];
+  const typeset = new Map();
 
   const key = () => (st.note ? (st.note.noteId || `new:${st.note.name}`) : null);
 
@@ -56,15 +58,25 @@ function create(ctx) {
   }
 
   /** KaTeX, never trusted (no \href, no \includegraphics in a note that
-   * may have arrived over sync); TeX it can't set shows as the raw text. */
+   * may have arrived over sync); TeX it can't set shows as the raw text.
+   * Each piece is typeset once (`typeset`): a draft redraws the whole page
+   * on every pause in typing, and almost none of its maths has changed. */
   function math(tex, display) {
     const node = h(display ? "div" : "span", display ? "doc-math display" : "doc-math");
-    try {
-      window.katex.render(tex, node, { displayMode: display, throwOnError: false, strict: false });
-    } catch (err) {
+    const key = `${display ? "D" : "i"}${tex}`;
+    if (!typeset.has(key)) {
+      if (typeset.size >= TYPESET_CAP) typeset.clear();
+      try {
+        typeset.set(key, window.katex.renderToString(tex, { displayMode: display, throwOnError: false, strict: false }));
+      } catch (err) {
+        typeset.set(key, null);
+      }
+    }
+    const html = typeset.get(key);
+    if (html === null) {
       node.classList.add("raw");
       node.textContent = tex;
-    }
+    } else node.innerHTML = html;
     return node;
   }
 
