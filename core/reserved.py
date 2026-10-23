@@ -249,6 +249,11 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
         "declaring unit 'deg' arrives converted) and out. sinc(x) is the "
         "unnormalized sin(x)/x with sinc(0) == 1 -- not numpy's sin(pi x)/"
         "(pi x)."},
+    {"syntax": "sinh, cosh, tanh, arcsinh, arccosh, arctanh", "meaning":
+        "The hyperbolic functions and their inverses. Only on values that "
+        "are already known, and dimensionless in and out, like exp(). "
+        "arccosh needs an argument of at least 1, arctanh one strictly "
+        "between -1 and 1."},
     {"syntax": "abs(x), min(...), max(...)", "meaning":
         "Only on values that are already known by the time they're "
         "evaluated -- deferred otherwise, same as property()."},

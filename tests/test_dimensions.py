@@ -68,6 +68,13 @@ def test_a_mismatched_equation_is_flagged():
     assert "left side is V" in problems[0]
 
 
+@pytest.mark.parametrize("name", ["log", "sinh", "arctanh"])
+def test_a_dimensioned_argument_to_an_exponential_call_is_flagged(name):
+    units = {"r1": {"ratio": "1", "length": "m"}}
+    problems = check_equation(f"ratio == {name}(length)", context(units=units))
+    assert any(f"{name}() takes a dimensionless argument" in p for p in problems)
+
+
 def test_adding_different_dimensions_is_flagged():
     units = {"r1": {"voltage": "V", "current": "A", "resistance": "ohm"}}
     problems = check_equation("voltage == current + resistance", context(units=units))
@@ -298,7 +305,7 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
     }
     dispatch_constants = {
         "NAVIGATION_CALLS", "AGGREGATE_CALLS", "NUMERIC_CALLS", "TRIG_CALLS",
-        "LOG_CALLS", "SQRT_CALL", "PREVIOUS_CALL", "PROPERTY_CALL", "CALCULUS_CALLS",
+        "LOG_CALLS", "HYPERBOLIC_CALLS", "SQRT_CALL", "PREVIOUS_CALL", "PROPERTY_CALL", "CALCULUS_CALLS",
     }
     # Every group formula._call() dispatches on must be one this module
     # imported and handles.
@@ -312,6 +319,7 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
         | formula.NUMERIC_CALLS
         | formula.TRIG_CALLS
         | formula.LOG_CALLS
+        | formula.HYPERBOLIC_CALLS
         | formula.CALCULUS_CALLS
         | {formula.SQRT_CALL, formula.PREVIOUS_CALL, formula.PROPERTY_CALL}
     )
@@ -341,6 +349,12 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
         "ln": "ln(x)",
         "log10": "log10(x)",
         "exp": "exp(x)",
+        "sinh": "sinh(x)",
+        "cosh": "cosh(x)",
+        "tanh": "tanh(x)",
+        "arcsinh": "arcsinh(x)",
+        "arccosh": "arccosh(x)",
+        "arctanh": "arctanh(x)",
         "prev": "prev(x)",
         "property": "property('a', 'op', 1)",
         "integrate": "integrate(f, 0, 1)",

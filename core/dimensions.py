@@ -37,6 +37,7 @@ from core.formula import (
     MATH_CONSTANTS,
     NAVIGATION_CALLS,
     NUMERIC_CALLS,
+    HYPERBOLIC_CALLS,
     LOG_CALLS,
     SQRT_CALL,
     TRIG_CALLS,
@@ -444,7 +445,7 @@ class _Checker:
             return self._combine([self.dimension(a) for a in node.args], name)
         if name in TRIG_CALLS:
             return self._trig(name, node)
-        if name in LOG_CALLS:
+        if name in LOG_CALLS or name in HYPERBOLIC_CALLS:
             return self._log(name, node)
         if name == SQRT_CALL:
             return self._sqrt(node)
@@ -592,12 +593,12 @@ class _Checker:
         return DIMENSIONLESS
 
     def _log(self, name: str, node: ast.Call) -> Dim:
-        """log/ln/log10/exp take a dimensionless argument and produce a
-        dimensionless result. Stricter than _trig, which lets an angle
-        through whatever it declares: there is no unit in which the
-        logarithm of a length means anything, so a dimensioned argument
-        is a modelling mistake worth reporting rather than a convention
-        worth accommodating."""
+        """log/ln/log10/exp and the hyperbolic calls take a dimensionless
+        argument and produce a dimensionless result. Stricter than _trig,
+        which lets an angle through whatever it declares: there is no unit
+        in which the logarithm (or sinh) of a length means anything, so a
+        dimensioned argument is a modelling mistake worth reporting rather
+        than a convention worth accommodating."""
         if len(node.args) != 1:
             raise FormulaError(f"{name}() takes exactly one argument")
         argument = self.dimension(node.args[0])

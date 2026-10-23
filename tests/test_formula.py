@@ -590,6 +590,31 @@ def test_sinc_is_the_unnormalized_sin_x_over_x():
     assert evaluate_expression("sinc(-1)", context()).constant == pytest.approx(math.sin(1))
 
 
+@pytest.mark.parametrize("name", ["sinh", "cosh", "tanh", "arcsinh", "arccosh", "arctanh"])
+def test_hyperbolic_calls_defer_on_unknowns(name):
+    with pytest.raises(NonlinearError):
+        evaluate_expression(f"{name}(current)", context())
+
+
+def test_hyperbolic_calls_match_the_stdlib():
+    assert evaluate_expression("sinh(1)", context()).constant == pytest.approx(math.sinh(1))
+    assert evaluate_expression("cosh(0)", context()).constant == 1.0
+    assert evaluate_expression("tanh(0.5)", context()).constant == pytest.approx(math.tanh(0.5))
+    assert evaluate_expression("arcsinh(sinh(2))", context()).constant == pytest.approx(2)
+    assert evaluate_expression("arccosh(cosh(2))", context()).constant == pytest.approx(2)
+    assert evaluate_expression("arctanh(tanh(0.3))", context()).constant == pytest.approx(0.3)
+
+
+@pytest.mark.parametrize("formula_text, message", [
+    ("arccosh(0.5)", "at least 1"),
+    ("arctanh(1)", "strictly between -1 and 1"),
+    ("cosh(1000)", "cosh"),
+])
+def test_hyperbolic_calls_reject_arguments_outside_their_domain(formula_text, message):
+    with pytest.raises(FormulaError, match=message):
+        evaluate_expression(formula_text, context())
+
+
 # ---- 0/0 ----
 
 def test_zero_over_zero_is_indeterminate_not_a_pole():

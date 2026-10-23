@@ -61,6 +61,10 @@ TRIG_CALLS = frozenset({"sin", "cos", "tan", "arcsin", "arccos", "arctan", "sinc
 # wants to be explicit about it, and `log10` is there so nobody has to
 # rely on guessing which one `log` meant.
 LOG_CALLS = frozenset({"log", "ln", "log10", "exp"})
+# The hyperbolic functions and their inverses, named like the arc trig
+# calls. Exponentials underneath, not angles: dimensionless in and out,
+# with no `deg` convention to honour.
+HYPERBOLIC_CALLS = frozenset({"sinh", "cosh", "tanh", "arcsinh", "arccosh", "arctanh"})
 SQRT_CALL = "sqrt"
 PREVIOUS_CALL = "prev"
 PROPERTY_CALL = "property"
@@ -73,7 +77,7 @@ DERIVATIVE_CALL = "deriv"
 CALCULUS_CALLS = frozenset({INTEGRATE_CALL, DERIVATIVE_CALL})
 ALLOWED_CALLS = (
     NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | TRIG_CALLS | LOG_CALLS
-    | CALCULUS_CALLS | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL}
+    | HYPERBOLIC_CALLS | CALCULUS_CALLS | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL}
 )
 
 # The current simulation step's index, exposed to formulas as a reserved
@@ -928,6 +932,8 @@ def _call(node: ast.Call, ctx: Context):
         return _trig(name, node, ctx)
     if name in LOG_CALLS:
         return _log(name, node, ctx)
+    if name in HYPERBOLIC_CALLS:
+        return _hyperbolic(name, node, ctx)
     if name == SQRT_CALL:
         return _sqrt(node, ctx)
     if name == PREVIOUS_CALL:
@@ -1399,6 +1405,36 @@ def _log(name: str, node: ast.Call, ctx: Context) -> Ratio:
     try:
         return Ratio.number(_LOG_FUNCS[name](value))
     except (ValueError, OverflowError) as e:
+        raise FormulaError(f"{name}({value!r}): {e}") from e
+
+
+_HYPERBOLIC_FUNCS = {
+    "sinh": math.sinh,
+    "cosh": math.cosh,
+    "tanh": math.tanh,
+    "arcsinh": math.asinh,
+    "arccosh": math.acosh,
+    "arctanh": math.atanh,
+}
+
+
+def _hyperbolic(name: str, node: ast.Call, ctx: Context) -> Ratio:
+    """sinh/cosh/tanh and their inverses -- deferred, like the trig calls,
+    until the argument is a known number. arccosh needs an argument of at
+    least 1 and arctanh one strictly between -1 and 1."""
+    if len(node.args) != 1:
+        raise FormulaError(f"{name}() takes exactly one argument")
+    arg = _as_ratio(_evaluate(node.args[0], ctx))
+    if not arg.is_constant:
+        raise NonlinearError(f"{name}() cannot be applied to an unknown quantity")
+    value = arg.constant
+    if name == "arccosh" and value < 1.0:
+        raise FormulaError(f"arccosh({value!r}) -- the argument must be at least 1")
+    if name == "arctanh" and not -1.0 < value < 1.0:
+        raise FormulaError(f"arctanh({value!r}) -- the argument must be strictly between -1 and 1")
+    try:
+        return Ratio.number(_HYPERBOLIC_FUNCS[name](value))
+    except OverflowError as e:
         raise FormulaError(f"{name}({value!r}): {e}") from e
 
 
