@@ -14,7 +14,8 @@
  * hover, and an unknown or an equation shows the value the garden holds for
  * it now, faded after the line. `esc` applies the whole sheet
  * (api.mora.apply) as one undo step -- with `live` on, a solve follows --
- * and then shows the garden's own reading of it. */
+ * and keeps the text as typed until the pane is reopened or the garden
+ * changes elsewhere; then it shows the garden's own reading. */
 
 import { createEditor } from "../editor.js";
 
@@ -30,9 +31,11 @@ function message(err) {
 function create(ctx) {
   const { api, store, components } = ctx;
   const { h } = components;
-  // `keep`: the text as typed, when applying it reported problems -- the
-  // garden's reading would drop the very lines that need fixing.
-  const st = { seq: 0, lines: [], error: null, applied: "", previewSeq: 0, keep: null };
+  // `keep`: the text as typed, after applying it -- the garden's reading
+  // drops a line it can't show (one with problems, or a given no equation
+  // reads yet). `keptFor` is the reading that came back with it: once the
+  // garden reads differently, something else wrote, and the reading wins.
+  const st = { seq: 0, lines: [], error: null, applied: "", previewSeq: 0, keep: null, keptFor: null };
   let root = null, editor = null, previewTimer = 0;
 
   function decorate(index) {
@@ -83,7 +86,8 @@ function create(ctx) {
       store.log("result", `the worksheet: ${r.error}`, { level: "fault" });
       return;
     }
-    st.keep = r.problems.length ? text : null;
+    st.keep = text;
+    st.keptFor = r.text;
     store.log("result", r.message, { level: r.problems.length ? "warn" : "ok" });
     r.problems.forEach((p) => store.log("result", p, { level: "warn" }));
     if (r.wrote) store.emit("write");
@@ -149,6 +153,7 @@ function create(ctx) {
     }
     st.error = null;
     render();
+    if (st.keep !== null && r.text !== st.keptFor) st.keep = null;
     st.applied = st.keep !== null ? st.keep : r.text;
     editor.set(st.applied);
     await preview();

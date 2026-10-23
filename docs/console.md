@@ -432,8 +432,10 @@ What the build decided within the settled plan above.
 - **Worksheet:** previews 0.15 s after typing; margin marks `=` `?` `←`
   `≡` `✓` `ƒ` `!`, each spelled out on hover; an unknown or equation shows
   the garden's value after it. (`←` was `ƒ` until function lines took it.)
-  After `esc`, a clean sheet is replaced by the garden's reading of it;
-  one with problems keeps your text.
+  After `esc` the sheet keeps your text, so a given no equation reads yet
+  stays in view (the user's call, 2026-10-22). Reopening the pane, or a
+  write elsewhere that changes the garden's reading, shows the reading
+  instead (`core/worksheet.py::read`).
 - **The inspector** in the old windows no longer opened notes; it
   summarized a `modoc` property read-only (until U8 deleted it).
 - **New tokens:** `--paper-*` (the read pane), `--bp-*` (the worksheet),
