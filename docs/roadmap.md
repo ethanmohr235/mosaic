@@ -109,6 +109,15 @@ Each one was a separate act of filing. That lesson became a rule in
   parameter units are optional, and a bare number into one that declares
   none warns; `\work` writes the call out as its body with values in it.
   See `simulation.md` -> *Functions*.
+- **Calculus (numeric done 2026-10-22).** `integrate(phi, a, b)` and
+  `deriv(phi, x0)` on a function mote. **Decided:** the function is passed
+  by bare name; a function of several parameters names the one it is
+  along as a quoted string, then gives the others, held; the estimates
+  are numeric (Gauss–Kronrod, Ridders) and fail rather than miss their
+  tolerance; they are reported in provenance (`why`, `\work`) and not in
+  the solve summary. **Still to do:** symbolic derivatives, shown in
+  `\work`. Time derivatives wait on time. See `simulation.md` ->
+  *Calculus*.
 - **Time simulation** keeps ticks, and runs are curves to plot
   (**done 2026-10-06**: `plot … vs t`, see `simulation.md` -> *Time-based
   simulation*). Cut

@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 from core import functions as functions_repo
 from core import units as units_repo
 from core.formula import (
-    ALLOWED_CALLS, MATH_CONSTANTS, TICK_NAME, FormulaError, is_bare_number, parse_expression,
+    ALLOWED_CALLS, CALCULUS_CALLS, MATH_CONSTANTS, TICK_NAME, FormulaError, is_bare_number,
+    parse_expression,
 )
 
 # How deep calls inside bodies are written out. A guard against a
@@ -98,7 +99,12 @@ def _rewrite(
     if isinstance(node, ast.Name):
         return _name(node, bindings, owner)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        args = [_rewrite(a, bindings, owner, state, calls) for a in node.args]
+        # A calculus call's first argument names a function; it is not a
+        # name to bind or qualify.
+        names_function = node.func.id in CALCULUS_CALLS and node.args \
+            and isinstance(node.args[0], ast.Name)
+        args = [a if names_function and i == 0 else _rewrite(a, bindings, owner, state, calls)
+                for i, a in enumerate(node.args)]
         written = state.functions.get(node.func.id)
         if node.func.id in ALLOWED_CALLS or written is None or node.func.id in calls \
                 or len(calls) >= _DEPTH or len(args) != len(written[1]):

@@ -49,6 +49,13 @@ MISSING_READ = "missing"
 # A function call answered with a limit (core/limits.py): the function
 # mote, the approach (`r → 0 cm`) in the key's place, and the limit.
 LIMIT_READ = "limit"
+# A calculus call's answer (core/calculus.py): the function mote, what was
+# asked (`∫ r 0 → 5 cm`, `d/dr at 2 cm`) in the key's place, the estimate.
+INTEGRAL_READ = "integral"
+DERIVATIVE_READ = "derivative"
+# Reads that are answers a solve computed rather than values it was given,
+# so shown work notes them on the result instead of writing them in.
+ANSWER_READS = frozenset({LIMIT_READ, INTEGRAL_READ, DERIVATIVE_READ})
 
 # Reads whose value comes out of a mote's stored properties, and so
 # arrives in whatever unit that mote declares.
@@ -168,6 +175,11 @@ class Reads:
         key's place holds what was asked -- the approach, `r → 0 cm` --
         since no property holds the answer."""
         self.note(LIMIT_READ, mote_id, approach, value)
+
+    def calculus(self, mote_id: str, kind: str, approach: str, value: float) -> None:
+        """Record one integral or derivative a calculus call took, keyed
+        like a limit by what was asked."""
+        self.note(kind, mote_id, approach, value)
 
     def collected(self) -> tuple[InputRead, ...]:
         return tuple(

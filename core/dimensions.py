@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from core import roles as roles_repo
 from core.formula import (
     AGGREGATE_CALLS,
+    CALCULUS_CALLS,
+    INTEGRATE_CALL,
     MATH_CONSTANTS,
     NAVIGATION_CALLS,
     NUMERIC_CALLS,
@@ -453,6 +455,8 @@ class _Checker:
             return self._name(self.ctx.mote_id, node.args[0].id)
         if name == PROPERTY_CALL:
             return self._property(node)
+        if name in CALCULUS_CALLS:
+            return self._calculus(name, node)
         return self._function_call(name, node)
 
     def _function_call(self, name: str, node: ast.Call) -> Dim:
@@ -460,23 +464,57 @@ class _Checker:
         dimension: the one it declares, else its argument's. Anything the
         evaluator itself refuses (an unknown name, the wrong arity,
         recursion) is raised for check_equation to leave to the run."""
-        function_id = function_named(self._evaluator_view(), name)
-        if function_id in self.calls:
-            raise FormulaError(f"{name}() calls itself")
-        properties = self.ctx.properties(function_id)
-        try:
-            parameters = functions_repo.parameters_of(properties)
-        except functions_repo.FunctionDefinitionError as e:
-            raise FormulaError(str(e)) from e
+        function_id, parameters = self._function(name)
         if len(parameters) != len(node.args):
             raise FormulaError(f"{name}() takes {len(parameters)} arguments")
         bindings = {
             parameter: self._argument(name, function_id, parameter, arg)
             for parameter, arg in zip(parameters, node.args)
         }
+        return self._body(function_id, bindings)
+
+    def _calculus(self, name: str, node: ast.Call) -> Dim:
+        """`integrate(f, a, b)` is f's dimension times its parameter's, and
+        `deriv(f, x0)` is f's over it. Arguments are checked as a call's
+        are, the bounds against the parameter they bound; a malformed call
+        is left to the evaluator to refuse, as a call's is."""
+        if not node.args or not isinstance(node.args[0], ast.Name):
+            raise FormulaError(f"{name}() takes a function's name first")
+        function = node.args[0].id
+        function_id, parameters = self._function(function)
+        rest = node.args[1:]
+        named = bool(rest) and isinstance(rest[0], ast.Constant) and isinstance(rest[0].value, str)
+        parameter = rest[0].value if named else (parameters[0] if len(parameters) == 1 else None)
+        if parameter not in parameters:
+            raise FormulaError(f"{name}({function}, ...) does not name one of its parameters")
+        rest = rest[1:] if named else rest
+        count = 2 if name == INTEGRATE_CALL else 1
+        others = [p for p in parameters if p != parameter]
+        if len(rest) != count + len(others):
+            raise FormulaError(f"{name}({function}, ...) has the wrong number of arguments")
+        own = [self._argument(function, function_id, parameter, a) for a in rest[:count]]
+        bindings = {parameter: own[0], **{
+            p: self._argument(function, function_id, p, a) for p, a in zip(others, rest[count:])}}
+        body, variable = self._body(function_id, bindings), own[0]
+        if body is None or variable is None:
+            return None
+        return body + variable if name == INTEGRATE_CALL else body - variable
+
+    def _function(self, name: str) -> tuple[str, list[str]]:
+        """The function mote `name` calls, and its parameters."""
+        function_id = function_named(self._evaluator_view(), name)
+        if function_id in self.calls:
+            raise FormulaError(f"{name}() calls itself")
+        try:
+            return function_id, functions_repo.parameters_of(self.ctx.properties(function_id))
+        except functions_repo.FunctionDefinitionError as e:
+            raise FormulaError(str(e)) from e
+
+    def _body(self, function_id: str, bindings: dict[str, Dim]) -> Dim:
         inner = _Checker(dataclasses.replace(self.ctx, mote_id=function_id),
                          bindings, (*self.calls, function_id), parent=self)
-        return inner.dimension(parse_expression(functions_repo.body_of(properties)))
+        body = functions_repo.body_of(self.ctx.properties(function_id))
+        return inner.dimension(parse_expression(body))
 
     def _argument(self, name: str, function_id: str, parameter: str, node: ast.AST) -> Dim:
         """One argument's dimension as the body sees it. A bare number into

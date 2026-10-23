@@ -212,7 +212,7 @@ against it · `a` / `n` add override / new scenario (prefills `set
 | Key | Does |
 |---|---|
 | `i` / `⏎` | Start typing (then every key but `^w` is the editor's) |
-| `esc` | Stop: a note saves (one undo step per session), the worksheet applies |
+| `esc` | Stop: a note saves (one undo step per session), the worksheet applies (your text stays until reopened) |
 | `^f` | Find / replace: `⏎` `⇧⏎` next/prev · `tab` field · `⏎` in replace: one · `^⏎` all · `esc` close |
 | `^z` | Undo typing (the text box's own) |
 | `^v` | In a note: paste a clipboard image as `\image{shot-NNN}` on its own line (one undo step; rename it with `image rename`) |
@@ -230,6 +230,8 @@ Worksheet lines:
 | `bd.Ax + bd.Bx == 0` | Relation: frees nothing |
 | `bd.s <= 250` · `b.R1 + b.R2 ?= b.W` | Check: evaluated, never solved |
 | `phi(r [cm]) = A * sin(B * r) / r` | Function |
+| `m.Q = integrate(phi, 0, m.R)` · `m.g = deriv(phi, m.r)` | Integral / derivative of a function (numeric) |
+| `integrate(f, 'y', 0, 1, m.x)` · `deriv(f, 'y', m.y, m.x)` | …along a named parameter, the others held |
 | `… ! ΣFx` | Names the rule |
 
 Margin: `=` given · `←` solves for its left side · `?` unknown · `≡`

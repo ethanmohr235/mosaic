@@ -65,7 +65,9 @@ from core import rules as rules_repo
 from core import species as species_repo
 from core import undo
 from core import units
-from core.formula import MATH_CONSTANTS, FormulaError, attribute_bases, parse_equation
+from core.formula import (
+    MATH_CONSTANTS, FormulaError, attribute_bases, function_reference_ids, parse_equation,
+)
 from core.entities import Mote
 from core.simulation import unresolved_equation_names
 
@@ -466,6 +468,7 @@ def _equation_property_refs(equation: str) -> tuple[set[str], dict[str, set[str]
             attribute_value_ids.add(id(node.value))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             call_func_ids.add(id(node.func))
+    call_func_ids |= function_reference_ids(tree)  # `phi` in integrate(phi, ...)
 
     own = {
         node.id for node in ast.walk(tree)

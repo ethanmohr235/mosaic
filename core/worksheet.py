@@ -107,8 +107,8 @@ from core import species as species_repo
 from core import units as units_repo
 from core.entities import Mote
 from core.formula import (
-    MATH_CONSTANTS, TICK_NAME, FormulaError, function_name_problem, parse_equation,
-    parse_expression,
+    MATH_CONSTANTS, TICK_NAME, FormulaError, function_name_problem, function_reference_ids,
+    parse_equation, parse_expression,
 )
 
 # What a line turned out to be.
@@ -1088,6 +1088,7 @@ def _names(relation: str) -> tuple[list[str], set[str]]:
                 bases.append(node.value.id)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             calls.add(id(node.func))
+    calls |= function_reference_ids(tree)  # `phi` in integrate(phi, ...)
     bare = {
         node.id for node in ast.walk(tree)
         if isinstance(node, ast.Name)

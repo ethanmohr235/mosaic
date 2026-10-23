@@ -25,6 +25,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from core import calculus as calculus_repo
 from core import functions as functions_repo
 from core import limits as limits_repo
 from core import roles as roles_repo
@@ -63,9 +64,16 @@ LOG_CALLS = frozenset({"log", "ln", "log10", "exp"})
 SQRT_CALL = "sqrt"
 PREVIOUS_CALL = "prev"
 PROPERTY_CALL = "property"
+# `integrate(f, a, b)` and `deriv(f, x0)` ask about a function mote along
+# one of its parameters, numerically (core/calculus.py). Their first
+# argument is the function's bare name, not a value -- every walker that
+# reads bare names as properties skips it (function_reference_ids).
+INTEGRATE_CALL = "integrate"
+DERIVATIVE_CALL = "deriv"
+CALCULUS_CALLS = frozenset({INTEGRATE_CALL, DERIVATIVE_CALL})
 ALLOWED_CALLS = (
     NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | TRIG_CALLS | LOG_CALLS
-    | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL}
+    | CALCULUS_CALLS | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL}
 )
 
 # The current simulation step's index, exposed to formulas as a reserved
@@ -94,6 +102,20 @@ def function_name_problem(name: object) -> str | None:
     if name == TICK_NAME or name in MATH_CONSTANTS:
         return f"{name!r} is a reserved name in a formula"
     return None
+
+
+def function_reference_ids(tree: ast.AST) -> set[int]:
+    """The `id()` of every bare name in `tree` that names a function mote
+    rather than reading a property: the first argument of a calculus call
+    (`phi` in `integrate(phi, 0, R)`). One answer, so the walkers that
+    collect a formula's bare names -- the worksheet, the command bar, shown
+    work -- skip exactly what the evaluator reads as a function."""
+    return {
+        id(node.args[0]) for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id in CALCULUS_CALLS
+        and node.args and isinstance(node.args[0], ast.Name)
+    }
 
 
 class FormulaError(ValueError):
@@ -587,6 +609,10 @@ class Context:
     # Told of every limit a function call takes (core/limits.py), so a
     # solve can say its answer came from one. Ignored by default.
     limit_taken: Callable[[limits_repo.Limit], None] = lambda limit: None
+    # Told of every integral and derivative a calculus call takes
+    # (core/calculus.py), for provenance. Ignored by default.
+    calculus_taken: Callable[
+        [calculus_repo.Integral | calculus_repo.Derivative], None] = lambda record: None
 
 
 def relation_operator(text: str) -> str:
@@ -908,6 +934,8 @@ def _call(node: ast.Call, ctx: Context):
         return _previous(node, ctx)
     if name == PROPERTY_CALL:
         return _property(node, ctx)
+    if name in CALCULUS_CALLS:
+        return _calculus(name, node, ctx)
     return _function_call(name, node, ctx)
 
 
@@ -943,14 +971,7 @@ def _function_call(name: str, node: ast.Call, ctx: Context) -> Ratio:
     bound to its argument. Arguments are evaluated where the call is, so
     an unknown passes into the body as itself and the body is exactly as
     linear -- or as deferred -- as it would be written inline."""
-    function_id = function_named(ctx, name)
-    if function_id in ctx.calls:
-        raise FormulaError(f"{name}() calls itself -- a function cannot be recursive")
-    properties = ctx.properties(function_id)
-    try:
-        parameters = functions_repo.parameters_of(properties)
-    except functions_repo.FunctionDefinitionError as e:
-        raise FormulaError(f"function {name}: {e}") from e
+    function_id, parameters, body = _function_parts(name, ctx)
     if len(node.args) != len(parameters):
         raise FormulaError(
             f"{name}() takes {len(parameters)} argument"
@@ -961,13 +982,30 @@ def _function_call(name: str, node: ast.Call, ctx: Context) -> Ratio:
         parameter: _argument(ctx, function_id, parameter, arg)
         for parameter, arg in zip(parameters, node.args)
     }
-    body = functions_repo.body_of(properties)
     try:
         return _call_body(name, function_id, body, arguments, ctx)
     except IndeterminateError:
         if not all(a.is_constant for a in arguments.values()):
             raise
         return _limit_call(name, function_id, body, arguments, ctx)
+
+
+def _function_parts(name: str, ctx: Context) -> tuple[str, list[str], ast.AST]:
+    """The function mote `name` calls, its parameters and its parsed body.
+    Refuses a call from inside its own body, directly or not."""
+    function_id = function_named(ctx, name)
+    if function_id in ctx.calls:
+        raise FormulaError(f"{name}() calls itself -- a function cannot be recursive")
+    properties = ctx.properties(function_id)
+    try:
+        parameters = functions_repo.parameters_of(properties)
+    except functions_repo.FunctionDefinitionError as e:
+        raise FormulaError(f"function {name}: {e}") from e
+    try:
+        body = _parse_ast(functions_repo.body_of(properties))
+    except FormulaError as e:
+        raise FormulaError(f"in {name}(): {e}") from e
+    return function_id, parameters, body
 
 
 def _argument(ctx: Context, function_id: str, parameter: str, node: ast.AST) -> Ratio:
@@ -981,7 +1019,7 @@ def _argument(ctx: Context, function_id: str, parameter: str, node: ast.AST) -> 
 
 
 def _limit_call(
-    name: str, function_id: str, body: str, arguments: dict[str, Ratio], ctx: Context
+    name: str, function_id: str, body: ast.AST, arguments: dict[str, Ratio], ctx: Context
 ) -> Ratio:
     """The call's value as a limit, approached along one parameter at a
     time, in order -- the first that settles is the answer, and the
@@ -1001,40 +1039,198 @@ def _limit_call(
 
 
 def _limit_along(
-    name: str, function_id: str, body: str, arguments: dict[str, Ratio],
+    name: str, function_id: str, body: ast.AST, arguments: dict[str, Ratio],
     parameter: str, ctx: Context,
 ) -> limits_repo.Limit:
+    along = _along(name, function_id, body, arguments, parameter, ctx)
+
     def at(x: float) -> float:
         try:
-            moved = {**arguments, parameter: Ratio.number(x)}
-            return _call_body(name, function_id, body, moved, ctx).constant
+            return along(x)
         except NonlinearError:
             raise
         except FormulaError as e:
             raise limits_repo.LimitError(f"it is not defined beside the point: {e}") from e
 
     point = arguments[parameter].constant
-    unit_name = ctx.units(function_id).get(parameter)
-    try:
-        scale = (to_base(1.0, unit_name) - to_base(0.0, unit_name)) if unit_name else None
-    except UnitError:
-        unit_name = scale = None  # reported by the unit check, not here
+    unit_name, scale = _parameter_unit(ctx, function_id, parameter)
     value = limits_repo.two_sided(at, point, limits_repo.first_step(point, scale))
-    shown = f"{from_base(point, unit_name):g} {unit_name}" if unit_name else f"{point:g}"
-    return limits_repo.Limit(function_id, name, parameter, point, shown, value)
+    return limits_repo.Limit(
+        function_id, name, parameter, point, _shown(point, unit_name), value)
+
+
+def _along(
+    name: str, function_id: str, body: ast.AST, arguments: dict[str, Ratio],
+    parameter: str, ctx: Context,
+) -> Callable[[float], float]:
+    """The body as a plain function of one parameter, the others held at
+    their arguments -- how a limit, an integral and a derivative all ask
+    a function about points beside the one it was called at. A body that
+    still reads an unknown has no number to give, so it defers."""
+    def at(x: float) -> float:
+        moved = {**arguments, parameter: Ratio.number(x)}
+        return _call_body(name, function_id, body, moved, ctx).value()
+    return at
+
+
+def _parameter_unit(ctx: Context, function_id: str, parameter: str) -> tuple[str | None, float | None]:
+    """A parameter's declared unit, and the size of one of it in base SI
+    (what a small step is measured against). None for both when it
+    declares none, or one the unit check already reports as unreadable."""
+    unit_name = ctx.units(function_id).get(parameter)
+    if not unit_name:
+        return None, None
+    try:
+        return unit_name, to_base(1.0, unit_name) - to_base(0.0, unit_name)
+    except UnitError:
+        return None, None
+
+
+def _shown(value: float, unit_name: str | None) -> str:
+    """A base-SI value as its parameter's unit writes it, for a reader."""
+    return f"{from_base(value, unit_name):g} {unit_name}" if unit_name else f"{value:g}"
 
 
 def _call_body(
-    name: str, function_id: str, body: str, arguments: dict[str, Ratio], ctx: Context
+    name: str, function_id: str, body: ast.AST, arguments: dict[str, Ratio], ctx: Context
 ) -> Ratio:
     inner = dataclasses.replace(
         ctx, mote_id=function_id, bindings=arguments, calls=(*ctx.calls, function_id))
     try:
-        return _as_ratio(_evaluate(_parse_ast(body), inner))
+        return _as_ratio(_evaluate(body, inner))
     except FormulaError as e:
         # Same type, so a NonlinearError still defers and an
         # IndeterminateError can still be answered with a limit.
         raise type(e)(f"in {name}(): {e}") from e
+
+
+@dataclass(frozen=True)
+class _Along:
+    """One calculus call, read: the function, the parameter it is taken
+    along, that parameter's own arguments (two bounds, or one point) and
+    every other parameter's, held fixed. All in base SI."""
+    name: str
+    function_id: str
+    body: ast.AST
+    parameter: str
+    variable: list[Ratio]
+    held: dict[str, Ratio]
+
+
+def _calculus(name: str, node: ast.Call, ctx: Context) -> Ratio:
+    """`integrate(f, a, b)` or `deriv(f, x0)`: a numeric estimate along one
+    of f's parameters (core/calculus.py), deferred like sin() until every
+    argument is a number, and reported to the context. An estimate that
+    misses its tolerance is an error, never a quiet number."""
+    along = _read_calculus(name, node, ctx)
+    if not all(v.is_constant for v in (*along.variable, *along.held.values())):
+        raise NonlinearError(f"{name}() cannot be taken at an unknown quantity")
+    sample = _sampler(along, ctx)
+    try:
+        record = (_integral if name == INTEGRATE_CALL else _derivative)(along, sample, ctx)
+    except calculus_repo.CalculusError as e:
+        raise FormulaError(f"{name}({along.name}): {e}") from e
+    ctx.calculus_taken(record)
+    return Ratio.number(record.value)
+
+
+def _read_calculus(name: str, node: ast.Call, ctx: Context) -> _Along:
+    """The call's arguments, bound: the function's bare name, then the
+    parameter it is along (quoted, optional for a function of one), then
+    that parameter's bounds or point, then every other parameter's value
+    in declared order. A bare number takes its parameter's unit, as in a
+    call."""
+    if not node.args or not isinstance(node.args[0], ast.Name):
+        raise FormulaError(f"{name}() takes a function's name first, e.g. {name}(phi, ...)")
+    function = node.args[0].id
+    function_id, parameters, body = _function_parts(function, ctx)
+    rest = node.args[1:]
+    parameter, named = _variable(name, function, parameters, rest)
+    rest = rest[1:] if named else rest
+    count = 2 if name == INTEGRATE_CALL else 1
+    others = [p for p in parameters if p != parameter]
+    if len(rest) != count + len(others):
+        raise FormulaError(f"{name}({function}, ...) takes {_calculus_shape(name, parameter, others)}")
+    return _Along(
+        function, function_id, body, parameter,
+        [_argument(ctx, function_id, parameter, a) for a in rest[:count]],
+        {p: _argument(ctx, function_id, p, a) for p, a in zip(others, rest[count:])},
+    )
+
+
+def _variable(name: str, function: str, parameters: list[str], rest: list[ast.AST]) -> tuple[str, bool]:
+    """The parameter a calculus call is along, and whether the call named
+    it. Naming is only optional when there is one parameter to mean."""
+    first = rest[0] if rest else None
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        if first.value not in parameters:
+            raise FormulaError(
+                f"{name}({function}, {first.value!r}, ...): {function} has no parameter "
+                f"{first.value!r} (its parameters: {', '.join(parameters) or 'none'})")
+        return first.value, True
+    if len(parameters) != 1:
+        example = f"{name}({function}, '{parameters[0]}', ...)" if parameters else ""
+        raise FormulaError(
+            f"{name}({function}, ...) must name the parameter it is taken along -- "
+            f"{function} takes {', '.join(parameters) or 'no parameters'}"
+            + (f", e.g. {example}" if example else ""))
+    return parameters[0], False
+
+
+def _calculus_shape(name: str, parameter: str, others: list[str]) -> str:
+    own = f"{parameter}'s two bounds" if name == INTEGRATE_CALL else f"the point {parameter} is at"
+    return own + (f", then {', '.join(others)}" if others else "")
+
+
+def _sampler(along: _Along, ctx: Context) -> Callable[[float], float]:
+    """The body along the one parameter, as core/calculus.py samples it. A
+    sample that lands on 0/0 is answered with its limit -- Kronrod's
+    centre node puts sin(r)/r exactly on r = 0 -- without a limit of its
+    own being reported, since the estimate it went into is. Any other
+    failure is the estimate's, except a deferral."""
+    at = _along(along.name, along.function_id, along.body,
+                {**along.held, along.parameter: Ratio.number(0.0)}, along.parameter, ctx)
+    _, scale = _parameter_unit(ctx, along.function_id, along.parameter)
+
+    def sample(x: float) -> float:
+        try:
+            return at(x)
+        except IndeterminateError:
+            try:
+                return limits_repo.two_sided(at, x, limits_repo.first_step(x, scale))
+            except limits_repo.LimitError as e:
+                raise calculus_repo.CalculusError(f"0/0 at {along.parameter} = {x:g}, and {e}") from e
+        except NonlinearError:
+            raise
+        except FormulaError as e:
+            raise calculus_repo.CalculusError(
+                f"it is not defined at {along.parameter} = {x:g}: {e}") from e
+    return sample
+
+
+def _integral(along: _Along, sample: Callable[[float], float], ctx: Context) -> calculus_repo.Integral:
+    lower, upper = (v.constant for v in along.variable)
+    estimate = calculus_repo.integrate(sample, lower, upper)
+    unit_name, _ = _parameter_unit(ctx, along.function_id, along.parameter)
+    return calculus_repo.Integral(
+        along.function_id, along.name, along.parameter, _shown(lower, unit_name),
+        _shown(upper, unit_name), estimate.value, estimate.error, _held(along, ctx))
+
+
+def _derivative(along: _Along, sample: Callable[[float], float], ctx: Context) -> calculus_repo.Derivative:
+    point = along.variable[0].constant
+    unit_name, scale = _parameter_unit(ctx, along.function_id, along.parameter)
+    estimate = calculus_repo.derivative(sample, point, calculus_repo.first_step(point, scale))
+    return calculus_repo.Derivative(
+        along.function_id, along.name, along.parameter, _shown(point, unit_name),
+        estimate.value, estimate.error, _held(along, ctx))
+
+
+def _held(along: _Along, ctx: Context) -> str:
+    """The parameters held fixed, as their units write them: `x = 2 cm`."""
+    return ", ".join(
+        f"{p} = {_shown(v.constant, _parameter_unit(ctx, along.function_id, p)[0])}"
+        for p, v in along.held.items())
 
 
 def _previous(node: ast.Call, ctx: Context) -> Ratio:

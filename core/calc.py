@@ -60,7 +60,7 @@ from core import simulation
 from core import uncertainty as uncertainty_repo
 from core import units as units_repo
 from core import worksheet as worksheet_repo
-from core.provenance import LIMIT_READ
+from core.provenance import ANSWER_READS, LIMIT_READ
 from core.units import UnitError
 
 SOURCE_KEY = "source"
@@ -604,17 +604,19 @@ def _steps(
             f"solved together with {len(equations)} equations, so there is no "
             f"one expression to substitute into"
         )
-    steps.append(Step(RESULT, shown.text(figures), _limits_taken(explanation, names)))
+    steps.append(Step(RESULT, shown.text(figures), _answers_taken(explanation, names)))
     return tuple(steps), note
 
 
-def _limits_taken(explanation, names: dict[str, str]) -> str:
+def _answers_taken(explanation, names: dict[str, str]) -> str:
     """`phi: limit r → 0 cm`, for each function call the solve answered
-    with a limit (core/limits.py) -- said on the result, because that is
-    the number the limit is."""
+    with a limit (core/limits.py), and `phi: ∫ r 0 → 5 cm ± 2e-15
+    relative` for each integral or derivative (core/calculus.py) -- said on
+    the result, because that is the number they are."""
     return "; ".join(
-        f"{names.get(read.mote_id, read.mote_id[:8])}: limit {read.key}"
-        for read in explanation.inputs if read.kind == LIMIT_READ
+        f"{names.get(read.mote_id, read.mote_id[:8])}: "
+        f"{'limit ' if read.kind == LIMIT_READ else ''}{read.key}"
+        for read in explanation.inputs if read.kind in ANSWER_READS
     )
 
 
@@ -671,7 +673,7 @@ def _reads(explanation, properties: dict[str, dict], names: dict[str, str]) -> d
     reason this cannot just print what the record holds."""
     reads: dict[str, Quantity] = {}
     for read in explanation.inputs:
-        if read.kind == LIMIT_READ:
+        if read.kind in ANSWER_READS:
             continue  # an answer, not a value to write into the line
         declared = quantity(properties.get(read.mote_id, {}), read.key)
         value = _from_base(read.value, declared.unit) if declared.unit \

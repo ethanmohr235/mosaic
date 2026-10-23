@@ -93,6 +93,7 @@ to both.
 | `t` | The current step's index within a time-based run (0 for the first step). A reserved word -- shadows a property literally named `t` inside a formula specifically, though that property is still ordinary and visible everywhere else. Always 0 in a plain (non-time-based) run. |
 | `prev(x)` | The value `x` had *entering* the current step -- `x` must be a bare property/unknown name on the mote the rule is running against (not `targets(...)`'s result). This is how a rule expresses a recurrence: `balance == prev(balance) * 1.05`. Only meaningful in a time-based run; raises an error otherwise. |
 | `phi(x)` | A call to a [function mote](#functions) named `phi`: its body, evaluated with each parameter bound to its argument. An unknown may be an argument; it passes into the body as itself. |
+| `integrate(phi, a, b)`, `deriv(phi, x0)` | The definite integral of the function mote `phi` from `a` to `b`, and its derivative at `x0`, both numerical. A function of several parameters names the one it is along, then gives the others: `integrate(f, 'y', a, b, x0)`. Deferred like `sin` until every bound or point is a number. See [Calculus](#calculus). |
 | `property('rel', 'operation', ...)` | Evaluates `operation` (e.g. `'pressure'`) through the property model of the single mote reached by relationship type `'rel'`, e.g. `property('working_fluid', 'pressure', density, temperature)`. The relationship type and operation must be quoted string literals; the remaining arguments must already be known numbers -- a property model is an opaque function of its inputs, so like `abs`/`min`/`max` this is deferred (retried by the substitution loop) until they are. See "Physical property models" below. |
 
 Anything else -- indexing, comprehensions, attribute access, `import`, calling a Python function -- is rejected when the formula is parsed. The parser uses Python's `ast` module against a whitelist and never calls `eval`.
@@ -600,6 +601,67 @@ Solved 1 value across 1 mote from 1 equation. 1 value came from a limit (phi: r 
   `limit` read in provenance (the function mote, and `r → 0 cm` in the
   key's place), which is how `why` and `\work` say it.
 - `sinc(x)` gives the same number with no limit: `A * B * sinc(B * r)`.
+
+### Calculus
+
+A function can be integrated or differentiated along one of its
+parameters, numerically (`core/calculus.py`). The first argument is the
+function mote's bare name:
+
+```text
+reactor.Q  = integrate(phi, 0, reactor.R)      <- ∫₀ᴿ φ(r) dr
+reactor.g  = deriv(phi, reactor.R)             <- φ′(R)
+plate.I    = integrate(f, 'y', 0, 1, plate.x)  <- ∫₀¹ f(x, y) dy at x = plate.x
+plate.dfdy = deriv(f, 'y', 0.5, plate.x)       <- ∂f/∂y at (x, 0.5)
+```
+
+- **The parameter it is along** is named as a quoted string, which may be
+  left out when the function has exactly one parameter. Then come that
+  parameter's two bounds (an integral) or its point (a derivative), then
+  every other parameter's value in declared order, held fixed. The wrong
+  count, an unknown parameter name, or a function of several parameters
+  with none named is refused, and the message says what the call takes.
+- **Arguments are read as a call's are**: a bare number takes the
+  parameter's declared unit (`integrate(phi, 0, 10)` into `r [cm]` is 0
+  to 10 cm), and an argument that reads a property carries its own.
+- **An unknown bound or point defers**, like `sin`. The substitution loop
+  retries it once another equation has solved it, and `newton` solves
+  through it: `integrate(q, 0, m.L) == 8` finds `L`, and `deriv(p, m.x)
+  == 0` finds a stationary point. A body that reads an unsolved value
+  defers the same way.
+- **Bounds either way round**: `a > b` gives the negated integral, and
+  `a == b` gives 0. Infinite bounds are not supported.
+- **Composes.** A body may itself call `integrate` or `deriv`, so a second
+  derivative is a function mote whose body is `deriv(g, x)`. A function
+  that integrates itself is refused, as any recursion is.
+- **How:** an integral is adaptive Gauss–Kronrod (7 points within 15),
+  splitting the worst piece until the error estimate is within 1e-10 of
+  the integral (or 1e-12 of ∫|f|, for one that cancels to 0). Kronrod
+  nodes never sit on a bound, so an integrand undefined there (sin(r)/r
+  from 0) is never asked there. A node that lands exactly on 0/0 inside
+  the bounds is answered with its [limit](#limits). A derivative is
+  Ridders' method: central differences Richardson-extrapolated over a
+  shrinking step, which starts at a tenth of the parameter's declared
+  unit (or of the point's size, or of 1). It is retried from a thousand
+  and a million times finer before giving up.
+- **Fails rather than guesses:** a pole inside the bounds, a kink (`abs`
+  at 0: the left and right slopes are named), a function undefined beside
+  the point (`sqrt` at 0), or an estimate that does not reach tolerance.
+  Each says which call and why.
+- **Units:** an integral is the body's unit times the parameter's, and a
+  derivative is the body's over it, so `integrate(force, 0, 3)` with
+  `x [m]` and a body in N is in J. The bounds, point and held arguments
+  get the same two warnings a call's arguments do.
+- **Reported in provenance, not the summary.** Each estimate is an
+  `integral` or `derivative` read (the function mote, and `∫ r 0 cm → 10
+  cm` or `d/dr at 10 cm` in the key's place, with the relative error when
+  it is above float roundoff). That is how `why` and `\work` say it:
+  `\work` notes it on the result, the way it notes a limit. ± propagation
+  works through either, since it differentiates the whole solve.
+- **LaTeX** sets `integrate(phi, 0, R)` as ∫₀ᴿ φ and `deriv(phi, x0)` as
+  φ′(x₀). With a parameter named, the integrand is written out with the
+  held arguments after a semicolon (∫ f(y; x₀) dy, ∂f/∂y(y₀; x₀)), since
+  the typesetter has no garden to put them back in declared order.
 
 ## Roles
 
@@ -1537,6 +1599,7 @@ a rule that doesn't add up.
 - **Continuous dynamics.** Time-based simulation is discrete steps, not an ODE integrator -- a numerical approximation, deliberately, not SPICE-style companion models. Fine for recurrences; genuinely continuous behavior (capacitors and inductors modelled from first principles, rather than as a discrete update rule) would need real integration. A solver backend for this shape (`dx/dt` rather than `F(x) == 0`) could join `linear`/`newton` later without changing how a rule is written.
 
   There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. The console's `sim` says so rather than implying a clock -- `--ticks`, the timeline and the playhead all count ticks. An integrator would reach `sim --solver` by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
+- **Symbolic calculus.** `integrate` and `deriv` are numeric. Symbolic derivatives (and, for `\work`, the derivative written out as an expression) are planned next; symbolic antiderivatives would need a computer-algebra dependency. Time derivatives (`dx/dt` in a rule) wait on the continuous-dynamics question above.
 - **Per-literal unit syntax in an equation** (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with. (A solved freedom with no unit of its own *is* now given one -- see [Inference](#inference) above -- but only when it is the entire side of the equation that determined it; anything shapelier still has to be declared.)
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.

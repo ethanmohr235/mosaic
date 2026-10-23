@@ -255,6 +255,57 @@ def _property(node: ast.Call) -> str:
     return rf"\operatorname{{{operation}}}_{{\mathrm{{{relationship}}}}}{_bracket(inputs)}"
 
 
+def _integral(node: ast.Call) -> str:
+    """`integrate(phi, 0, R)` as ∫₀ᴿ φ; with its parameter named, the
+    integrand is written out with it and the parameters held fixed after a
+    semicolon, ∫ f(y; x₀) dy -- this module has no garden, so it cannot
+    put them back in their declared order."""
+    function, parameter, args = _calculus_parts(node)
+    if len(args) < 2:
+        raise _Unsupported()
+    (lower, upper), held = args[:2], args[2:]
+    bounds = rf"\int_{{{lower}}}^{{{upper}}}"
+    if parameter is None:
+        if held:
+            raise _Unsupported()
+        return rf"{bounds} {function}"
+    variable = name_tex(parameter)
+    return rf"{bounds} {function}{_bracket(_with_held(variable, held))}\,\mathrm{{d}}{variable}"
+
+
+def _derivative(node: ast.Call) -> str:
+    """`deriv(phi, x0)` as φ′(x₀); with its parameter named, as df/dy at
+    the point, partial when other parameters are held."""
+    function, parameter, args = _calculus_parts(node)
+    if not args:
+        raise _Unsupported()
+    point, held = args[0], args[1:]
+    if parameter is None:
+        if held:
+            raise _Unsupported()
+        return rf"{function}'{_bracket(point)}"
+    d = r"\partial" if held else r"\mathrm{d}"
+    return rf"\frac{{{d} {function}}}{{{d} {name_tex(parameter)}}}{_bracket(_with_held(point, held))}"
+
+
+def _calculus_parts(node: ast.Call) -> tuple[str, str | None, list[str]]:
+    """A calculus call's function as a symbol, the parameter it names (None
+    when it names none), and the rest of its arguments as LaTeX."""
+    if not node.args or not isinstance(node.args[0], ast.Name) \
+            or formula.function_name_problem(node.args[0].id):
+        raise _Unsupported()
+    rest, parameter = node.args[1:], None
+    if rest and isinstance(rest[0], ast.Constant) and isinstance(rest[0].value, str):
+        parameter, rest = rest[0].value, rest[1:]
+        if not parameter.isidentifier():
+            raise _Unsupported()
+    return name_tex(node.args[0].id), parameter, [_expr(a)[0] for a in rest]
+
+
+def _with_held(first: str, held: list[str]) -> str:
+    return first + (rf";\, {', '.join(held)}" if held else "")
+
+
 def _extreme(command: str) -> Callable[[ast.Call], str]:
     return lambda node: rf"{command}{_bracket(', '.join(_args(node)))}"
 
@@ -276,4 +327,6 @@ CALL_TEX: dict[str, Callable[[ast.Call], str]] = {
     formula.SQRT_CALL: lambda node: rf"\sqrt{{{_one(node)}}}",
     formula.PREVIOUS_CALL: _previous,
     formula.PROPERTY_CALL: _property,
+    formula.INTEGRATE_CALL: _integral,
+    formula.DERIVATIVE_CALL: _derivative,
 }

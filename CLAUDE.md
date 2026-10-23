@@ -41,6 +41,8 @@ what is still to do, lives in the docs; the short map:
 - **Functions:** a function mote (`function`, `parameters`) is called by
   name from any formula; a call at 0/0 takes a reported limit
   (`core/functions.py`, `core/limits.py`, `core/function_text.py`); `sinc`.
+  `integrate(phi, a, b)` and `deriv(phi, x0)` take one numerically
+  (`core/calculus.py`), recorded in provenance.
 - **Knobs:** `--set m.k=value [unit]` on `plot`, `sim`, `fit` and
   `graph --flow` tries a value and writes nothing; `--keep` (key `W`)
   writes it (`core/knobs.py`).
@@ -60,8 +62,8 @@ what is still to do, lives in the docs; the short map:
   and the `sync` verb and pane. Login is CLI-only (`monoss sync login`).
 - **Still to do** (`roadmap.md`): the project variables pane; `fit` and
   `--data` over a time axis; document health and the submitted revision on
-  Home rows; SVG images and surface plots in `.tex` export; the Mosaic
-  rename of code (an open question).
+  Home rows; SVG images and surface plots in `.tex` export; symbolic
+  derivatives; the Mosaic rename of code (an open question).
 
 ## Environment notes
 

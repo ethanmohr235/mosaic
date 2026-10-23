@@ -20,6 +20,7 @@ import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
+from core import calculus as calculus_repo
 from core import incidence as incidence_repo
 from core import model_resolver
 from core import roles as roles_repo
@@ -41,11 +42,14 @@ from core.formula import (
 )
 from core.dimensions import DimensionContext, check_equation, infer_unit
 from core.entities import Relationship
+from core.calculus import Derivative, Integral
 from core.limits import Limit
 from core.motes import list_motes, update_mote
 from core.providers import PropertyProvider
 from core.provenance import (
+    DERIVATIVE_READ,
     DERIVED_READ,
+    INTEGRAL_READ,
     MISSING_READ,
     PREVIOUS_READ,
     PROPERTY_READ,
@@ -1354,6 +1358,11 @@ def _context(
         if reads is not None:
             reads.limit(limit.function_id, limit.approach, limit.value)
 
+    def calculus_taken(record: Integral | Derivative) -> None:
+        if reads is not None:
+            kind = INTEGRAL_READ if isinstance(record, Integral) else DERIVATIVE_READ
+            reads.calculus(record.function_id, kind, calculus_repo.reported(record), record.value)
+
     return Context(
         mote_id=mote_id,
         properties=properties,
@@ -1372,6 +1381,7 @@ def _context(
         units=lambda mid: view.units.get(mid, {}),
         roles=lambda mid: view.roles.get(mid, {}),
         limit_taken=limit_taken,
+        calculus_taken=calculus_taken,
     )
 
 
