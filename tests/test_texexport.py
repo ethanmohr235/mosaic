@@ -52,6 +52,20 @@ def test_values_are_frozen_and_equations_numbered(conn, bar):
     assert "\\begin{equation}\nl = \\sqrt{x^2+y^2}\n\\end{equation}" in out.tex
 
 
+def test_a_line_break_in_an_equation_survives(conn, bar):
+    out = export(conn, "\\begin{equation}\na = b \\newline c = d \\\\ e\n\\end{equation}")
+    assert ("\\begin{equation}\n\\begin{gathered}\na = b \\\\ c = d \\\\ e\n"
+            "\\end{gathered}\n\\end{equation}") in out.tex
+
+
+def test_breaks_inside_an_inner_environment_are_left_alone(conn, bar):
+    out = export(conn, "\\begin{equation}\n\\begin{aligned}\na &= b \\\\\nc &= d\n"
+                       "\\end{aligned}\n\\end{equation}")
+    assert ("\\begin{equation}\n\\begin{aligned} a &= b \\\\ c &= d \\end{aligned}\n"
+            "\\end{equation}") in out.tex
+    assert "gathered" not in out.tex
+
+
 def test_bad_value_is_marked_and_reported(conn, bar):
     out = export(conn, "Oops \\val{nope.x}.")
     assert "[nope.x: error]" in out.tex

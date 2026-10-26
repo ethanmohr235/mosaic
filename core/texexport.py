@@ -211,7 +211,7 @@ def _block(b: dict, files: dict[str, bytes], problems: list[str]) -> str:
         items = "\n".join(rf"\item {inline(i, problems)}" for i in b["items"])
         return f"\\begin{{{env}}}\n{items}\n\\end{{{env}}}"
     if kind == "equation":
-        return f"\\begin{{equation}}\n{b['tex']}\n\\end{{equation}}"
+        return f"\\begin{{equation}}\n{_display(b['tex'])}\n\\end{{equation}}"
     if kind == "cited":
         if b.get("error"):
             problems.append(f"\\rule{{{b['rule']}}}: {b['error']}")
@@ -230,6 +230,34 @@ def _block(b: dict, files: dict[str, bytes], problems: list[str]) -> str:
         return _section(b, problems)
     problems.append(f"line {b.get('line', 0)}: cannot export a {kind} block")
     return ""
+
+
+_DISPLAY_TOKEN_RE = re.compile(
+    r"\\begin\{[^{}]*\}|\\end\{[^{}]*\}|\\newline(?![a-zA-Z])|\\\\|\\.|[{}]")
+
+
+def _display(tex: str) -> str:
+    """An equation body with its top-level line breaks made real.
+
+    KaTeX breaks a display formula at a `\\newline` or `\\\\`; LaTeX's
+    `equation` holds one line and drops them. So a body that breaks
+    outside any group or inner environment is set as `gathered` -- the
+    lines centred under one number, as the read pane shows them. Breaks
+    inside an `aligned` or a `matrix` already belong to it."""
+    depth, breaks = 0, []
+    for token in _DISPLAY_TOKEN_RE.finditer(tex):
+        text = token.group()
+        if text == "{" or text.startswith("\\begin"):
+            depth += 1
+        elif text == "}" or text.startswith("\\end"):
+            depth -= 1
+        elif depth == 0 and text in ("\\newline", "\\\\"):
+            breaks.append(token.span())
+    if not breaks:
+        return tex
+    for start, end in reversed(breaks):
+        tex = tex[:start] + "\\\\" + tex[end:]
+    return f"\\begin{{gathered}}\n{tex}\n\\end{{gathered}}"
 
 
 def _captioned(b: dict, inner: str, problems: list[str], env: str = "figure") -> str:

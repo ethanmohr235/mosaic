@@ -564,6 +564,7 @@ frozen**: what the read pane shows, written for LaTeX
 | --- | --- |
 | class | `article`, 11pt, 1in margins; the owner's cover (name, author, due, revision) is the title block |
 | `\val`, `\given`, `\answers` | `$4.00\,\mathrm{in}$` -- no siunitx; ± is `\pm`, `e-5` is `\times 10^{-5}` |
+| `equation` | the body as typed; a `\newline` or `\\` outside any group or inner environment is set as `gathered`, one number, as the read pane breaks it |
 | `\ref`, `\mote` | frozen as their text ("Equation 2"); LaTeX numbers equations, figures and tables itself, in the same order |
 | `\graph` | a pgfplots `axis` per unit band with the solved points inline; a failed point breaks the line. Surface and correlation figures are reported as a problem and left out |
 | `\image` | a file under `images/`, drawn with `\includegraphics`. PNG only: an SVG is reported as a problem |
