@@ -103,6 +103,14 @@ def test_what_the_pdf_cannot_set_is_marked_and_reported(conn, bar):
     assert out.problems == ("line 3: \\href: links and HTML hooks don't export; write the text",)
 
 
+def test_each_block_knows_its_note_line(conn, bar):
+    out = export(conn, "\\section{Method}\n\nOne.\n\nTwo\nlines.\n\nThree.")
+    tex = out.tex.splitlines()
+    three = next(n for n, text in enumerate(tex, 1) if text == "Three.")
+    assert texexport.note_line(out, three) == 8
+    assert texexport.note_line(out, 1) is None
+
+
 def test_calc_sections_and_work(conn, bar):
     out = export(conn, "\\work{bd.l}\n\n\\given\n\n\\answers\n\n\\checks")
     assert r"\subsection*{" in out.tex and "bd.l" in out.tex

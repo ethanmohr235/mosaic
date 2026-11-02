@@ -45,7 +45,7 @@ def test_prose_links_values_and_refs(conn, bar):
 def test_numbered_equations_and_refs(conn, bar):
     out = blocks(conn, "\\begin{equation}\n\\label{eq:l}\nl = \\sqrt{x^2+y^2}\n\\end{equation}\n\n"
                        "By \\ref{eq:l} and \\ref{nope}.")
-    assert out[0] == {"type": "equation", "tex": "l = \\sqrt{x^2+y^2}", "number": 1, "label": "eq:l"}
+    assert out[0] == {"type": "equation", "tex": "l = \\sqrt{x^2+y^2}", "number": 1, "label": "eq:l", "line": 1}
     refs = [n for n in out[1]["content"] if n["type"] == "ref"]
     assert refs[0]["text"] == "Equation 1" and refs[0]["error"] is None
     assert refs[1]["error"] == "no such label"

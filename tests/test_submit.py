@@ -95,6 +95,18 @@ def test_an_unresolved_value_refuses(project):
         submit.submit(conn, "hw4")
 
 
+def test_a_compile_error_names_the_note_line(project, monkeypatch):
+    conn, _owner = project
+
+    def fail(tex, files=None, fetch=None):
+        line = next(n for n, text in enumerate(tex.splitlines(), 1) if "Length" in text)
+        raise tectonic.TectonicError("tectonic failed", line, "Misplaced alignment tab character &")
+
+    monkeypatch.setattr(tectonic, "compile_pdf", fail)
+    with pytest.raises(tectonic.TectonicError, match="^line 3: Misplaced alignment tab character &"):
+        submit.pdf(conn, "hw4")
+
+
 def test_archived_garden_is_refused(project):
     from core import projects
     conn, _ = project

@@ -193,7 +193,7 @@ def render(conn: sqlite3.Connection, note_id: str, source: str, draw=None) -> di
     return {
         "noteId": note_id,
         "anchor": table_repo.describe(index, resolution.anchor_id),
-        "blocks": [shape.block(b) for b in document.blocks],
+        "blocks": [{**shape.block(b), "line": getattr(b, "line", 0)} for b in document.blocks],
         "problems": [{"line": d.line, "kind": d.kind, "message": d.message} for d in found],
         "notices": [{"line": d.line, "kind": d.kind, "message": d.message}
                     for d in modoc_bind.notices(document, resolution)],

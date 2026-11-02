@@ -641,6 +641,12 @@ Anything that did not resolve, or that the PDF cannot set (see *One
 vocabulary for the pane and the PDF*), is printed as a visible marker and
 returned in `problems`; a clean export has none.
 
+If a PDF still fails to compile, the error comes from tectonic's log and
+names the note line the failing block was written on: `line 42:
+Misplaced alignment tab character & -- the PDF did not compile`. A
+character the PDF's font lacks is a failure too, rather than a gap in
+the PDF.
+
 A **PDF** is that `.tex` compiled by [tectonic](https://tectonic-typesetting.github.io),
 one binary with no TeX Live. `core/tectonic.py` uses a `tectonic` on PATH,
 else a copy in `~/.cache/monoss/tectonic/`, else downloads the pinned

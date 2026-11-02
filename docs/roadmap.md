@@ -161,7 +161,9 @@ Each one was a separate act of filing. That lesson became a rule in
   vocabulary (`core/latex_vocab.py`, generated from the vendored KaTeX
   by `scripts/latex_vocab.py`). The preamble loads the packages and
   KaTeX aliases that close most of the gap. The rest is a marked
-  `not_latex` problem, typos included, and Submit refuses it.
+  `not_latex` problem, typos included, and Submit refuses it. A compile
+  error names its note line, and a glyph the font lacks fails the
+  export instead of leaving a gap.
 - **Submit / revisions (done 2026-10-05):** a `submission` mote per
   revision holds the `.tex`, PDF, figures and the quoted values;
   the owner gets `status: submitted`, `revision` and `submitted`.

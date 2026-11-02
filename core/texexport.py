@@ -52,10 +52,25 @@ _SYMBOLS = {
 class TexBundle:
     """What an export produced: the document, the files it includes (path
     relative to the .tex -> bytes), and everything that was not exportable
-    cleanly. `problems` empty means the note resolved completely."""
+    cleanly. `problems` empty means the note resolved completely.
+    `lines` pairs the `.tex` line each block starts on with the note line
+    it came from, so a compile error can be put back where it was typed
+    (`note_line`)."""
     tex: str
     files: dict[str, bytes] = field(default_factory=dict)
     problems: tuple[str, ...] = ()
+    lines: tuple[tuple[int, int], ...] = ()
+
+
+def note_line(bundle: TexBundle, tex_line: int) -> int | None:
+    """The note line the `.tex` line `tex_line` was written from, or None
+    for the preamble and title block."""
+    found = None
+    for start, line in bundle.lines:
+        if start > tex_line:
+            break
+        found = line or None
+    return found
 
 
 # --- escaping --------------------------------------------------------
@@ -136,12 +151,16 @@ def from_render(rendered: dict, cover: Cover | None = None) -> TexBundle:
         f"line {p['line']}: {p['message']}" for p in rendered.get("problems", [])
     ]
     files: dict[str, bytes] = {}
-    body = "\n\n".join(
-        part for part in (_block(b, files, problems) for b in rendered["blocks"]) if part
-    )
+    parts = [(b.get("line", 0), _block(b, files, problems)) for b in rendered["blocks"]]
+    parts = [(line, part) for line, part in parts if part]
     title = cover.name if cover else rendered["anchor"]["name"]
-    tex = _PREAMBLE + _title_block(title, cover) + "\n" + body + "\n\n\\end{document}\n"
-    return TexBundle(tex=tex, files=files, problems=tuple(problems))
+    head = _PREAMBLE + _title_block(title, cover) + "\n"
+    lines, at = [], head.count("\n") + 1
+    for line, part in parts:
+        lines.append((at, line))
+        at += part.count("\n") + 2
+    tex = head + "\n\n".join(part for _line, part in parts) + "\n\n\\end{document}\n"
+    return TexBundle(tex=tex, files=files, problems=tuple(problems), lines=tuple(lines))
 
 
 _PREAMBLE = r"""\documentclass[11pt]{article}

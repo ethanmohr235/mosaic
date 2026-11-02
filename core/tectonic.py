@@ -16,12 +16,14 @@ import hashlib
 import io
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
 import tarfile
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 VERSION = "0.17.0"
@@ -50,7 +52,24 @@ COMPILE_TIMEOUT = 600  # the first run downloads packages
 
 class TectonicError(RuntimeError):
     """Tectonic is missing, could not be fetched, or failed to compile.
-    The message is the sentence a surface shows as-is."""
+    The message is the sentence a surface shows as-is. A compile failure
+    read from the log also carries its `reason` alone and the `tex_line`
+    of main.tex it points at, so core/submit.py can name the note line."""
+
+    def __init__(self, message: str, tex_line: int | None = None, reason: str = "") -> None:
+        super().__init__(message)
+        self.tex_line = tex_line
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class Failure:
+    """What a compile log says went wrong: the first error, or a glyph
+    the font did not have (which XeTeX only warns about, leaving a gap in
+    the PDF)."""
+    reason: str
+    tex_line: int | None
+    excerpt: str = ""
 
 
 def cache_dir() -> Path:
@@ -122,8 +141,10 @@ def _install(data: bytes, name: str) -> Path:
 
 def compile_pdf(tex: str, files: dict[str, bytes] | None = None, fetch=None) -> bytes:
     """The PDF for `tex`, with `files` (path -> bytes, relative to the
-    document) alongside it. Raises TectonicError carrying the tail of
-    tectonic's output when the document does not compile."""
+    document) alongside it. Raises TectonicError when the document does
+    not compile, or compiles with a character its font lacks: the log's
+    reason and line where it gives one (`failure`), else the tail of
+    tectonic's output."""
     binary = ensure(fetch)
     with tempfile.TemporaryDirectory(prefix="monoss-tex-") as work:
         root = Path(work)
@@ -136,12 +157,49 @@ def compile_pdf(tex: str, files: dict[str, bytes] | None = None, fetch=None) -> 
             path.write_bytes(data)
         try:
             run = subprocess.run(
-                [str(binary), "-X", "compile", "main.tex", "--untrusted"],
+                [str(binary), "-X", "compile", "main.tex", "--untrusted", "--keep-logs"],
                 cwd=root, capture_output=True, text=True, timeout=COMPILE_TIMEOUT)
         except subprocess.TimeoutExpired as exc:
             raise TectonicError("tectonic timed out") from exc
-        pdf = root / "main.pdf"
+        pdf, log = root / "main.pdf", root / "main.log"
+        found = failure(log.read_text(errors="replace"), tex) if log.is_file() else None
+        if found is not None:
+            raise _failed(found)
         if run.returncode != 0 or not pdf.is_file():
             tail = "\n".join((run.stderr or run.stdout or "").strip().splitlines()[-15:])
             raise TectonicError(f"tectonic failed:\n{tail}")
         return pdf.read_bytes()
+
+
+_ERROR_RE = re.compile(r"^! (?P<reason>.*)$", re.M)
+_LINE_RE = re.compile(r"^l\.(?P<line>\d+) ?(?P<excerpt>.*)$", re.M)
+_COMMAND_RE = re.compile(r"\\[A-Za-z@]+")
+_MISSING_RE = re.compile(r"Missing character: There is no (?P<char>.) \((?P<code>U\+[0-9A-F]+)\)")
+
+
+def failure(log: str, tex: str) -> Failure | None:
+    """The first thing wrong in a compile log, or None. Pure, so a test can
+    hand it a log without running tectonic."""
+    error = _ERROR_RE.search(log)
+    if error:
+        reason = error.group("reason").strip().rstrip(".")
+        place = _LINE_RE.search(log, error.end())
+        context = log[error.end():place.start() if place else None]
+        if reason == "Undefined control sequence" and _COMMAND_RE.findall(context):
+            reason += " " + _COMMAND_RE.findall(context)[-1]
+        if place is None:
+            return Failure(reason, None)
+        return Failure(reason, int(place.group("line")), place.group("excerpt").strip())
+    missing = _MISSING_RE.search(log)
+    if missing:
+        char = missing.group("char")
+        line = next((n for n, text in enumerate(tex.splitlines(), 1) if char in text), None)
+        return Failure(f"the PDF font has no '{char}' ({missing.group('code')})", line)
+    return None
+
+
+def _failed(found: Failure) -> TectonicError:
+    where = f" at line {found.tex_line} of the .tex" if found.tex_line else ""
+    excerpt = f"\n  {found.excerpt}" if found.excerpt else ""
+    return TectonicError(f"tectonic failed{where}: {found.reason}{excerpt}",
+                         found.tex_line, found.reason)

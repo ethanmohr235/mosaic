@@ -152,7 +152,21 @@ def export(conn: sqlite3.Connection, garden: str, note_ref: str | None = None) -
 def pdf(conn: sqlite3.Connection, garden: str, note_ref: str | None = None, fetch=None) -> tuple[bytes, texexport.TexBundle]:
     """A draft PDF: `export`, compiled. Nothing is written."""
     bundle = export(conn, garden, note_ref)
-    return tectonic.compile_pdf(bundle.tex, bundle.files, fetch=fetch), bundle
+    return _compile(bundle, fetch), bundle
+
+
+def _compile(bundle: texexport.TexBundle, fetch=None) -> bytes:
+    """`bundle` as a PDF. A compile error is put back on the note line it
+    came from, the way the note's own problems are reported."""
+    try:
+        return tectonic.compile_pdf(bundle.tex, bundle.files, fetch=fetch)
+    except tectonic.TectonicError as exc:
+        line = texexport.note_line(bundle, exc.tex_line) if exc.tex_line else None
+        if line is None:
+            raise
+        raise tectonic.TectonicError(
+            f"line {line}: {exc.reason} -- the PDF did not compile", exc.tex_line, exc.reason,
+        ) from exc
 
 
 def submit(
@@ -175,7 +189,7 @@ def submit(
     found = problems_of(conn, bundle)
     if found and not force:
         raise SubmitRefused(found)
-    pdf = tectonic.compile_pdf(bundle.tex, bundle.files, fetch=fetch)
+    pdf = _compile(bundle, fetch)
 
     date = (today or datetime.date.today()).isoformat()
     files = {TEX_NAME: bundle.tex.encode("utf-8"), PDF_NAME: pdf, **bundle.files}

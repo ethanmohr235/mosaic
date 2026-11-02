@@ -73,3 +73,29 @@ def test_real_compile(monkeypatch):
     monkeypatch.setenv("PATH", __import__("os").environ["PATH"])
     pdf = tectonic.compile_pdf("\\documentclass{article}\\begin{document}Hi\\end{document}")
     assert pdf.startswith(b"%PDF")
+
+
+UNDEFINED_LOG = r"""[1] [2]
+! Undefined control sequence.
+<argument> k_\infin
+                    -1
+l.107 ... \frac{\pi^2}{R^2}=\frac{k_\infin-1}{L^2}
+
+Output written on main.xdv (2 pages, 23440 bytes).
+"""
+
+
+def test_failure_reads_the_first_error_and_its_line():
+    found = tectonic.failure(UNDEFINED_LOG, "")
+    assert found.reason == r"Undefined control sequence \infin"
+    assert found.tex_line == 107 and found.excerpt.endswith(r"{L^2}")
+
+
+def test_a_missing_glyph_is_a_failure_at_the_line_that_has_it():
+    log = 'Missing character: There is no \u2603 (U+2603) in font lmroman10-regular!\n'
+    found = tectonic.failure(log, "a\nb \u2603\nc")
+    assert found == tectonic.Failure("the PDF font has no '\u2603' (U+2603)", 2)
+
+
+def test_a_clean_log_is_no_failure():
+    assert tectonic.failure("Output written on main.xdv (1 page).", "") is None
