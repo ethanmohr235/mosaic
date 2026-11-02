@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from core import calc
 from core import derivations
 from core import images as images_repo
+from core import latex_vocab
 from core.calc import format_value  # noqa: F401 -- re-exported
 from core import modoc
 from core import kinds as kinds_repo
@@ -513,6 +514,8 @@ def problems(document: modoc.Document, resolution: Resolution) -> list[modoc.Dia
             found.append(modoc.Diagnostic(
                 node.line, "unresolved_section", f"\\{node.kind}: {section.error}"
             ))
+    for text, line in modoc.formulas(document):
+        found.extend(latex_vocab.check(text, line))
     return sorted(found, key=lambda d: d.line)
 
 

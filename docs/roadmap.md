@@ -157,6 +157,11 @@ Each one was a separate act of filing. That lesson became a rule in
   per-user cache, a `tectonic` on PATH wins, and `.tex` export never
   needs it. PNG images export; an SVG is a reported problem until a
   converter is approved.
+  **Decided (2026-11-01):** the pane and the PDF share one maths
+  vocabulary (`core/latex_vocab.py`, generated from the vendored KaTeX
+  by `scripts/latex_vocab.py`). The preamble loads the packages and
+  KaTeX aliases that close most of the gap. The rest is a marked
+  `not_latex` problem, typos included, and Submit refuses it.
 - **Submit / revisions (done 2026-10-05):** a `submission` mote per
   revision holds the `.tex`, PDF, figures and the quoted values;
   the owner gets `status: submitted`, `revision` and `submitted`.

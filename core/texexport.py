@@ -25,6 +25,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from core import document as document_repo
+from core import latex_vocab
 from core import quantity_tex
 from core.projects import Cover
 
@@ -61,19 +62,25 @@ class TexBundle:
 
 def escape(text: str) -> str:
     """Plain text as LaTeX text. Unicode symbols a text font lacks become
-    their math command; everything else passes through, which XeTeX
+    their math command -- `_SYMBOLS`, then any symbol KaTeX reads as one
+    (core/latex_vocab.py); everything else passes through, which XeTeX
     (tectonic's engine) reads natively."""
     out = []
     for ch in text:
-        out.append(quantity_tex.SPECIALS.get(ch) or _SYMBOLS.get(ch) or ch)
+        out.append(quantity_tex.SPECIALS.get(ch) or _SYMBOLS.get(ch) or _text_symbol(ch) or ch)
     return "".join(out)
+
+
+def _text_symbol(ch: str) -> str | None:
+    found = None if ch.isascii() else latex_vocab.symbol(ch)
+    return None if found is None else rf"\ensuremath{{{found.strip()}}}"
 
 
 def quantity(text: str) -> str:
     """A `calc.Quantity` reading, as maths: `4.00 in` -> `$4.00\\,\\mathrm{in}$`.
     Text that is not number-led (a name, an error) is escaped as text."""
     body = quantity_tex.body(text)
-    return escape(text) if body is None else f"${body}$"
+    return escape(text) if body is None else f"${latex_vocab.to_latex(body)}$"
 
 
 # --- inline ----------------------------------------------------------
@@ -91,7 +98,7 @@ def _node(n: dict, problems: list[str]) -> str:
             n["style"], "emph")
         return rf"\{command}{{{escape(n['text'])}}}"
     if kind == "math":
-        return f"${n['tex']}$"
+        return f"${latex_vocab.to_latex(n['tex'])}$"
     if kind == "ref":
         if n.get("error"):
             problems.append(f"\\ref{{{n['name']}}}: {n['error']}")
@@ -140,7 +147,7 @@ def from_render(rendered: dict, cover: Cover | None = None) -> TexBundle:
 _PREAMBLE = r"""\documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath}
-\usepackage{graphicx}
+""" + latex_vocab.preamble() + r"""\usepackage{graphicx}
 \usepackage{pgfplots}
 \usepgfplotslibrary{fillbetween}
 \pgfplotsset{compat=1.17}
@@ -177,7 +184,7 @@ def _block(b: dict, files: dict[str, bytes], problems: list[str]) -> str:
         items = "\n".join(rf"\item {inline(i, problems)}" for i in b["items"])
         return f"\\begin{{{env}}}\n{items}\n\\end{{{env}}}"
     if kind == "equation":
-        return f"\\begin{{equation}}\n{_display(b['tex'])}\n\\end{{equation}}"
+        return f"\\begin{{equation}}\n{_display(latex_vocab.to_latex(b['tex']))}\n\\end{{equation}}"
     if kind == "cited":
         if b.get("error"):
             problems.append(f"\\rule{{{b['rule']}}}: {b['error']}")

@@ -27,6 +27,7 @@ from core import calc
 from core import derivations
 from core import formula_tex
 from core import images as images_repo
+from core import latex_vocab
 from core import modoc
 from core import modoc_bind
 from core import motes as motes_repo
@@ -310,7 +311,7 @@ class _Shaper:
             if result is None or result.error:
                 return quantity_tex.broken(node.expression)
             return quantity_tex.in_math(result.text)
-        return modoc.fill_math(tex, line, write)
+        return modoc.fill_math(latex_vocab.mark(tex), line, write)
 
     # -- inline --
 

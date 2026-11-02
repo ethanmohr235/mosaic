@@ -84,6 +84,25 @@ def test_a_bad_value_in_maths_is_marked_and_reported(conn, bar):
     assert any("nope.x" in p for p in out.problems)
 
 
+def test_the_preamble_takes_what_katex_draws(conn, bar):
+    out = export(conn, "$k_\\infin \\in \\mathbb{R}$")
+    assert r"\usepackage{amssymb}" in out.tex and r"\providecommand{\infin}{\infty}" in out.tex
+    assert r"$k_\infin \in \mathbb{R}$" in out.tex and out.problems == ()
+
+
+def test_unicode_and_katex_spellings_are_written_as_latex(conn, bar):
+    out = export(conn, "Then ∞ wins: $k_∞ ≤ 1$\n\n"
+                       "\\begin{equation}\n\\begin{align*}\na &= b\n\\end{align*}\n\\end{equation}")
+    assert r"Then \ensuremath{\infty} wins: $k_\infty  \leq  1$" in out.tex
+    assert r"\begin{aligned} a &= b \end{aligned}" in out.tex and out.problems == ()
+
+
+def test_what_the_pdf_cannot_set_is_marked_and_reported(conn, bar):
+    out = export(conn, "Intro.\n\n$x + \\href{a}{b}$")
+    assert r"$x + \htmlClass{doc-broken}{\text{\textbackslash{}href}}{a}{b}$" in out.tex
+    assert out.problems == ("line 3: \\href: links and HTML hooks don't export; write the text",)
+
+
 def test_calc_sections_and_work(conn, bar):
     out = export(conn, "\\work{bd.l}\n\n\\given\n\n\\answers\n\n\\checks")
     assert r"\subsection*{" in out.tex and "bd.l" in out.tex

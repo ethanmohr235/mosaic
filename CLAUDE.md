@@ -49,7 +49,10 @@ what is still to do, lives in the docs; the short map:
 - **Plots:** `plot … vs t` draws the run `sim` walks; publication export,
   `--data` overlays.
 - **Documents:** the calc macros, LaTeX basics, images, `.tex`/PDF export
-  (`core/texexport.py`, tectonic), `submit` and revisions.
+  (`core/texexport.py`, tectonic), `submit` and revisions. The read pane's
+  KaTeX and the PDF share one maths vocabulary (`core/latex_vocab.py`;
+  regenerate `core/data/latex_math.json` with `scripts/latex_vocab.py`
+  after a KaTeX or preamble change).
 - **Projects:** a mote may own a garden; Home (`gardens`, `garden`) shows
   the tree with solve and check marks; archive is read-only in the console
   too; cross-garden search.

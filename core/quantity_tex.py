@@ -61,7 +61,14 @@ def in_math(text: str) -> str:
 
 def broken(expression: str) -> str:
     """The in-place marker for a `\\val{expression}` that did not resolve."""
-    return rf"\htmlClass{{{BROKEN_CLASS}}}{{\text{{?{text_escape(expression)}}}}}"
+    return marked(f"?{expression}")
+
+
+def marked(text: str) -> str:
+    """`text` set as a visible marker inside a formula: red in the pane,
+    plain text in the PDF. Also what core/latex_vocab.py puts in place of
+    TeX the PDF cannot set."""
+    return rf"\htmlClass{{{BROKEN_CLASS}}}{{\text{{{text_escape(text)}}}}}"
 
 
 def text_escape(text: str) -> str:

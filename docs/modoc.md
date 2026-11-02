@@ -95,6 +95,49 @@ the parser reads nothing in `$...$` but a `\val`. Broken TeX renders in red
 where it stands rather than taking the note down with it -- the same
 bargain the rest of the format strikes.
 
+#### One vocabulary for the pane and the PDF
+
+A formula has to read the same in KaTeX and in LaTeX, and KaTeX takes far
+more than LaTeX does (`\infin`, `\R`, a typed `∞`). So the maths a note
+may use is one list, `core/latex_vocab.py`, and both sides keep to it.
+
+- **The export takes what KaTeX draws.** The `.tex` preamble loads
+  `amssymb`, `mathtools`, `amscd`, `cancel`, `bm`, `xcolor`, `mathrsfs`,
+  `braket`, `extarrows`, `ulem`, `esint` and `arydshln`, and defines
+  KaTeX's own aliases (`\infin`, `\R`, `\plusmn`, `\rArr`, `\argmax`,
+  `\blueA{…}`, …). The `.tex` export also rewrites what LaTeX spells
+  differently:
+
+  | KaTeX reads | the `.tex` has |
+  | --- | --- |
+  | a Unicode symbol (`∞`, `≤`, `α`, `°`, `µ`) | its command (`\infty`); in prose or `\text{}`, `\ensuremath{\infty}` |
+  | `align*`, `gather*`, `alignat*`, `equation*`, `darray` | `aligned`, `gathered`, `alignedat`, `gathered`, `array` |
+  | `\color{#f80}` | `\color[HTML]{FF8800}` |
+
+- **Everything else is a problem.** These are listed with the note's
+  problems (kind `not_latex`, with a hint), shown as a red marker in
+  the pane and as plain text in the PDF, and Submit refuses them. A
+  draft PDF still compiles. The list:
+  - a command not on the list. This covers typos (`\fracc`), the few
+    KaTeX commands nothing defines (`\widecheck`, `\overgroup`, …),
+    and `\href`, `\url` and the `\html…` hooks.
+  - a Unicode symbol in maths with no command. A text argument's letters
+    (`\text{é}`) are the text font's business.
+  - `align`, `gather`, `alignat` or `equation` inside a formula. KaTeX
+    numbers each line and LaTeX refuses them, so use `aligned`,
+    `gathered` or `alignedat`. The PDF sets the unnumbered form.
+  - a `\color{…}` naming anything but a `#hex` or one of xcolor's base
+    colours.
+
+So a note with no problems compiles, and shows the same maths in the PDF
+as in the pane.
+
+The list is generated, not typed. `scripts/latex_vocab.py` reads the
+vendored KaTeX's command names and Unicode symbols, asks tectonic which
+are defined under the preamble, and writes `core/data/latex_math.json`.
+Rerun it after upgrading KaTeX or touching the preamble.
+`tests/test_latex_vocab.py` fails, where tectonic runs, until you do.
+
 `monoss modoc render` has no typesetter to hand, so in the terminal a
 formula falls back to symbol and script substitution: `\alpha` becomes
 α, `r^{2}` raises the 2, and a `\frac` prints as itself.
@@ -594,8 +637,9 @@ frozen**: what the read pane shows, written for LaTeX
 | `\work` | the equation typeset, the substituted line and result in `\texttt` |
 | `\rule` | the rule's equation, typeset and numbered (`\texttt` if it cannot be set) |
 
-Anything that did not resolve is printed as a visible marker and returned
-in `problems`; a clean export has none.
+Anything that did not resolve, or that the PDF cannot set (see *One
+vocabulary for the pane and the PDF*), is printed as a visible marker and
+returned in `problems`; a clean export has none.
 
 A **PDF** is that `.tex` compiled by [tectonic](https://tectonic-typesetting.github.io),
 one binary with no TeX Live. `core/tectonic.py` uses a `tectonic` on PATH,
@@ -670,6 +714,7 @@ it is, ask `preview_simulation`.
 | `core/simulation.py::expression_context` | the evaluation context a `\val` gets |
 | `cli/render.py::print_modoc` | the terminal's renderer |
 | `core/texexport.py`, `core/tectonic.py`, `core/submit.py` | `.tex` export, the PDF compiler, frozen revisions |
+| `core/latex_vocab.py`, `core/data/latex_math.json`, `scripts/latex_vocab.py` | the maths both KaTeX and the PDF take, and its generator |
 | `core/document.py` | the whole document as the console's read pane draws it |
 | `console/mora.py`, `console/frontend/js/views/mora-*.js` | the console's notes panes (`edit`, `read`, `notes`) |
 

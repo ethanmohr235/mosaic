@@ -966,6 +966,14 @@ def values(document: Document) -> list[Value]:
     return found
 
 
+def formulas(document: Document) -> list[tuple[str, int]]:
+    """Every `$...$` and equation body, with its line: the TeX the read
+    pane hands KaTeX and the export hands LaTeX."""
+    found = [(n.text, n.line) for n in _inlines(document) if isinstance(n, Math)]
+    found += [(b.text, b.line) for b in document.blocks if isinstance(b, Equation)]
+    return sorted(found, key=lambda f: f[1])
+
+
 def graphs(document: Document) -> list[Graph]:
     return [b for b in document.blocks if isinstance(b, Graph)]
 
@@ -1123,6 +1131,12 @@ def math_values(text: str, line: int) -> list[Value]:
     prose, so a format brace still means `{unit, figures}`."""
     return [_value_node(m, line) for m in _MATH_VALUE_RE.finditer(text)
             if m.group("first") is not None]
+
+
+def math_value_spans(text: str) -> list[tuple[int, int]]:
+    """Where each `\\val` sits in a maths body, so a reader of the rest of
+    the TeX (core/latex_vocab.py) can step over them."""
+    return [m.span() for m in _MATH_VALUE_RE.finditer(text) if m.group("first") is not None]
 
 
 def fill_math(text: str, line: int, write: Callable[[Value], str]) -> str:
