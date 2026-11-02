@@ -25,12 +25,14 @@ from core.modoc import (
     Value,
     anchor,
     export_file,
+    fill_math,
     graph_key,
     graphs,
     has_modoc,
     import_file,
     links,
     math_spans,
+    math_values,
     parse,
     parse_inline,
     read_source,
@@ -127,8 +129,26 @@ def test_val_takes_an_expression_and_an_optional_anchor():
 
 def test_styles_and_math():
     assert inline("\\textbf{a}\\emph{b}\\texttt{c}$d$") == [
-        Styled("bold", "a"), Styled("emph", "b"), Styled("code", "c"), Math("d"),
+        Styled("bold", "a"), Styled("emph", "b"), Styled("code", "c"), Math("d", 1),
     ]
+
+
+def test_a_val_inside_maths_is_read_with_the_prose_grammar():
+    assert math_values(r"\boxed{\val{bd.l}{in, 3}} + \val[Atlas]{due}", 4) == [
+        Value("bd.l", None, 4, modoc.Format("in", 3)), Value("due", "Atlas", 4),
+    ]
+    # `\\` is a TeX line break, not the start of a `\val`.
+    assert math_values(r"a \\val{x}", 1) == []
+
+
+def test_fill_math_replaces_only_the_vals():
+    filled = fill_math(r"\frac{\val{a}}{2} \\val{b}", 1, lambda v: f"<{v.expression}>")
+    assert filled == r"\frac{<a>}{2} \\val{b}"
+
+
+def test_values_include_those_in_maths():
+    document = parse("See $x = \\val{a}$.\n\n\\begin{equation}\ny = \\val{b}{m}\n\\end{equation}")
+    assert [(v.expression, v.line) for v in values(document)] == [("a", 1), ("b", 3)]
 
 
 def test_escapes_produce_literal_text_in_one_run():

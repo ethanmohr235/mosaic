@@ -75,7 +75,8 @@ may contain inline macros (`\section{Status of \mote{atlas}{Atlas}}`).
 `\textbf{...}`, `\emph{...}`, `\texttt{...}`, `\ref{...}`, and `$...$` for
 maths.
 
-Maths is the one place this grammar does not look inside. A `$...$` body
+Maths is the one place this grammar does not look inside, except for
+`\val` (below). A `$...$` body
 and an `\begin{equation}` body are kept as the TeX you typed and are
 typeset by [KaTeX](https://katex.org) (vendored under
 `console/frontend/vendor/katex/`), so `\frac`, `\sum` with limits, `\left(`,
@@ -90,7 +91,7 @@ and environments KaTeX knows -- `aligned`, `matrix`, `cases` -- all work:
 
 Nothing outside a formula changes: the macros above are still flat, and
 a `\frac` in a formula is never mistaken for an unknown command because
-the parser never reads into `$...$` at all. Broken TeX renders in red
+the parser reads nothing in `$...$` but a `\val`. Broken TeX renders in red
 where it stands rather than taking the note down with it -- the same
 bargain the rest of the format strikes.
 
@@ -166,6 +167,27 @@ takes a limit, the value carries a **notice** (`phi: limit r → 0 cm`):
 `modoc_bind.notices()`, `notices` in the rendered payload and in
 `resolve_modoc`, and a `notice:` line from `modoc check`. A notice is
 never a problem, because the value is right, so it never stops `submit`.
+
+#### Inside maths
+
+A `\val` also works inside `$...$` and an `equation` body, with the same
+grammar, and it is the only macro that does. Its reading is set into the
+formula as TeX, so the formula is typeset around it:
+
+    The answer is $\boxed{\val{bd.l}{in, 4}}$.     →  \boxed{196.9\,\mathrm{in}}
+    \begin{equation} l = \val{bd.l}{m, 3} \end{equation}
+
+A quantity is written as in the `.tex` export (`\,\mathrm{in}`, `\pm`,
+`\times 10^{-5}`), and anything else, such as a date, is written as
+`\text{...}`. Inside a formula the value looks like the rest of the maths and
+is not highlighted the way a prose value is. A value that does not
+resolve shows as a red `?expr` in place. The rest of the formula still
+typesets, and the reason is listed under Problems like any other
+unresolved `\val`. The read pane allows KaTeX `\htmlClass` only for that
+marker's class. In the terminal, the value's text is substituted before
+the symbol reduction.
+
+`\\` stays a line break: in `a \\val{x}` the `val` is not a macro.
 
 ### A note reads the garden as a solve leaves it
 
@@ -564,7 +586,8 @@ frozen**: what the read pane shows, written for LaTeX
 | --- | --- |
 | class | `article`, 11pt, 1in margins; the owner's cover (name, author, due, revision) is the title block |
 | `\val`, `\given`, `\answers` | `$4.00\,\mathrm{in}$` -- no siunitx; ± is `\pm`, `e-5` is `\times 10^{-5}` |
-| `equation` | the body as typed; a `\newline` or `\\` outside any group or inner environment is set as `gathered`, one number, as the read pane breaks it |
+| `\val` inside maths | set into the formula the same way, without its own `$`; an unresolved one is `\htmlClass{doc-broken}{\text{?expr}}`, which the preamble defines to print `?expr` |
+| `equation` | the body as typed, with any `\val` set into it; a `\newline` or `\\` outside any group or inner environment is set as `gathered`, one number, as the read pane breaks it |
 | `\ref`, `\mote` | frozen as their text ("Equation 2"); LaTeX numbers equations, figures and tables itself, in the same order |
 | `\graph` | a pgfplots `axis` per unit band with the solved points inline; a failed point breaks the line. Surface and correlation figures are reported as a problem and left out |
 | `\image` | a file under `images/`, drawn with `\includegraphics`. PNG only: an SVG is reported as a problem |

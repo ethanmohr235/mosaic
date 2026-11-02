@@ -29,6 +29,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from core.relationships import list_relationships
 
@@ -74,6 +75,14 @@ _INLINE_RE = re.compile(
     r"\{(?P<first>[^{}]*)\}"
     r"(?:\{(?P<second>[^{}]*)\})?"
     r"|\$(?P<math>[^$]*)\$"
+)
+# A `\val` inside maths, the one macro a formula is read for. `\\` is
+# matched first so a TeX line break before `val` is never taken for one.
+_MATH_VALUE_RE = re.compile(
+    r"\\\\"
+    r"|\\val(?:\[(?P<ref>[^\[\]]*)\])?"
+    r"\{(?P<first>[^{}]*)\}"
+    r"(?:\{(?P<second>[^{}]*)\})?"
 )
 # A backslash-word left over after the pass above: a command we don't
 # know, or a known one missing its argument. Either way it is worth
@@ -137,11 +146,13 @@ class Styled:
 
 @dataclass(frozen=True)
 class Math:
-    """`$...$`. The raw source, kept raw: math is the one place this
-    grammar does not look inside. Mora hands the string to KaTeX and the
-    CLI reduces it with math_spans(); neither reading belongs in a parse
-    tree the other has to agree with."""
+    """`$...$`. The raw source, kept raw: apart from a `\\val` (see
+    math_values()), math is the one place this grammar does not look
+    inside. Mora hands the string to KaTeX and the CLI reduces it with
+    math_spans(); neither reading belongs in a parse tree the other has to
+    agree with."""
     text: str
+    line: int = 0
 
 
 @dataclass(frozen=True)
@@ -889,7 +900,7 @@ def _inline_node(match: re.Match, line: int) -> Inline:
     if match.group("esc") is not None:
         return Text(match.group("esc"))
     if match.group("math") is not None:
-        return Math(match.group("math"))
+        return Math(match.group("math"), line)
 
     command, first, second = match.group("cmd"), match.group("first"), match.group("second")
     if command == "mote":
@@ -897,11 +908,16 @@ def _inline_node(match: re.Match, line: int) -> Inline:
     if command == "ref":
         return Ref(first.strip(), line)
     if command == "val":
-        ref = match.group("ref")
-        return Value(
-            first.strip(), ref.strip() if ref else None, line, parse_format(second)
-        )
+        return _value_node(match, line)
     return Styled({"textbf": "bold", "emph": "emph", "texttt": "code"}[command], first)
+
+
+def _value_node(match: re.Match, line: int) -> Value:
+    ref = match.group("ref")
+    return Value(
+        match.group("first").strip(), ref.strip() if ref else None, line,
+        parse_format(match.group("second")),
+    )
 
 
 def _append_text(
@@ -937,7 +953,17 @@ def links(document: Document) -> list[Link]:
 
 
 def values(document: Document) -> list[Value]:
-    return [n for n in _inlines(document) if isinstance(n, Value)]
+    """Every `\\val` in the note, prose and maths alike."""
+    found = []
+    for node in _inlines(document):
+        if isinstance(node, Value):
+            found.append(node)
+        elif isinstance(node, Math):
+            found.extend(math_values(node.text, node.line))
+    for block in document.blocks:
+        if isinstance(block, Equation):
+            found.extend(math_values(block.text, block.line))
+    return found
 
 
 def graphs(document: Document) -> list[Graph]:
@@ -1090,6 +1116,23 @@ _SYMBOL_RE = re.compile(
 )
 
 _SCRIPT_RE = re.compile(r"([\^_])\{([^{}]*)\}|([\^_])(\S)")
+
+
+def math_values(text: str, line: int) -> list[Value]:
+    """The `\\val`s in a `$...$` or equation body. Same grammar as in
+    prose, so a format brace still means `{unit, figures}`."""
+    return [_value_node(m, line) for m in _MATH_VALUE_RE.finditer(text)
+            if m.group("first") is not None]
+
+
+def fill_math(text: str, line: int, write: Callable[[Value], str]) -> str:
+    """A maths body with each `\\val` replaced by what `write` makes of
+    it. Everything else is left exactly as typed."""
+    def one(match: re.Match) -> str:
+        if match.group("first") is None:
+            return match.group(0)
+        return write(_value_node(match, line))
+    return _MATH_VALUE_RE.sub(one, text)
 
 
 @dataclass(frozen=True)

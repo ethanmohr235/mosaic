@@ -72,6 +72,18 @@ def test_bad_value_is_marked_and_reported(conn, bar):
     assert any("nope.x" in p for p in out.problems)
 
 
+def test_a_val_in_maths_is_frozen_into_it(conn, bar):
+    out = export(conn, "The answer is $\\boxed{\\val{bd.l}{m, 3}}$.")
+    assert r"The answer is $\boxed{5.00\,\mathrm{m}}$." in out.tex and out.problems == ()
+
+
+def test_a_bad_value_in_maths_is_marked_and_reported(conn, bar):
+    out = export(conn, "$x = \\val{nope.x}$")
+    assert r"\providecommand{\htmlClass}[2]{#2}" in out.tex
+    assert r"$x = \htmlClass{doc-broken}{\text{?nope.x}}$" in out.tex
+    assert any("nope.x" in p for p in out.problems)
+
+
 def test_calc_sections_and_work(conn, bar):
     out = export(conn, "\\work{bd.l}\n\n\\given\n\n\\answers\n\n\\checks")
     assert r"\subsection*{" in out.tex and "bd.l" in out.tex

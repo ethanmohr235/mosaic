@@ -25,15 +25,11 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from core import document as document_repo
+from core import quantity_tex
 from core.projects import Cover
 
 IMAGE_DIR = "images"
 
-_SPECIALS = {
-    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
-    "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}",
-    "^": r"\textasciicircum{}",
-}
 # Characters Latin Modern text fonts lack, as the math command that draws
 # them. Greek is how a note names a stress or an angle.
 _SYMBOLS = {
@@ -49,16 +45,6 @@ _SYMBOLS = {
     "²": r"\ensuremath{^2}", "³": r"\ensuremath{^3}", "⁻": r"\ensuremath{^-}",
     "¹": r"\ensuremath{^1}", "→": r"\ensuremath{\to}",
 }
-_SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
-_SUPERSCRIPT_RUN_RE = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+")
-
-_NUMBER = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
-# What `calc.Quantity.text` writes: `4.00`, `4.00 in`, `4.00 ± 0.05 in`.
-_QUANTITY_RE = re.compile(
-    rf"^(?P<value>{_NUMBER})(?: ± (?P<sigma>{_NUMBER}))?(?: (?P<unit>\S.*))?$"
-)
-_SCI_RE = re.compile(r"^([-+]?[\d.]+)[eE]([-+]?\d+)$")
-_UNIT_EXPONENT_RE = re.compile(r"\^(-?\d+)")
 
 
 @dataclass(frozen=True)
@@ -79,37 +65,15 @@ def escape(text: str) -> str:
     (tectonic's engine) reads natively."""
     out = []
     for ch in text:
-        out.append(_SPECIALS.get(ch) or _SYMBOLS.get(ch) or ch)
+        out.append(quantity_tex.SPECIALS.get(ch) or _SYMBOLS.get(ch) or ch)
     return "".join(out)
-
-
-def unit_tex(unit: str) -> str:
-    """A unit as the body of a `\\mathrm{}`: `m/s^2`, `N*m`, `m/s²`."""
-    unit = _SUPERSCRIPT_RUN_RE.sub(lambda m: "^" + m.group(0).translate(_SUPERSCRIPTS), unit)
-    unit = unit.replace("·", " ").replace("*", r"\,")
-    unit = _UNIT_EXPONENT_RE.sub(r"^{\1}", unit)
-    return unit.replace("%", r"\%")
 
 
 def quantity(text: str) -> str:
     """A `calc.Quantity` reading, as maths: `4.00 in` -> `$4.00\\,\\mathrm{in}$`.
     Text that is not number-led (a name, an error) is escaped as text."""
-    match = _QUANTITY_RE.match(text.strip())
-    if match is None:
-        return escape(text)
-    body = _number(match.group("value"))
-    if match.group("sigma"):
-        body += rf"\pm {_number(match.group('sigma'))}"
-    if match.group("unit"):
-        body += rf"\,\mathrm{{{unit_tex(match.group('unit'))}}}"
-    return f"${body}$"
-
-
-def _number(text: str) -> str:
-    sci = _SCI_RE.match(text)
-    if sci:
-        return rf"{sci.group(1)}\times 10^{{{int(sci.group(2))}}}"
-    return text
+    body = quantity_tex.body(text)
+    return escape(text) if body is None else f"${body}$"
 
 
 # --- inline ----------------------------------------------------------
@@ -182,6 +146,8 @@ _PREAMBLE = r"""\documentclass[11pt]{article}
 \pgfplotsset{compat=1.17}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.6em}
+% A formula's unresolved \val (core/quantity_tex.py::broken): its text only.
+\providecommand{\htmlClass}[2]{#2}
 \begin{document}
 """
 

@@ -254,6 +254,15 @@ def test_modoc_render_resolves_values_and_links(conn, capsys, note):
     assert "see T0 and Nowhere" in out
 
 
+def test_modoc_render_sets_a_val_inside_maths(conn, capsys):
+    from core.modoc import write_source
+
+    project = create_mote(conn, {"name": "Atlas", "n": 3})
+    write_source(conn, project, "So $\\alpha = \\val{n}$.\n")
+    _handle_modoc(conn, parse(["modoc", "render", project]))
+    assert "So α = 3." in capsys.readouterr().out
+
+
 def test_modoc_check_lists_only_what_did_not_resolve(conn, capsys, note):
     _handle_modoc(conn, parse(["modoc", "check", note]))
     out = capsys.readouterr().out

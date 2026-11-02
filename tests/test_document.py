@@ -51,6 +51,26 @@ def test_numbered_equations_and_refs(conn, bar):
     assert refs[1]["error"] == "no such label"
 
 
+def test_a_val_in_maths_is_set_into_the_formula(conn, bar):
+    para, equation = blocks(conn, "So $\\boxed{\\val{bd.l}{m, 3}}$ on \\val{bd.x}.\n\n"
+                                  "\\begin{equation}\nl = \\val{bd.l}{cm}\n\\end{equation}")
+    assert para["content"][1] == {"type": "math", "tex": r"\boxed{5.00\,\mathrm{m}}"}
+    assert equation["tex"] == r"l = 500\,\mathrm{cm}"
+
+
+def test_a_val_in_maths_that_is_not_a_number_is_text(conn, bar):
+    note_id = create_mote(conn, {"name": "HW", "due": "2026-09-30", modoc.MODOC_KEY: ""})
+    (para,) = blocks(conn, "$d = \\val{due}$", note_id)
+    assert para["content"][0]["tex"] == r"d = \text{2026-09-30}"
+
+
+def test_a_broken_val_in_maths_is_marked_in_place(conn, bar):
+    note_id = note(conn, "")
+    out = document.render(conn, note_id, "$x = \\val{bd.no_such}$")
+    assert out["blocks"][0]["content"][0]["tex"] == r"x = \htmlClass{doc-broken}{\text{?bd.no\_such}}"
+    assert [p["kind"] for p in out["problems"]] == ["unresolved_value"]
+
+
 def test_work_and_the_calc_sections(conn, bar):
     work, given, answers, checks = blocks(conn, "\\work{bd.l}\n\n\\given\n\n\\answers\n\n\\checks")
     assert work["type"] == "work" and work["steps"] and work["result"].startswith("5")

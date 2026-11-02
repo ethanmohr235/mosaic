@@ -31,6 +31,7 @@ from core import modoc
 from core import modoc_bind
 from core import motes as motes_repo
 from core import plotview
+from core import quantity_tex
 from core import simulation
 from core import table as table_repo
 from core import undo
@@ -220,7 +221,8 @@ class _Shaper:
         if isinstance(b, modoc.ItemList):
             return {"type": "list", "ordered": b.ordered, "items": [self.inline(i) for i in b.items]}
         if isinstance(b, modoc.Equation):
-            return {"type": "equation", "tex": b.text, "number": b.number, "label": b.label}
+            return {"type": "equation", "tex": self.math(b.text, b.line),
+                    "number": b.number, "label": b.label}
         if isinstance(b, modoc.Cited):
             rule = self.resolution.rules.get(b.rule)
             return {"type": "cited", "rule": b.rule, "number": b.number,
@@ -299,6 +301,17 @@ class _Shaper:
             } for r in result.rows]
         return out
 
+    def math(self, tex: str, line: int) -> str:
+        """A formula with its `\\val`s set in it, as TeX: what the read pane
+        typesets and the `.tex` export writes. A broken one is marked in
+        place; its reason is with the note's problems."""
+        def write(node: modoc.Value) -> str:
+            result = self.resolution.values.get(modoc.value_key(node))
+            if result is None or result.error:
+                return quantity_tex.broken(node.expression)
+            return quantity_tex.in_math(result.text)
+        return modoc.fill_math(tex, line, write)
+
     # -- inline --
 
     def inline(self, nodes) -> list[dict]:
@@ -310,7 +323,7 @@ class _Shaper:
         if isinstance(n, modoc.Styled):
             return {"type": "styled", "style": n.style, "text": n.text}
         if isinstance(n, modoc.Math):
-            return {"type": "math", "tex": n.text}
+            return {"type": "math", "tex": self.math(n.text, n.line)}
         if isinstance(n, modoc.Ref):
             return {"type": "ref", "name": n.name, "text": modoc.reference_text(self.document, n),
                     "error": None if n.name in self.document.labels else "no such label"}

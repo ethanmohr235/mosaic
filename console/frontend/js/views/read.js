@@ -23,6 +23,10 @@ function message(err) {
   return String(err && err.message ? err.message : err);
 }
 
+function brokenOnly(context) {
+  return context.command === "\\htmlClass" && context.class === "doc-broken";
+}
+
 function create(ctx) {
   const { api, store, components } = ctx;
   const { h } = components;
@@ -62,7 +66,9 @@ function create(ctx) {
   }
 
   /** KaTeX, never trusted (no \href, no \includegraphics in a note that
-   * may have arrived over sync); TeX it can't set shows as the raw text.
+   * may have arrived over sync) but for the one `\htmlClass` a formula's
+   * unresolved `\val` is marked with (core/quantity_tex.py::broken); TeX
+   * it can't set shows as the raw text.
    * Each piece is typeset once (`typeset`): a draft redraws the whole page
    * on every pause in typing, and almost none of its maths has changed. */
   function math(tex, display) {
@@ -71,7 +77,7 @@ function create(ctx) {
     if (!typeset.has(key)) {
       if (typeset.size >= TYPESET_CAP) typeset.clear();
       try {
-        typeset.set(key, window.katex.renderToString(tex, { displayMode: display, throwOnError: false, strict: false }));
+        typeset.set(key, window.katex.renderToString(tex, { displayMode: display, throwOnError: false, strict: false, trust: brokenOnly }));
       } catch (err) {
         typeset.set(key, null);
       }

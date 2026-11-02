@@ -132,7 +132,10 @@ Each one was a separate act of filing. That lesson became a rule in
   argument and cover the whole garden; a format goes in a second brace
   (`\val{bd.l}{in, 4}`); and a value's provenance is the reserved
   `source` property (`assumed`, `external`), which is also what phase 7's
-  V&V table reads. See `modoc.md`.
+  V&V table reads. `\val` also works inside `$...$` and `equation`
+  bodies (**done 2026-11-01**). **Decided:** it is set into the formula as
+  TeX in the same form as the `.tex` export and is not highlighted
+  there, and an unresolved one is a red `?expr` in place. See `modoc.md`.
 - **LaTeX basics:** numbered equations with `\label`/`\ref`, citable
   rules, figures with captions, `tabular`, `enumerate`, and `\include`
   for multi-note documents. **Decided:** `\caption`/`\label` go inside

@@ -318,7 +318,7 @@ def _print_block(block, document, resolution) -> None:
     elif isinstance(block, modoc.ItemList):
         _print_items(block, document, resolution)
     elif isinstance(block, modoc.Equation):
-        _print_equation(_math_text(block.text), block.number)
+        _print_equation(_math_text(_filled(block.text, block.line, resolution)), block.number)
     elif isinstance(block, modoc.Cited):
         _print_cited(block, resolution)
     elif isinstance(block, modoc.Table):
@@ -499,7 +499,7 @@ def _inline_text(nodes, document, resolution) -> str:
         elif isinstance(node, modoc.Styled):
             parts.append(node.text.upper() if node.style == "bold" else node.text)
         elif isinstance(node, modoc.Math):
-            parts.append(_math_text(node.text))
+            parts.append(_math_text(_filled(node.text, node.line, resolution)))
         elif isinstance(node, modoc.Link):
             target = resolution.links.get(node.ref)
             parts.append(node.label or (target.name if target else node.ref))
@@ -511,6 +511,14 @@ def _inline_text(nodes, document, resolution) -> str:
             # cross-reference says is a fact about the text.
             parts.append(modoc.reference_text(document, node))
     return "".join(parts)
+
+
+def _filled(text: str, line: int, resolution) -> str:
+    """A formula with its `\\val`s written in as the terminal prints one."""
+    def write(node: modoc.Value) -> str:
+        result = resolution.values.get(modoc.value_key(node))
+        return result.text if result else f"?{node.expression}"
+    return modoc.fill_math(text, line, write)
 
 
 def _math_text(text: str) -> str:
