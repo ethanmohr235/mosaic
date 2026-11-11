@@ -437,8 +437,10 @@ class _Checker:
             if node.id in self.bindings:
                 return self.bindings[node.id]
             if node.id == TICK_NAME:
+                self._shadowed(node.id, "the step index")
                 return None
             if node.id in MATH_CONSTANTS:
+                self._shadowed(node.id, f"the constant {MATH_CONSTANTS[node.id]:.6g}")
                 return LITERAL
             return self._name(self.ctx.mote_id, node.id)
         if isinstance(node, ast.BinOp):
@@ -450,6 +452,19 @@ class _Checker:
         if isinstance(node, ast.Attribute):
             return self._attribute(node)
         raise FormulaError(f"{type(node).__name__} is not allowed in a formula")
+
+    def _shadowed(self, name: str, meaning: str) -> None:
+        """A bare reserved name read where the mote has a property of that
+        name: the formula reads the reserved meaning, and the property --
+        almost certainly what was meant -- is never reached. Not a unit
+        problem, but this walk is the one every surface already reports."""
+        if name not in self.ctx.properties(self.ctx.mote_id):
+            return
+        mote = self.ctx.mote_name(self.ctx.mote_id) or self.ctx.label(self.ctx.mote_id)
+        self.report(
+            f"`{name}` here is {meaning}, not {mote}.{name} -- "
+            f"write {mote}.{name} to read the property"
+        )
 
     def _name(self, mote_id: str, key: str) -> Dim:
         # TICK_NAME and MATH_CONSTANTS are handled by callers that reach a

@@ -66,12 +66,15 @@ from core import species as species_repo
 from core import undo
 from core import units
 from core.formula import (
-    MATH_CONSTANTS, FormulaError, attribute_bases, function_reference_ids, parse_equation,
+    MATH_CONSTANTS, TICK_NAME, FormulaError, attribute_bases, function_reference_ids,
+    parse_equation,
 )
 from core.entities import Mote
 from core.simulation import unresolved_equation_names
 
 _IDENTIFIER = r"[A-Za-z_]\w*"
+# The names a formula reads bare as something other than a property.
+_RESERVED_BARE = "(?:" + "|".join(sorted({TICK_NAME, *MATH_CONSTANTS})) + ")"
 
 # Deliberately not a shape: any `lhs == rhs`, with core/formula.py's own
 # parser deciding whether it is a relation this engine can read. A rule
@@ -373,7 +376,11 @@ def _run_rule(conn, lhs: str, rhs: str) -> CommandResult:
     # to fail on (Anchor is not its own neighbor). Any *other* Name.prop
     # reference is left alone; it resolves only if that mote is actually
     # wired to Anchor (see the unresolved-names check below).
-    self_prefix = re.compile(rf"\b{re.escape(anchor_token)}\.")
+    #
+    # Except before a reserved name: a bare `e` is Euler's number, so
+    # `p12.e` stripped to `e` would silently change what the rule reads.
+    # Kept qualified, it reaches the anchor through garden scope.
+    self_prefix = re.compile(rf"\b{re.escape(anchor_token)}\.(?!{_RESERVED_BARE}\b)")
     equation = self_prefix.sub("", full)
 
     # Named from the stripped equation, not the raw typed line -- "Rule:

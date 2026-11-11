@@ -278,6 +278,24 @@ def test_rule_that_does_not_parse_is_rejected_at_the_bar(conn):
     assert not any(str(n).startswith("Rule:") for n in names if n)
 
 
+@pytest.mark.parametrize("reserved", ["e", "pi", "t"])
+def test_rule_keeps_the_prefix_before_a_reserved_name(conn, reserved):
+    # Stripped, `p.e` would read Euler's number rather than p's own e.
+    result = run_command(conn, f"p.y == 2 * p.{reserved} + p.x")
+    rule = motes_repo.get_mote(conn, result.mote_id)
+    assert rule.properties[rules_repo.EQUATION_KEY] == f"y == 2 * p.{reserved} + x"
+
+
+def test_a_kept_reserved_prefix_reads_the_property(conn):
+    from core import simulation
+    run_command(conn, "p.e = 10")
+    run_command(conn, "p.y ?")
+    run_command(conn, "p.y == p.e / 2")
+    simulation.run_simulation(conn)
+    p = next(m for m in motes_repo.list_motes(conn) if m.properties.get("name") == "p")
+    assert p.properties["y"] == 5
+
+
 # ---- freedom form ----
 
 def test_freedom_marks_a_property_free_and_creates_the_mote(conn):

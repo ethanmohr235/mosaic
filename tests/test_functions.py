@@ -216,6 +216,20 @@ def test_a_problem_inside_the_body_is_the_callers_problem(conn):
     assert any("different dimensions" in p for p in problems)
 
 
+def test_a_parameter_named_e_is_not_a_shadowed_constant(conn):
+    create_mote(conn, {"name": "decay", "function": "exp(-k * e)", "parameters": "e",
+                       "k": 2, "e": 9})
+    problems = unit_problems(conn, "m.y = decay(1)")
+    assert not any("here is the constant" in p for p in problems)
+
+
+def test_a_constant_of_the_function_shadowed_by_e_is_reported(conn):
+    create_mote(conn, {"name": "f", "function": "x / e", "parameters": "x", "e": 9,
+                       UNITS_KEY: {"x": "1"}})
+    [problem] = unit_problems(conn, "m.y = f(1)")
+    assert "`e` here is the constant 2.71828, not f.e -- write f.e" in problem
+
+
 def test_the_result_unit_is_inferred_through_the_body(conn):
     create_mote(conn, {"name": "twice", "function": "2 * x", "parameters": "x",
                        UNITS_KEY: {"x": "m"}})

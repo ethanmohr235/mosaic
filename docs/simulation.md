@@ -87,7 +87,7 @@ to both.
 | `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached -- unlike an `arity: many` role, which never collapses. |
 | `sum(...)`, `count(...)` | Combine several motes into one value. Required when more than one mote is reached. |
 | `+ - * / **` (`^` also works as exponent) | Arithmetic. Parentheses work as usual. An unknown may appear in a denominator -- see [Writing an equation the way you mean it](#writing-an-equation-the-way-you-mean-it). |
-| `pi`, `e` | The math constants (3.14159..., 2.71828...). Reserved words -- shadow a property literally named `pi` or `e` inside a formula specifically, the same way `t` does. |
+| `pi`, `e` | The math constants (3.14159..., 2.71828...). Reserved words -- shadow a property literally named `pi` or `e` inside a formula specifically, the same way `t` does. Such a property is still read qualified (`p12.e`), and the command bar keeps the prefix in front of a reserved name rather than stripping it as it does the anchor's other names. A rule that reads a bare `e`, `pi` or `t` on a mote that holds a property of that name gets a warning from the unit check (see [Checking equations](#checking-equations)). |
 | `abs`, `min`, `max` | Only on values that are already known. |
 | `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `sinc`, `sqrt` | Also only on known values. `sinc(x)` is the unnormalized `sin(x)/x`, with `sinc(0) = 1` (numpy's `sinc` is `sin(πx)/(πx)`; this one is not). `sin`/`cos`/`tan` take radians -- an argument declaring unit `deg` (see [Units](#units) below) arrives already converted; their inverses `arcsin`/`arccos`/`arctan` return radians the same way, and `arcsin`/`arccos` require an argument between -1 and 1. `sqrt` of a negative number is an error. |
 | `sinh`, `cosh`, `tanh`, `arcsinh`, `arccosh`, `arctanh` | The hyperbolic functions and their inverses, only on known values. Dimensionless in and out, like `exp` (no `deg` conversion). `arccosh` needs an argument of at least 1, `arctanh` one strictly between -1 and 1. |
@@ -1599,6 +1599,14 @@ adapts to whatever it's compared with (`resistance == 100` is fine), and
 or elapsed time. A *computed* dimensionless value is different: if
 `a / b` cancels to a pure ratio, comparing it to a voltage is a real
 mistake and gets reported.
+
+One warning is about names rather than dimensions, and rides along
+because this walk is the one every surface reports: a bare `e`, `pi` or
+`t` read on a mote that holds a property of that name. The formula reads
+the constant (or the step index), so the property, which is almost
+certainly what was meant, is never reached. The message says to write
+`p12.e`. It fires with or without units, since nothing about it is a
+unit.
 
 ### Bare numbers
 

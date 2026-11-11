@@ -8,7 +8,7 @@ from core.dimensions import DimensionContext, check_equation
 
 
 def context(mote_id="r1", units=None, targets=None, capability_units=None,
-            neighbors=None, names=None, garden_names=None):
+            neighbors=None, names=None, garden_names=None, properties=None):
     """A checker context over plain dicts -- the same testing shape
     core/formula.py's Context is built for.
 
@@ -20,6 +20,7 @@ def context(mote_id="r1", units=None, targets=None, capability_units=None,
     neighbors = neighbors or {}
     names = names or {}
     garden_names = garden_names or {}
+    properties = properties or {}
     return DimensionContext(
         mote_id=mote_id,
         units=lambda mid: units.get(mid, {}),
@@ -29,6 +30,7 @@ def context(mote_id="r1", units=None, targets=None, capability_units=None,
         neighbors=lambda mid: neighbors.get(mid, []),
         mote_name=lambda mid: names.get(mid),
         named=lambda name: garden_names.get(name, []),
+        properties=lambda mid: properties.get(mid, {}),
     )
 
 
@@ -233,6 +235,25 @@ def test_math_constants_are_treated_as_literals():
     # dimension mismatch.
     units = {"r1": {"circumference": "m", "radius": "m"}}
     assert check_equation("circumference == 2 * pi * radius", context(units=units)) == []
+
+
+@pytest.mark.parametrize("name, meaning", [("e", "the constant 2.71828"), ("pi", "the constant 3.14159"), ("t", "the step index")])
+def test_a_reserved_name_the_mote_also_holds_is_reported(name, meaning):
+    # p12.e typed as a bare `e` reads Euler's number, never p12's own e.
+    ctx = context(names={"r1": "p12"}, properties={"r1": {name: 10404, "y": 1}})
+    problems = check_equation(f"y == 2 / {name}", ctx)
+    assert problems == [f"`{name}` here is {meaning}, not p12.{name} -- write p12.{name} to read the property"]
+
+
+def test_a_reserved_name_the_mote_lacks_is_quiet():
+    ctx = context(names={"r1": "p12"}, properties={"r1": {"y": 1}})
+    assert check_equation("y == 2 * pi * e", ctx) == []
+
+
+def test_a_qualified_reserved_name_is_quiet():
+    ctx = context(names={"r1": "p12"}, properties={"r1": {"e": 3, "y": 1}},
+                  garden_names={"p12": ["r1"]})
+    assert check_equation("y == 2 / p12.e", ctx) == []
 
 
 def test_a_role_qualified_e_keeps_its_real_dimension():
