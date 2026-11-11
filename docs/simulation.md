@@ -1471,7 +1471,9 @@ included too -- `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `bar`,
 `degF`, which carry an offset. Inside a compound they mean their
 *degree* (`Btu/(lb*degF)` is per Fahrenheit degree, the same as
 `Btu/(lb*degR)`; `degC/s` is K/s): the offset belongs to a temperature,
-never to a degree of one. On their own they are temperatures.
+never to a degree of one. On their own they are temperatures. They (and
+`degR`) are typed that way and shown as `°C`, `°F` and `°R` wherever a
+value is displayed, a document and its PDF included.
 
 Angle is genuinely dimensionless in SI, so there's no separate `rad`:
 an unlabeled number is already radians, exactly what `sin`/`cos`/`tan`

@@ -80,6 +80,13 @@ def test_format_unit_renders_caret_notation_as_superscript():
     assert format_unit("J/(kg*K)") == "J/(kg·K)"
 
 
+def test_format_unit_shows_degree_units_with_the_degree_sign():
+    assert format_unit("degC") == "°C"
+    assert format_unit("degF") == "°F"
+    assert format_unit("degR/s") == "°R/s"
+    assert format_unit("deg") == "deg"
+
+
 # ---- conversion ----
 
 def test_convert_between_prefixed_units():
