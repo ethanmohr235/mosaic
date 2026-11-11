@@ -29,6 +29,7 @@ import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from core import quantity_literals
 from core import roles as roles_repo
 from core.formula import (
     AGGREGATE_CALLS,
@@ -43,6 +44,7 @@ from core.formula import (
     TRIG_CALLS,
     PREVIOUS_CALL,
     PROPERTY_CALL,
+    QUANTITY_CALL,
     FormulaError,
     TICK_NAME,
     function_named,
@@ -453,6 +455,15 @@ class _Checker:
             return self._attribute(node)
         raise FormulaError(f"{type(node).__name__} is not allowed in a formula")
 
+    def _quantity(self, node: ast.Call) -> Dim:
+        """`51 cm` is a length -- a positive claim, unlike a bare `51`,
+        which adapts to whatever it is added to."""
+        try:
+            _value, unit_name = quantity_literals.parts(node)
+            return dimension_of(unit_name)
+        except (quantity_literals.QuantityError, UnitError) as e:
+            raise FormulaError(str(e)) from e
+
     def _shadowed(self, name: str, meaning: str) -> None:
         """A bare reserved name read where the mote has a property of that
         name: the formula reads the reserved meaning, and the property --
@@ -755,6 +766,8 @@ class _Checker:
             return self._property(node)
         if name in CALCULUS_CALLS:
             return self._calculus(name, node)
+        if name == QUANTITY_CALL:
+            return self._quantity(node)
         return self._function_call(name, node)
 
     def _function_call(self, name: str, node: ast.Call) -> Dim:

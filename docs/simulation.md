@@ -87,6 +87,7 @@ to both.
 | `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached -- unlike an `arity: many` role, which never collapses. |
 | `sum(...)`, `count(...)` | Combine several motes into one value. Required when more than one mote is reached. |
 | `+ - * / **` (`^` also works as exponent) | Arithmetic. Parentheses work as usual. An unknown may appear in a denominator -- see [Writing an equation the way you mean it](#writing-an-equation-the-way-you-mean-it). |
+| `51 cm`, `9.81 m/s^2` | A number with a unit -- one quantity, so `r / 51 cm` is `r / (51 cm)`. See [Numbers with units](#numbers-with-units). |
 | `pi`, `e` | The math constants (3.14159..., 2.71828...). Reserved words -- shadow a property literally named `pi` or `e` inside a formula specifically, the same way `t` does. Such a property is still read qualified (`p12.e`), and the command bar keeps the prefix in front of a reserved name rather than stripping it as it does the anchor's other names. A rule that reads a bare `e`, `pi` or `t` on a mote that holds a property of that name gets a warning from the unit check (see [Checking equations](#checking-equations)). |
 | `abs`, `min`, `max` | Only on values that are already known. |
 | `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `sinc`, `sqrt` | Also only on known values. `sinc(x)` is the unnormalized `sin(x)/x`, with `sinc(0) = 1` (numpy's `sinc` is `sin(πx)/(πx)`; this one is not). `sin`/`cos`/`tan` take radians -- an argument declaring unit `deg` (see [Units](#units) below) arrives already converted; their inverses `arcsin`/`arccos`/`arctan` return radians the same way, and `arcsin`/`arccos` require an argument between -1 and 1. `sqrt` of a negative number is an error. |
@@ -1492,6 +1493,42 @@ bar it's the one unit written with no space before it: `P.efficiency =
 unit convert --value 36 --from km/hr --to m/s
 ```
 
+### Numbers with units
+
+A bare number in a formula is base SI. That is right for `2 * x`, and
+wrong for a textbook's `1 - (r/51)^2` with `r` in cm: inside a function
+whose `r` is declared `cm`, `r` arrives as metres and 51 is 51 m. Writing
+the unit says what the book meant:
+
+```
+P(r [cm], z [cm]) = P0 * (1 - (r / 51 cm)^2) * cos(pi * z / 109 cm)
+```
+
+- **A unit runs to the next space.** `9.81 m/s^2`, `1.3 kJ/(kg*K)` and
+  `51 cm^2` (51 square centimetres) are each one quantity. Spaces are
+  allowed inside the unit's own brackets (`1.3 kJ/(kg K)`), and a unit
+  also stops at a `,` or an unmatched `)`, so `(r / 51 cm)^2` and
+  `phi(5 cm, 2 s)` read as meant. To divide by a property, use a space:
+  `51 cm / m.s`.
+- **A quantity is one atom.** `r / 51 cm` is `r / (51 cm)`; `-5 cm` is
+  `-(5 cm)`; `(51 cm)^2` squares the quantity.
+- `5%` needs no space, as in the command bar. An affine unit (`400 degC`)
+  is absolute, as a given's is, and a minus written directly in front of
+  one negates the number before converting: `-40 degC` is 233.15 K.
+- A quantity carries its dimension into the [unit check](#checking-equations),
+  so `51 cm` never adapts the way a bare `51` does. Passed to a function,
+  it keeps its own unit rather than taking the parameter's.
+- **Errors say what to do.** `51 cm*x` is refused (a unit runs to the
+  next space, so put one after `cm`), and so is `51 cmm` (not a
+  recognized unit). `2 pi` says to write `2 * pi`.
+
+A number followed by a word was a syntax error before this existed, so no
+formula that parsed then means anything different now. The stored
+equation is never rewritten: it keeps what was typed, and every surface
+(the worksheet, `\work`, the typeset equation) shows `51 cm`. Inside the
+parser a quantity is a call to the reserved `__unit__`
+(`core/quantity_literals.py`), which is how every walker comes to handle it.
+
 ### Solving
 
 The solver works internally in base (SI) units. A declared value is
@@ -1660,7 +1697,6 @@ a rule that doesn't add up.
 
   There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. The console's `sim` says so rather than implying a clock -- `--ticks`, the timeline and the playhead all count ticks. An integrator would reach `sim --solver` by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
 - **Symbolic calculus.** `integrate` and `deriv` are numeric. Symbolic derivatives (and, for `\work`, the derivative written out as an expression) are planned next; symbolic antiderivatives would need a computer-algebra dependency. Time derivatives (`dx/dt` in a rule) wait on the continuous-dynamics question above.
-- **Per-literal unit syntax in an equation** (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with. (A solved freedom with no unit of its own *is* now given one -- see [Inference](#inference) above -- but only when it is the entire side of the equation that determined it; anything shapelier still has to be declared.)
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
 - **Species inheritance.** Species are flat.

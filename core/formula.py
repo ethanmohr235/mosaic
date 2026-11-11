@@ -28,7 +28,9 @@ from dataclasses import dataclass, field
 from core import calculus as calculus_repo
 from core import functions as functions_repo
 from core import limits as limits_repo
+from core import quantity_literals
 from core import roles as roles_repo
+from core.quantity_literals import QUANTITY_CALL
 from core.units import UnitError, dimension_of, from_base, to_base
 
 # An unknown the solver may determine: which mote, which property key.
@@ -75,9 +77,12 @@ PROPERTY_CALL = "property"
 INTEGRATE_CALL = "integrate"
 DERIVATIVE_CALL = "deriv"
 CALCULUS_CALLS = frozenset({INTEGRATE_CALL, DERIVATIVE_CALL})
+# `51 cm` in a formula is parsed as `__unit__(51, 'cm')`
+# (core/quantity_literals.py), so it is one more call every walker handles.
 ALLOWED_CALLS = (
     NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | TRIG_CALLS | LOG_CALLS
-    | HYPERBOLIC_CALLS | CALCULUS_CALLS | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL}
+    | HYPERBOLIC_CALLS | CALCULUS_CALLS
+    | {SQRT_CALL, PREVIOUS_CALL, PROPERTY_CALL, QUANTITY_CALL}
 )
 
 # The current simulation step's index, exposed to formulas as a reserved
@@ -493,8 +498,13 @@ def _rewrite_caret(text: str) -> str:
 
 
 def _parse_ast(text: str) -> ast.AST:
+    """The parsed tree, with `^` read as a power and each `51 cm` read as
+    one quantity (core/quantity_literals.py)."""
     try:
-        tree = ast.parse(_rewrite_caret(text).strip(), mode="eval")
+        source = _rewrite_caret(quantity_literals.rewrite(text)).strip()
+        tree = ast.parse(source, mode="eval")
+    except quantity_literals.QuantityError as e:
+        raise FormulaError(f"could not parse formula {text!r}: {e}") from e
     except SyntaxError as e:
         raise FormulaError(f"could not parse formula {text!r}: {e.msg}") from e
     return tree.body
@@ -785,6 +795,29 @@ def _constant(node: ast.Constant) -> Ratio:
     return Ratio.number(node.value)
 
 
+def _quantity(node: ast.Call, sign: float = 1.0) -> Ratio:
+    """`51 cm`, in base units. `sign` negates the number *before* the
+    conversion, which is what `-40 degC` means (233.15 K, not -313.15 K)."""
+    try:
+        value, unit_name = quantity_literals.parts(node)
+        return Ratio.number(to_base(sign * value, unit_name))
+    except (quantity_literals.QuantityError, UnitError) as e:
+        raise FormulaError(str(e)) from e
+
+
+def _negated_affine(node: ast.UnaryOp) -> Ratio | None:
+    """`-40 degC` as the quantity -40 degC; None for any other negation."""
+    if not isinstance(node.op, ast.USub):
+        return None
+    try:
+        found = quantity_literals.parts(node.operand)
+    except quantity_literals.QuantityError as e:
+        raise FormulaError(str(e)) from e
+    if found is None or not quantity_literals.is_affine(found[1]):
+        return None
+    return _quantity(node.operand, sign=-1.0)
+
+
 def _binary(node: ast.BinOp, ctx: Context) -> Ratio:
     op = _BIN_OPS.get(type(node.op))
     if op is None:
@@ -854,6 +887,9 @@ def _companion_unit(node: ast.AST, ctx: Context) -> str | None:
 
 
 def _unary(node: ast.UnaryOp, ctx: Context) -> Ratio:
+    negated = _negated_affine(node)
+    if negated is not None:
+        return negated
     operand = _as_ratio(_evaluate(node.operand, ctx))
     if isinstance(node.op, ast.USub):
         return -operand
@@ -1002,6 +1038,8 @@ def _call(node: ast.Call, ctx: Context):
         return _property(node, ctx)
     if name in CALCULUS_CALLS:
         return _calculus(name, node, ctx)
+    if name == QUANTITY_CALL:
+        return _quantity(node)
     return _function_call(name, node, ctx)
 
 

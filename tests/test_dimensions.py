@@ -327,6 +327,7 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
     dispatch_constants = {
         "NAVIGATION_CALLS", "AGGREGATE_CALLS", "NUMERIC_CALLS", "TRIG_CALLS",
         "LOG_CALLS", "HYPERBOLIC_CALLS", "SQRT_CALL", "PREVIOUS_CALL", "PROPERTY_CALL", "CALCULUS_CALLS",
+        "QUANTITY_CALL",
     }
     # Every group formula._call() dispatches on must be one this module
     # imported and handles.
@@ -342,7 +343,7 @@ def test_the_checker_handles_exactly_the_formula_call_whitelist():
         | formula.LOG_CALLS
         | formula.HYPERBOLIC_CALLS
         | formula.CALCULUS_CALLS
-        | {formula.SQRT_CALL, formula.PREVIOUS_CALL, formula.PROPERTY_CALL}
+        | {formula.SQRT_CALL, formula.PREVIOUS_CALL, formula.PROPERTY_CALL, formula.QUANTITY_CALL}
     )
 
 
@@ -380,6 +381,7 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
         "property": "property('a', 'op', 1)",
         "integrate": "integrate(f, 0, 1)",
         "deriv": "deriv(f, 1)",
+        "__unit__": "51 cm",
     }
     assert name in calls, f"{name}() is whitelisted but has no checker coverage here"
     # No assertion on the result -- the point is that it doesn't raise

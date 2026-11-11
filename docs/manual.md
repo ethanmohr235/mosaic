@@ -232,6 +232,7 @@ Worksheet lines:
 | `bd.s <= 250` · `b.R1 + b.R2 ?= b.W` | Check: evaluated, never solved |
 | `phi(r [cm]) = A * sin(B * r) / r` | Function |
 | `Tb(z [in]) [degF] = …` | …and declare its value's unit (refused if the body disagrees; `\val{Tb(0)}` and plots show it) |
+| `… (1 - (r / 51 cm)^2)` · `9.81 m/s^2` | A number with a unit; the unit runs to the next space |
 | `m.Q = integrate(phi, 0, m.R)` · `m.g = deriv(phi, m.r)` | Integral / derivative of a function (numeric) |
 | `integrate(f, 'y', 0, 1, m.x)` · `deriv(f, 'y', m.y, m.x)` | …along a named parameter, the others held |
 | `… ! ΣFx` | Names the rule |

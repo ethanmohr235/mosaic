@@ -67,7 +67,7 @@ from core import undo
 from core import units
 from core.formula import (
     MATH_CONSTANTS, TICK_NAME, FormulaError, attribute_bases, function_reference_ids,
-    parse_equation,
+    parse_equation, parse_expression,
 )
 from core.entities import Mote
 from core.simulation import unresolved_equation_names
@@ -462,8 +462,8 @@ def _equation_property_refs(equation: str) -> tuple[set[str], dict[str, set[str]
     step in `_run_rule` only; never raises; a formula that doesn't parse
     or is empty simply refers to nothing."""
     try:
-        tree = ast.parse(equation, mode="eval")
-    except SyntaxError:
+        tree = parse_expression(equation)
+    except FormulaError:
         return set(), {}
 
     attribute_value_ids = set()

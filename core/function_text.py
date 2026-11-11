@@ -22,6 +22,7 @@ import itertools
 from dataclasses import dataclass, field
 
 from core import functions as functions_repo
+from core import quantity_literals
 from core import units as units_repo
 from core.formula import (
     ALLOWED_CALLS, CALCULUS_CALLS, MATH_CONSTANTS, TICK_NAME, FormulaError, is_bare_number,
@@ -56,7 +57,8 @@ def expand(equation: str, properties: dict[str, dict]) -> str | None:
         return None
     try:
         tree = _rewrite(parse_expression(equation), {}, "", state, ())
-    except (FormulaError, functions_repo.FunctionDefinitionError, SyntaxError):
+    except (FormulaError, functions_repo.FunctionDefinitionError, SyntaxError,
+            quantity_literals.QuantityError):
         return None
     if not state.expanded:
         return None
@@ -98,6 +100,10 @@ def _rewrite(
     `owner.name`; outside, names are left as the equation wrote them."""
     if isinstance(node, ast.Name):
         return _name(node, bindings, owner)
+    quantity = quantity_literals.parts(node)
+    if quantity is not None:  # `51 cm`, written back as typed
+        value, unit = quantity
+        return state.quantity(f"({quantity_literals.number_text(value)} {unit})")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         # A calculus call's first argument names a function; it is not a
         # name to bind or qualify.

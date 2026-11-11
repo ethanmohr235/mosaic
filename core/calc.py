@@ -56,6 +56,7 @@ from dataclasses import dataclass
 from core import derivations as derivations_repo
 from core import function_text
 from core import motes as motes_repo
+from core import quantity_literals
 from core import simulation
 from core import uncertainty as uncertainty_repo
 from core import units as units_repo
@@ -646,8 +647,12 @@ def _substitute(
     # *answer's* precision, and padding a given to it would claim precision
     # the given never stated. `80 in` quoted to four figures is still
     # `80 in`; only the result line becomes `100.0 in`.
+    # A unit is not a reference: `2 m` keeps its `m` when a read is `m`.
+    units = quantity_literals.spans(equation)
     return pattern.sub(
-        lambda m: _bracketed(converted[m.group(0)].text()), equation
+        lambda m: _bracketed(converted[m.group(0)].text())
+        if quantity_literals.outside(units, m.start()) else m.group(0),
+        equation,
     ), note
 
 

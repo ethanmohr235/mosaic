@@ -37,7 +37,8 @@ what is still to do, lives in the docs; the short map:
 - **Model:** garden-scope names, the worksheet, solve health, checks
   (`?=`), uncertainty (`±`), the materials provider, scenarios, sweeps and
   `fit`. `why` and `\work` explain the garden as it stands from a live solve
-  (`core/derivations.py`); nothing about a solve is stored.
+  (`core/derivations.py`); nothing about a solve is stored. A number in a
+  formula may carry a unit (`r / 51 cm`, `core/quantity_literals.py`).
 - **Functions:** a function mote (`function`, `parameters`) is called by
   name from any formula; a call at 0/0 takes a reported limit
   (`core/functions.py`, `core/limits.py`, `core/function_text.py`); `sinc`.

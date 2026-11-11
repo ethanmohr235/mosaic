@@ -19,6 +19,9 @@ import re
 from collections.abc import Callable
 
 from core import formula
+from core import quantity_literals
+from core import quantity_tex
+from core import units as units_repo
 
 # Binding strength of what a node renders as. A child weaker than its
 # parent needs brackets; a fraction is self-delimiting everywhere except
@@ -72,7 +75,9 @@ def _expr(node: ast.AST) -> tuple[str, int]:
     if isinstance(node, ast.BinOp):
         return _binary(node)
     if isinstance(node, ast.Call):
-        return _call(node), _ATOM
+        # `51 cm` binds like a product: `(51 cm)^2` keeps its brackets.
+        strength = _MUL if _is_quantity(node) else _ATOM
+        return _call(node), strength
     if isinstance(node, ast.Attribute):
         return _attribute(node), _ATOM
     raise _Unsupported()
@@ -231,6 +236,23 @@ def _function_call(node: ast.Call) -> str:
     return rf"{name_tex(node.func.id)}{_bracket(', '.join(_args(node)))}"
 
 
+def _is_quantity(node: ast.Call) -> bool:
+    return isinstance(node.func, ast.Name) and node.func.id == formula.QUANTITY_CALL
+
+
+def _quantity(node: ast.Call) -> str:
+    """`51 cm` as a `\\val` reads, `51\\,\\mathrm{cm}` (core/quantity_tex.py)."""
+    try:
+        value, unit_name = quantity_literals.parts(node)
+        reading = quantity_literals.text(value, unit_name)
+    except (quantity_literals.QuantityError, units_repo.UnitError):
+        raise _Unsupported() from None
+    tex = quantity_tex.body(reading)
+    if tex is None:
+        raise _Unsupported()
+    return tex
+
+
 def _fn(command: str) -> Callable[[ast.Call], str]:
     return lambda node: rf"{command}{_bracket(_one(node))}"
 
@@ -332,4 +354,5 @@ CALL_TEX: dict[str, Callable[[ast.Call], str]] = {
     formula.PROPERTY_CALL: _property,
     formula.INTEGRATE_CALL: _integral,
     formula.DERIVATIVE_CALL: _derivative,
+    formula.QUANTITY_CALL: _quantity,
 }

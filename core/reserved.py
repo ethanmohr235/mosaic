@@ -234,10 +234,17 @@ EQUATION_LANGUAGE: list[dict[str, str]] = [
         "Arithmetic. Parentheses work as usual. An unknown may sit in a "
         "denominator -- 'I / I0 == 0.1' is solved as the equivalent "
         "linear equation, so there's no need to rearrange it by hand."},
+    {"syntax": "51 cm, 9.81 m/s^2, 1.3 kJ/(kg*K)", "meaning":
+        "A number with a unit: one quantity, so 'r / 51 cm' is r / (51 cm). "
+        "The unit runs to the next space (or a ',' or an unmatched ')'), so "
+        "'51 cm^2' is 51 square centimetres and '51 cm / x' divides by x. "
+        "A bare number is base SI -- write the unit wherever the number is "
+        "not, as with a textbook constant in cm."},
     {"syntax": "pi, e", "meaning":
         "The math constants (3.14159..., 2.71828...). Reserved words -- "
         "shadow a property literally named 'pi' or 'e' inside a formula "
-        "only, the same way 't' does."},
+        "only, the same way 't' does. Write 'p12.e' to read such a "
+        "property."},
     {"syntax": "log(x), ln(x), log10(x), exp(x)", "meaning":
         "Logarithms and the exponential. log() and ln() are the natural "
         "logarithm; log10() is base 10. Only on values that are already "
