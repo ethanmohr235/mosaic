@@ -519,7 +519,8 @@ def _rewrite_quantities(text: str) -> str:
         start = match.end()
         end = start
         depth = 0
-        while end < len(text) and text[end] in _UNIT_CHARS:
+        # Spaces only inside a unit's brackets: `1.3 kJ/(kg * K)`.
+        while end < len(text) and (text[end] in _UNIT_CHARS or (text[end] == " " and depth > 0)):
             depth += {"(": 1, ")": -1}.get(text[end], 0)
             if depth < 0:
                 break

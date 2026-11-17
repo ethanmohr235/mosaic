@@ -403,3 +403,11 @@ p.dp = p.f * p.L / p.D * p.rho * p.V^2 / 2"""
     friction, drop = shown(conn, sheet, "p.f}{6", "p.dp}{psi, 6")
     assert number(friction) == pytest.approx(f, rel=1e-5)
     assert number(drop) == pytest.approx(f * 100 * FT / D * rho * V**2 / 2 / PSI, rel=1e-5)
+
+
+def test_a_unit_written_with_spaces_inside_its_brackets(conn):
+    # As typed in a homework sheet: a given, and the same inside an equation.
+    sheet = "w.cp = 1.302 kJ/(kg * K)\nw.c2 = 2 * 1.302 kJ/(kg * K)"
+    cp, twice = shown(conn, sheet, "w.cp}{Btu/(lb*degF), 3", "w.c2}{kJ/(kg*K), 4")
+    assert number(cp) == pytest.approx(1.302 / 4.1868, rel=1e-3)
+    assert number(twice) == pytest.approx(2.604, rel=1e-6)

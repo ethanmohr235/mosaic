@@ -653,6 +653,14 @@ def parse_value(text: str):
         unit_name = _resolve_unit(tail)
         if number is not None and unit_name:
             return number, unit_name
+    # A unit with spaces in it -- `1.302 kJ/(kg * K)` -- splits at the
+    # first space instead: the number is one word, the unit the rest.
+    first, _, rest = text.partition(" ")
+    if rest and rest != tail:
+        number = _to_number(first)
+        unit_name = _resolve_unit(rest)
+        if number is not None and unit_name:
+            return number, unit_name
     return _coerce(text), None
 
 
