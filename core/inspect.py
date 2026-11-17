@@ -138,15 +138,19 @@ def kinds_of(conn, mote, species_id: str | None) -> dict:
     if template is not None and all(s.id != template.id for s in siblings):
         siblings = siblings + [template]
     vocabulary = enum_vocabulary(siblings)
-    declared_units = simulation.units_for(
-        mote.properties, simulation.inferred_units(conn).get(mote.id))
+    inferred = simulation.inferred_units(conn).get(mote.id)
+    declared_units = simulation.units_for(mote.properties, inferred)
 
     kinds = {}
     for key, value in mote.properties.items():
         if isinstance(value, bool):
             kinds[key] = {"kind": "boolean"}
         elif isinstance(value, (int, float)):
-            kinds[key] = {"kind": "number", **unit_info(declared_units.get(key), value)}
+            number, unit_name = simulation.shown(value, mote.properties, key, inferred)
+            kinds[key] = {"kind": "number", **unit_info(unit_name, number)}
+            if number != value:
+                # Held in base SI, shown in the unit inferred for it.
+                kinds[key]["shown"] = f"{number:.6g}"
         elif isinstance(value, str) and motes_repo.get_mote(conn, value) is not None:
             # A property whose value is another mote's id is a
             # reference -- the inspector makes it a button that walks

@@ -1756,6 +1756,44 @@ def units_for(
     return {**(inferred or {}), **parse_units_property(properties.get(UNITS_KEY))}
 
 
+def shown(
+    value: float, properties: dict, key: str, inferred: dict[str, str] | None = None,
+    *, spread: bool = False,
+) -> tuple[float, str | None]:
+    """A number as a surface shows it, and its unit. A value with a declared
+    unit is in that unit already; one with only an inferred unit is held in
+    base SI (a solve writes it so, and `Solved.value` returns it so), and is
+    converted here -- a unit is never shown beside a number not in it.
+    `spread` converts a ± (size only, no offset)."""
+    declared = parse_units_property(properties.get(UNITS_KEY)).get(key)
+    if declared:
+        return value, declared
+    unit_name = (inferred or {}).get(key)
+    if not unit_name or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value, None
+    try:
+        if spread:
+            return abs(from_base(value, unit_name) - from_base(0.0, unit_name)), unit_name
+        return from_base(value, unit_name), unit_name
+    except UnitError:
+        return value, None
+
+
+def shown_properties(properties: dict, inferred: dict[str, str] | None) -> dict:
+    """A mote's properties as a surface shows them: each value with only an
+    inferred unit converted into it, and the unit filled in."""
+    if not inferred:
+        return properties
+    out = dict(properties)
+    declared = parse_units_property(properties.get(UNITS_KEY))
+    for key, unit_name in inferred.items():
+        if key in declared or key not in properties:
+            continue
+        out[key], _unit = shown(properties[key], properties, key, inferred)
+    out[UNITS_KEY] = units_for(properties, inferred)
+    return out
+
+
 @dataclass(frozen=True)
 class RoleReport:
     """The result of checking how a garden's assemblies are wired."""

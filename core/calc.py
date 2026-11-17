@@ -385,8 +385,7 @@ def _with_inferred_units(conn: sqlite3.Connection) -> dict[str, dict]:
     what a solve infers (a live solve's `properties` already are)."""
     inferred = simulation.inferred_units(conn)
     return {
-        m.id: ({**m.properties, units_repo.UNITS_KEY: simulation.units_for(m.properties, inferred[m.id])}
-               if m.id in inferred else m.properties)
+        m.id: simulation.shown_properties(m.properties, inferred.get(m.id))
         for m in motes_repo.list_motes(conn)
     }
 

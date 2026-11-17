@@ -323,3 +323,35 @@ r.m2a = 2.32
 r.Efrac = 0.9
 r.Pc = r.Pt / r.N * r.m2a * r.Efrac""")
     assert not run_simulation(conn).dimension_warnings
+
+
+# ---- a stored answer is shown in the unit shown beside it ----
+
+def test_every_surface_shows_a_stored_temperature_in_its_inferred_unit(conn):
+    # A solve writes a value with no declared unit in base SI (here K); a
+    # surface that names its inferred unit (degF) must convert, never just
+    # label the kelvin number.
+    from core import calc, inspect, plotcmd, plotview
+    from core.motes import list_motes
+    sheet = """w.cp = 1.3 Btu/(lb*degF)
+w.m = 3148 lb/hr
+w.q = 1.0718e6 Btu/hr
+w.Ti = 543 degF
+w.To = w.Ti + w.q / (w.m * w.cp)"""
+    worksheet.apply(conn, sheet)
+    run_simulation(conn)
+    outlet = 543 + 1.0718e6 / (3148 * 1.3)
+    w = next(m for m in list_motes(conn) if m.properties.get("name") == "w")
+
+    kinds = inspect.inspect(conn, w.id)["kinds"]["To"]
+    assert kinds["unit"] == "degF" and float(kinds["shown"]) == pytest.approx(outlet, rel=1e-5)
+
+    (row,) = [r for r in calc.answers(conn) if r.key == "To"]
+    assert row.quantity.unit == "degF" and row.quantity.value == pytest.approx(outlet, rel=1e-6)
+
+    (line,) = [p for p in worksheet.preview(conn, sheet) if p.value][-1:]
+    assert line.value.endswith("degF") and number(line.value) == pytest.approx(outlet, rel=1e-5)
+
+    resolved = plotcmd.resolve(conn, plotcmd.parse_text("plot w.To vs w.Ti 500:600 --steps 2").line)
+    points = plotview.figure_from_spec(conn, resolved.spec, max_points=10).series[0].points
+    assert points[1] == [550.0, pytest.approx(550 + 1.0718e6 / (3148 * 1.3), rel=1e-6)]

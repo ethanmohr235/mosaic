@@ -268,13 +268,20 @@ def run(conn: sqlite3.Connection, line: SimLine) -> SimRun:
     for mote_id, key in ordered[:MAX_ROWS]:
         state = (SOLVED if (mote_id, key) in solved else VARIED if (mote_id, key) in varied
                  else PINNED if (mote_id, key) in freedoms else GIVEN)
+        props = start.get(mote_id, {})
+        inferred = garden.inferred.get(mote_id)
+
+        def shown(value, props=props, key=key, inferred=inferred):
+            # A value with only an inferred unit is held in base SI.
+            return None if value is None else simulation_repo.shown(value, props, key, inferred)[0]
+
         rows.append(Row(
             mote_id=mote_id, key=key, ref=garden.text_of(mote_id, key), state=state,
-            unit=_unit(start.get(mote_id, {}), key, garden.inferred.get(mote_id)),
-            start=_number(start.get(mote_id, {}).get(key)),
-            series=tuple(series[(mote_id, key)]),
-            vs=tuple(vs_series[(mote_id, key)]) if vs_series is not None else None,
-            vs_start=_number(vs_start.get(mote_id, {}).get(key)) if vs_start is not None else None,
+            unit=_unit(props, key, inferred),
+            start=shown(_number(props.get(key))),
+            series=tuple(shown(v) for v in series[(mote_id, key)]),
+            vs=tuple(shown(v) for v in vs_series[(mote_id, key)]) if vs_series is not None else None,
+            vs_start=shown(_number(vs_start.get(mote_id, {}).get(key))) if vs_start is not None else None,
         ))
 
     markers = [Marker(step.step, CONSTRAINT, problem)

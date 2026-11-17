@@ -817,7 +817,7 @@ def _shown(properties: dict, key: str, inferred: dict[str, str] | None = None) -
     value = properties.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return ""
-    unit = simulation.units_for(properties, inferred).get(key)
+    value, unit = simulation.shown(value, properties, key, inferred)
     from core.calc import Quantity
     return Quantity(value, unit).text()
 

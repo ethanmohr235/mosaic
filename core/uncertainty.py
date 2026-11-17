@@ -206,11 +206,15 @@ def propagate(conn: sqlite3.Connection, solver: str = "linear") -> Report:
                          (c.sensitivity * c.sigma) ** 2 / variance if variance else 0.0)
             for c in parts if c.sensitivity * c.sigma != 0
         ]
+        own, inferred_here = properties[unknown[0]], inferred.get(unknown[0])
+        shown_value, unit_name = simulation.shown(value, own, unknown[1], inferred_here)
+        sigma, _unit = simulation.shown(math.sqrt(variance), own, unknown[1], inferred_here,
+                                        spread=True)
         results.append(Propagated(
             unknown[0], unknown[1], f"{labels.get(unknown[0], unknown[0][:8])}.{unknown[1]}",
-            value, math.sqrt(variance),
+            shown_value, sigma,
             tuple(sorted(parts, key=lambda c: -c.share)),
-            simulation.units_for(properties[unknown[0]], inferred.get(unknown[0])).get(unknown[1]),
+            unit_name,
         ))
     results.sort(key=lambda r: (r.label.casefold()))
     return Report(tuple(results), tuple(inputs), tuple(problems))

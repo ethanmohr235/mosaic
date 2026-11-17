@@ -296,6 +296,17 @@ class _Directory:
             return None
         return simulation.units_for(mote.properties, self._inferred.get(mote_id)).get(key)
 
+    def shown(self, mote_id: str, key: str, value):
+        """A solved value in the unit `unit()` names: one with only an
+        inferred unit comes out of a solve in base SI."""
+        mote = self._motes.get(mote_id)
+        if mote is None or value is None:
+            return value
+        return simulation.shown(value, mote.properties, key, self._inferred.get(mote_id))[0]
+
+    def shown_point(self, mote_id: str, key: str, point):
+        return None if point is None else [point[0], self.shown(mote_id, key, point[1])]
+
     def label(self, mote_id: str, key: str) -> str:
         mote = self._motes.get(mote_id)
         return f"{name_of(mote) if mote else mote_id[:8]}.{key}"
@@ -350,8 +361,10 @@ def _sweep(
     for index, s in enumerate(series_specs):
         key = (_case_key(s), s["mote"], s["key"])
         ghost_key = ("ghost", s["mote"], s["key"])
-        points = [_point(p, key) for p in result.points]
-        ghost = [_point(p, ghost_key) for p in result.points] if ghosting else []
+        points = [directory.shown_point(s["mote"], s["key"], _point(p, key))
+                  for p in result.points]
+        ghost = ([directory.shown_point(s["mote"], s["key"], _point(p, ghost_key))
+                  for p in result.points] if ghosting else [])
         rows.append({
             "id": s.get("id") or f"s{index}",
             "label": s.get("label") or directory.label(s["mote"], s["key"]),
@@ -607,11 +620,12 @@ def _surface(
         x_lo=x_axis.lo, x_hi=x_axis.hi, y_lo=y_axis.lo, y_hi=y_axis.hi,
         cells=[
             {"r": row_at[c.row], "c": col_at[c.col], "x": c.x, "y": c.y,
-             "v": c.value, "error": c.error}
+             "v": directory.shown(output["mote"], output["key"], c.value), "error": c.error}
             for c in result.cells
         ],
         rows=len(rows), cols=len(cols),
-        lo=span[0] if span else None, hi=span[1] if span else None,
+        lo=directory.shown(output["mote"], output["key"], span[0]) if span else None,
+        hi=directory.shown(output["mote"], output["key"], span[1]) if span else None,
         solves=result.solves,
         error=None if span else "nothing solved across this grid",
     )

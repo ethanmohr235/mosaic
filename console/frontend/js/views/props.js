@@ -92,7 +92,7 @@ function create(ctx) {
       return h("span", "props-link", [components.swatch(st.palette(meta.refSpeciesId)), " ", meta.refLabel]);
     }
     if (meta.kind === "number" && meta.unit) {
-      const node = h("span", "", [String(value), h("span", "dim", ` ${meta.unit}`)]);
+      const node = h("span", "", [String(meta.shown ?? value), h("span", "dim", ` ${meta.unit}`)]);
       if (meta.unitBase) node.title = meta.unitBase;
       return node;
     }
