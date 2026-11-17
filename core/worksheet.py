@@ -47,6 +47,7 @@ surface can say so rather than implying a worksheet is the whole garden.
 | `bd.l [m] = sqrt(...)` | an equation that declares `m` for `l`, refused if its right side is not a length |
 | `bd.Ax = ?` | an **unknown**: `Ax` free on `bd`, with no value |
 | `bd.Ax [N] = ?` | an unknown that declares `N` for `Ax` |
+| `p.f = ? 0.02` | an unknown starting at 0.02 -- where newton begins |
 | `bd.Ax + bd.Bx == 0` | a **relation**: an equation, and no freedom declared |
 | `bd.sigma <= 250` | a **check**: evaluated, never solved (`core/formula.py`) |
 | `bd.R1 + bd.R2 ?= bd.W` | an **equality check**: stored as `==` with `check: true` |
@@ -213,6 +214,8 @@ class Applied:
     deleted: tuple[str, ...] = ()
     untouched: int = 0
     problems: tuple[str, ...] = field(default_factory=tuple)
+    # `m.k` for each freedom whose line is gone, taken away with its value.
+    unfreed: tuple[str, ...] = ()
 
 
 # ---- reading text ----
@@ -267,9 +270,19 @@ def _read(number: int, text: str, body: str, name: str) -> Line:
         )
     lhs, declared = _declared_unit(assignment.group("lhs"))
     rhs = assignment.group("rhs")
-    if rhs.strip() == UNKNOWN_MARKER:
+    if rhs.strip() == UNKNOWN_MARKER or rhs.strip().startswith(UNKNOWN_MARKER + " "):
         mote, key = _target(lhs)
-        return Line(number, text, UNKNOWN, mote=mote, key=key, unit=declared, name=name, free=True)
+        start, start_unit = None, None
+        rest = rhs.strip()[1:].strip()
+        if rest:
+            start, start_unit = _as_number(rest)
+            if start is None:
+                raise FormulaError(
+                    f"after `?` comes a starting value, not {rest!r} -- e.g. `{mote}.{key} = ? 0.02`")
+            if start_unit and declared and not _same_dimension(start_unit, declared):
+                raise FormulaError(f"the start {rest} is not in {declared}'s dimension")
+        return Line(number, text, UNKNOWN, mote=mote, key=key, unit=declared, name=name,
+                    free=True, value=start, spread=start_unit)
     spread = None
     with_spread = _SPREAD_RE.match(rhs)
     if with_spread:
@@ -295,6 +308,13 @@ def _read(number: int, text: str, body: str, name: str) -> Line:
     mote, key = _target(lhs)
     return Line(number, text, GIVEN, mote=mote, key=key, value=value, unit=unit, name=name,
                 spread=spread)
+
+
+def _same_dimension(a: str, b: str) -> bool:
+    try:
+        return units_repo.dimension_of(a) == units_repo.dimension_of(b)
+    except units_repo.UnitError:
+        return False
 
 
 def _declared_unit(lhs: str) -> tuple[str, str | None]:
@@ -430,6 +450,8 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
             mote_id = _resolve(conn, index, created, line.mote)
             _free(conn, mote_id, line.key)
             _declare_unit(conn, mote_id, line.key, line.unit)
+            if line.value is not None:
+                _write_start(conn, mote_id, line)
         except FormulaError as e:
             problems.append(f"line {line.number}: {e}")
     for line in sheet.equations:
@@ -439,14 +461,14 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
             problems.append(f"line {line.number}: {e}")
 
     ours, untouched = _existing_rules(conn)
-    deleted = []
+    deleted, unfreed = [], []
     if not problems:
-        for rule in ours:
-            if rule.mote.id in written_rules:
-                continue
+        gone = [rule for rule in ours if rule.mote.id not in written_rules]
+        for rule in gone:
             motes_repo.delete_mote(conn, rule.mote.id)
             deleted.append(rule.name)
         deleted.extend(_unwrite_functions(conn, written_functions))
+        unfreed = _unfree(conn, sheet, gone)
 
     return Applied(
         motes_created=tuple(created),
@@ -455,6 +477,7 @@ def apply(conn: sqlite3.Connection, text: str) -> Applied:
         deleted=tuple(deleted),
         untouched=untouched,
         problems=tuple(problems),
+            unfreed=tuple(unfreed),
     )
 
 
@@ -722,6 +745,59 @@ def _as_applied(conn: sqlite3.Connection, sheet: Worksheet) -> tuple[dict[str, d
         if line.unit:
             declared[line.key] = line.unit
     return properties, ids
+
+
+def _write_start(conn, mote_id: str, line: Line) -> None:
+    """`p.f = ? 0.02`: the value Newton starts from, stored as the
+    freedom's value -- in its declared unit, else base SI, as a solve
+    would write it."""
+    declared = units_repo.parse_units_property(
+        motes_repo.get_mote(conn, mote_id).properties.get(units_repo.UNITS_KEY)).get(line.key)
+    value, unit = float(line.value), line.spread
+    if unit and declared:
+        value = units_repo.convert(value, unit, declared)
+    elif unit:
+        value = units_repo.to_base(value, unit)
+    motes_repo.update_mote(conn, mote_id, {line.key: value})
+
+
+def _unfree(conn, sheet: Worksheet, gone: list[rules_repo.Rule]) -> list[str]:
+    """Freedoms the sheet no longer declares, taken away with the value the
+    solve wrote for them -- `p29.D = ?` deleted from the sheet must not
+    leave the garden short an equation. Only a mote's own `freedoms` on a
+    mote the sheet is about (it names it, or a rule this apply deleted read
+    it), and never on an instance of a species or a species: those are a
+    model's, not a line's. A value the sheet now gives on a line of its
+    own stays. Returns `m.k` for each, for the apply's account."""
+    declared = {(line.mote, line.key) for line in (*sheet.unknowns, *sheet.equations) if line.free}
+    given = {(line.mote, line.key) for line in sheet.givens}
+    named = {line.mote for line in sheet.lines if line.mote}
+    for line in sheet.equations:
+        named.update(_bases(line.relation))
+    for rule in gone:
+        named.update(_bases(rule.equation))
+    links = [r for r in rel_repo.list_relationships(conn) if r.type == species_repo.INSTANCE_OF]
+    species_ids = {r.to_id for r in links}
+    instances = {r.from_id for r in links}
+    removed = []
+    for mote in motes_repo.list_motes(conn):
+        name = mote.properties.get("name")
+        if name not in named or mote.id in instances or mote.id in species_ids:
+            continue
+        own = rules_repo.parse_freedoms(mote.properties.get(rules_repo.FREEDOMS_KEY))
+        stale = [key for key in own if (name, key) not in declared]
+        if not stale:
+            continue
+        kept = [key for key in own if key not in stale]
+        if kept:
+            motes_repo.update_mote(conn, mote.id, {rules_repo.FREEDOMS_KEY: kept})
+        else:
+            motes_repo.delete_property(conn, mote.id, rules_repo.FREEDOMS_KEY)
+        for key in stale:
+            if (name, key) not in given:
+                motes_repo.delete_property(conn, mote.id, key)
+            removed.append(f"{name}.{key}")
+    return removed
 
 
 def _existing_rules(conn: sqlite3.Connection) -> tuple[list[rules_repo.Rule], int]:
@@ -1078,8 +1154,16 @@ def _render_unknowns(
         for key in sorted(free.get(mote.id, set())):
             if (name, key) not in headed:
                 target = _with_unit(f"{name}.{key}", declared.get(key))
-                lines.append((name, f"{target} {ASSIGN} {UNKNOWN_MARKER}"))
+                # The value it holds is where Newton starts: kept on the line.
+                value = mote.properties.get(key)
+                start = (f" {_number_text(value)}" if isinstance(value, (int, float))
+                         and not isinstance(value, bool) else "")
+                lines.append((name, f"{target} {ASSIGN} {UNKNOWN_MARKER}{start}"))
     return lines
+
+
+def _number_text(value: float) -> str:
+    return f"{value:.12g}"
 
 
 def _bases(relation: str) -> list[str]:

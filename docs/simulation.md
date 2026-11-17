@@ -1169,10 +1169,22 @@ a function whose line is gone loses its body and parameters, and the mote
 itself is deleted when nothing else is left on it (`Applied.deleted` says
 `phi()`).
 
-One asymmetry worth knowing: applying **adds** freedoms and never removes
-one. A freedom may have been declared in another surface about a mote the
-worksheet happens to mention, and taking it away would be reaching past
-what the lines are about.
+**A freedom whose line is gone goes too**, with the value the solve wrote
+for it (a freedom's value is always the solve's: every solve overwrites
+it). A stray `p29.D = ?` deleted from the sheet no longer leaves the
+garden short an equation. This reaches only as far as the lines are
+about: a mote's own `freedoms` on a mote the sheet names (or that a rule
+this apply deleted read), never a species' or an instance's -- those are
+a model's -- and a value the sheet now gives on a line of its own stays.
+`Applied.unfreed` names each (`p29.D`), and it is one undo step with the
+rest of the apply.
+
+**`p.f = ? 0.02` starts newton there.** The number after the `?` (with a
+unit if wanted: `s.x [m] = ? 30 cm`) is stored as the freedom's value,
+which is where newton begins; `read()` writes back the value the freedom
+holds, so after a solve the line carries the last answer as the next
+start. Colebrook's friction factor needs one: from newton's default of
+1.0 the first step takes the square root of a negative number.
 
 ## Solve health
 

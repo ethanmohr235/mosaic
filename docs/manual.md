@@ -228,6 +228,7 @@ Worksheet lines:
 | `bd.l = sqrt(bd.x^2 + bd.y^2)` | Equation: solve for `bd.l` |
 | `bd.l [m] = …` | …and declare its unit (refused if the right side disagrees) |
 | `bd.Ax = ?` · `bd.Ax [N] = ?` | Unknown: free to solve, no equation of its own |
+| `p.f = ? 0.02` · `s.x [m] = ? 30 cm` | …starting newton there (the value it holds; shown back after a solve) |
 | `bd.Ax + bd.Bx == 0` | Relation: frees nothing |
 | `bd.s <= 250` · `b.R1 + b.R2 ?= b.W` | Check: evaluated, never solved |
 | `c.h ?= 16.4 ft` · `s.y == s.x + 1 m` · `w.q = w.cp * 10 degF` | A number with a unit inside an equation (unit written without spaces: `5 m/s`, `1.3 Btu/(lb*degF)`). An offset unit is a degree, except alone on one side of a comparison (`T == 100 degF`) |

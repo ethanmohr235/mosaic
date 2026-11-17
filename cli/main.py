@@ -872,6 +872,8 @@ def _print_applied(applied: worksheet.Applied) -> None:
         print(f"{len(applied.deleted)} rule(s) had no line and were deleted:")
         for label in applied.deleted:
             print(f"  {label}")
+    if applied.unfreed:
+        print(f"No longer solved for (their lines are gone): {', '.join(applied.unfreed)}")
     if applied.untouched:
         print(f"{applied.untouched} rule(s) about a species were left alone.")
     for problem in applied.problems:

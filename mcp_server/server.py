@@ -1087,6 +1087,7 @@ def write_worksheet(text: str, garden: str | None = None) -> dict[str, Any]:
             "givensWritten": applied.givens_written,
             "rulesWritten": applied.rules_written,
             "deleted": list(applied.deleted),
+            "unfreed": list(applied.unfreed),
             "untouched": applied.untouched,
             "problems": list(applied.problems),
         }

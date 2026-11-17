@@ -634,3 +634,45 @@ def test_a_result_unit_the_body_contradicts_is_refused(conn):
 def test_a_malformed_result_unit_or_parameter_is_refused(conn, line, message):
     applied = worksheet.apply(conn, line)
     assert applied.problems and message in applied.problems[0]
+
+
+# ---- a line that goes takes its freedom; a start for newton ----
+
+def test_a_removed_unknown_line_takes_its_freedom_and_solved_value(conn):
+    sheet = "p.a = 2 m\np.b = p.a * 3\np.D = ?"
+    worksheet.apply(conn, sheet)
+    run_simulation(conn)
+    applied = worksheet.apply(conn, "p.a = 2 m")
+    assert set(applied.unfreed) == {"p.D", "p.b"}
+    p = named(conn, "p")
+    assert FREEDOMS_KEY not in p.properties and "b" not in p.properties
+    assert p.properties["a"] == 2
+
+
+def test_a_freedom_turned_given_keeps_the_given_value(conn):
+    worksheet.apply(conn, "p.a = 2 m\np.b = p.a * 3")
+    worksheet.apply(conn, "p.a = 2 m\np.b = 7 m")
+    p = named(conn, "p")
+    assert p.properties["b"] == 7 and "b" not in parse_freedoms(p.properties.get(FREEDOMS_KEY))
+
+
+def test_a_species_instances_freedoms_are_left_alone(conn):
+    species = create_mote(conn, {"name": "Bar", FREEDOMS_KEY: "l"})
+    bar = create_mote(conn, {"name": "bar", "x": 1, FREEDOMS_KEY: "l"})
+    create_relationship(conn, bar, species, INSTANCE_OF)
+    worksheet.apply(conn, "bar.x = 2")
+    assert parse_freedoms(get_mote(conn, bar).properties[FREEDOMS_KEY]) == ["l"]
+
+
+def test_an_unknown_line_may_carry_a_start(conn):
+    applied = worksheet.apply(conn, "s.x [m] = ? 30 cm\ns.y = ? 0.02")
+    assert not applied.problems, applied.problems
+    s = named(conn, "s")
+    assert s.properties["x"] == pytest.approx(0.3) and s.properties["y"] == 0.02
+    worksheet.apply(conn, "s.x [m] = ? 30 cm\ns.y = ? 0.02\ns.x * s.y == 1 m")
+    assert "s.y = ? 0.02" in worksheet.read(conn)
+
+
+def test_a_start_in_another_dimension_is_refused(conn):
+    applied = worksheet.apply(conn, "s.x [m] = ? 3 s")
+    assert applied.problems and "dimension" in applied.problems[0]

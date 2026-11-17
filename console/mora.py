@@ -142,6 +142,8 @@ class MoraApi:
                 parts.append(f"made {', '.join(applied.motes_created)}")
             if applied.deleted:
                 parts.append(f"deleted {', '.join(applied.deleted)}")
+            if applied.unfreed:
+                parts.append(f"no longer solved for {', '.join(applied.unfreed)}")
             return {"message": "applied the worksheet: " + " · ".join(parts) + live,
                     "wrote": command is not None, "problems": list(applied.problems),
                     "text": worksheet_repo.read(conn)}
