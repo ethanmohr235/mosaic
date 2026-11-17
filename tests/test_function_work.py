@@ -115,7 +115,7 @@ def test_the_tex_export_says_the_limit_and_sets_the_call(conn, reactor):
 def test_val_shows_a_lone_call_in_its_declared_result_unit(conn):
     worksheet.apply(conn, "core.T = 500 degF\nTb(z [in]) [degF] = core.T + 0 * z")
     _note, _document, resolution = resolved(conn, r"\val{Tb(3)} and \val{Tb(3)}{degC}")
-    assert [v.text for v in resolution.values.values()] == ["500 degF", "260 degC"]
+    assert [v.text for v in resolution.values.values()] == ["500 °F", "260 °C"]
 
 
 def test_a_unit_asked_of_an_expression_converts_it(conn):
