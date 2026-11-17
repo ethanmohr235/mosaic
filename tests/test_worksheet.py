@@ -602,3 +602,34 @@ def test_preview_says_what_each_mark_means(conn):
         "relation: frees nothing; a `= ?` line says what it solves for",
         "check: evaluated, never solved",
     ]
+
+
+# ---- a function's result unit ----
+
+def test_a_function_declares_the_unit_of_its_value(conn):
+    sheet = "core.Ti = 543 degF\nTb(z [in]) [degF] = core.Ti + 0 * z"
+    applied = worksheet.apply(conn, sheet)
+    assert not applied.problems, applied.problems
+    assert named(conn, "Tb").properties[UNITS_KEY] == {"z": "in", "function": "degF"}
+    assert "Tb(z [in]) [degF] = core.Ti + 0 * z" in worksheet.read(conn)
+
+
+def test_dropping_the_result_unit_drops_it_from_units(conn):
+    worksheet.apply(conn, "Tb(z [in]) [degF] = 1 + 0 * z")
+    worksheet.apply(conn, "Tb(z [in]) = 1 + 0 * z")
+    assert named(conn, "Tb").properties[UNITS_KEY] == {"z": "in"}
+
+
+def test_a_result_unit_the_body_contradicts_is_refused(conn):
+    applied = worksheet.apply(conn, "core.Ti = 543 degF\nBad(z [in]) [W] = core.Ti + 0 * z")
+    assert applied.problems and "declares W" in applied.problems[0]
+
+
+@pytest.mark.parametrize("line, message", [
+    ("f(x) [] = x", "names no unit"),
+    ("f(x) [furlongs] = x", "not a unit"),
+    ("f(function) = function", "reserved"),
+])
+def test_a_malformed_result_unit_or_parameter_is_refused(conn, line, message):
+    applied = worksheet.apply(conn, line)
+    assert applied.problems and message in applied.problems[0]

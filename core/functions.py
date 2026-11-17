@@ -25,6 +25,10 @@ import json
 
 FUNCTION_KEY = "function"
 PARAMETERS_KEY = "parameters"
+# The unit of the function's value, kept in the ordinary `units` map under
+# the body's own key -- `units[k]` is the unit of property k's value, and
+# the body is the `function` property. Optional; written `phi(r) [W] = …`.
+RESULT_UNIT_KEY = FUNCTION_KEY
 
 
 class FunctionDefinitionError(ValueError):
@@ -62,6 +66,17 @@ def parameters_of(properties: dict) -> list[str]:
     for name in names:
         if not name.isidentifier():
             raise FunctionDefinitionError(f"parameter {name!r} is not a name")
+        if name == RESULT_UNIT_KEY:
+            raise FunctionDefinitionError(
+                f"{name!r} is reserved -- it names the function's own value")
     if len(set(names)) != len(names):
         raise FunctionDefinitionError(f"parameters {names} repeat a name")
     return names
+
+
+def result_unit(properties: dict) -> str | None:
+    """The unit the function's value is declared in, or None. Values still
+    travel in base SI; this only says how a reader is shown one."""
+    from core.units import parse_units_property, UNITS_KEY
+    unit = parse_units_property(dict.get(properties, UNITS_KEY)).get(RESULT_UNIT_KEY)
+    return unit if isinstance(unit, str) and unit.strip() else None

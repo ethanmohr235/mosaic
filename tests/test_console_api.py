@@ -631,6 +631,17 @@ def test_the_plot_payload_coarse_then_full(api, divider):
     assert "no mote named" in api.moxie.plot("plot C9.x vs C1.voltage 0:1")["error"]
 
 
+def test_a_function_plot_draws_in_the_pane(api):
+    from core import worksheet
+    worksheet.apply(api._session.conn, "phi(r [cm]) = A * sin(B * r) / r\nphi.A = 5e13\nphi.B = 0.0628 1/cm")
+    payload = api.moxie.plot("plot phi(r) vs r 0:30 --steps 10")
+    assert payload["mode"] == "sweep" and payload["figure"]["xLabel"] == "r (cm)"
+    assert payload["series"] == [{"id": "s0", "ref": "phi(r)", "hidden": False}]
+    assert len(payload["figure"]["series"][0]["points"]) == 11 and not payload["knobs"]
+    zoomed = api.moxie.rewrite("plot phi(r) vs r 0:30", {"range": [5, 10]})
+    assert zoomed == {"command": "plot 'phi(r)' vs r 5:10"}
+
+
 def test_a_plot_writes_nothing(api, divider):
     before = motes_repo.get_mote(api._session.conn, divider).properties
     api.moxie.plot(LINE + " --set C1.r_a=5")

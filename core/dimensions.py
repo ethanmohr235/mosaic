@@ -223,10 +223,64 @@ def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
     except FormulaError:
         return None
 
+    return unit_named(dimension)
+
+
+def unit_named(dimension: Dim) -> str | None:
+    """A unit name for `dimension` that round-trips through core.units.unit()
+    -- the canonical symbol, else the base-SI product in caret notation --
+    or None for an unknown, literal or dimensionless one (nothing to name).
+    What infer_unit and a plotted expression's axis both call a dimension."""
     if dimension is None or _is_literal(dimension) or dimension.is_dimensionless:
         return None
     name = describe_expression(dimension)
     return name if is_unit(name) else None
+
+
+def expression_dimension(
+    text: str, ctx: DimensionContext, bindings: dict[str, Dim] | None = None,
+) -> Dim:
+    """What an expression measures, with `bindings` naming free variables'
+    dimensions (`r` in `P(r, 0)`, as a plot binds it). None when it cannot
+    be told; a bare literal comes back as DIMENSIONLESS. Never raises: a
+    malformed expression is the evaluator's to report."""
+    dimension = _walk_expression(text, ctx, bindings)
+    return DIMENSIONLESS if _is_literal(dimension) else dimension
+
+
+def _walk_expression(
+    text: str, ctx: DimensionContext, bindings: dict[str, Dim] | None,
+    calls: tuple[str, ...] = (),
+) -> Dim:
+    checker = _Checker(ctx, bindings, calls, bare_numbers=True)
+    try:
+        return checker.dimension(parse_expression(text))
+    except FormulaError:
+        return None
+
+
+def function_problem(function_id: str, ctx: DimensionContext) -> str | None:
+    """Whether a function's body contradicts the unit it declares for its
+    value, walked with each parameter at its declared dimension. None when
+    they agree, or when there are not enough units to tell."""
+    properties = ctx.properties(function_id)
+    declared_name = functions_repo.result_unit(properties)
+    if declared_name is None:
+        return None
+    try:
+        declared = dimension_of(declared_name)
+        parameters = functions_repo.parameters_of(properties)
+    except (UnitError, functions_repo.FunctionDefinitionError):
+        return None
+    inner = dataclasses.replace(ctx, mote_id=function_id)
+    names = _Checker(inner)
+    bindings = {p: names._name(function_id, p) for p in parameters}
+    body = _walk_expression(functions_repo.body_of(properties), inner, bindings, (function_id,))
+    if not _conflict(body, declared):
+        return None
+    shown = describe(declared)
+    named = declared_name if shown == declared_name else f"{declared_name} ({shown})"
+    return f"its body is {describe(body)}, but it declares {named} -- these are different dimensions"
 
 
 
@@ -482,7 +536,20 @@ class _Checker:
             parameter: self._argument(name, function_id, parameter, arg)
             for parameter, arg in zip(parameters, node.args)
         }
-        return self._body(function_id, bindings)
+        body = self._body(function_id, bindings)
+        return body if body is not None else self._result(function_id)
+
+    def _result(self, function_id: str) -> Dim:
+        """The dimension a function declares for its value, for a body that
+        cannot tell its own (a bare coefficient, say). None when it
+        declares none, or one that does not read."""
+        unit_name = functions_repo.result_unit(self.ctx.properties(function_id))
+        if unit_name is None:
+            return None
+        try:
+            return dimension_of(unit_name)
+        except UnitError:
+            return None
 
     def _calculus(self, name: str, node: ast.Call) -> Dim:
         """`integrate(f, a, b)` is f's dimension times its parameter's, and

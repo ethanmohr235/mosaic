@@ -74,8 +74,8 @@ def build(conn: sqlite3.Connection, line_text: str) -> Publication:
     except CommandError as e:
         raise PlotExportError(str(e)) from e
     spec = resolved.spec
-    if spec.get("mode") != "sweep":
-        raise PlotExportError(f"only sweep plots export as figures, not {spec.get('mode')}")
+    if spec.get("mode") not in ("sweep", plotcmd.FUNCTION_MODE):
+        raise PlotExportError(f"only sweep and function plots export as figures, not {spec.get('mode')}")
     steps = int((spec.get("x") or {}).get("steps") or plotcmd.DEFAULT_STEPS)
     figure = plotview.figure_from_spec(conn, spec, name=resolved.name, view_id=resolved.view_id,
                                        max_points=steps + 1)

@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 
 from core import calc
 from core import derivations
+from core import dimensions as dimensions_repo
+from core import functions as functions_repo
 from core import images as images_repo
 from core import latex_vocab
 from core.calc import format_value  # noqa: F401 -- re-exported
@@ -43,6 +45,9 @@ from core.motes import list_motes
 from core.relationships import list_relationships
 from core.simulation import expression_context, garden_freedoms
 from core.units import UNITS_KEY, format_unit, parse_units_property
+
+# `Tb(3)`, `P(r, 0)`: an expression that is one call and nothing else.
+_LONE_CALL_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*$")
 
 NAME_KEY = "name"
 
@@ -633,14 +638,43 @@ def _value(
         number = evaluate_expression(node.expression, context).value()
     except (FormulaError, ZeroDivisionError) as e:
         return ValueResult(f"?{node.expression}", None, str(e))
-    # An evaluated expression is in base SI (core/formula.py normalizes
-    # every read), so a unit asked for here is the unit to *present* it in
-    # and there is nothing to convert from. Significant figures still
-    # apply, which is the half of a format an expression can honour.
     return ValueResult(
-        calc.Quantity(number, node.format.unit).text(node.format.figures), number,
+        _expression_quantity(node, number, mote_id, motes, garden).text(node.format.figures),
+        number,
         note="; ".join(f"{limit.function}: limit {limit.approach}" for limit in limits),
     )
+
+
+def _expression_quantity(
+    node: modoc.Value, number: float, mote_id: str, motes: list[Mote], garden: _Garden,
+) -> calc.Quantity:
+    """An evaluated expression, which is in base SI (core/formula.py
+    normalizes every read), in the unit it is shown in: the one asked for,
+    else a lone call's declared result unit (`Tb(0)` in `Tb`'s degF), else
+    none. Converted from the base unit of what the expression measures;
+    when that cannot be told, the number is shown as it came, labelled with
+    the unit asked for, as before."""
+    target = node.format.unit or _result_unit(node.expression, motes)
+    if not target:
+        return calc.Quantity(number)
+    dimension = simulation.expression_dimension_of(
+        garden.properties, garden.relationships, node.expression, anchor=mote_id)
+    base = dimensions_repo.unit_named(dimension)
+    if base is None:
+        return calc.Quantity(number, target)
+    return calc.Quantity(number, base).converted(target)
+
+
+def _result_unit(expression: str, motes: list[Mote]) -> str | None:
+    """The declared result unit of the function `expression` calls, when it
+    is nothing but one call."""
+    match = _LONE_CALL_RE.match(expression)
+    if match is None:
+        return None
+    for mote in motes:
+        if mote.properties.get("name") == match.group(1) and functions_repo.is_function(mote.properties):
+            return functions_repo.result_unit(mote.properties)
+    return None
 
 
 def _not_solved(expression: str, live: "simulation.LiveGarden") -> ValueResult:

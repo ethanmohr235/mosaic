@@ -541,6 +541,13 @@ reactor.flux_center = phi(0)
   qualified name (`reactor.k`) reaches any mote, as usual. A parameter
   shadows `t`, `pi` and `e` inside the body, so `decay(t) = exp(-k * t)`
   means the parameter.
+- **The value's unit may be declared too**, written after the parameters:
+  `Tb(z [in]) [degF] = core.Ti + …`. It is the `units` entry under the
+  body's own key, `function` (so `function` cannot be a parameter's
+  name). Values still travel in base SI; the declared unit is how one is
+  shown: `\val{Tb(0)}` is in degF, and so is a plotted `Tb(z)`. The
+  worksheet refuses a declaration the body's dimension contradicts, and
+  the unit check uses it for a call whose body cannot tell its own.
 - **A parameter's unit is the function mote's ordinary `units` entry.** It
   says what a *bare number* passed to that parameter means: `phi(0)` is
   0 cm. A number with no declared unit is base SI. An argument that reads

@@ -849,6 +849,29 @@ What the build decided within the settled plan above.
   run is always solved from tick 0, and a failing tick ends it as a failed
   span. `fit` and `--data` over time are not done.
 
+### Settled for function plots (2026-11-16)
+
+- **`plot ‹expr›… vs ‹var› lo:hi`** plots expressions in a free variable:
+  `plot P(r, 0) P(r, 20) vs r 0:51`, `plot "sin(x)/x" vs x 1:20`. A y that
+  is not a plain `m.k` makes the line a function plot; the name after
+  `vs` is the variable, and a range is required. A call typed unquoted
+  keeps its arguments together.
+- **One solve, then evaluation.** The garden is solved once (a live
+  solve, as documents read it) and each expression is evaluated at every
+  x with the variable bound, as a call binds a parameter. A 0/0 at a call
+  takes its limit; a point that fails is a hole and a failed span.
+- **Units.** x is measured in the unit of the function parameter it is
+  passed straight into (`r` into `P(r [cm], …)` is in cm), read again on
+  every draw; two parameters of different dimensions are refused. y is a
+  lone call's declared result unit (`Tb(z [in]) [degF] = …`), else the
+  base-SI unit of what the expression measures.
+- **The spec** is `{"mode": "function", "x": {"variable", "lo", "hi",
+  "steps"}, "series": [{"id", "expression"}]}`, drawn as a sweep-shaped
+  figure, so the pane, `plot save`, `\graph{…}`, csv and the publication
+  export (± band included) need nothing new.
+- **Not yet:** knobs and scenarios on the line, surfaces (`by`), `--data`,
+  and one plot mixing a function curve with swept properties.
+
 ### Settled for live documents (2026-10-19)
 
 - **Documents read a live solve** (`core/simulation.py::live_garden`;

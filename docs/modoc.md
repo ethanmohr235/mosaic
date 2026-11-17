@@ -189,9 +189,14 @@ versus stored units*).
 
 Significant figures keep their trailing zeros, because that is the claim:
 `2.50` says the hundredths place was determined and `2.5` says it was not.
-An expression rather than a plain property is evaluated in base SI, so a
-unit asked for there is the unit to present it in and there is nothing to
-convert from; the figure count still applies.
+An expression rather than a plain property is evaluated in base SI, and a
+unit asked for there is converted to from the base unit of what the
+expression measures: `\val{bd.H * 2}{ft}` with `bd.H = 144 in` reads
+`24 ft`. With no unit asked for, a lone call to a function that declares
+its value's unit (`Tb(z [in]) [degF] = …`) is shown in that unit, and any
+other expression as a plain number. When the expression's dimension
+cannot be told, the number is shown as evaluated, labelled with the unit
+asked for. The figure count always applies.
 
 An expression that is a bare property name the mote actually has is
 returned as-is, whatever its type -- this is what makes `\val{due}` a

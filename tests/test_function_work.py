@@ -108,3 +108,19 @@ def test_the_tex_export_says_the_limit_and_sets_the_call(conn, reactor):
     assert r"\phi\left(0\right)" in bundle.tex
     assert r"\emph{(phi: limit r \ensuremath{\to} 0 cm)}" in bundle.tex
     assert bundle.problems == ()
+
+
+# ---- a result unit and a unit asked of an expression ----
+
+def test_val_shows_a_lone_call_in_its_declared_result_unit(conn):
+    worksheet.apply(conn, "core.T = 500 degF\nTb(z [in]) [degF] = core.T + 0 * z")
+    _note, _document, resolution = resolved(conn, r"\val{Tb(3)} and \val{Tb(3)}{degC}")
+    assert [v.text for v in resolution.values.values()] == ["500 degF", "260 degC"]
+
+
+def test_a_unit_asked_of_an_expression_converts_it(conn):
+    # An expression evaluates in base SI: 144 in comes back as 3.6576 m,
+    # and {in} must convert it back, not label metres as inches.
+    worksheet.apply(conn, "bd.H = 144 in\nbd.n = 2")
+    _note, _document, resolution = resolved(conn, r"\val{bd.H * 1}{in} \val{bd.H * bd.n}{ft}")
+    assert [v.text for v in resolution.values.values()] == ["144 in", "24 ft"]

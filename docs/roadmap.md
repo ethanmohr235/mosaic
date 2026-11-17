@@ -203,7 +203,15 @@ Each one was a separate act of filing. That lesson became a rule in
   is drawn by core, PDF is the pgfplots figure compiled by tectonic; the
   theory curve carries the propagated ± as a shaded band, the data points
   their own `uncertainty` as bars; the overlay is a flag on the line, not
-  part of a saved plot. Sweeps only.
+  part of a saved plot. Sweeps and function plots.
+- **Function plots (done 2026-11-16):** `plot P(r, 0) vs r 0:51` draws an
+  expression in a free variable, from one solve. **Decided:** a call with
+  a free variable named after `vs`, any expression allowed; x takes the
+  unit of the parameter it feeds; a function may declare its value's unit
+  (`Tb(z [in]) [degF] = …`), which `\val` and plots show. Save, `\graph`
+  and export work. **Still to do:** knobs and scenarios on the line,
+  surfaces, `--data`, and mixing function curves with swept properties.
+  See `console.md` -> *Settled for function plots*.
 
 ### Across gardens
 - **Cross-garden search:** read-only across every `.db`, and results open

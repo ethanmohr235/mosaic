@@ -40,7 +40,9 @@ from core.formula import (
     evaluate_equation,
     relation_operator,
 )
-from core.dimensions import DimensionContext, check_equation, infer_unit
+from core.dimensions import (
+    DimensionContext, check_equation, expression_dimension, function_problem, infer_unit,
+)
 from core.entities import Relationship
 from core.calculus import Derivative, Integral
 from core.limits import Limit
@@ -521,12 +523,22 @@ def live_garden(
     leave it (see LiveGarden). Never raises: a solve that stops short
     still lays over what it found, and `error` says why it stopped."""
     stored = {m.id: m.properties for m in list_motes(conn)}
-    view = _build_view(
-        scenarios_repo.overlay(
-            scenarios_repo.apply(stored, _resolve_scenario(conn, scenario)), overrides or {}),
-        list_relationships(conn),
-    )
-    pairs = _rule_instances(rules_repo.list_rules(conn), view)
+    overlaid = scenarios_repo.overlay(
+        scenarios_repo.apply(stored, _resolve_scenario(conn, scenario)), overrides or {})
+    return live_garden_of(stored, overlaid, list_relationships(conn),
+                          rules_repo.list_rules(conn), solver)
+
+
+def live_garden_of(
+    stored: dict[str, dict], solving: dict[str, dict], relationships: list[Relationship],
+    rules: list[rules_repo.Rule], solver: str = _DEFAULT_SOLVER,
+) -> LiveGarden:
+    """live_garden() from a garden already read: `solving` is what the
+    solve sees (scenario and overrides laid over), `stored` what its values
+    are laid over. The same two for a caller that wants its overrides to
+    show -- a function plot reading a knobbed given directly."""
+    view = _build_view(solving, relationships)
+    pairs = _rule_instances(rules, view)
     model_cache: dict[str, PropertyProvider] = {}
     journal, error = _journal_solve(view, pairs, solver, model_cache)
     determined = {v for d in journal.derivations for v in d.values}
@@ -1677,6 +1689,25 @@ def dimension_problems(
     worksheet checks the garden a sheet would leave (core/worksheet.py)."""
     view = _build_view(properties, relationships)
     return [check_equation(text, _dimension_context(view, {}, mote_id)) for mote_id, text in equations]
+
+
+def function_unit_problems(
+    properties: dict[str, dict], relationships: list[Relationship], function_ids: list[str],
+) -> list[str | None]:
+    """For each function mote, whether its body contradicts the unit it
+    declares for its value (core/dimensions.py's function_problem)."""
+    view = _build_view(properties, relationships)
+    return [function_problem(fid, _dimension_context(view, {}, fid)) for fid in function_ids]
+
+
+def expression_dimension_of(
+    properties: dict[str, dict], relationships: list[Relationship], text: str,
+    bindings: dict | None = None, anchor: str = "",
+):
+    """What `text` measures against this garden, free names bound to the
+    dimensions in `bindings` -- a plotted expression's y axis."""
+    view = _build_view(properties, relationships)
+    return expression_dimension(text, _dimension_context(view, {}, anchor), bindings)
 
 
 def units_for(

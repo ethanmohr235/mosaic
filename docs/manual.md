@@ -54,6 +54,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `template ‹mote› ‹species›` | Make a mote its species' template |
 | `plot ‹m.y›… vs ‹m.x› [lo:hi]` | Plot, re-solving at each point (nothing written) |
 | `plot ‹m.y›… vs t [lo:hi]` | A run drawn: the ticks `lo`–`hi` (whole, from 0; default `0:50`) of the run `sim` walks, so `prev()` and `t` give curves. Knobs, scenarios, save, export and `\graph` work as for any sweep; `fit` and `--data` don't take it yet |
+| `plot ‹expr›… vs ‹var› lo:hi` | **Function plot**: expressions in a free variable (`plot P(r, 0) Pz(r) vs r 0:51`, `plot "sin(x)/x" vs x 1:20`). One solve, then evaluated along the range. `var` takes the unit of the parameter it is passed to (`r [cm]`); y is a lone call's result unit, else base SI. Save, export and `\graph` work; `--set`, `--scenario`, `by`, `--data` and mixing with `m.y` series don't yet |
 | `plot ‹m.z› vs ‹m.x› lo:hi by ‹m.y› lo:hi` | Surface |
 | `plot ‹key› vs ‹key› --across` | One dot per mote with both keys |
 | `plot "‹saved›"` / `plot #id` | Open a saved plot |
@@ -230,6 +231,7 @@ Worksheet lines:
 | `bd.Ax + bd.Bx == 0` | Relation: frees nothing |
 | `bd.s <= 250` · `b.R1 + b.R2 ?= b.W` | Check: evaluated, never solved |
 | `phi(r [cm]) = A * sin(B * r) / r` | Function |
+| `Tb(z [in]) [degF] = …` | …and declare its value's unit (refused if the body disagrees; `\val{Tb(0)}` and plots show it) |
 | `m.Q = integrate(phi, 0, m.R)` · `m.g = deriv(phi, m.r)` | Integral / derivative of a function (numeric) |
 | `integrate(f, 'y', 0, 1, m.x)` · `deriv(f, 'y', m.y, m.x)` | …along a named parameter, the others held |
 | `… ! ΣFx` | Names the rule |

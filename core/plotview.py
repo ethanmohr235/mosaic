@@ -34,12 +34,19 @@ broken figure in it must still render the other nineteen. A missing
 view, an unreadable specification, a sweep that blows up -- each comes
 back as a Figure carrying an `error` and no points.
 """
+import ast
+import dataclasses
 import logging
+import math
 import sqlite3
 from dataclasses import dataclass, field
 
+from core import dimensions as dimensions_repo
+from core import functions as functions_repo
+from core import scenarios as scenarios_repo
 from core import simulation
 from core import units as units_repo
+from core.formula import FormulaError, Ratio, evaluate_expression, parse_expression
 from core.entities import Mote
 from core.motes import list_motes
 from core.sweep import (
@@ -66,7 +73,9 @@ NOTE_POINTS = 60
 # A surface is the square of a sweep, so it gets a coarser grid still.
 NOTE_SURFACE_POINTS = 24
 
-_MODES = ("sweep", "surface", "correlate")
+# "function" is a spec's mode only: it draws as a sweep-shaped Figure.
+FUNCTION_MODE = "function"
+_MODES = ("sweep", "surface", "correlate", FUNCTION_MODE)
 
 
 @dataclass(frozen=True)
@@ -262,6 +271,8 @@ def figure_from_spec(
             return _surface(spec, name, view_id, directory, ground, max_points, should_cancel)
         if mode == "correlate":
             return _correlate(spec, name, view_id, directory, ground)
+        if mode == FUNCTION_MODE:
+            return _function(spec, name, view_id, ground, motes, max_points, should_cancel)
         return _sweep(spec, name, view_id, directory, ground, max_points, should_cancel)
     except Exception as e:                      # noqa: BLE001 -- see the module docstring
         logger.warning("plot %r failed to draw: %s", name or spec, e)
@@ -382,6 +393,185 @@ def _sweep(
         error=None if any(any(p for p in s.points) for s in series)
         else "nothing solved across this range",
     )
+
+
+def check_expression(text: str) -> None:
+    """Raise ValueError when `text` is not an expression a formula could
+    hold -- a plot line refuses it as it is typed."""
+    try:
+        parse_expression(text)
+    except FormulaError as e:
+        raise ValueError(str(e)) from None
+
+
+def variable_unit(motes: list[Mote], variable: str, expressions: list[str]) -> str | None:
+    """The unit a function plot's free variable is measured in: the one
+    declared by every function parameter it is passed straight into
+    (`r` in `P(r, 0)` is P's first parameter's). None when it feeds none
+    that declares one -- a plain number, read as base SI. Raises
+    ValueError when two such parameters measure different things."""
+    functions: dict[str, Mote] = {}
+    for mote in motes:
+        name = mote.properties.get("name")
+        if isinstance(name, str) and functions_repo.is_function(mote.properties):
+            functions.setdefault(name, mote)
+    found: list[tuple[str, str]] = []
+    for text in expressions:
+        try:
+            tree = parse_expression(text)
+        except FormulaError:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            mote = functions.get(node.func.id)
+            if mote is None:
+                continue
+            try:
+                parameters = functions_repo.parameters_of(mote.properties)
+            except functions_repo.FunctionDefinitionError:
+                continue
+            declared = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
+            for parameter, argument in zip(parameters, node.args):
+                if isinstance(argument, ast.Name) and argument.id == variable and declared.get(parameter):
+                    found.append((declared[parameter], f"{node.func.id}()'s {parameter}"))
+    if not found:
+        return None
+    first, where = found[0]
+    for unit, other in found[1:]:
+        try:
+            same = units_repo.dimension_of(unit) == units_repo.dimension_of(first)
+        except units_repo.UnitError:
+            same = True
+        if not same:
+            raise ValueError(f"{variable} is {first} as {where} but {unit} as {other} -- "
+                             f"these measure different things, so one axis cannot be both")
+    return first
+
+
+@dataclass(frozen=True)
+class _At:
+    """One x of a function plot, for _spans: where it failed, and why."""
+    x: float
+    error: str | None
+
+
+def _function(
+    spec: dict, name: str, view_id: str | None, ground: Ground, motes: list[Mote],
+    max_points: int, should_cancel=None,
+) -> Figure:
+    """A function plot: the garden solved once, under the spec's knobs, and
+    each expression evaluated along the free variable with it bound
+    (core/formula.py's Context.bindings, as a call binds a parameter).
+    Drawn as a sweep, so everything that draws a sweep draws this."""
+    x = spec.get("x") or {}
+    variable = x.get("variable")
+    series_specs = [s for s in spec.get("series") or []
+                    if isinstance(s, dict) and isinstance(s.get("expression"), str)]
+    try:
+        lo, hi = float(x["lo"]), float(x["hi"])
+        steps = int(x.get("steps") or NOTE_POINTS)
+    except (TypeError, ValueError, KeyError):
+        lo = hi = steps = None
+    if not variable or not series_specs or lo is None or lo == hi:
+        return Figure(name=name, view_id=view_id,
+                      error="this view has no variable, range or expression saved on it")
+    x_unit = variable_unit(motes, variable, [s["expression"] for s in series_specs])
+
+    solving = scenarios_repo.overlay(ground.properties, _overrides(spec))
+    live = simulation.live_garden_of(solving, solving, ground.relationships, ground.rules,
+                                     spec.get("solver", "linear"))
+    base = simulation.expression_context(live.properties, ground.relationships, "")
+    count = max(1, min(steps, max_points - 1))
+    xs = [lo + (hi - lo) * i / count for i in range(count + 1)]
+    x_dimension = units_repo.dimension_of(x_unit) if x_unit else dimensions_repo.LITERAL
+
+    rows, failures = [], [None] * len(xs)
+    for index, s in enumerate(series_specs):
+        expression = s["expression"]
+        y_unit = _expression_unit(expression, live.properties, ground.relationships, motes,
+                                  variable, x_dimension)
+        points: list[list[float] | None] = []
+        for i, at in enumerate(xs):
+            if should_cancel is not None and should_cancel():
+                return Figure(mode="sweep", name=name, view_id=view_id, cancelled=True)
+            bound = units_repo.to_base(at, x_unit) if x_unit else at
+            context = dataclasses.replace(base, bindings={variable: Ratio.number(bound)})
+            try:
+                value = evaluate_expression(expression, context).value()
+                shown = units_repo.from_base(value, y_unit) if y_unit else value
+                if not math.isfinite(shown):
+                    raise ValueError("not a finite number")
+            except (FormulaError, ZeroDivisionError, ValueError, OverflowError, TypeError) as e:
+                points.append(None)
+                failures[i] = failures[i] or f"{expression} at {variable} = {at:g}: {e}"
+                continue
+            points.append([at, shown])
+        rows.append({
+            "id": s.get("id") or f"s{index}",
+            "label": s.get("label") or expression,
+            "unit": units_repo.format_unit(y_unit) if y_unit else None,
+            "dimension": _dimension_text(y_unit),
+            "points": points,
+            "ghost": [],
+        })
+
+    log = spec.get("yScale") == "log"
+    bands = _bands(rows, log)
+    series = [
+        FigureSeries(id=r["id"], label=r["label"], unit=r["unit"], dimension=r["dimension"],
+                     band=next((i for i, b in enumerate(bands) if r["id"] in b.series), 0),
+                     points=r["points"])
+        for r in rows
+    ]
+    x_label = variable + (f" ({units_repo.format_unit(x_unit)})" if x_unit else "")
+    at_points = [_At(at, failure) for at, failure in zip(xs, failures)]
+    return Figure(
+        mode="sweep", name=name, view_id=view_id,
+        x_label=x_label,
+        y_label=bands[0].label if bands else "value",
+        y_scale="log" if log else "linear",
+        x_lo=lo, x_hi=hi,
+        y_lo=bands[0].lo if bands else 0.0, y_hi=bands[0].hi if bands else 1.0,
+        bands=bands, series=series,
+        failed=_spans(at_points, lambda p: p.error is not None, lambda p: p.error),
+        solves=1,
+        error=None if any(any(p for p in s.points) for s in series)
+        else (live.error and f"the garden does not solve: {live.error}")
+        or next((f for f in failures if f), "nothing evaluated across this range"),
+    )
+
+
+def _expression_unit(
+    expression: str, properties: dict[str, dict], relationships, motes: list[Mote],
+    variable: str, x_dimension,
+) -> str | None:
+    """The unit a plotted expression is shown in: a lone call's declared
+    result unit, else the name of what the expression measures."""
+    try:
+        tree = parse_expression(expression)
+    except FormulaError:
+        return None
+    if isinstance(tree, ast.Call) and isinstance(tree.func, ast.Name):
+        for mote in motes:
+            if (mote.properties.get("name") == tree.func.id
+                    and functions_repo.is_function(mote.properties)):
+                declared = functions_repo.result_unit(mote.properties)
+                if declared and units_repo.is_unit(declared):
+                    return declared
+                break
+    dimension = simulation.expression_dimension_of(
+        properties, relationships, expression, {variable: x_dimension})
+    return dimensions_repo.unit_named(dimension)
+
+
+def _dimension_text(unit_name: str | None) -> str | None:
+    if not unit_name:
+        return None
+    try:
+        return units_repo.describe(units_repo.dimension_of(unit_name))
+    except units_repo.UnitError:
+        return None
 
 
 def _surface(

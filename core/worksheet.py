@@ -140,9 +140,12 @@ _TARGET_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*$")
 # `bd.Ax [N]`: the unit a `=` line declares for the value it solves for.
 _DECLARED_RE = re.compile(r"^(?P<target>[^\[\]]+?)\s*\[\s*(?P<unit>[^\[\]]*?)\s*\]\s*$")
 # `phi(r [cm], z) = body`: a call on the left of a single `=`. Unambiguous,
-# since an assignment's left side is otherwise always `mote.key`.
+# since an assignment's left side is otherwise always `mote.key`. An
+# optional `[unit]` after the parameters declares the unit of its value:
+# `Tb(z [in]) [degF] = body`.
 _FUNCTION_RE = re.compile(
-    r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<parameters>[^()]*)\)\s*=(?!=)\s*(?P<body>.+)$")
+    r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<parameters>[^()]*)\)"
+    r"(?:\s*\[\s*(?P<unit>[^\[\]]*?)\s*\])?\s*=(?!=)\s*(?P<body>.+)$")
 _PARAMETER_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*(?:\[\s*(?P<unit>[^\]]+?)\s*\])?$")
 
 
@@ -330,9 +333,17 @@ def _function(number: int, text: str, match: re.Match) -> Line:
     names = [p for p, _unit in parameters]
     if len(set(names)) != len(names):
         raise FormulaError(f"{name}() repeats a parameter name")
+    if functions_repo.RESULT_UNIT_KEY in names:
+        raise FormulaError(f"{functions_repo.RESULT_UNIT_KEY!r} is reserved and cannot be a parameter")
+    result = match.group("unit")
+    if result is not None and not result:
+        raise FormulaError(f"`[]` names no unit -- write `{name}(…) [W] = …`, or leave the brackets off")
+    if result and not units_repo.is_unit(result):
+        raise FormulaError(f"{result!r} is not a unit ({name}'s value)")
     body = match.group("body").strip()
     parse_expression(body)  # raises FormulaError, which _line() reports
-    return Line(number, text, FUNCTION, mote=name, relation=body, parameters=tuple(parameters))
+    return Line(number, text, FUNCTION, mote=name, relation=body, parameters=tuple(parameters),
+                unit=result or None)
 
 
 def _as_number(rhs: str) -> tuple[float | int | None, str | None]:
@@ -517,6 +528,9 @@ def _write_function(conn, index, created: list[str], line: Line) -> str:
         unit_map.pop(parameter, None)
         if unit:
             unit_map[parameter] = unit
+    unit_map.pop(functions_repo.RESULT_UNIT_KEY, None)
+    if line.unit:
+        unit_map[functions_repo.RESULT_UNIT_KEY] = line.unit
     new = {
         functions_repo.FUNCTION_KEY: line.relation,
         functions_repo.PARAMETERS_KEY: [p for p, _unit in line.parameters],
@@ -654,13 +668,19 @@ def _unit_problems(conn: sqlite3.Connection, sheet: Worksheet) -> dict[int, str]
     functions included -- so a line is judged the same typed as applied.
     Not enough units to tell is no problem, as for `check_equation`."""
     lines = [line for line in sheet.equations if line.unit]
-    if not lines:
+    functions = [line for line in sheet.functions if line.unit]
+    if not lines and not functions:
         return {}
     properties, ids = _as_applied(conn, sheet)
+    relationships = rel_repo.list_relationships(conn)
     found = simulation.dimension_problems(
-        properties, rel_repo.list_relationships(conn),
-        [(ids[line.mote], line.relation) for line in lines])
-    return {line.number: "; ".join(problems) for line, problems in zip(lines, found) if problems}
+        properties, relationships, [(ids[line.mote], line.relation) for line in lines])
+    refused = {line.number: "; ".join(problems) for line, problems in zip(lines, found) if problems}
+    for line, problem in zip(functions, simulation.function_unit_problems(
+            properties, relationships, [ids[line.mote] for line in functions])):
+        if problem:
+            refused[line.number] = f"{line.mote}(): {problem}"
+    return refused
 
 
 def _as_applied(conn: sqlite3.Connection, sheet: Worksheet) -> tuple[dict[str, dict], dict[str, str]]:
@@ -688,6 +708,9 @@ def _as_applied(conn: sqlite3.Connection, sheet: Worksheet) -> tuple[dict[str, d
         props[functions_repo.FUNCTION_KEY] = line.relation
         props[functions_repo.PARAMETERS_KEY] = [p for p, _unit in line.parameters]
         units(props).update({p: unit for p, unit in line.parameters if unit})
+        units(props).pop(functions_repo.RESULT_UNIT_KEY, None)
+        if line.unit:
+            units(props)[functions_repo.RESULT_UNIT_KEY] = line.unit
     for line in sheet.givens:
         props = mote(line.mote)
         props[line.key] = line.value
@@ -860,7 +883,9 @@ def _render_functions(motes: dict[str, Mote]) -> list[tuple[str, str]]:
         unit_map = units_repo.parse_units_property(mote.properties.get(units_repo.UNITS_KEY))
         shown = ", ".join(
             f"{p} [{unit_map[p]}]" if p in unit_map else p for p in parameters)
-        lines.append((name, f"{name}({shown}) {ASSIGN} {functions_repo.body_of(mote.properties)}"))
+        result = functions_repo.result_unit(mote.properties)
+        declared = f" [{result}]" if result else ""
+        lines.append((name, f"{name}({shown}){declared} {ASSIGN} {functions_repo.body_of(mote.properties)}"))
     return lines
 
 

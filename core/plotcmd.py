@@ -14,6 +14,12 @@ line, and a layout that restores the line restores the plot:
     plot export csv|png|svg|pdf|tex [path]
     plot bd.sigma vs bd.l 4:24 --data sigma vs l --from bench.csv
                                                  measured points over the curve
+    plot P(r, 0) Pz(r) vs r 0:51                 a function: expressions in a
+                                                 free variable, solved once
+
+A y that is not a plain `m.k` makes the line a *function plot*: each y is
+an expression, `vs` names its free variable, and core/plotview.py solves
+the garden once and evaluates the expressions along the range.
 
 Names are garden-scope names (`bd.l`, the worksheet's), or `#id.key`.
 `--hide ‹m.k›` keeps a series in the legend without drawing it.
@@ -32,6 +38,7 @@ import sqlite3
 from dataclasses import dataclass, replace
 from typing import Sequence
 
+from core import functions as functions_repo
 from core import knobs as knobs_repo
 from core import motes as motes_repo
 from core import scenarios as scenarios_repo
@@ -69,6 +76,17 @@ _NUMBER = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 _RANGE_RE = re.compile(rf"^({_NUMBER}):({_NUMBER})$")
 
 PLOT, SAVED = "plot", "saved"
+
+# A function plot's spec mode (core/plotview.py::_function).
+FUNCTION_MODE = "function"
+_PLAIN_REF_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
+_VARIABLE_RE = re.compile(r"^[A-Za-z_]\w*$")
+
+
+def is_expression(text: str) -> bool:
+    """Whether a y on a plot line is an expression to evaluate rather than
+    a property to read: anything but `m.k`, `#id.key` or a bare key."""
+    return not text.startswith("#") and not _PLAIN_REF_RE.match(text)
 
 
 def usage() -> str:
@@ -108,6 +126,8 @@ class PlotLine:
     def mode(self) -> str:
         if self.across:
             return "correlate"
+        if any(is_expression(y) for y in self.ys):
+            return FUNCTION_MODE
         return "surface" if self.by else "sweep"
 
     def text(self) -> str:
@@ -182,7 +202,22 @@ def parse_text(command: str) -> PlotCommand:
     return parse(tokens[1:])
 
 
+def _rejoined(tokens: Sequence[str]) -> list[str]:
+    """Tokens with a call's arguments put back together: `P(r, 0)` typed
+    unquoted reaches here as `P(r,` and `0)`."""
+    out: list[str] = []
+    depth = 0
+    for token in tokens:
+        if depth > 0:
+            out[-1] += " " + token
+        else:
+            out.append(token)
+        depth += token.count("(") - token.count(")")
+    return out
+
+
 def parse_line(tokens: Sequence[str]) -> PlotLine:
+    tokens = _rejoined(tokens)
     groups: list[list[str]] = [[]]
     keywords: list[str] = []
     fields: dict = {"sets": [], "hide": []}
@@ -239,10 +274,12 @@ def parse_line(tokens: Sequence[str]) -> PlotLine:
     across = bool(fields.get("across"))
     if across and (x_range or by or len(ys) != 1):
         raise CommandError("--across takes two keys and no range: plot ‹key› vs ‹key› --across")
-    if x == TIME:
+    if x == TIME and not any(is_expression(y) for y in ys):
         if by or across:
             raise CommandError("time is the x axis of a sweep: plot ‹m.y›… vs t [lo:hi], no `by` or --across")
         _time_range(x_range)
+    if not across and any(is_expression(y) for y in ys):
+        _check_function_line(ys, x, x_range, by, sets, fields)
     return PlotLine(
         ys=ys, x=x, range=x_range, by=by, by_range=by_range, across=across,
         steps=fields.get("steps"), sets=sets, scenario=fields.get("scenario"),
@@ -250,6 +287,27 @@ def parse_line(tokens: Sequence[str]) -> PlotLine:
         data=fields.get("data"), source=fields.get("source"),
     )
 
+
+
+def _check_function_line(ys, x, x_range, by, sets, fields) -> None:
+    """What a function plot does not take yet, each said plainly."""
+    plain = [y for y in ys if not is_expression(y)]
+    if plain:
+        raise CommandError(
+            f"{plain[0]} is a property and the rest are expressions -- a plot is one or the "
+            f"other for now: plot ‹expr›… vs ‹variable› lo:hi, or plot ‹m.y›… vs ‹m.x›")
+    if not _VARIABLE_RE.match(x):
+        raise CommandError(
+            f"after `vs`, a function plot names its free variable (e.g. `r`), not {x!r}")
+    if by:
+        raise CommandError("a function plot is one curve per expression -- no `by` surface yet")
+    if x_range is None:
+        raise CommandError(f"a function plot needs a range for {x}: e.g. vs {x} 0:10")
+    refused = [flag for flag, present in (
+        (SET_FLAG, bool(sets)), (SCENARIO_FLAG, bool(fields.get("scenario"))),
+        (DATA_FLAG, bool(fields.get("data")))) if present]
+    if refused:
+        raise CommandError(f"{refused[0]} doesn't work on a function plot yet")
 
 
 def _flag(fields: dict, flag: str, value: str) -> None:
@@ -469,10 +527,9 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
             raise CommandError("this saved plot's specification is unreadable")
         return Resolved(
             spec, name=plotview.name_of(view), view_id=view.id,
-            series=tuple(SeriesRef(s.get("id") or f"s{i}", garden.text_of(s["mote"], s["key"]), False)
+            series=tuple(SeriesRef(s.get("id") or f"s{i}", _series_text(garden, s), False)
                          for i, s in enumerate(spec.get("series") or [])
-                         if isinstance(s, dict) and s.get("mote") and s.get("key")
-                         and s["mote"] in garden.by_id),
+                         if _series_text(garden, s) is not None),
             knobs=tuple(_knob(garden, garden.text_of(k["mote"], k["key"]), k["mote"], k["key"],
                               float(k["value"]))
                         for k in spec.get("knobs") or []
@@ -492,6 +549,9 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
     if line.across:
         spec["xKey"], spec["yKey"] = line.x, line.ys[0]
         return Resolved(spec, knobs=knobs)
+
+    if line.mode == FUNCTION_MODE:
+        return _resolve_function(garden, line, spec)
 
     if line.x == TIME:
         return _resolve_time(garden, line, spec, scenario_id, knobs)
@@ -519,6 +579,43 @@ def resolve(conn: sqlite3.Connection, line: PlotLine) -> Resolved:
     return Resolved(spec, series=tuple(legend), knobs=knobs,
                     x_pinned=x_key in freedoms.get(x_mote, set()),
                     overlay=(*line.data, line.source) if line.data else None)
+
+
+def _series_text(garden: _Garden, series) -> str | None:
+    """How a saved series is written on a line: its expression, or its
+    property's ref -- None for one naming a mote that is gone."""
+    if not isinstance(series, dict):
+        return None
+    if isinstance(series.get("expression"), str):
+        return series["expression"]
+    if series.get("mote") in garden.by_id and series.get("key"):
+        return garden.text_of(series["mote"], series["key"])
+    return None
+
+
+def _resolve_function(garden: _Garden, line: PlotLine, spec: dict) -> Resolved:
+    """`plot P(r, 0) vs r 0:51`: expressions in a free variable. Each is
+    parsed now, and the variable's unit read off the garden's functions,
+    so a line that could never draw is refused as it is typed; the unit
+    itself is not saved -- the figure reads it again as the garden stands."""
+    lo, hi = line.range
+    spec["x"] = {"variable": line.x, "lo": lo, "hi": hi, "steps": line.steps or DEFAULT_STEPS}
+    series, legend = [], []
+    for index, expression in enumerate(line.ys):
+        try:
+            plotview.check_expression(expression)
+        except ValueError as e:
+            raise CommandError(f"{expression}: {e}") from None
+        series_id = f"s{index}"
+        legend.append(SeriesRef(series_id, expression, expression in line.hide))
+        if expression not in line.hide:
+            series.append({"id": series_id, "expression": expression})
+    try:
+        plotview.variable_unit(garden.motes, line.x, list(line.ys))
+    except ValueError as e:
+        raise CommandError(str(e)) from None
+    spec["series"] = series
+    return Resolved(spec, series=tuple(legend))
 
 
 def _resolve_time(garden: _Garden, line: PlotLine, spec: dict, scenario_id, knobs) -> Resolved:
@@ -551,6 +648,12 @@ def line_of(conn: sqlite3.Connection, spec: dict) -> PlotLine:
     scenario_id = spec.get("scenario") or next((s.get("scenario") for s in series if s.get("scenario")), None)
     scenario = next((s.name for s in scenarios_repo.list_scenarios(conn) if s.mote_id == scenario_id), None)
     mode = spec.get("mode") or "sweep"
+    if mode == FUNCTION_MODE:
+        x = spec.get("x") or {}
+        return PlotLine(ys=tuple(s["expression"] for s in spec.get("series") or []
+                                 if isinstance(s, dict) and s.get("expression")),
+                        x=x.get("variable"), range=(float(x["lo"]), float(x["hi"])),
+                        steps=int(x.get("steps") or DEFAULT_STEPS), log=log)
     if mode == "correlate":
         return PlotLine(ys=(spec.get("yKey") or "",), x=spec.get("xKey"), across=True,
                         sets=sets, scenario=scenario, log=log)
@@ -624,6 +727,8 @@ def choices(conn: sqlite3.Connection, rest: str) -> list[Choice]:
     if before == STEPS_FLAG:
         return [Choice(str(DEFAULT_STEPS))]
     known = refs(conn)
+    if VS not in done:
+        known = known + functions(conn)
     if not done:
         saved = [Choice(plotview.name_of(v), "saved plot")
                  for v in plotview.list_views(motes_repo.list_motes(conn))]
@@ -637,6 +742,22 @@ def choices(conn: sqlite3.Connection, rest: str) -> list[Choice]:
     if before == VS:
         keywords.append(Choice(TIME, "time: the ticks of a run (0:50)"))
     return keywords + known
+
+
+def functions(conn: sqlite3.Connection) -> list[Choice]:
+    """Every function mote as a call to plot: `phi(r)`, written with its
+    own parameter names, for a function plot (`plot phi(r) vs r 0:30`)."""
+    rows = []
+    for mote in motes_repo.list_motes(conn):
+        name = mote.properties.get("name")
+        if not isinstance(name, str) or not functions_repo.is_function(mote.properties):
+            continue
+        try:
+            parameters = functions_repo.parameters_of(mote.properties)
+        except functions_repo.FunctionDefinitionError:
+            continue
+        rows.append(Choice(f"{name}({', '.join(parameters)})", "function"))
+    return sorted(rows, key=lambda c: c.value.casefold())
 
 
 def refs(conn: sqlite3.Connection) -> list[Choice]:
