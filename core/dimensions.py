@@ -147,6 +147,11 @@ class DimensionContext:
     # A mote's properties, for reading a function mote's body and
     # parameters at a call. Defaults to nothing, so no call resolves.
     properties: Callable[[str], dict] = lambda mote_id: {}
+    # For unit inference: which keys the solver determines (a solved
+    # number is not a bare number -- its unit may simply not be inferred
+    # yet), and which of those inference already found to be pure numbers.
+    freedoms: Callable[[str], set] = lambda mote_id: set()
+    scalars: Callable[[str], set] = lambda mote_id: set()
 
 
 def check_equation(text: str, ctx: DimensionContext) -> list[str]:
@@ -184,7 +189,16 @@ def check_equation(text: str, ctx: DimensionContext) -> list[str]:
 
 
 def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
-    """A reasonable unit for `key` on `ctx.mote_id`, read off the *other*
+    """infer_dimension's answer, named (see unit_named)."""
+    return unit_named(infer_dimension(text, key, ctx))
+
+
+def infer_dimension(text: str, key: str, ctx: DimensionContext) -> Dim:
+    """The dimension of `key`'s value as an equation determines it -- from
+    which infer_unit names a unit. DIMENSIONLESS (or a literal) means a
+    pure number; None means it cannot be told.
+
+    A reasonable unit for `key` on `ctx.mote_id`, read off the *other*
     side of an equation that determines it -- for a solved freedom with
     no declared unit of its own (see core/simulation.py's write-back).
 
@@ -223,7 +237,7 @@ def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
     except FormulaError:
         return None
 
-    return unit_named(dimension)
+    return dimension
 
 
 def unit_named(dimension: Dim) -> str | None:
@@ -359,10 +373,8 @@ class _Checker:
         # declared unit.
         declared = self.ctx.units(mote_id).get(key)
         if declared is None:
-            if self.bare_numbers:
-                value = self.ctx.properties(mote_id).get(key)
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    return LITERAL
+            if self.bare_numbers and self._is_bare_number(mote_id, key):
+                return LITERAL
             return None
         try:
             return dimension_of(declared)
@@ -538,6 +550,19 @@ class _Checker:
         }
         body = self._body(function_id, bindings)
         return body if body is not None else self._result(function_id)
+
+    def _is_bare_number(self, mote_id: str, key: str) -> bool:
+        """A number stored with no unit that is a given -- or a solved
+        value inference already found to be a pure number (`N = 193 *
+        204`). A solved value whose unit is merely not inferred yet is
+        unknown, not a scalar: reading it as one names the quantities
+        downstream of it wrongly (`A = Q / (U * LMTD)` read as m²·K)."""
+        if key in self.ctx.scalars(mote_id):
+            return True
+        if key in self.ctx.freedoms(mote_id):
+            return False
+        value = self.ctx.properties(mote_id).get(key)
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
 
     def _result(self, function_id: str) -> Dim:
         """The dimension a function declares for its value, for a body that

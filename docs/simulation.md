@@ -1536,9 +1536,12 @@ from before this has its saved units dropped once, on open, where they
 equal what is inferred today (`core/db.py`, `PRAGMA user_version` 1); one
 that differs stays, and reads as declared.
 
-**A stored number with no unit is a scalar here**, like a literal in the
+**A given with no unit is a scalar here**, like a literal in the
 equation: it multiplies or divides the other factors' dimension and
-never removes it. `per_rod == power / n`, with `power` in W and `n` a
+never removes it. A *solved* value with no unit is a scalar only once
+inference has found it to be a pure number (`N = 193 * 204`); until its
+own unit is inferred it is unknown, so `A = Q / (U * LMTD)` waits for
+LMTD's temperature rather than reading it as a bare number. `per_rod == power / n`, with `power` in W and `n` a
 plain `4`, reads in W. (Only inference reads it so; the dimension check
 still treats an undeclared property as unknown, to stay quiet on a
 partly-annotated garden.) A function body reads its bare coefficient the

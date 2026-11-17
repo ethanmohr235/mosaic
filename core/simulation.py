@@ -41,7 +41,8 @@ from core.formula import (
     relation_operator,
 )
 from core.dimensions import (
-    DimensionContext, check_equation, expression_dimension, function_problem, infer_unit,
+    DimensionContext, check_equation, expression_dimension, function_problem, infer_dimension,
+    infer_unit, unit_named,
 )
 from core.entities import Relationship
 from core.calculus import Derivative, Integral
@@ -1575,8 +1576,10 @@ def check_dimensions(
 
 
 def _dimension_context(
-    view: _GardenView, model_cache: dict[str, PropertyProvider], mote_id: str
+    view: _GardenView, model_cache: dict[str, PropertyProvider], mote_id: str,
+    scalars: dict[str, set[str]] | None = None,
 ) -> DimensionContext:
+    scalars = scalars or {}
     return DimensionContext(
         mote_id=mote_id,
         units=lambda mid: view.units.get(mid, {}),
@@ -1589,6 +1592,8 @@ def _dimension_context(
         mote_name=lambda mid: view.properties.get(mid, {}).get("name"),
         named=lambda name: view.by_name.get(name, []),
         properties=lambda mid: view.properties.get(mid, {}),
+        freedoms=lambda mid: view.freedoms.get(mid, set()),
+        scalars=lambda mid: scalars.get(mid, set()),
     )
 
 
@@ -1621,15 +1626,21 @@ def _infer_missing_units(
     feeds the next (`y == 2 * x` once `x` has one). Nothing is stored for
     a later solve to read, so a chain has to be followed here or not at all."""
     inferred: dict[str, dict[str, str]] = {}
+    # Solved values inference found to be pure numbers (`N = 193 * 204`):
+    # nothing to name, but a scalar to whatever reads them from then on.
+    scalars: dict[str, set[str]] = {}
     keys = list(solved)
     while True:
         known = {mid: {**units, **inferred.get(mid, {})} for mid, units in view.units.items()}
         known.update({mid: units for mid, units in inferred.items() if mid not in known})
-        found = _infer_pass(dataclasses.replace(view, units=known), equations, keys, model_cache)
-        if not found:
+        found, pure = _infer_pass(
+            dataclasses.replace(view, units=known), equations, keys, model_cache, scalars)
+        if not found and not pure:
             return inferred
         for mote_id, units in found.items():
             inferred.setdefault(mote_id, {}).update(units)
+        for mote_id, key in pure:
+            scalars.setdefault(mote_id, set()).add(key)
 
 
 def _infer_pass(
@@ -1637,21 +1648,31 @@ def _infer_pass(
     equations: list[tuple[rules_repo.Rule, str]],
     keys: list[Unknown],
     model_cache: dict[str, PropertyProvider],
-) -> dict[str, dict[str, str]]:
+    scalars: dict[str, set[str]] | None = None,
+) -> tuple[dict[str, dict[str, str]], set[Unknown]]:
     """One pass of `_infer_missing_units`: a unit for each key in `keys`
-    that `view` holds none for and one of its equations pins down."""
+    that `view` holds none for and one of its equations pins down, and
+    the keys an equation shows to be pure numbers."""
+    scalars = scalars or {}
     found: dict[str, dict[str, str]] = {}
+    pure: set[Unknown] = set()
     for mote_id, key in keys:
-        if view.units.get(mote_id, {}).get(key) or key in found.get(mote_id, {}):
+        if (view.units.get(mote_id, {}).get(key) or key in found.get(mote_id, {})
+                or key in scalars.get(mote_id, set())):
             continue
         for rule, pair_mote_id in equations:
             if pair_mote_id != mote_id:
                 continue
-            unit_name = infer_unit(rule.equation, key, _dimension_context(view, model_cache, mote_id))
+            dimension = infer_dimension(
+                rule.equation, key, _dimension_context(view, model_cache, mote_id, scalars))
+            unit_name = unit_named(dimension)
             if unit_name:
                 found.setdefault(mote_id, {})[key] = unit_name
                 break
-    return found
+            if dimension is not None and (dimension.is_dimensionless):
+                pure.add((mote_id, key))
+                break
+    return found, pure
 
 
 def inferred_units(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
