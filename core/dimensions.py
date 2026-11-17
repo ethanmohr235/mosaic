@@ -186,6 +186,9 @@ def check_equation(text: str, ctx: DimensionContext) -> list[str]:
             f"left side is {describe(left_dim)} but right side is "
             f"{describe(right_dim)} -- these are different dimensions"
         )
+    problem = step_declared_absolute(text, ctx)
+    if problem:
+        checker.report(problem)
     return checker.problems
 
 
@@ -250,6 +253,67 @@ def unit_named(dimension: Dim) -> str | None:
         return None
     name = describe_expression(dimension)
     return name if is_unit(name) else None
+
+
+ABSOLUTE, STEP = "absolute", "step"
+# The degree each affine temperature unit counts in.
+_STEP_OF = {"degF": "degR", "degC": "K"}
+# A Rankine value is, in practice, a Fahrenheit-sized difference -- what a
+# difference of two degF values is named -- so it keeps the family going.
+_FAHRENHEIT_STEP = "degR"
+_NAMES = {"degF": "Fahrenheit", "degC": "Celsius"}
+
+
+def temperature_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
+    """The unit a solved temperature is named in, read off the equation
+    that determines it: the garden's own temperature unit (degF) for an
+    absolute temperature (`Ti + rise`), its degree (degR) for a difference
+    (`Thi - Tco`). None when the equation reads no degF or degC; UNDECIDED
+    when it does but cannot yet tell which it is (a value it reads has no
+    unit yet) -- the caller may wait for one, then names the dimension (K)."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return None
+    checker = _Checker(ctx)
+    if checker.is_own_property(relation.left, key):
+        other = relation.right
+    elif checker.is_own_property(relation.right, key):
+        other = relation.left
+    else:
+        return None
+    affine = checker.affine_unit_in(other)
+    if affine is None:
+        return None
+    if affine == _FAHRENHEIT_STEP:
+        affine = "degF"
+    kind = checker.temperature_kind(other)
+    if kind == ABSOLUTE:
+        return affine
+    if kind == STEP:
+        return _STEP_OF.get(affine)
+    return UNDECIDED
+
+
+UNDECIDED = "?"
+
+
+def step_declared_absolute(text: str, ctx: DimensionContext) -> str | None:
+    """A problem when one side of an equation is a single value declared in
+    degF or degC and the other is a temperature *difference* -- 150 °F of
+    difference read as a temperature of 150 °F is -309.67 °F."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return None
+    checker = _Checker(ctx)
+    for one, other in ((relation.left, relation.right), (relation.right, relation.left)):
+        unit_name = checker.unit_of(one)
+        if unit_name in _STEP_OF and checker.temperature_kind(other) == STEP:
+            return (f"{_written(other)} is a temperature difference, but {_written(one)} is "
+                    f"declared {unit_name}, which reads it as a temperature -- declare it "
+                    f"[{_STEP_OF[unit_name]}] (a {_NAMES[unit_name]}-sized degree)")
+    return None
 
 
 def expression_dimension(
@@ -450,6 +514,86 @@ class _Checker:
                 f"different dimensions"
             )
         return left if left is not None else right
+
+    def unit_of(self, node: ast.AST) -> str | None:
+        """The declared unit of a single value (a property, a role or named
+        mote's property, a parameter), or None for anything else."""
+        while isinstance(node, ast.UnaryOp):
+            node = node.operand
+        if isinstance(node, ast.Name) and node.id not in MATH_CONSTANTS:
+            return self.ctx.units(self.ctx.mote_id).get(node.id)
+        if isinstance(node, ast.Attribute):
+            try:
+                _role, value = self._role_or_value(node)
+            except FormulaError:
+                return None
+            if isinstance(value, _Motes) and value.mote_ids:
+                return self.ctx.units(value.mote_ids[0]).get(node.attr)
+        return None
+
+    def affine_unit_in(self, node: ast.AST) -> str | None:
+        """The first degF or degC that `node` reads, if any."""
+        for inner in ast.walk(node):
+            if isinstance(inner, (ast.Name, ast.Attribute)):
+                unit_name = self.unit_of(inner)
+                if unit_name in _STEP_OF or unit_name == _FAHRENHEIT_STEP:
+                    return unit_name
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
+                result = self._called_result_unit(inner.func.id)
+                if result in _STEP_OF:
+                    return result
+        return None
+
+    def temperature_kind(self, node: ast.AST) -> str | None:
+        """Whether `node` is an absolute temperature or a step of one: a
+        degF value is absolute; absolute minus absolute is a step; absolute
+        plus or minus a step (or a bare number) is absolute; a product, a
+        quotient or a power is a step. None when it cannot be told -- a
+        kelvin value may be either."""
+        if isinstance(node, ast.Constant):
+            return "literal"
+        if isinstance(node, (ast.Name, ast.Attribute)):
+            unit_name = self.unit_of(node)
+            if unit_name in _STEP_OF:
+                return ABSOLUTE
+            if unit_name == _FAHRENHEIT_STEP:
+                return STEP
+            return "kelvin" if unit_name == "K" else None
+        if isinstance(node, ast.UnaryOp):
+            inner = self.temperature_kind(node.operand)
+            return STEP if inner in (ABSOLUTE, STEP) else inner
+        if isinstance(node, ast.BinOp):
+            if isinstance(node.op, (ast.Add, ast.Sub)):
+                a, b = self.temperature_kind(node.left), self.temperature_kind(node.right)
+                # A kelvin value beside a degF or degC one is its step --
+                # `Tc - dT` with the rise solved in K.
+                steps = (STEP, "literal", "kelvin")
+                if isinstance(node.op, ast.Sub) and a == ABSOLUTE and b == ABSOLUTE:
+                    return STEP
+                if ABSOLUTE in (a, b) and ({a, b} - {ABSOLUTE}) <= set(steps):
+                    return ABSOLUTE
+                if a in (STEP, "literal") and b in (STEP, "literal"):
+                    return STEP if STEP in (a, b) else "literal"
+                return None
+            return STEP
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in NUMERIC_CALLS:
+                kinds = [self.temperature_kind(a) for a in node.args]
+                return ABSOLUTE if ABSOLUTE in kinds else (STEP if STEP in kinds else None)
+            result = self._called_result_unit(node.func.id)
+            if result in _STEP_OF:
+                return ABSOLUTE
+            return STEP
+        return None
+
+    def _called_result_unit(self, name: str) -> str | None:
+        try:
+            function_id = function_named(self._evaluator_view(), name)
+        except FormulaError:
+            return None
+        if function_id is None:
+            return None
+        return functions_repo.result_unit(self.ctx.properties(function_id))
 
     def _bare_beside_computed(self, bare: ast.AST, other: ast.AST, dim: Dim, op) -> None:
         if (dim is None or _is_literal(dim) or dim.is_dimensionless

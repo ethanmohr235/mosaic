@@ -208,11 +208,15 @@ def test_compound_scales_compose():
     assert convert(36, "km/hr", "m/s") == pytest.approx(10.0)
 
 
-def test_offset_units_cannot_be_combined_into_a_compound():
-    # Dropping the offset would make degC/s silently mean K/s -- numbers
-    # that look plausible and are wrong.
-    with pytest.raises(UnitError, match="offset unit"):
-        dimension_of("degC/s")
+def test_an_offset_unit_in_a_compound_is_its_degree():
+    # Per Fahrenheit degree, as a textbook writes it: the offset belongs to
+    # a temperature, never to a degree of one (a warming of 1 degC/s is 1 K/s).
+    assert convert(1, "Btu/(lb*degF)", "Btu/(lb*degR)") == pytest.approx(1.0)
+    assert convert(1, "Btu/(lb*degF)", "J/(kg*K)") == pytest.approx(4186.8, rel=1e-6)
+    assert convert(1, "degC/s", "K/s") == pytest.approx(1.0)
+    assert convert(1, "W/(m^2*degC)", "W/(m^2*K)") == pytest.approx(1.0)
+    # On its own it is still a temperature.
+    assert convert(32, "degF", "K") == pytest.approx(273.15)
 
 
 def test_unknown_unit_inside_a_compound_names_the_whole_expression():

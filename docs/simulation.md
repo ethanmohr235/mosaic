@@ -1468,8 +1468,10 @@ everything registered, grouped by dimension. SI prefixes work on the
 usual units (`kohm`, `mV`, `MPa`, `km`). Common non-SI units are
 included too -- `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `bar`,
 `atm`, `psi` -- along with the affine temperature units `degC` and
-`degF`, which carry an offset and so can only be used on their own,
-never inside a compound.
+`degF`, which carry an offset. Inside a compound they mean their
+*degree* (`Btu/(lb*degF)` is per Fahrenheit degree, the same as
+`Btu/(lb*degR)`; `degC/s` is K/s): the offset belongs to a temperature,
+never to a degree of one. On their own they are temperatures.
 
 Angle is genuinely dimensionless in SI, so there's no separate `rad`:
 an unlabeled number is already radians, exactly what `sin`/`cos`/`tan`

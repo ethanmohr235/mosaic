@@ -375,11 +375,9 @@ class _Parser:
         if token not in _UNITS:
             raise UnknownUnit(f"no unit registered as {token!r} (in {self.source!r})")
         atomic = _UNITS[token]
-        if atomic.offset:
-            raise UnitError(
-                f"{token!r} is an offset unit and can only be used on its own, "
-                f"not combined as in {self.source!r}"
-            )
+        # Inside a compound an offset unit is its *step*: `Btu/(lb*degF)`
+        # is per Fahrenheit degree, as every textbook means it -- the
+        # offset belongs to a temperature, never to a degree of one.
         return atomic.dimension, atomic.scale
 
     def _number(self) -> float:

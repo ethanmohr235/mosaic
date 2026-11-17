@@ -42,7 +42,7 @@ from core.formula import (
 )
 from core.dimensions import (
     DimensionContext, check_equation, expression_dimension, function_problem, infer_dimension,
-    infer_unit, unit_named,
+    infer_unit, temperature_unit, unit_named, UNDECIDED,
 )
 from core.entities import Relationship
 from core.calculus import Derivative, Integral
@@ -1597,6 +1597,9 @@ def _dimension_context(
     )
 
 
+_TEMPERATURE = dimension_of("K")
+
+
 def _infer_missing_units(
     view: _GardenView,
     equations: list[tuple[rules_repo.Rule, str]],
@@ -1636,7 +1639,13 @@ def _infer_missing_units(
         found, pure = _infer_pass(
             dataclasses.replace(view, units=known), equations, keys, model_cache, scalars)
         if not found and not pure:
-            return inferred
+            # A temperature that could not yet tell whether it is one or a
+            # difference has waited for its inputs; now it takes what it can.
+            found, pure = _infer_pass(
+                dataclasses.replace(view, units=known), equations, keys, model_cache, scalars,
+                final=True)
+            if not found and not pure:
+                return inferred
         for mote_id, units in found.items():
             inferred.setdefault(mote_id, {}).update(units)
         for mote_id, key in pure:
@@ -1649,6 +1658,7 @@ def _infer_pass(
     keys: list[Unknown],
     model_cache: dict[str, PropertyProvider],
     scalars: dict[str, set[str]] | None = None,
+    final: bool = False,
 ) -> tuple[dict[str, dict[str, str]], set[Unknown]]:
     """One pass of `_infer_missing_units`: a unit for each key in `keys`
     that `view` holds none for and one of its equations pins down, and
@@ -1663,9 +1673,16 @@ def _infer_pass(
         for rule, pair_mote_id in equations:
             if pair_mote_id != mote_id:
                 continue
-            dimension = infer_dimension(
-                rule.equation, key, _dimension_context(view, model_cache, mote_id, scalars))
+            context = _dimension_context(view, model_cache, mote_id, scalars)
+            dimension = infer_dimension(rule.equation, key, context)
             unit_name = unit_named(dimension)
+            if unit_name and dimension == _TEMPERATURE:
+                # degF for a temperature, degR for a difference of two.
+                named = temperature_unit(rule.equation, key, context)
+                if named == UNDECIDED and not final:
+                    continue
+                if named and named != UNDECIDED:
+                    unit_name = named
             if unit_name:
                 found.setdefault(mote_id, {})[key] = unit_name
                 break

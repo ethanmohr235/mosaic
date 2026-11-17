@@ -216,3 +216,50 @@ m.u = Ok(m.r)""")
     assert any("1 is subtracted from (r / 51)^2" in w for w in warnings)
     assert any("cos() takes an angle" in w and "109" in w for w in warnings)
     assert not any("m.u" in w for w in warnings)
+
+
+# ---- temperatures and their differences ----
+
+def test_differences_read_as_degrees_and_temperatures_as_temperatures(conn):
+    sheet = HX.replace("degR", "degF") + "\nhx.Tmid = hx.Tci + hx.dT1 / 2"
+    d1, lmtd, mid, area = shown(conn, sheet, "hx.dT1", "hx.LMTD", "hx.Tmid", "hx.A}{ft^2, 6")
+    assert (number(d1), unit_of(d1)) == (150, "degR")
+    assert unit_of(lmtd) == "degR" and number(lmtd) == pytest.approx(139.762, rel=1e-5)
+    assert (number(mid), unit_of(mid)) == (145, "degF")
+    assert number(area) == pytest.approx(500000 / (50 * 20 / math.log(150 / 130)), rel=1e-5)
+
+
+def test_celsius_differences_read_in_kelvin(conn):
+    sheet = "c.T1 = 20 degC\nc.T2 = 80 degC\nc.d = c.T2 - c.T1\nc.m = c.T1 + c.d / 2"
+    difference, middle = shown(conn, sheet, "c.d", "c.m")
+    assert difference == "60 K" and middle == "50 degC"
+
+
+def test_a_difference_declared_in_degf_is_refused(conn):
+    applied = worksheet.apply(conn, "hx.Thi = 300 degF\nhx.Tco = 150 degF\nhx.dT1 [degF] = hx.Thi - hx.Tco")
+    assert applied.problems and "declare it [degR]" in applied.problems[0]
+
+
+def test_a_specific_heat_per_fahrenheit_degree(conn):
+    # Lamarsh Ex. 8.7: 1.3 Btu/lb-°F water at 3148 lb/hr, 1.07e6 Btu/hr into it.
+    sheet = """w.cp = 1.3 Btu/(lb*degF)
+w.m = 3148 lb/hr
+w.q = 1.0718e6 Btu/hr
+w.Ti = 543 degF
+w.To = w.Ti + w.q / (w.m * w.cp)"""
+    (outlet,) = shown(conn, sheet, "w.To")
+    assert unit_of(outlet) == "degF"
+    assert number(outlet) == pytest.approx(543 + 1.0718e6 / (3148 * 1.3), rel=1e-5)
+
+
+def test_a_temperature_less_a_rise_solved_in_kelvin_is_a_temperature(conn):
+    sheet = """p.Tc = 1220 degF
+p.q = 10 W/cm
+p.k = 27 W/(m*K)
+p.dT = p.q / (4 * pi * p.k)
+p.Tfc = p.Tc - p.dT"""
+    rise, interface = shown(conn, sheet, "p.dT", "p.Tfc")
+    kelvin = 1000 / (4 * math.pi * 27)
+    assert unit_of(rise) == "K" and number(rise) == pytest.approx(kelvin, rel=1e-5)
+    assert unit_of(interface) == "degF"
+    assert number(interface) == pytest.approx(1220 - kelvin * 1.8, rel=1e-5)
