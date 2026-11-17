@@ -693,7 +693,7 @@ def test_calc_sections_convert_and_quote_for_display(garden):
     (answer,) = calc_sections(unit="in", figures=4, garden=GARDEN)["answers"]
     assert answer["text"] == "100.0 in"
     assert answer["unit"] == "in"
-    assert answer["value"] == pytest.approx(2.54)   # nothing stored changed
+    assert answer["value"] == pytest.approx(100.0)  # in its inferred unit, in
 
 
 def test_calc_sections_read_the_source_convention(garden):

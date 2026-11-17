@@ -136,7 +136,8 @@ def test_an_applied_worksheet_solves(conn):
     bd = named(conn, "bd")
     assert bd.properties["l"] == pytest.approx(2.54)
     assert "l" not in bd.properties[UNITS_KEY]
-    assert simulation.inferred_units(conn)[bd.id]["l"] == "m"
+    # Held in m, shown in the garden's own inches.
+    assert simulation.inferred_units(conn)[bd.id]["l"] == "in"
     assert convert(bd.properties["l"], "m", "in") == pytest.approx(100.0)
 
 

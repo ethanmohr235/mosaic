@@ -42,7 +42,7 @@ from core.formula import (
 )
 from core.dimensions import (
     DimensionContext, check_equation, expression_dimension, function_problem, infer_dimension,
-    infer_unit, temperature_unit, unit_named, UNDECIDED,
+    infer_unit, temperature_unit, unit_named, UNDECIDED, determining_side, preferred_unit,
 )
 from core.entities import Relationship
 from core.calculus import Derivative, Integral
@@ -1600,6 +1600,15 @@ def _dimension_context(
 _TEMPERATURE = dimension_of("K")
 
 
+def _garden_units(view: _GardenView) -> dict[str, int]:
+    """Every unit the garden declares, and how often."""
+    counts: dict[str, int] = {}
+    for units in view.units.values():
+        for unit_name in units.values():
+            counts[unit_name] = counts.get(unit_name, 0) + 1
+    return counts
+
+
 def _infer_missing_units(
     view: _GardenView,
     equations: list[tuple[rules_repo.Rule, str]],
@@ -1683,6 +1692,11 @@ def _infer_pass(
                     continue
                 if named and named != UNDECIDED:
                     unit_name = named
+            elif unit_name:
+                # In the garden's own units: MW from a power in MW, ft² in feet.
+                unit_name = preferred_unit(
+                    dimension, determining_side(rule.equation, key, context), context,
+                    _garden_units(view)) or unit_name
             if unit_name:
                 found.setdefault(mote_id, {})[key] = unit_name
                 break

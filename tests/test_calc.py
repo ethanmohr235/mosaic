@@ -108,7 +108,8 @@ def test_a_mote_no_equation_mentions_contributes_no_givens(conn):
 def test_answers_are_the_freedoms_with_what_they_hold(conn):
     worksheet.apply(conn, PYTHAGORAS)
     run_simulation(conn)
-    assert [(r.label, r.text(3)) for r in calc.answers(conn)] == [("bd.l", "2.54 m")]
+    # Shown in the garden's own inches, though the solve holds it in m.
+    assert [(r.label, r.text(3)) for r in calc.answers(conn)] == [("bd.l", "100 in")]
 
 
 def test_an_answer_nobody_has_computed_still_appears(conn):

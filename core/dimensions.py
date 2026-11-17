@@ -26,6 +26,7 @@ there without being handled here. See docs/simulation.md, Units.
 """
 import ast
 import dataclasses
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -294,6 +295,21 @@ def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
     return unit_named(infer_dimension(text, key, ctx))
 
 
+def determining_side(text: str, key: str, ctx: DimensionContext) -> ast.AST | None:
+    """The side of an equation that determines `key`, when `key` is the
+    whole of the other side."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return None
+    checker = _Checker(ctx)
+    if checker.is_own_property(relation.left, key):
+        return relation.right
+    if checker.is_own_property(relation.right, key):
+        return relation.left
+    return None
+
+
 def infer_dimension(text: str, key: str, ctx: DimensionContext) -> Dim:
     """The dimension of `key`'s value as an equation determines it -- from
     which infer_unit names a unit. DIMENSIONLESS (or a literal) means a
@@ -341,6 +357,14 @@ def infer_dimension(text: str, key: str, ctx: DimensionContext) -> Dim:
     return dimension
 
 
+# Names for derived dimensions with no symbol of their own, as an
+# engineer writes them -- tried before the base-SI product (`m^2*s^-2*K^-1`).
+_COMMON_NAMES = (
+    "J/(kg*K)", "W/(m*K)", "W/(m^2*K)", "J/kg", "W/m^2", "W/m^3", "kg/m^3", "kg/s",
+    "m^3/s", "m/s", "m/s^2", "Pa*s", "m^2/s", "N*m", "J/K",
+)
+
+
 def unit_named(dimension: Dim) -> str | None:
     """A unit name for `dimension` that round-trips through core.units.unit()
     -- the canonical symbol, else the base-SI product in caret notation --
@@ -349,7 +373,146 @@ def unit_named(dimension: Dim) -> str | None:
     if dimension is None or _is_literal(dimension) or dimension.is_dimensionless:
         return None
     name = describe_expression(dimension)
-    return name if is_unit(name) else None
+    if not is_unit(name) or not any(ch in name for ch in "*^"):
+        return name if is_unit(name) else None
+    for common in _COMMON_NAMES:
+        if dimension_of(common) == dimension:
+            return common
+    return name
+
+
+# Units that share a dimension with something they are not (Ci and Bq are
+# 1/s, Gy and Sv are J/kg): shown only when an input declares one.
+_SPECIAL = frozenset({"Ci", "Bq", "kBq", "MBq", "GBq", "Gy", "mGy", "Sv", "mSv", "rad", "rem",
+                      "Hz", "kHz", "MHz", "GHz", "u", "eV", "keV", "MeV", "GeV", "barn"})
+_ATOM_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
+
+
+def preferred_unit(
+    dimension: Dimension, other: ast.AST | None, ctx: DimensionContext,
+    garden_units: dict[str, int],
+) -> str | None:
+    """The unit an inferred value is shown in, in the garden's own terms --
+    the equation's own units first, then the garden's:
+    1. one of the same dimension that the equation's inputs declare (MW
+       from a power in MW);
+    2. a product of the inputs' own units, when the value is one (`lbf*ft`
+       for P * L);
+    3. a power of a unit the inputs measure that one axis in, inside
+       compounds too (cm³ from cm² times cm; ft² beside `Btu/(hr*ft^2*degF)`);
+    4. the unit the garden declares most often for that dimension (psi);
+    5. a power of a unit the garden measures that one axis in;
+    else None, for the caller's canonical name. 2, 3 and 5 only for non-SI
+    units (V and A make an ohm, not a V/A). Units that share a dimension
+    with something else (Ci, Gy, u) are taken only from the inputs.
+    Display only -- a solved value is held in base SI whatever it is
+    shown in."""
+    def same(unit_name: str) -> bool:
+        try:
+            return dimension_of(unit_name) == dimension and not _offset(unit_name)
+        except UnitError:
+            return False
+
+    checker = _Checker(ctx)
+    inputs: list[str] = []
+    if other is not None:
+        for node in ast.walk(other):
+            if isinstance(node, (ast.Name, ast.Attribute)):
+                unit_name = checker.unit_of(node)
+                if unit_name and unit_name not in inputs:
+                    inputs.append(unit_name)
+    for unit_name in inputs:
+        if same(unit_name):
+            return unit_name
+    if other is not None:
+        composed = _composed(other, checker)
+        if composed and same(composed):
+            return composed
+    powered = _power_of(dimension, inputs)
+    if powered:
+        return powered
+    ranked = [u for u, _n in sorted(garden_units.items(), key=lambda item: (-item[1], item[0]))]
+    for unit_name in ranked:
+        if unit_name not in _SPECIAL and same(unit_name):
+            return unit_name
+    return _power_of(dimension, ranked)
+
+
+def _power_of(dimension: Dimension, units: list[str]) -> str | None:
+    """`cm^3` for a volume, from the first non-SI length any of `units`
+    is written in (atoms inside compounds count)."""
+    axes = [a for a in _AXES_ALL if getattr(dimension, a)]
+    if len(axes) != 1 or axes[0] not in ("length", "mass", "time"):
+        return None
+    power = getattr(dimension, axes[0])
+    base = Dimension(**{axes[0]: 1.0})
+    for unit_name in units:
+        for atom in _ATOM_RE.findall(unit_name):
+            if atom in _SPECIAL or not _non_si(atom) or not same_base(atom, base):
+                continue
+            if power == 1:
+                return atom
+            shown = f"{int(power)}" if float(power).is_integer() else f"{power:g}"
+            candidate = f"{atom}^{shown}"
+            return candidate if is_unit(candidate) else None
+    return None
+
+
+_AXES_ALL = ("length", "mass", "time", "current", "temperature", "amount")
+
+
+def _composed(node: ast.AST, checker: "_Checker") -> str | None:
+    """`lbf*ft` for `b.P * b.L`: a product or quotient of single values
+    each declared in one plain unit, written in those units. None for
+    anything else -- a sum, a call, a compound unit, more than three."""
+    factors: list[tuple[str, int]] = []
+
+    def walk(n: ast.AST, sign: int) -> bool:
+        if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Mult, ast.Div)):
+            return walk(n.left, sign) and walk(n.right, sign if isinstance(n.op, ast.Mult) else -sign)
+        if isinstance(n, ast.Constant) or (isinstance(n, ast.Name) and n.id in MATH_CONSTANTS):
+            return True
+        if isinstance(n, (ast.Name, ast.Attribute)):
+            unit_name = checker.unit_of(n)
+            if not unit_name or not _ATOM_RE.fullmatch(unit_name) or _offset(unit_name):
+                return False
+            factors.append((unit_name, sign))
+            return True
+        return False
+
+    if not walk(node, 1) or not 2 <= len(factors) <= 3:
+        return None
+    if not any(_non_si(u) for u, _s in factors):
+        return None     # V and A make an ohm, not a V/A
+    top = [u for u, s in factors if s > 0]
+    bottom = [u for u, s in factors if s < 0]
+    if not top:
+        return None
+    text = "*".join(top) + ("/" + (bottom[0] if len(bottom) == 1 else f"({'*'.join(bottom)})")
+                            if bottom else "")
+    return text if is_unit(text) else None
+
+
+def same_base(unit_name: str, base: Dimension) -> bool:
+    try:
+        return dimension_of(unit_name) == base
+    except UnitError:
+        return False
+
+
+def _non_si(unit_name: str) -> bool:
+    """Whether a unit is anything but its dimension's base one."""
+    try:
+        return to_base(1.0, unit_name) != 1.0 or to_base(0.0, unit_name) != 0.0
+    except UnitError:
+        return False
+
+
+def _offset(unit_name: str) -> bool:
+    try:
+        return to_base(0.0, unit_name) != 0.0
+    except UnitError:
+        return False
 
 
 ABSOLUTE, STEP = "absolute", "step"

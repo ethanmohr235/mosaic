@@ -1551,6 +1551,23 @@ still treats an undeclared property as unknown, to stay quiet on a
 partly-annotated garden.) A function body reads its bare coefficient the
 same way: `A * sin(B * r) / r` with a bare `A` carries `1/length`.
 
+**The unit is named in the garden's own terms**, the equation's first
+(`core/dimensions.py::preferred_unit`): a unit of the same dimension one
+of its inputs declares (MW from a power in MW); a product of its inputs'
+units (`lbf*ft` for a force times a length); a power of a unit its
+inputs measure that axis in, compounds included (cm³ from cm² × cm, ft²
+beside a `Btu/(hr*ft^2*degF)`); the garden's most common unit for the
+dimension (psi); a power of the garden's unit for the axis; and only
+then a canonical name (`ohm`, `W`, `J/(kg*K)`, `m/s`) or the base-SI
+product. Products and powers are made only of non-SI units -- volts over
+amps is an ohm -- and a unit that shares a dimension with something it
+is not (Ci and Bq are 1/s, Gy is J/kg, u is a mass) is used only when an
+input declares it, so a decay constant reads in yr⁻¹, never Ci. A
+temperature is named as one or as a difference of two (see *Temperature
+steps*). This is display only: a solved value with no declared unit is
+held in base SI, and every surface converts it into the inferred unit
+before showing it (`simulation.shown`).
+
 Inference repeats until it finds nothing new, so a unit inferred for one
 freedom feeds the next (`y == 2 * x` once `x` has one). A dimension with no name of
 its own (`distance / time`) falls back to the base-SI product, written

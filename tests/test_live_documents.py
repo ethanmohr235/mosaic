@@ -90,7 +90,7 @@ def test_answers_and_checks_are_live(conn, bar):
 def test_work_shows_the_inferred_unit(conn):
     worksheet.apply(conn, "m.d = 3 m\nm.t = 2 s\nm.v = m.d / m.t")
     shown = calc.work(conn, named(conn, "m").id, "v")
-    assert shown.quantity.unit == "m*s^-1"
+    assert shown.quantity.unit == "m/s"
 
 
 def test_reading_live_writes_nothing(conn, bar):

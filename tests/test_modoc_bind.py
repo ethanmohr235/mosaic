@@ -379,8 +379,9 @@ def test_val_converts_a_stored_value_into_the_unit_it_asks_for(conn, solved):
 
 
 def test_val_without_a_format_still_reads_the_stored_unit(conn, solved):
+    # The inferred unit is the garden's own: its legs are in inches.
     _document, resolution = on_a_new_note(conn, "\\val{bd.l}")
-    assert list(resolution.values.values())[0].text == "2.54 m"
+    assert list(resolution.values.values())[0].text == "100 in"
 
 
 def test_val_on_an_expression_can_still_ask_for_figures(conn, solved):

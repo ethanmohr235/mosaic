@@ -66,7 +66,7 @@ def test_heat_exchanger_area_from_an_lmtd(conn):
 
 def test_an_area_from_solved_temperatures_is_an_area(conn):
     (area,) = shown(conn, HX, "hx.A")
-    assert "K" not in unit_of(area) and "m²" in unit_of(area)
+    assert unit_of(area) == "ft²"     # the garden's feet, not m²·K
 
 
 # ---- cantilever, US customary ----
@@ -355,3 +355,18 @@ w.To = w.Ti + w.q / (w.m * w.cp)"""
     resolved = plotcmd.resolve(conn, plotcmd.parse_text("plot w.To vs w.Ti 500:600 --steps 2").line)
     points = plotview.figure_from_spec(conn, resolved.spec, max_points=10).series[0].points
     assert points[1] == [550.0, pytest.approx(550 + 1.0718e6 / (3148 * 1.3), rel=1e-6)]
+
+
+# ---- a solved value is shown in the garden's own units ----
+
+@pytest.mark.parametrize("sheet, ref, expected", [
+    ("e.P = 100 MW\ne.eta = 90 %\ne.a = e.P * e.eta", "e.a", "90 MW"),           # an input's unit
+    (BEAM, "b.M", "3000 lbf·ft"),                                                  # a product of them
+    (BEAM, "b.sigma", "6000 psi"),                                                 # the garden's
+    (HX, "hx.A", "71.5504 ft²"),                                                   # a power of feet
+    ("k.a = 2 cm^2\nk.h = 3 cm\nk.V = k.a * k.h", "k.V", "6 cm³"),
+    ("cs.T = 30.08 yr\ncs.A0 = 1 Ci\ncs.lam = ln(2) / cs.T", "cs.lam", "0.0230435 yr⁻¹"),  # never Ci
+    ("r.V = 10 V\nr.I = 2 A\nr.R = r.V / r.I", "r.R", "5 ohm"),                    # SI stays named
+])
+def test_a_solved_value_reads_in_the_gardens_own_units(conn, sheet, ref, expected):
+    assert shown(conn, sheet, ref) == [expected]

@@ -111,12 +111,13 @@ def test_has_uncertainty(conn):
 
 
 def test_an_unsolved_result_is_in_the_unit_a_solve_infers(conn):
-    # Inferred from the equations, so a result never written still says m.
+    # Inferred from the equations, so a result never written still has a
+    # unit -- the garden's own inches, its ± in them too.
     worksheet.apply(conn, BAR)
     with_spread(conn, "bd", x=0.5)
     (l,) = uncertainty.propagate(conn).results
-    assert l.unit == "m"
-    assert l.sigma == pytest.approx(0.8 * 0.5 * 0.0254, rel=1e-6)
+    assert l.unit == "in"
+    assert l.sigma == pytest.approx(0.8 * 0.5, rel=1e-6)
 
 
 # ---- showing it ----

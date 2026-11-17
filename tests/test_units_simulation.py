@@ -322,7 +322,7 @@ def test_an_unnamed_dimension_falls_back_to_a_base_unit_product(conn):
 
     run_simulation(conn)
     assert prop(conn, trip, "speed") == pytest.approx(10.0)
-    assert inferred_units(conn)[trip]["speed"] == "m*s^-1"
+    assert inferred_units(conn)[trip]["speed"] == "m/s"
 
 
 def test_a_dimensionless_result_gets_no_unit(conn):
