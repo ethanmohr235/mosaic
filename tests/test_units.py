@@ -265,3 +265,11 @@ def test_parse_units_property_ignores_malformed_values():
 def test_parse_units_property_ignores_a_non_dict():
     assert parse_units_property("ohm") == {}
     assert parse_units_property(None) == {}
+
+
+def test_btu_resolves_under_every_spelling():
+    from core.units import unit
+    for spelling in ("Btu", "BTU", "btu"):
+        assert unit(spelling).scale == pytest.approx(1055.05585262)
+    assert unit("Btu/hr").scale == pytest.approx(1055.05585262 / 3600.0)
+    assert unit("Btu/hr").dimension == unit("W").dimension

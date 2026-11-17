@@ -540,7 +540,9 @@ register_unit("slug", _MASS, 14.593902937206364)
 register_unit("ton", _MASS, 907.18474)  # US short ton
 register_unit("lbf", _FORCE, 4.4482216152605)
 register_unit("hp", _POWER, 745.6998715822702)
-register_unit("BTU", _ENERGY, 1055.05585262)
+# International Table Btu, under every spelling people type.
+for _btu in ("Btu", "BTU", "btu"):
+    register_unit(_btu, _ENERGY, 1055.05585262)
 register_unit("acre", _AREA, 4046.8564224)
 # US liquid volume, related by simple fractions of the gallon.
 register_unit("gal", _VOLUME, 3.785411784e-3)
