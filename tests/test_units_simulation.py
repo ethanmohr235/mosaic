@@ -542,3 +542,18 @@ def test_the_migration_runs_once(conn):
     update_mote(conn, m.id, {"units": {**prop(conn, m.id, "units"), "leak": "Hz"}})
     initialize_database(conn)
     assert prop(conn, m.id, "units")["leak"] == "Hz"
+
+
+def test_a_bare_number_scales_the_unit_it_divides_instead_of_removing_it(conn):
+    # `n` is a plain count with no unit: it divides power, it does not
+    # make the quotient unitless.
+    species = create_mote(conn, {"name": "Core", "freedoms": "per_rod"})
+    add_rule(conn, species, "Share", "per_rod == power / n")
+    core = create_mote(conn, {
+        "name": "C", "power": 1000, "n": 4, "units": {"power": "W"},
+    })
+    set_species(conn, core, species)
+
+    run_simulation(conn)
+    assert prop(conn, core, "per_rod") == pytest.approx(250.0)
+    assert inferred_units(conn)[core]["per_rod"] == "W"

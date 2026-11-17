@@ -40,7 +40,7 @@ def test_work_writes_the_call_out_as_its_body(conn, reactor):
         (calc.EXPANDED, "reactor.flux == phi.A * sin(phi.B * reactor.r) / reactor.r", ""),
         (calc.SUBSTITUTED,
          "reactor.flux == 5e13 * sin((0.0628 1/cm) * (10 cm)) / (10 cm)", ""),
-        (calc.RESULT, "2.938e14", ""),
+        (calc.RESULT, "2.938e14 m⁻¹", ""),
     ]
 
 
@@ -51,7 +51,7 @@ def test_a_bare_number_is_written_in_its_parameters_unit(conn, reactor):
 
 def test_the_result_says_it_came_from_a_limit(conn, reactor):
     result = steps(calc.work(conn, reactor, "center", figures=3))[-1]
-    assert result == (calc.RESULT, "3.14e14", "phi: limit r → 0 cm")
+    assert result == (calc.RESULT, "3.14e14 m⁻¹", "phi: limit r → 0 cm")
 
 
 def test_an_equation_without_a_call_is_shown_as_before(conn):

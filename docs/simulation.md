@@ -1529,6 +1529,14 @@ from before this has its saved units dropped once, on open, where they
 equal what is inferred today (`core/db.py`, `PRAGMA user_version` 1); one
 that differs stays, and reads as declared.
 
+**A stored number with no unit is a scalar here**, like a literal in the
+equation: it multiplies or divides the other factors' dimension and
+never removes it. `per_rod == power / n`, with `power` in W and `n` a
+plain `4`, reads in W. (Only inference reads it so; the dimension check
+still treats an undeclared property as unknown, to stay quiet on a
+partly-annotated garden.) A function body reads its bare coefficient the
+same way: `A * sin(B * r) / r` with a bare `A` carries `1/length`.
+
 Inference repeats until it finds nothing new, so a unit inferred for one
 freedom feeds the next (`y == 2 * x` once `x` has one). A dimension with no name of
 its own (`distance / time`) falls back to the base-SI product, written

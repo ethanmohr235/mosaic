@@ -211,7 +211,7 @@ def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
     except FormulaError:
         return None
 
-    checker = _Checker(ctx)
+    checker = _Checker(ctx, bare_numbers=True)
     try:
         if checker.is_own_property(relation.left, key):
             other = relation.right
@@ -246,8 +246,14 @@ class _Checker:
     def __init__(
         self, ctx: DimensionContext, bindings: dict[str, Dim] | None = None,
         calls: tuple[str, ...] = (), parent: "_Checker | None" = None,
+        bare_numbers: bool = False,
     ):
         self.ctx = ctx
+        # Inference only: a stored number with no declared unit scales
+        # whatever it multiplies or divides, as a literal does. The
+        # checker leaves it unknown, which keeps a partly-annotated
+        # garden quiet.
+        self.bare_numbers = bare_numbers or (parent.bare_numbers if parent else False)
         # Inside a function's body: each parameter's dimension, and the
         # functions being walked (to stop on recursion). A body's problems
         # are the calling equation's problems, so they share one list.
@@ -299,6 +305,10 @@ class _Checker:
         # declared unit.
         declared = self.ctx.units(mote_id).get(key)
         if declared is None:
+            if self.bare_numbers:
+                value = self.ctx.properties(mote_id).get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    return LITERAL
             return None
         try:
             return dimension_of(declared)
