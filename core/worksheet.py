@@ -108,7 +108,7 @@ from core import units as units_repo
 from core.entities import Mote
 from core.formula import (
     MATH_CONSTANTS, TICK_NAME, FormulaError, function_name_problem, function_reference_ids,
-    parse_equation, parse_expression,
+    parse_equation, parse_expression, syntax_tree,
 )
 
 # What a line turned out to be.
@@ -934,7 +934,7 @@ def _head(relation: str) -> tuple[str, str] | None:
 def _refs(relation: str) -> set[tuple[str, str]]:
     """Every `Name.property` a relation mentions, as `(name, property)`."""
     try:
-        tree = ast.parse(relation, mode="eval")
+        tree = syntax_tree(relation)
     except SyntaxError:
         return set()
     return {
@@ -1102,7 +1102,7 @@ def _names(relation: str) -> tuple[list[str], set[str]]:
     """`(dotted bases in source order, bare property names)`. A call's own
     name, the tick index and the math constants are none of those."""
     try:
-        tree = ast.parse(relation, mode="eval")
+        tree = syntax_tree(relation)
     except SyntaxError:
         return [], set()
     dotted, calls, bases = [], set(), []

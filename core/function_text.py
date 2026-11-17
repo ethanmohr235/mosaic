@@ -26,6 +26,7 @@ from core import units as units_repo
 from core.formula import (
     ALLOWED_CALLS, CALCULUS_CALLS, MATH_CONSTANTS, TICK_NAME, FormulaError, is_bare_number,
     parse_expression,
+    unparse,
 )
 
 # How deep calls inside bodies are written out. A guard against a
@@ -60,7 +61,7 @@ def expand(equation: str, properties: dict[str, dict]) -> str | None:
         return None
     if not state.expanded:
         return None
-    text = ast.unparse(tree).replace("**", "^")
+    text = unparse(tree)
     for placeholder, quantity in state.quantities.items():
         text = text.replace(placeholder, quantity)
     return text
@@ -127,7 +128,7 @@ def _body(
     bindings = {}
     for parameter, source, arg in zip(parameters, typed, args):
         unit = units.get(parameter)
-        bindings[parameter] = (state.quantity(f"({ast.unparse(arg)} {unit})")
+        bindings[parameter] = (state.quantity(f"({unparse(arg)} {unit})")
                                if unit and is_bare_number(source) else arg)
     state.expanded = True
     return _rewrite(parse_expression(body), bindings, name, state, (*calls, name))

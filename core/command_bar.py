@@ -66,7 +66,7 @@ from core import species as species_repo
 from core import undo
 from core import units
 from core.formula import (
-    MATH_CONSTANTS, FormulaError, attribute_bases, function_reference_ids, parse_equation,
+    MATH_CONSTANTS, FormulaError, attribute_bases, function_reference_ids, parse_equation, syntax_tree,
 )
 from core.entities import Mote
 from core.simulation import unresolved_equation_names
@@ -455,7 +455,7 @@ def _equation_property_refs(equation: str) -> tuple[set[str], dict[str, set[str]
     step in `_run_rule` only; never raises; a formula that doesn't parse
     or is empty simply refers to nothing."""
     try:
-        tree = ast.parse(equation, mode="eval")
+        tree = syntax_tree(equation)
     except SyntaxError:
         return set(), {}
 

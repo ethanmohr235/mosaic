@@ -35,6 +35,7 @@ from core.formula import (
     CALCULUS_CALLS,
     INTEGRATE_CALL,
     MATH_CONSTANTS,
+    QUANTITY_CALL,
     NAVIGATION_CALLS,
     NUMERIC_CALLS,
     HYPERBOLIC_CALLS,
@@ -47,6 +48,8 @@ from core.formula import (
     TICK_NAME,
     function_named,
     is_bare_number,
+    quantity_of,
+    unparse,
     name_match,
     parse_equation,
     parse_expression,
@@ -287,7 +290,7 @@ def temperature_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
         return None
     if affine == _FAHRENHEIT_STEP:
         affine = "degF"
-    kind = checker.temperature_kind(other)
+    kind = checker.side_kind(other)
     if kind == ABSOLUTE:
         return affine
     if kind == STEP:
@@ -309,7 +312,7 @@ def step_declared_absolute(text: str, ctx: DimensionContext) -> str | None:
     checker = _Checker(ctx)
     for one, other in ((relation.left, relation.right), (relation.right, relation.left)):
         unit_name = checker.unit_of(one)
-        if unit_name in _STEP_OF and checker.temperature_kind(other) == STEP:
+        if unit_name in _STEP_OF and checker.side_kind(other) == STEP:
             return (f"{_written(other)} is a temperature difference, but {_written(one)} is "
                     f"declared {unit_name}, which reads it as a temperature -- declare it "
                     f"[{_STEP_OF[unit_name]}] (a {_NAMES[unit_name]}-sized degree)")
@@ -368,8 +371,8 @@ _ANGLE_CALLS = frozenset({"sin", "cos", "tan", "sinc"})
 
 
 def _written(node: ast.AST) -> str:
-    """A node as a person would have typed it (`^`, not `**`)."""
-    return ast.unparse(node).replace(" ** ", "^")
+    """A node as a person would have typed it (`^`, `5 m`)."""
+    return unparse(node)
 
 
 def _has_bare_number(node: ast.AST) -> bool:
@@ -539,10 +542,19 @@ class _Checker:
                 if unit_name in _STEP_OF or unit_name == _FAHRENHEIT_STEP:
                     return unit_name
             if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
-                result = self._called_result_unit(inner.func.id)
-                if result in _STEP_OF:
+                found = quantity_of(inner)
+                result = found[1] if found else self._called_result_unit(inner.func.id)
+                if result in _STEP_OF or (found and result == _FAHRENHEIT_STEP):
                     return result
         return None
+
+    def side_kind(self, node: ast.AST) -> str | None:
+        """temperature_kind of a whole side of a relation, where a written
+        `100 degF` alone is a temperature, as the evaluator reads it."""
+        found = quantity_of(node)
+        if found is not None and found[1] in _STEP_OF:
+            return ABSOLUTE
+        return self.temperature_kind(node)
 
     def temperature_kind(self, node: ast.AST) -> str | None:
         """Whether `node` is an absolute temperature or a step of one: a
@@ -577,6 +589,9 @@ class _Checker:
                 return None
             return STEP
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            found = quantity_of(node)
+            if found is not None:
+                return STEP if found[1] in _STEP_OF or found[1] == _FAHRENHEIT_STEP else None
             if node.func.id in NUMERIC_CALLS:
                 kinds = [self.temperature_kind(a) for a in node.args]
                 return ABSOLUTE if ABSOLUTE in kinds else (STEP if STEP in kinds else None)
@@ -719,6 +734,12 @@ class _Checker:
             raise FormulaError("only plain function calls are allowed in a formula")
         name = node.func.id
 
+        if name == QUANTITY_CALL:
+            found = quantity_of(node)
+            try:
+                return dimension_of(found[1]) if found else None
+            except UnitError:
+                return None
         if name in NAVIGATION_CALLS:
             return self._navigate(name, node)
         if name in AGGREGATE_CALLS:

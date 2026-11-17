@@ -263,3 +263,34 @@ p.Tfc = p.Tc - p.dT"""
     assert unit_of(rise) == "K" and number(rise) == pytest.approx(kelvin, rel=1e-5)
     assert unit_of(interface) == "degF"
     assert number(interface) == pytest.approx(1220 - kelvin * 1.8, rel=1e-5)
+
+
+# ---- numbers with units inside equations ----
+
+def test_units_written_in_an_equation(conn):
+    sheet = """s.x [m] = ?
+s.y [m] = ?
+s.y == s.x + 1 m
+s.x + s.y == 7 m
+w.Ti = 543 degF
+w.To = w.Ti + 10 degF
+w.cp = 1.3 Btu/(lb*degF)
+w.q = w.cp * 1 lb * 10 degF
+w.T2 [degF] = ?
+w.T2 == 100 degF"""
+    x, y, outlet, heat, t2 = shown(conn, sheet, "s.x}{m, 6", "s.y}{m, 6", "w.To}{degF, 6",
+                                   "w.q}{Btu, 6", "w.T2}{degF, 6")
+    assert [number(v) for v in (x, y, outlet, heat, t2)] == pytest.approx([3, 4, 553, 13, 100])
+    assert not run_simulation(conn).dimension_warnings
+
+
+def test_a_book_answer_as_a_check_with_its_unit(conn):
+    from core import calc
+    worksheet.apply(conn, """c.a = 3 m
+c.b = 4 m
+c.h = sqrt(c.a^2 + c.b^2)
+c.h ?= 16.4042 ft
+c.h <= 6 m""")
+    run_simulation(conn)
+    rows = calc.checks(conn)
+    assert rows and all(row.passed for row in rows), rows

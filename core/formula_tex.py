@@ -19,6 +19,7 @@ import re
 from collections.abc import Callable
 
 from core import formula
+from core import quantity_tex
 
 # Binding strength of what a node renders as. A child weaker than its
 # parent needs brackets; a fraction is self-delimiting everywhere except
@@ -312,7 +313,17 @@ def _extreme(command: str) -> Callable[[ast.Call], str]:
 
 # One renderer per callable formula.ALLOWED_CALLS admits -- the drift
 # test in tests/test_formula_tex.py asserts the two sets are equal.
+def _quantity(node: ast.Call) -> str:
+    """`5 m` written in a formula, set as a value with its unit."""
+    found = formula.quantity_of(node)
+    if found is None:
+        raise _Unsupported()
+    number, unit = found
+    return rf"{_number(number)}\,\mathrm{{{quantity_tex.unit_tex(unit)}}}"
+
+
 CALL_TEX: dict[str, Callable[[ast.Call], str]] = {
+    formula.QUANTITY_CALL: _quantity,
     "targets": _navigation(r"\overrightarrow"),
     "sources": _navigation(r"\overleftarrow"),
     "sum": lambda node: rf"\sum {_one(node)}",

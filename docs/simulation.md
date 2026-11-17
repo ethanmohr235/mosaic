@@ -1598,6 +1598,18 @@ or elapsed time. A *computed* dimensionless value is different: if
 `a / b` cancels to a pure ratio, comparing it to a voltage is a real
 mistake and gets reported.
 
+### Numbers with units in an equation
+
+A number followed by a unit is a quantity wherever an equation allows a
+number: `c.h ?= 16.4 ft`, `s.y == s.x + 1 m`, `w.q = w.cp * 1 lb * 10
+degF`. The unit is written without spaces (`5 m/s`, `1.3 Btu/(lb*degF)`;
+`5 m / p.t` is 5 m divided by `p.t`) and is never a name being read
+(`5 m.x` is not a quantity). A degF or degC there is a *degree* --
+`T + 10 degF` is ten degrees warmer -- except alone on one side of a
+comparison, where it is a temperature (`T == 100 degF`, `?= 3940 degF`).
+This is what a book answer is checked with: `p29.Tm_max ?= 3940 degF`.
+The worksheet, `\work` and the PDF write it back as it was typed.
+
 ### Bare numbers
 
 A number written with no unit means what a textbook means by it:
@@ -1650,7 +1662,6 @@ a rule that doesn't add up.
 
   There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. The console's `sim` says so rather than implying a clock -- `--ticks`, the timeline and the playhead all count ticks. An integrator would reach `sim --solver` by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
 - **Symbolic calculus.** `integrate` and `deriv` are numeric. Symbolic derivatives (and, for `\work`, the derivative written out as an expression) are planned next; symbolic antiderivatives would need a computer-algebra dependency. Time derivatives (`dx/dt` in a rule) wait on the continuous-dynamics question above.
-- **Per-literal unit syntax in an equation** (`100[ohm]`) -- a bare number takes on the unit of whatever it's compared with. (A solved freedom with no unit of its own *is* now given one -- see [Inference](#inference) above -- but only when it is the entire side of the equation that determined it; anything shapelier still has to be declared.)
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
 - **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
 - **Species inheritance.** Species are flat.
