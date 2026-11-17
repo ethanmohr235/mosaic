@@ -294,3 +294,32 @@ c.h <= 6 m""")
     run_simulation(conn)
     rows = calc.checks(conn)
     assert rows and all(row.passed for row in rows), rows
+
+
+# ---- a given that should have a unit, and doesn't ----
+
+@pytest.mark.parametrize("sheet, given, dimension", [
+    # The p29 slip: cp typed bare in the coolant heat balance.
+    ("""p.qmax = 4.82e8 W/m^3
+p.Vf = 3.27e-4 m^3
+p.vQ = 3148 lb/hr
+p.cp = 1.3
+p.Ti = 543 degF
+p.Tb = p.Ti + p.qmax * p.Vf / (pi * p.vQ * p.cp) * 2""", "p.cp", "m²·s⁻²·K⁻¹"),
+    ("q.T = 300 degF\nq.dT = 10\nq.T2 = q.T + q.dT", "q.dT", "K"),
+    ("v.A = 4\nv.P = 1000 W\nv.q = 250 W/m^2\nv.q == v.P / v.A", "v.A", "m²"),
+])
+def test_a_given_missing_its_unit_is_named_with_the_dimension_it_needs(conn, sheet, given, dimension):
+    worksheet.apply(conn, sheet)
+    warnings = run_simulation(conn).dimension_warnings
+    assert any(f"{given} has no unit, but this equation needs it in {dimension}" in w
+               for w in warnings), warnings
+
+
+def test_pure_numbers_are_not_asked_for_a_unit(conn):
+    worksheet.apply(conn, """r.Pt = 1893 MW
+r.N = 39372
+r.m2a = 2.32
+r.Efrac = 0.9
+r.Pc = r.Pt / r.N * r.m2a * r.Efrac""")
+    assert not run_simulation(conn).dimension_warnings

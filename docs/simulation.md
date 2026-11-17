@@ -1598,6 +1598,27 @@ or elapsed time. A *computed* dimensionless value is different: if
 `a / b` cancels to a pure ratio, comparing it to a voltage is a real
 mistake and gets reported.
 
+### A given missing its unit
+
+A given typed with no unit is read as base SI, so `p29.cp = 1.3` meant to
+be Btu/(lb·°F) is 4187 times too small -- and nothing about the answer
+says so. The unit check asks what dimension each unitless given would
+need for its equation to balance, and says so when it is not a pure
+number:
+
+```
+p.Tb == p.Ti + … / (pi * p.vQ * p.cp) * 2 on p: p.cp has no unit, but this equation
+needs it in m²·s⁻²·K⁻¹ -- write it with one (e.g. `p.cp = 1.3 …`), or declare [1] if it is a pure number
+```
+
+It checks each pair that must measure the same -- the two sides, and the
+two operands of every sum inside them -- with the given bound to no
+dimension and then to a probe one; the difference says what power it
+enters with and so what it must be (`core/dimensions.py::missing_units`).
+It reports only what it can tell: other unitless givens are taken as the
+pure numbers they look like, and a pair with an undeclared value on it is
+skipped. Declaring `[1]` says a value really is a pure number.
+
 ### Numbers with units in an equation
 
 A number followed by a unit is a quantity wherever an equation allows a

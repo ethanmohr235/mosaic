@@ -192,7 +192,101 @@ def check_equation(text: str, ctx: DimensionContext) -> list[str]:
     problem = step_declared_absolute(text, ctx)
     if problem:
         checker.report(problem)
+    if not checker.problems:
+        for mote_id, key, needed in missing_units(text, ctx):
+            value = ctx.properties(mote_id).get(key)
+            checker.report(
+                f"{ctx.label(mote_id)}.{key} has no unit, but this equation needs it in "
+                f"{describe(needed)} -- write it with one (e.g. "
+                f"`{ctx.label(mote_id)}.{key} = {value:g} {suggested_unit(needed, ctx)}`), "
+                f"or declare [1] if it is a pure number")
     return checker.problems
+
+
+# A dimension no real quantity has, bound to a unitless given to see how
+# its dimension enters an equation (see missing_units).
+_PROBE = Dimension(amount=1000.0)
+
+
+def missing_units(text: str, ctx: DimensionContext) -> list[tuple[str, str, Dimension]]:
+    """Each given in `text` that has a number but no unit, and the dimension
+    the equation needs it to have -- `p29.cp = 1.3` in a heat balance needs
+    J/(kg·K). Reported only when the rest of the equation is dimensioned
+    well enough to say so, and the answer is not a pure number.
+
+    Each pair that must measure the same -- the two sides, or the two
+    operands of a sum inside them -- is checked with the given bound in
+    turn to no dimension and to a probe one: the two residuals (left over
+    right) differ by the probe times the power the given enters with, so
+    the dimension it needs is the residual over that power. The first
+    pair that can tell decides. Other unitless givens are read as the pure numbers they
+    are taken for when inferring units."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return []
+    candidates = _unitless_givens(relation, ctx)
+    # Every pair of things that must measure the same: the two sides, and
+    # the two operands of each sum or difference anywhere in them.
+    pairs = [(relation.left, relation.right)] + [
+        (node.left, node.right) for side in (relation.left, relation.right)
+        for node in ast.walk(side)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub))]
+    found: list[tuple[str, str, Dimension]] = []
+    for ref, nodes in candidates.items():
+        others = {other: LITERAL for other in candidates if other != ref}
+        inside = {id(n) for n in nodes}
+        for left, right in pairs:
+            if not any(id(n) in inside for side in (left, right) for n in ast.walk(side)):
+                continue
+            needed = _needed_by_probe(left, right, ref, ctx, others)
+            if needed is not None:
+                if not needed.is_dimensionless:
+                    found.append((*ref, needed))
+                break
+    return found
+
+
+def _unitless_givens(relation, ctx: DimensionContext) -> dict[tuple[str, str], list[ast.AST]]:
+    checker = _Checker(ctx)
+    found: dict[tuple[str, str], list[ast.AST]] = {}
+    for side in (relation.left, relation.right):
+        for node in ast.walk(side):
+            ref = checker.ref_of(node)
+            if ref is None:
+                continue
+            mote_id, key = ref
+            if (ctx.units(mote_id).get(key) is None and key not in ctx.freedoms(mote_id)
+                    and key not in ctx.scalars(mote_id)
+                    and isinstance(ctx.properties(mote_id).get(key), (int, float))
+                    and not isinstance(ctx.properties(mote_id).get(key), bool)):
+                found.setdefault(ref, []).append(node)
+    return found
+
+
+def _needed_by_probe(left_node, right_node, ref, ctx, others) -> Dim:
+    residuals = []
+    for bound in (DIMENSIONLESS, _PROBE):
+        checker = _Checker(ctx, overrides={**others, ref: bound})
+        try:
+            left, right = checker.dimension(left_node), checker.dimension(right_node)
+        except FormulaError:
+            return None
+        if left is None or right is None:
+            return None
+        residuals.append((DIMENSIONLESS if _is_literal(left) else left)
+                         - (DIMENSIONLESS if _is_literal(right) else right))
+    base, probed = residuals
+    power = (probed - base).amount / _PROBE.amount
+    if power == 0 or (probed - base) != _PROBE * power:
+        return None
+    return base * (-1.0 / power)
+
+
+def suggested_unit(dimension: Dimension, ctx: DimensionContext) -> str:
+    """A unit to suggest for `dimension`: its name (see unit_named), else
+    the base-SI product."""
+    return unit_named(dimension) or dimension.expression
 
 
 def infer_unit(text: str, key: str, ctx: DimensionContext) -> str | None:
@@ -403,9 +497,13 @@ class _Checker:
     def __init__(
         self, ctx: DimensionContext, bindings: dict[str, Dim] | None = None,
         calls: tuple[str, ...] = (), parent: "_Checker | None" = None,
-        bare_numbers: bool = False,
+        bare_numbers: bool = False, overrides: dict | None = None,
     ):
         self.ctx = ctx
+        # (mote id, key) -> the dimension to read it as, whatever it
+        # declares: how missing_units() asks "what would this need to be?"
+        self.overrides = overrides if overrides is not None else (
+            parent.overrides if parent else {})
         # Inference only: a stored number with no declared unit scales
         # whatever it multiplies or divides, as a literal does. The
         # checker leaves it unknown, which keeps a partly-annotated
@@ -460,6 +558,8 @@ class _Checker:
         # prev()'s bare-name check below) -- not here, so `targetp3.t`
         # reached through _attribute still resolves to that mote's real
         # declared unit.
+        if (mote_id, key) in self.overrides:
+            return self.overrides[(mote_id, key)]
         declared = self.ctx.units(mote_id).get(key)
         if declared is None:
             if self.bare_numbers and self._is_bare_number(mote_id, key):
@@ -517,6 +617,22 @@ class _Checker:
                 f"different dimensions"
             )
         return left if left is not None else right
+
+    def ref_of(self, node: ast.AST) -> tuple[str, str] | None:
+        """(mote id, key) a node reads as a single property, or None."""
+        if isinstance(node, ast.Name):
+            if (node.id in self.bindings or node.id == TICK_NAME
+                    or node.id in MATH_CONSTANTS):
+                return None
+            return self.ctx.mote_id, node.id
+        if isinstance(node, ast.Attribute):
+            try:
+                _role, value = self._role_or_value(node)
+            except FormulaError:
+                return None
+            if isinstance(value, _Motes) and len(value.mote_ids) == 1:
+                return value.mote_ids[0], node.attr
+        return None
 
     def unit_of(self, node: ast.AST) -> str | None:
         """The declared unit of a single value (a property, a role or named
