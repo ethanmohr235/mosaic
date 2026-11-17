@@ -29,7 +29,7 @@ from core import calculus as calculus_repo
 from core import functions as functions_repo
 from core import limits as limits_repo
 from core import roles as roles_repo
-from core.units import UnitError, from_base, to_base
+from core.units import UnitError, dimension_of, from_base, to_base
 
 # An unknown the solver may determine: which mote, which property key.
 Unknown = tuple[str, str]
@@ -689,9 +689,8 @@ def evaluate_equation(text: str, ctx: Context) -> Equation:
     operator only decides what is done with the result -- solved for
     zero, or checked for a sign."""
     relation = parse_equation(text)
-    difference = (
-        _as_ratio(_evaluate(relation.left, ctx)) - _as_ratio(_evaluate(relation.right, ctx))
-    )
+    left, right = _beside(relation.left, relation.right, ctx, step=False)
+    difference = left - right
     return Equation.from_difference(
         _clear_denominator(difference, relation.operator, text),
         source=text,
@@ -790,7 +789,68 @@ def _binary(node: ast.BinOp, ctx: Context) -> Ratio:
     op = _BIN_OPS.get(type(node.op))
     if op is None:
         raise FormulaError(f"operator {type(node.op).__name__} is not allowed in a formula")
+    if isinstance(node.op, (ast.Add, ast.Sub)):
+        left, right = _beside(node.left, node.right, ctx, step=True)
+        return op(left, right)
     return op(_as_ratio(_evaluate(node.left, ctx)), _as_ratio(_evaluate(node.right, ctx)))
+
+
+def _beside(left: ast.AST, right: ast.AST, ctx: Context, *, step: bool) -> tuple[Ratio, Ratio]:
+    """Both sides of a sum or a comparison, a bare number on one side read
+    in the declared unit of what is on the other: `L + 2` with L in ft is
+    L + 2 ft, `R == 100` with R in kohm is 100 kohm. In a sum the number
+    is a step, so only the unit's size applies (`Ti + 10` with Ti in degF
+    is ten Fahrenheit degrees warmer); in a comparison it is a value, so
+    an offset applies too (`T == 100` is 100 °F). A product or quotient
+    never adopts anything -- a bare number there is a pure scalar. Nor
+    does a dimensionless unit: beside a percentage or an angle a bare
+    number is already a pure number (`loss == 1 - efficiency` is 100 %)."""
+    left_bare, right_bare = is_bare_number(left), is_bare_number(right)
+    if left_bare != right_bare:
+        bare, other = (left, right) if left_bare else (right, left)
+        unit_name = _companion_unit(other, ctx)
+        if unit_name and not _dimensionless_unit(unit_name):
+            number = _as_ratio(_evaluate(bare, ctx)).constant
+            try:
+                read = (number * (to_base(1.0, unit_name) - to_base(0.0, unit_name))
+                        if step else to_base(number, unit_name))
+            except UnitError:
+                read = number
+            adopted = Ratio.number(read)
+            evaluated = _as_ratio(_evaluate(other, ctx))
+            return (adopted, evaluated) if left_bare else (evaluated, adopted)
+    return _as_ratio(_evaluate(left, ctx)), _as_ratio(_evaluate(right, ctx))
+
+
+def _dimensionless_unit(unit_name: str) -> bool:
+    try:
+        return dimension_of(unit_name).is_dimensionless
+    except UnitError:
+        return True
+
+
+def _companion_unit(node: ast.AST, ctx: Context) -> str | None:
+    """The declared unit of a single value -- a property, a role or named
+    mote's property, a function parameter -- which a bare number beside it
+    is read in. None for anything computed: there is no one unit to adopt,
+    so a bare number there stays base SI (and the unit check warns)."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return _companion_unit(node.operand, ctx)
+    if isinstance(node, ast.Name):
+        if node.id in ctx.bindings:
+            # A parameter, inside its function's body: its declared unit.
+            return ctx.units(ctx.mote_id).get(node.id) if ctx.calls else None
+        if node.id == TICK_NAME or node.id in MATH_CONSTANTS:
+            return None
+        return ctx.units(ctx.mote_id).get(node.id)
+    if isinstance(node, ast.Attribute):
+        try:
+            _role, value = _role_or_value(node, ctx)
+        except FormulaError:
+            return None
+        if isinstance(value, MoteSet) and len(value.mote_ids) == 1:
+            return ctx.units(value.mote_ids[0]).get(node.attr)
+    return None
 
 
 def _unary(node: ast.UnaryOp, ctx: Context) -> Ratio:

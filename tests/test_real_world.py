@@ -184,3 +184,35 @@ def test_a_sweep_of_deflection_against_length(conn):
     for length_ft, deflection_in in points:
         inches = length_ft * 12
         assert deflection_in == pytest.approx(500 * inches**3 / (3 * 29e6 * 12), rel=1e-5)
+
+
+# ---- bare numbers mean the companion's unit ----
+
+@pytest.mark.parametrize("sheet, ref, expected", [
+    ("g.L = 10 ft\ng.x [ft] = g.L + 2", "g.x}{ft, 6", 12.0),
+    ("g.L = 10 ft\ng.x [ft] = 2 + g.L", "g.x}{ft, 6", 12.0),
+    ("g.L = 10 ft\ng.x [ft] = g.L - 2", "g.x}{ft, 6", 8.0),
+    ("w.Ti = 543 degF\nw.To [degF] = w.Ti + 10", "w.To}{degF, 6", 553.0),
+    ("r.R [kohm] = ?\nr.R == 100", "r.R}{kohm, 6", 100.0),
+    ("t.T [degF] = ?\nt.T == 100", "t.T}{degF, 6", 100.0),
+    ("g.L = 10 ft\ng.x [ft] = g.L / 2", "g.x}{ft, 6", 5.0),
+    ("e.eff = 22.5 %\ne.loss [%] = 1 - e.eff", "e.loss}{%, 6", 77.5),
+])
+def test_a_bare_number_reads_in_its_companions_unit(conn, sheet, ref, expected):
+    (value,) = shown(conn, sheet, ref)
+    assert number(value) == pytest.approx(expected, rel=1e-9)
+
+
+def test_a_bare_number_in_a_function_body_warns_when_it_reads_as_si(conn):
+    worksheet.apply(conn, """Pr(r [cm]) = 1 - (r/51)^2
+Pz(z [cm]) = cos(pi*z/109)
+Ok(r [cm]) = 1 - (r/m.a)^2
+m.a = 51 cm
+m.r = 25.5 cm
+m.v = Pr(m.r)
+m.w = Pz(m.r)
+m.u = Ok(m.r)""")
+    warnings = run_simulation(conn).dimension_warnings
+    assert any("1 is subtracted from (r / 51)^2" in w for w in warnings)
+    assert any("cos() takes an angle" in w and "109" in w for w in warnings)
+    assert not any("m.u" in w for w in warnings)

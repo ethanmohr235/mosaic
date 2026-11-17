@@ -60,6 +60,7 @@ from core.units import (
     describe_expression,
     dimension_of,
     is_unit,
+    to_base,
 )
 
 # A dimension, or None meaning "not declared" -- deliberately distinct
@@ -299,6 +300,27 @@ def function_problem(function_id: str, ctx: DimensionContext) -> str | None:
 
 
 
+_ANGLE_CALLS = frozenset({"sin", "cos", "tan", "sinc"})
+
+
+def _written(node: ast.AST) -> str:
+    """A node as a person would have typed it (`^`, not `**`)."""
+    return ast.unparse(node).replace(" ** ", "^")
+
+
+def _has_bare_number(node: ast.AST) -> bool:
+    return any(isinstance(n, ast.Constant) and isinstance(n.value, (int, float))
+               and not isinstance(n.value, bool) for n in ast.walk(node))
+
+
+def _single_value(node: ast.AST) -> bool:
+    """A lone property, parameter or role read -- what a bare number beside
+    it takes its unit from (core/formula.py's _companion_unit)."""
+    while isinstance(node, ast.UnaryOp):
+        node = node.operand
+    return isinstance(node, (ast.Name, ast.Attribute))
+
+
 def _conflict(a: Dim, b: Dim) -> bool:
     """Two dimensions disagree only when both are actually declared, and
     neither is a literal free to adopt the other's unit."""
@@ -411,11 +433,16 @@ class _Checker:
         left = self.dimension(node.left)
         right = self.dimension(node.right)
         # A literal takes on the unit of whatever it's added to, so it
-        # carries no information of its own here.
-        if _is_literal(left):
-            return right
-        if _is_literal(right):
-            return left
+        # carries no information of its own here -- beside a single value
+        # the evaluator reads it in that value's unit (core/formula.py's
+        # _beside). Beside a computed one there is no one unit to adopt,
+        # so it is base SI, which is worth saying when the garden works in
+        # other units: `1 - (r/51)^2` with r in cm is not what was meant.
+        if _is_literal(left) or _is_literal(right):
+            bare, other, dim = ((node.left, node.right, right) if _is_literal(left)
+                                else (node.right, node.left, left))
+            self._bare_beside_computed(bare, other, dim, node.op)
+            return right if _is_literal(left) else left
         if _conflict(left, right):
             verb = "added to" if isinstance(node.op, ast.Add) else "subtracted from"
             self.report(
@@ -423,6 +450,41 @@ class _Checker:
                 f"different dimensions"
             )
         return left if left is not None else right
+
+    def _bare_beside_computed(self, bare: ast.AST, other: ast.AST, dim: Dim, op) -> None:
+        if (dim is None or _is_literal(dim) or dim.is_dimensionless
+                or not is_bare_number(bare) or _single_value(other)
+                or not self._reads_non_si(other)):
+            return
+        verb = "added to" if isinstance(op, ast.Add) else "subtracted from"
+        base = unit_named(dim) or describe(dim)
+        self.report(
+            f"{_written(bare)} is {verb} {_written(other)} (in {describe(dim)}), so it is "
+            f"read as {_written(bare)} {base} -- a bare number beside a computed value is in "
+            f"base SI units; give it a unit if it means something else")
+
+    def _reads_non_si(self, node: ast.AST) -> bool:
+        """Whether `node` reads a value declared in a unit other than its
+        dimension's base one (cm, degF, psi) -- where a bare number read
+        in base SI is likely a slip rather than the intent."""
+        for inner in ast.walk(node):
+            unit_name = None
+            if isinstance(inner, ast.Name) and inner.id not in MATH_CONSTANTS:
+                unit_name = self.ctx.units(self.ctx.mote_id).get(inner.id)
+            elif isinstance(inner, ast.Attribute):
+                try:
+                    _role, value = self._role_or_value(inner)
+                except FormulaError:
+                    continue
+                if isinstance(value, _Motes) and value.mote_ids:
+                    unit_name = self.ctx.units(value.mote_ids[0]).get(inner.attr)
+            if unit_name:
+                try:
+                    if to_base(1.0, unit_name) != 1.0 or to_base(0.0, unit_name) != 0.0:
+                        return True
+                except UnitError:
+                    continue
+        return False
 
     def _power(self, base: Dim, exponent_node: ast.AST) -> Dim:
         """`x ** n` scales x's dimension by n, which requires n to be a
@@ -691,7 +753,13 @@ class _Checker:
         is reported rather than silently discarded."""
         if len(node.args) != 1:
             raise FormulaError(f"{name}() takes exactly one argument")
-        self.dimension(node.args[0])
+        argument = self.dimension(node.args[0])
+        if (name in _ANGLE_CALLS and argument is not None and not _is_literal(argument)
+                and not argument.is_dimensionless):
+            hint = (" -- a bare number in it is read in base SI units; give it a unit"
+                    if _has_bare_number(node.args[0]) else "")
+            self.report(f"{name}() takes an angle (a pure number), but "
+                        f"{_written(node.args[0])} is in {describe(argument)}{hint}")
         return DIMENSIONLESS
 
     def _log(self, name: str, node: ast.Call) -> Dim:

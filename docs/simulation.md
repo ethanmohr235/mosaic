@@ -550,7 +550,9 @@ reactor.flux_center = phi(0)
   the unit check uses it for a call whose body cannot tell its own.
 - **A parameter's unit is the function mote's ordinary `units` entry.** It
   says what a *bare number* passed to that parameter means: `phi(0)` is
-  0 cm. A number with no declared unit is base SI. An argument that reads
+  0 cm. Inside the body, a bare number added to or compared with the
+  parameter takes its unit too (`r + 2` is r + 2 cm); one beside a
+  computed value is base SI and warns (see *Bare numbers*). A number with no declared unit is base SI. An argument that reads
   a property already carries that property's unit, so it is never
   reinterpreted. `[1]` declares a parameter dimensionless.
 - **The name resolves like a garden-scope name**: the one mote in the
@@ -1593,6 +1595,33 @@ adapts to whatever it's compared with (`resistance == 100` is fine), and
 or elapsed time. A *computed* dimensionless value is different: if
 `a / b` cancels to a pure ratio, comparing it to a voltage is a real
 mistake and gets reported.
+
+### Bare numbers
+
+A number written with no unit means what a textbook means by it:
+
+| Written | With | Means |
+|---|---|---|
+| `g.L + 2` | L in ft | L + 2 ft (a sum: the companion's unit) |
+| `w.Ti + 10` | Ti in degF | ten Fahrenheit degrees warmer (a sum adds a *step*: size, no offset) |
+| `r.R == 100` | R in kohm | 100 kohm (a comparison: the value, offset included -- `T == 100` is 100 °F) |
+| `2 * b.L`, `b.L / 2` | L in ft | a pure scalar (products and quotients never adopt a unit) |
+| `1 - eff` | eff in % | 1 is 100 % (a dimensionless unit is never adopted) |
+
+The unit adopted is that of a **single value** beside the number: a
+property, a named mote's or role's property, or a function parameter in
+its body. Beside anything computed there is no one unit to adopt, so the
+number is base SI -- and when that computed value reads a non-SI unit the
+unit check says so, since it is almost always a slip:
+
+```
+m.v == Pr(m.r) on m: 1 is subtracted from (r / 51)^2 (in m²), so it is read as 1 m^2 -- …
+m.w == Pz(m.r) on m: cos() takes an angle (a pure number), but pi * z / 109 is in m -- a bare number in it is read in base SI units; give it a unit
+```
+
+(`Pr(r [cm]) = 1 - (r/51)^2` reads 51 as 51 m. Write the constant with
+its unit -- a given `m.a = 51 cm`, then `r/m.a`.) `sin`, `cos`, `tan` and
+`sinc` warn whenever their argument has a dimension.
 
 By default this is advisory -- warnings appear on the run's result
 (`SimulationResult.dimension_warnings`) and the run proceeds. Passing
