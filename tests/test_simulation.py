@@ -357,7 +357,24 @@ def test_nonlinear_in_unknowns_is_reported(conn):
     set_species(conn, mote, species)
 
     with pytest.raises(SimulationError, match="could not be resolved"):
-        run_simulation(conn)
+        run_simulation(conn, solver="linear")
+
+
+def test_the_default_solver_iterates_where_it_must_and_says_so(conn):
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
+    add_rule(conn, species, "square", "x * x == 4")
+    mote = create_mote(conn, {"name": "m", "x": 1.0})
+    set_species(conn, mote, species)
+    result = run_simulation(conn)
+    assert result.values[(mote, "x")] == pytest.approx(2.0)
+    assert "solved iteratively (newton)" in result.summary
+
+
+def test_a_linear_garden_says_nothing_about_iterating(conn):
+    species = create_mote(conn, {"name": "S", "freedoms": "x"})
+    add_rule(conn, species, "double", "x * 2 == 4")
+    set_species(conn, create_mote(conn, {"name": "m"}), species)
+    assert "newton" not in run_simulation(conn).summary
 
 
 def test_formula_error_names_the_rule_and_mote(conn):
@@ -462,10 +479,10 @@ def test_time_series_accepts_a_solver_override(conn):
     assert result.failed_at is None
     assert result.steps[0].values[(mote, "side")] == pytest.approx(4.0)
 
-    # The default backend still can't solve it -- confirms the override,
-    # not some other change, is what made the newton run succeed.
-    default_result = run_time_series(conn, step_count=1)
-    assert default_result.failed_at == 0
+    # `linear` still can't solve it -- confirms the override, not some
+    # other change, is what made the newton run succeed.
+    linear_result = run_time_series(conn, step_count=1, solver="linear")
+    assert linear_result.failed_at == 0
 
 
 # ---- what a solve writes ----

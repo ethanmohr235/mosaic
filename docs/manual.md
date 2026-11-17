@@ -69,7 +69,7 @@ selection). A mote named like a command is reached as `"find"` or `#id`.
 | `rule @sel\|‹rule›` | A rule's equation and bound values (a non-rule mote: every rule touching it) |
 | `why ‹m.k›` | How the garden as it stands determines a value (a live solve; writes nothing) |
 | `scenarios` | Scenarios and their overrides |
-| `solve` | Solve once and write it (undoable; refused if a rule uses `prev()`) |
+| `solve` | Solve once and write it (undoable; refused if a rule uses `prev()`). The default solver is `auto`: linear, and newton where an equation is nonlinear (the summary says so) |
 | `solve --live on\|off` | Solve after every edit made here (top bar: `live`) |
 | `step +N\|-N\|‹tick›`, `play`, `pause` | Move the shared playhead (top bar: `tick 12/49 ▶`) |
 | `edit @sel\|#id\|‹name›` | Write a note (a new name makes it on the first save) |

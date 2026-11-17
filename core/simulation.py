@@ -10,9 +10,10 @@ T1 * (p2/p1)**0.286`), and it means a garden of plain assignment-style
 rules never touches a solver backend at all. Whatever's left -- a
 still-linear system of several unknowns, or something genuinely nonlinear
 in its unknowns -- is handed to a pluggable solver backend (see
-core/solvers.py) chosen per run via `solver`/`solver_configuration`: the
-default `"linear"` is exact and non-iterative but fails on genuine
-nonlinearity, `"newton"` is iterative and can solve that.
+core/solvers.py) chosen per run via `solver`/`solver_configuration`:
+`"linear"` is exact and non-iterative but fails on genuine nonlinearity,
+`"newton"` is iterative and can solve that, and the default `"auto"` is
+linear unless something is left that only newton can finish.
 """
 import dataclasses
 import logging
@@ -43,6 +44,7 @@ from core.formula import (
 from core.dimensions import (
     DimensionContext, check_equation, expression_dimension, function_problem, infer_dimension,
     infer_unit, temperature_unit, unit_named, UNDECIDED, determining_side, preferred_unit,
+    required_dimension,
 )
 from core.entities import Relationship
 from core.calculus import Derivative, Integral
@@ -78,7 +80,8 @@ from core.units import (
 logger = logging.getLogger(__name__)
 
 _TOLERANCE = 1e-9
-_DEFAULT_SOLVER = "linear"
+# `auto`: linear, and newton for what is not (core/solver_registry.py).
+_DEFAULT_SOLVER = DEFAULT_SOLVER = "auto"
 
 
 class SimulationError(Exception):
@@ -109,6 +112,8 @@ class SimulationResult:
     # Function calls answered with a limit rather than evaluated: the
     # answer is right, and how it was reached is worth saying.
     limits: list[Limit] = field(default_factory=list)
+    # True when the default solver had to iterate (newton) for some of it.
+    iterated: bool = False
 
     @property
     def summary(self) -> str:
@@ -118,6 +123,8 @@ class SimulationResult:
             f"across {motes} mote{'' if motes == 1 else 's'} "
             f"from {self.equation_count} equation{'' if self.equation_count == 1 else 's'}."
         )
+        if self.iterated:
+            text += " Nonlinear, so solved iteratively (newton)."
         if self.unsolved:
             text += f" {len(self.unsolved)} declared freedom(s) had no equation."
         if self.dimension_warnings:
@@ -252,6 +259,8 @@ class _GardenView:
     # (core/limits.py), once per (function, parameter, point). Mutable
     # on purpose: it is the one thing evaluation writes back to the run.
     limits: dict[tuple, Limit] = field(default_factory=dict)
+    # Set when the `auto` solver had to iterate, for the summary to say so.
+    iterated: list[str] = field(default_factory=list)
 
 
 def _limit_summary(limits: list[Limit]) -> str:
@@ -670,9 +679,9 @@ def run_simulation(
 
     `solver` picks the backend that finishes whatever the substitution
     loop couldn't resolve on its own -- see core/solvers.py. The default,
-    `"linear"`, is today's exact non-iterative behavior and fails on
-    genuine nonlinearity; `"newton"` can solve that at the cost of being
-    iterative/approximate.
+    `"auto"`, is `"linear"` -- exact and non-iterative -- unless an
+    equation is genuinely nonlinear, when `"newton"` finishes it
+    iteratively; naming `"linear"` refuses that instead.
 
     `strict_units` promotes a dimensional mismatch from a warning on the
     result to a SimulationError. Off by default: units are opt-in, so a
@@ -728,6 +737,7 @@ def run_simulation(
         scenario_id=scenario,
         constraint_violations=violations,
         limits=list(view.limits.values()),
+        iterated=bool(view.iterated),
     )
 
 
@@ -1653,6 +1663,11 @@ def _infer_missing_units(
             found, pure = _infer_pass(
                 dataclasses.replace(view, units=known), equations, keys, model_cache, scalars,
                 final=True)
+        if not found and not pure:
+            # Last, a value no equation determines as a whole side, from
+            # what an equation it is in needs it to be.
+            found, pure = _probe_pass(
+                dataclasses.replace(view, units=known), equations, keys, model_cache, scalars)
             if not found and not pure:
                 return inferred
         for mote_id, units in found.items():
@@ -1703,6 +1718,34 @@ def _infer_pass(
             if dimension is not None and (dimension.is_dimensionless):
                 pure.add((mote_id, key))
                 break
+    return found, pure
+
+
+def _probe_pass(
+    view: _GardenView,
+    equations: list[tuple[rules_repo.Rule, str]],
+    keys: list[Unknown],
+    model_cache: dict[str, PropertyProvider],
+    scalars: dict[str, set[str]],
+) -> tuple[dict[str, dict[str, str]], set[Unknown]]:
+    found: dict[str, dict[str, str]] = {}
+    pure: set[Unknown] = set()
+    for mote_id, key in keys:
+        if view.units.get(mote_id, {}).get(key) or key in scalars.get(mote_id, set()):
+            continue
+        for rule, pair_mote_id in equations:
+            context = _dimension_context(view, model_cache, pair_mote_id, scalars)
+            dimension = required_dimension(rule.equation, (mote_id, key), context)
+            if dimension is None:
+                continue
+            if dimension.is_dimensionless:
+                pure.add((mote_id, key))
+            else:
+                unit_name = (preferred_unit(dimension, None, context, _garden_units(view))
+                             or unit_named(dimension))
+                if unit_name:
+                    found.setdefault(mote_id, {})[key] = unit_name
+            break
     return found, pure
 
 
@@ -2365,6 +2408,8 @@ def _finish(
     # point this backend wandered to is not.
     try:
         values = backend.solve(remainder, known, candidates, _initial_guess(view))
+        if getattr(backend, "used", None) == "newton":
+            view.iterated.append("newton")
     except SolverError:
         raise
     except FormulaError as e:

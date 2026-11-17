@@ -296,7 +296,7 @@ def run(conn, line: graphview.GraphLine, selection=(), run: dict | None = None,
     garden = _Garden(conn)
     scenario = garden.scenario(settings.get("scenario"))
     tried = _knobs(garden, settings, line)
-    trace = simulation.trace(conn, scenario, settings.get("solver") or "linear", tried)
+    trace = simulation.trace(conn, scenario, settings.get("solver") or simulation.DEFAULT_SOLVER, tried)
     raw = build_groups(trace)
     ends = answers(raw)
     fold_list = folds_of(raw, ends, {str(k): bool(v) for k, v in (folds or {}).items()})
@@ -337,7 +337,7 @@ def _extras(r: _Run, shown: list[Group], settings: dict) -> None:
     variables = _touched(shown)
     if settings.get("ticks"):
         result = motion._series_run(r.conn, int(settings["ticks"]),
-                                    settings.get("solver") or "linear", r.scenario, r.tried)
+                                    settings.get("solver") or simulation.DEFAULT_SOLVER, r.scenario, r.tried)
         case = scenarios_repo.get_scenario(r.conn, r.scenario) if r.scenario else None
         start = scenarios_repo.overlay(
             scenarios_repo.apply({m.id: dict(m.properties) for m in r.garden.motes}, case), r.tried)

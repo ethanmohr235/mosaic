@@ -231,7 +231,7 @@ def run(conn: sqlite3.Connection, line: SimLine) -> SimRun:
     garden = _Garden(conn)
     scenario_id = garden.scenario(line.scenario)
     vs_id, vs_name = _vs(garden, line.vs)
-    solver = line.solver or "linear"
+    solver = line.solver or simulation_repo.DEFAULT_SOLVER
     knobs = knobs_repo.resolve(garden, line.sets)
     tried = knobs_repo.overrides(knobs)
     result = _series_run(conn, line.tick_count, solver, scenario_id, tried)
@@ -462,7 +462,7 @@ def rule_cards(conn: sqlite3.Connection, ref: str, *, ticks: int | None = None,
     series = None
     if ticks is not None:
         tried = knobs_repo.overrides(knobs_repo.resolve(garden, [knobs_repo.parse_set(s) for s in sets]))
-        result = _series_run(conn, ticks, solver or "linear", scenario_id, tried)
+        result = _series_run(conn, ticks, solver or simulation_repo.DEFAULT_SOLVER, scenario_id, tried)
         case = scenarios_repo.get_scenario(conn, scenario_id) if scenario_id else None
         start = scenarios_repo.overlay(
             scenarios_repo.apply({m.id: dict(m.properties) for m in garden.motes}, case), tried)
@@ -593,7 +593,7 @@ def solve(conn: sqlite3.Connection, solver: str | None = None) -> Solve:
                            f"use sim; solve writes one static solve")
     before = {m.id: dict(m.properties) for m in motes_repo.list_motes(conn)}
     try:
-        result = simulation_repo.run_simulation(conn, solver=solver or "linear")
+        result = simulation_repo.run_simulation(conn, solver=solver or simulation_repo.DEFAULT_SOLVER)
     except simulation_repo.SimulationError as e:
         raise CommandError(f"solve failed: {e}") from None
     after = {m.id: dict(m.properties) for m in motes_repo.list_motes(conn)}

@@ -376,7 +376,7 @@ def neighborhood(
 def preview_simulation(
     step_count: int = 1,
     garden: str | None = None,
-    solver: str = "linear",
+    solver: str = "auto",
     solver_configuration: dict[str, Any] | None = None,
     scenario: str | None = None,
 ) -> dict[str, Any]:
@@ -388,11 +388,12 @@ def preview_simulation(
     that in the app.
 
     `solver` picks the backend that finishes whatever the substitution
-    loop can't resolve on its own: `"linear"` (the default) is exact but
-    fails if a rule is genuinely nonlinear in its unknowns (e.g. `area ==
-    side * side`); `"newton"` solves that iteratively instead, tunable
-    via `solver_configuration` (`max_iterations`, `tolerance`,
-    `epsilon`).
+    loop can't resolve on its own: `"auto"` (the default) is exact
+    (`"linear"`) where the rules are linear and iterates (`"newton"`)
+    where one is genuinely nonlinear in its unknowns (e.g. `area == side *
+    side`); `"linear"` refuses that instead, and `"newton"` iterates
+    throughout, tunable via `solver_configuration` (`max_iterations`,
+    `tolerance`, `epsilon`).
 
     `scenario` names a mote gathering overrides (see list_scenarios) --
     the garden is solved as that scenario would have it. A preview never
@@ -813,7 +814,7 @@ def start_project(mote_id: str, name: str | None = None, garden: str | None = No
         return {"garden": created, "owner": mote_id}
 
 
-def propagate_uncertainty(solver: str = "linear", garden: str | None = None) -> dict[str, Any]:
+def propagate_uncertainty(solver: str = "auto", garden: str | None = None) -> dict[str, Any]:
     """Each solved value's ±, propagated from the givens' ± -- computed on
     read, never stored. A given carries its ± in the reserved `uncertainty`
     map ({x: 0.5} absolute in x's unit, {x: "2%"} relative). First order,

@@ -164,7 +164,8 @@ Solving runs in two stages:
 
 `run_simulation`/`run_time_series` (and the console's `sim --solver`) all take an optional `solver` (a name) and `solver_configuration` (a dict of backend-specific settings), the same pattern [physical property models](#physical-property-models) use for `provider`/`configuration` -- a pluggable, named backend rather than one hardcoded algorithm. Unlike a property model, solver choice can't be attached to a single mote: solving happens over the whole coupled equation system at once, so it's picked per run, not per mote.
 
-- **`linear`** (the default). Exact, non-iterative least-squares solve of whatever's left after substitution. Fails with **could not be resolved** if any equation is genuinely nonlinear in its unknowns.
+- **`auto`** (the default). `linear` when what is left is linear, `newton` when something is genuinely nonlinear -- so a garden that needs iteration solves everywhere it is read (a document's `\val`, a plot, `why`, `solve`) without anyone naming a solver. The summary says when it iterated: *Nonlinear, so solved iteratively (newton).* A start for newton is written `p.f = ? 0.02` (see the worksheet).
+- **`linear`**. Exact, non-iterative least-squares solve of whatever's left after substitution. Fails with **could not be resolved** if any equation is genuinely nonlinear in its unknowns -- name it to insist on that.
 - **`newton`**. Finds a root of the combined residual by Newton-Raphson with a numeric (finite-difference) Jacobian, so it can solve the cases `linear` can't -- an equation of state, a nonlinear structural relation, a `property()` call whose input is itself unknown. Being iterative, it needs a starting guess for each unknown (the mote's existing property value if there is one, otherwise `1.0`) and can fail to converge or find a different root than expected for a badly-conditioned or multi-rooted system. Configuration: `max_iterations` (default 50), `tolerance` (default `1e-9`), `epsilon` (the finite-difference step, default `1e-6`).
 
 ## Errors
@@ -531,8 +532,8 @@ reactor.flux_center = phi(0)
   argument** (`core/formula.py::_function_call`). Arguments are evaluated
   where the call is, so an unknown goes into the body as itself, and the
   body is exactly as linear, or as deferred, as it would be written
-  inline. `line(s.x) == 7` solves with the default solver; `sq(s.x) == 9`
-  needs `newton`, just as `s.x * s.x == 9` would. Every surface that
+  inline. `line(s.x) == 7` solves with `linear`; `sq(s.x) == 9` needs
+  `newton`, just as `s.x * s.x == 9` would (the default `auto` picks it). Every surface that
   evaluates a formula gets calls with no changes: rules, checks, `\val`,
   `\work`, `why`, sweeps, `fit`, uncertainty and solve health.
 - **A bare name in the body is a parameter first, then a property of the
@@ -1713,5 +1714,5 @@ a rule that doesn't add up.
   There is no `dt` anywhere in the engine, and no seconds: **a tick is one re-solve of the equation set**, not an integration step. The console's `sim` says so rather than implying a clock -- `--ticks`, the timeline and the playhead all count ticks. An integrator would reach `sim --solver` by being registered in `core/solver_registry.py`, which is the only registration point either side reads.
 - **Symbolic calculus.** `integrate` and `deriv` are numeric. Symbolic derivatives (and, for `\work`, the derivative written out as an expression) are planned next; symbolic antiderivatives would need a computer-algebra dependency. Time derivatives (`dx/dt` in a rule) wait on the continuous-dynamics question above.
 - **Non-physical units.** Currencies, story points, and other non-SI "units" aren't in the dimension system. A passthrough dimension for them could be added without disturbing the design.
-- **A default solver per garden/species.** `solver` is a per-call argument only; there's no way to persist "this garden always uses `newton`" so every caller has to name it.
+- **A solver pinned per garden.** The default `auto` picks `linear` or `newton` as the equations need; there's no way to persist "this garden always uses `newton`" (or always refuses iteration), so a caller that wants one names it.
 - **Species inheritance.** Species are flat.

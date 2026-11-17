@@ -248,6 +248,55 @@ def missing_units(text: str, ctx: DimensionContext) -> list[tuple[str, str, Dime
     return found
 
 
+def required_dimension(text: str, ref: tuple[str, str], ctx: DimensionContext) -> Dim:
+    """The dimension `ref` must have for `text` to balance, worked out as
+    missing_units() does -- for a solved value that no equation determines
+    as a whole side (`1/sqrt(f) == -2 * log10(...)` makes f a pure number).
+    None when the equation cannot tell."""
+    try:
+        relation = parse_equation(text)
+    except FormulaError:
+        return None
+    checker = _Checker(ctx)
+    nodes = [n for side in (relation.left, relation.right) for n in ast.walk(side)
+             if checker.ref_of(n) == ref]
+    if not nodes:
+        return None
+    inside = {id(n) for n in nodes}
+    pairs = [(relation.left, relation.right)] + [
+        (node.left, node.right) for side in (relation.left, relation.right)
+        for node in ast.walk(side)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub))]
+    for left, right in pairs:
+        if any(id(n) in inside for side in (left, right) for n in ast.walk(side)):
+            needed = _needed_by_probe(left, right, ref, ctx, {})
+            if needed is not None:
+                return needed
+    return _needed_inside_a_call(relation, ref, ctx)
+
+
+def _needed_inside_a_call(relation, ref, ctx) -> Dim:
+    """A value under sqrt/log/exp/trig whose argument must be a pure
+    number: `log10(x)` makes x dimensionless. Only when the value is the
+    argument itself or a product/quotient of it with known values."""
+    checker = _Checker(ctx)
+    for side in (relation.left, relation.right):
+        for node in ast.walk(side):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and len(node.args) == 1):
+                continue
+            name = node.func.id
+            if name not in LOG_CALLS and name not in _ANGLE_CALLS and name not in HYPERBOLIC_CALLS:
+                continue
+            argument = node.args[0]
+            if not any(checker.ref_of(n) == ref for n in ast.walk(argument)):
+                continue
+            needed = _needed_by_probe(argument, ast.Constant(1.0), ref, ctx, {})
+            if needed is not None:
+                return needed
+    return None
+
+
 def _unitless_givens(relation, ctx: DimensionContext) -> dict[tuple[str, str], list[ast.AST]]:
     checker = _Checker(ctx)
     found: dict[tuple[str, str], list[ast.AST]] = {}

@@ -370,3 +370,36 @@ w.To = w.Ti + w.q / (w.m * w.cp)"""
 ])
 def test_a_solved_value_reads_in_the_gardens_own_units(conn, sheet, ref, expected):
     assert shown(conn, sheet, ref) == [expected]
+
+
+# ---- a nonlinear garden reads in a document like any other ----
+
+def test_a_nonlinear_system_is_solved_where_a_document_reads_it(conn):
+    sheet = """s.x [m] = ? 1 m
+s.y [m] = ? 1 m
+s.r = 5 m
+s.x^2 + s.y^2 == s.r^2
+s.y == s.x + 1 m"""
+    x, y = shown(conn, sheet, "s.x}{m, 6", "s.y}{m, 6")
+    assert (number(x), number(y)) == pytest.approx((3, 4))
+
+
+def test_colebrook_from_a_starting_friction_factor(conn):
+    rho, mu, D, V, eps = 998.0, 1.002e-3, 2 * IN, 3.0, 0.045e-3
+    reynolds = rho * V * D / mu
+    f = 0.02
+    for _ in range(100):
+        f = (-2 * math.log10(eps / (3.7 * D) + 2.51 / (reynolds * math.sqrt(f)))) ** -2
+    sheet = """p.rho = 998 kg/m^3
+p.mu = 1.002e-3 Pa*s
+p.D = 2 in
+p.V = 3 m/s
+p.eps = 0.045 mm
+p.L = 100 ft
+p.f = ? 0.02
+p.Re = p.rho * p.V * p.D / p.mu
+1/sqrt(p.f) == -2 * log10(p.eps/(3.7*p.D) + 2.51/(p.Re*sqrt(p.f)))
+p.dp = p.f * p.L / p.D * p.rho * p.V^2 / 2"""
+    friction, drop = shown(conn, sheet, "p.f}{6", "p.dp}{psi, 6")
+    assert number(friction) == pytest.approx(f, rel=1e-5)
+    assert number(drop) == pytest.approx(f * 100 * FT / D * rho * V**2 / 2 / PSI, rel=1e-5)

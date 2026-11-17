@@ -109,7 +109,7 @@ class Explainer:
     use. `overrides` are knobs (core/knobs.py) over `scenario`'s."""
     conn: sqlite3.Connection
     scenario: str | None = None
-    solver: str = "linear"
+    solver: str = simulation.DEFAULT_SOLVER
     overrides: dict | None = None
     _live: simulation.LiveGarden | None = field(default=None, init=False, repr=False)
     _index: Index | None = field(default=None, init=False, repr=False)

@@ -350,7 +350,7 @@ def _sweep(
     outputs = list({(s["mote"], s["key"]) for s in series_specs})
     result = run_sweep(
         ground, axis, cases, outputs,
-        spec.get("solver", "linear"), spec.get("solverConfiguration"),
+        spec.get("solver", simulation.DEFAULT_SOLVER), spec.get("solverConfiguration"),
         should_cancel=should_cancel,
     )
     if result.cancelled:
@@ -493,7 +493,7 @@ def _function(
 
     solving = scenarios_repo.overlay(ground.properties, _overrides(spec))
     live = simulation.live_garden_of(solving, solving, ground.relationships, ground.rules,
-                                     spec.get("solver", "linear"))
+                                     spec.get("solver", simulation.DEFAULT_SOLVER))
     base = simulation.expression_context(live.properties, ground.relationships, "")
     count = max(1, min(steps, max_points - 1))
     xs = [lo + (hi - lo) * i / count for i in range(count + 1)]
@@ -600,7 +600,7 @@ def _surface(
 
     result = run_surface(
         ground, x_axis, y_axis, (output["mote"], output["key"]),
-        _cases(spec, [])[0], spec.get("solver", "linear"),
+        _cases(spec, [])[0], spec.get("solver", simulation.DEFAULT_SOLVER),
         spec.get("solverConfiguration"), should_cancel=should_cancel,
     )
     if result.cancelled:
@@ -640,7 +640,7 @@ def _correlate(
                       error="this view has no two property names saved on it")
     dots = run_correlation(
         ground, x_key, y_key, _cases(spec, [])[0],
-        spec.get("solver", "linear"), spec.get("solverConfiguration"),
+        spec.get("solver", simulation.DEFAULT_SOLVER), spec.get("solverConfiguration"),
     )
     xs = [d.x for d in dots]
     ys = [d.y for d in dots]

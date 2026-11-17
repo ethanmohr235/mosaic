@@ -149,7 +149,7 @@ def has_uncertainty(conn: sqlite3.Connection) -> bool:
     return cur.fetchone() is not None
 
 
-def propagate(conn: sqlite3.Connection, solver: str = "linear") -> Report:
+def propagate(conn: sqlite3.Connection, solver: str = simulation.DEFAULT_SOLVER) -> Report:
     """Every solved value's ±, from the givens' ±. Writes nothing.
 
     Solves the garden as it stands, then once more per given either side

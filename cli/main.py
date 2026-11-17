@@ -255,10 +255,10 @@ def build_parser() -> argparse.ArgumentParser:
     simulate_sub = simulate_parser.add_subparsers(dest="action")
     run_parser = simulate_sub.add_parser("run", help="Run the simulation (default)")
     run_parser.add_argument(
-        "--solver", default="linear",
+        "--solver", default="auto",
         help="Solver backend for whatever the substitution loop can't resolve alone "
-             "(default: linear; also available: newton, for equations genuinely "
-             "nonlinear in their unknowns)",
+             "(default: auto -- linear, and newton where an equation is genuinely "
+             "nonlinear in its unknowns; or name linear or newton)",
     )
     run_parser.add_argument(
         "--strict-units", action="store_true",
@@ -314,7 +314,7 @@ def build_parser() -> argparse.ArgumentParser:
     unc_parser = subparsers.add_parser(
         "uncertainty", help="Each result's ±, propagated from the givens' ±, with its budget"
     )
-    unc_parser.add_argument("--solver", default="linear", help="Solver backend (default linear)")
+    unc_parser.add_argument("--solver", default="auto", help="Solver backend (default auto: linear, newton where needed)")
 
     ### Fit
     fit_parser = subparsers.add_parser(
@@ -729,7 +729,7 @@ def _handle_simulate(conn, args) -> None:
         try:
             result = run_simulation(
                 conn,
-                solver=getattr(args, "solver", "linear"),
+                solver=getattr(args, "solver", "auto"),
                 strict_units=getattr(args, "strict_units", False),
                 strict_constraints=getattr(args, "strict_constraints", False),
                 scenario=getattr(args, "scenario", None),

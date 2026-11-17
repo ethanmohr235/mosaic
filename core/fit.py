@@ -220,7 +220,7 @@ class _Model:
             overrides.setdefault(mote, {})[key] = float(value)
         point = {self.x[0]: {self.x[1]: float(x)}}
         self.solves += 1
-        solved, error = sweep_repo._solve(self.ground, self.scenario, overrides, point, "linear", None)
+        solved, error = sweep_repo._solve(self.ground, self.scenario, overrides, point, sweep_repo._DEFAULT_SOLVER, None)
         if solved is None:
             return None, error
         value = solved.value(*self.y)

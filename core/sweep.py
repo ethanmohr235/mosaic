@@ -63,7 +63,7 @@ from core.solvers import SolverError
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SOLVER = "linear"
+_DEFAULT_SOLVER = "auto"
 
 # A property named by mote and key -- what a sweep reads out of each solve.
 Output = tuple[str, str]
