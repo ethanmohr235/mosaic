@@ -52,6 +52,14 @@ def test_values_are_frozen_and_equations_numbered(conn, bar):
     assert "\\begin{equation}\nl = \\sqrt{x^2+y^2}\n\\end{equation}" in out.tex
 
 
+def test_a_celsius_value_prints_the_degree_sign(conn):
+    worksheet.apply(conn, "p2.Ti = 400 degC")
+    out = export(conn, "Inlet \\val{p2.Ti}.\n\n\\begin{equation}\nT = \\val{p2.Ti}\n\\end{equation}")
+    assert r"Inlet $400\,\mathrm{{^\circ}C}$." in out.tex
+    assert r"T = 400\,\mathrm{{^\circ}C}" in out.tex
+    assert "degC" not in out.tex and out.problems == ()
+
+
 def test_a_line_break_in_an_equation_survives(conn, bar):
     out = export(conn, "\\begin{equation}\na = b \\newline c = d \\\\ e\n\\end{equation}")
     assert ("\\begin{equation}\n\\begin{gathered}\na = b \\\\ c = d \\\\ e\n"

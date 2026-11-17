@@ -22,14 +22,15 @@ before.
 import ast
 import dataclasses
 import math
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from core import calculus as calculus_repo
 from core import functions as functions_repo
 from core import limits as limits_repo
+from core import quantity_literals
 from core import roles as roles_repo
+from core.quantity_literals import QUANTITY_CALL
 from core.units import UnitError, dimension_of, from_base, to_base
 
 # An unknown the solver may determine: which mote, which property key.
@@ -80,10 +81,8 @@ PROPERTY_CALL = "property"
 INTEGRATE_CALL = "integrate"
 DERIVATIVE_CALL = "deriv"
 CALCULUS_CALLS = frozenset({INTEGRATE_CALL, DERIVATIVE_CALL})
-# `5 m`, `3940 degF`, `1.3 Btu/(lb*degF)` inside a formula: a number with
-# its unit, parsed as a call to this (never typed; written back as `5 m`).
-QUANTITY_CALL = "__qty__"
-
+# `51 cm` in a formula is parsed as `__unit__(51, 'cm')`
+# (core/quantity_literals.py), so it is one more call every walker handles.
 ALLOWED_CALLS = (
     NAVIGATION_CALLS | AGGREGATE_CALLS | NUMERIC_CALLS | TRIG_CALLS | LOG_CALLS
     | HYPERBOLIC_CALLS | CALCULUS_CALLS
@@ -502,76 +501,38 @@ def _rewrite_caret(text: str) -> str:
     return "".join(out)
 
 
-_QUANTITY_START_RE = re.compile(
-    r"(?<![\w.])((?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)[ \t]+(?=[A-Za-z_(])")
-_UNIT_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_*/^()-")
-_QUANTITY_TEXT_RE = re.compile(r"__qty__\(([^,()]+), '([^']*)'\)")
-
-
-def _rewrite_quantities(text: str) -> str:
-    """`5 m` -> `__qty__(5, 'm')`, before parsing. Only a number followed
-    by whitespace and a unit is touched -- that is a syntax error in any
-    formula today, so nothing that already parses changes meaning. The
-    unit runs as far as unit characters go (no spaces: `5 m/s`, `1.3
-    Btu/(lb*degF)`), shortened from the right until it is a unit, and is
-    never one followed by `.` or `(` -- that is a name being read."""
-    from core.units import is_unit
-    out, position = [], 0
-    for match in _QUANTITY_START_RE.finditer(text):
-        if match.start() < position:
-            continue
-        start = match.end()
-        end = start
-        depth = 0
-        # Spaces only inside a unit's brackets: `1.3 kJ/(kg * K)`.
-        while end < len(text) and (text[end] in _UNIT_CHARS or (text[end] == " " and depth > 0)):
-            depth += {"(": 1, ")": -1}.get(text[end], 0)
-            if depth < 0:
-                break
-            end += 1
-        unit = None
-        for stop in range(end, start, -1):
-            candidate = text[start:stop]
-            following = text[stop:stop + 1]
-            if (candidate.count("(") == candidate.count(")") and candidate[-1] not in "*/^-"
-                    and following not in (".", "(") and not (following.isalnum() or following == "_")
-                    and is_unit(candidate)):
-                unit = candidate
-                end = stop
-                break
-        if unit is None:
-            continue
-        out.append(text[position:match.start()])
-        out.append(f"{QUANTITY_CALL}({match.group(1)}, '{unit}')")
-        position = end
-    out.append(text[position:])
-    return "".join(out)
-
-
 def unparse(node: ast.AST) -> str:
-    """A node as it would be typed: `^` for a power, `5 m` for a quantity."""
-    text = ast.unparse(node).replace(" ** ", "^").replace("**", "^")
-    return _QUANTITY_TEXT_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}", text)
+    """A node as it would be typed: `x^2`, and each quantity bracketed as
+    written, `(5 m)` (core/quantity_literals.py)."""
+    return quantity_literals.unparse(node).replace(" ^ ", "^")
 
 
 def quantity_of(node: ast.AST) -> tuple[float, str] | None:
     """(number, unit) for a `5 m` written in a formula, else None."""
-    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == QUANTITY_CALL and len(node.args) == 2
-            and all(isinstance(a, ast.Constant) for a in node.args)):
-        return float(node.args[0].value), str(node.args[1].value)
-    return None
+    try:
+        return quantity_literals.parts(node)
+    except quantity_literals.QuantityError:
+        return None
 
 
 def syntax_tree(text: str) -> ast.Expression:
     """`text` parsed as the formula language reads it (`^` a power, `5 m` a
     quantity), for a caller walking names in it. Raises SyntaxError."""
-    return ast.parse(_rewrite_caret(_rewrite_quantities(text)).strip(), mode="eval")
+    try:
+        source = quantity_literals.rewrite(text)
+    except quantity_literals.QuantityError as e:
+        raise SyntaxError(str(e)) from e
+    return ast.parse(_rewrite_caret(source).strip(), mode="eval")
 
 
 def _parse_ast(text: str) -> ast.AST:
+    """The parsed tree, with `^` read as a power and each `51 cm` read as
+    one quantity (core/quantity_literals.py)."""
     try:
-        tree = syntax_tree(text)
+        source = _rewrite_caret(quantity_literals.rewrite(text)).strip()
+        tree = ast.parse(source, mode="eval")
+    except quantity_literals.QuantityError as e:
+        raise FormulaError(f"could not parse formula {text!r}: {e}") from e
     except SyntaxError as e:
         raise FormulaError(f"could not parse formula {text!r}: {e.msg}") from e
     return tree.body
@@ -862,6 +823,29 @@ def _constant(node: ast.Constant) -> Ratio:
     return Ratio.number(node.value)
 
 
+def _quantity(node: ast.Call, sign: float = 1.0) -> Ratio:
+    """`51 cm`, in base units. `sign` negates the number *before* the
+    conversion, which is what `-40 degC` means (233.15 K, not -313.15 K)."""
+    try:
+        value, unit_name = quantity_literals.parts(node)
+        return Ratio.number(to_base(sign * value, unit_name))
+    except (quantity_literals.QuantityError, UnitError) as e:
+        raise FormulaError(str(e)) from e
+
+
+def _negated_affine(node: ast.UnaryOp) -> Ratio | None:
+    """`-40 degC` as the quantity -40 degC; None for any other negation."""
+    if not isinstance(node.op, ast.USub):
+        return None
+    try:
+        found = quantity_literals.parts(node.operand)
+    except quantity_literals.QuantityError as e:
+        raise FormulaError(str(e)) from e
+    if found is None or not quantity_literals.is_affine(found[1]):
+        return None
+    return _quantity(node.operand, sign=-1.0)
+
+
 def _binary(node: ast.BinOp, ctx: Context) -> Ratio:
     op = _BIN_OPS.get(type(node.op))
     if op is None:
@@ -869,13 +853,16 @@ def _binary(node: ast.BinOp, ctx: Context) -> Ratio:
     if isinstance(node.op, (ast.Add, ast.Sub)):
         left, right = _beside(node.left, node.right, ctx, step=True)
         return op(left, right)
-    return op(_as_ratio(_evaluate(node.left, ctx)), _as_ratio(_evaluate(node.right, ctx)))
+    if isinstance(node.op, ast.Pow):
+        # `(400 degC)^4` is a temperature to the fourth; `(51 cm)^2` an area.
+        return op(_as_ratio(_evaluate(node.left, ctx)), _as_ratio(_evaluate(node.right, ctx)))
+    return op(_operand(node.left, ctx), _operand(node.right, ctx))
 
 
 def _quantity_value(node: ast.AST, *, step: bool) -> float:
-    """A written `5 m` in base SI. An offset unit is a step unless it is a
-    whole side of a comparison: `T + 10 degF` is ten Fahrenheit degrees
-    warmer, `T == 100 degF` is 100 °F."""
+    """A written `5 m` in base SI, as a step of its unit or as a value --
+    which differ only for an offset unit (10 degF is 5.56 K as a step,
+    260.93 K as a value)."""
     found = quantity_of(node)
     if found is None:
         raise FormulaError(f"{QUANTITY_CALL}() takes a number and a quoted unit")
@@ -888,8 +875,10 @@ def _quantity_value(node: ast.AST, *, step: bool) -> float:
         raise FormulaError(f"{number:g} {unit_name}: {e}") from e
 
 
-def _sum_side(node: ast.AST, ctx: Context) -> Ratio:
-    """One side of a sum: a written quantity is a step there."""
+def _operand(node: ast.AST, ctx: Context) -> Ratio:
+    """An operand of `+ - * /`: a written quantity is a step there, so
+    `T + 10 degF` is ten degrees warmer and `cp * 10 degF` ten degrees'
+    worth. Alone, as a value, it is a temperature (_quantity)."""
     if quantity_of(node) is not None:
         return Ratio.number(_quantity_value(node, step=True))
     if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
@@ -923,15 +912,8 @@ def _beside(left: ast.AST, right: ast.AST, ctx: Context, *, step: bool) -> tuple
             evaluated = _as_ratio(_evaluate(other, ctx))
             return (adopted, evaluated) if left_bare else (evaluated, adopted)
     if step:
-        return _sum_side(left, ctx), _sum_side(right, ctx)
-    return _relation_side(left, ctx), _relation_side(right, ctx)
-
-
-def _relation_side(node: ast.AST, ctx: Context) -> Ratio:
-    """A whole side of a comparison: a written quantity there is a value."""
-    if quantity_of(node) is not None:
-        return Ratio.number(_quantity_value(node, step=False))
-    return _as_ratio(_evaluate(node, ctx))
+        return _operand(left, ctx), _operand(right, ctx)
+    return _as_ratio(_evaluate(left, ctx)), _as_ratio(_evaluate(right, ctx))
 
 
 def _dimensionless_unit(unit_name: str) -> bool:
@@ -966,6 +948,9 @@ def _companion_unit(node: ast.AST, ctx: Context) -> str | None:
 
 
 def _unary(node: ast.UnaryOp, ctx: Context) -> Ratio:
+    negated = _negated_affine(node)
+    if negated is not None:
+        return negated
     operand = _as_ratio(_evaluate(node.operand, ctx))
     if isinstance(node.op, ast.USub):
         return -operand
@@ -1095,10 +1080,10 @@ def _call(node: ast.Call, ctx: Context):
         raise FormulaError(f"{name}() does not take keyword arguments")
 
     if name == QUANTITY_CALL:
-        # A step wherever it is part of something -- `cp * 10 degF` is ten
-        # degrees' worth; a temperature only alone on one side of a
-        # comparison (`?= 3940 degF`, in _beside).
-        return Ratio.number(_quantity_value(node, step=True))
+        # A value where it stands alone -- a side of a comparison, an
+        # argument, a whole expression: `?= 3940 degF` is 3940 °F. Inside
+        # arithmetic it is a step (_operand): `T + 10 degF`, `cp * 10 degF`.
+        return _quantity(node)
     if name in NAVIGATION_CALLS:
         return _navigate(name, node, ctx)
     if name in AGGREGATE_CALLS:

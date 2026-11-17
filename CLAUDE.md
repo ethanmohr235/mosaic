@@ -39,12 +39,14 @@ what is still to do, lives in the docs; the short map:
   `fit`. `why` and `\work` explain the garden as it stands from a live solve
   (`core/derivations.py`); nothing about a solve is stored.
 - **Units (2026-11-16):** a bare number takes the unit of what it is added
-  to or compared with; `5 m` may be written inside an equation; degF/degC
-  in a compound mean a degree; a given missing a unit is reported with the
-  dimension it needs; solved values are named in the garden's own units
-  (held in base SI, converted where shown: `simulation.shown`). The default
-  solver is `auto` (linear, newton where needed). `tests/test_real_world.py`
-  is the end-to-end suite for all of it.
+  to or compared with; `5 m` may be written inside an equation
+  (`core/quantity_literals.py`: a degree inside arithmetic, a temperature
+  where it stands alone); degF/degC in a compound mean a degree; a given
+  missing a unit is reported with the dimension it needs; solved values
+  are named in the garden's own units (held in base SI, converted where
+  shown: `simulation.shown`). The default solver is `auto` (linear, newton
+  where needed). `tests/test_real_world.py` is the end-to-end suite for
+  all of it.
 - **Functions:** a function mote (`function`, `parameters`) is called by
   name from any formula; a call at 0/0 takes a reported limit
   (`core/functions.py`, `core/limits.py`, `core/function_text.py`); `sinc`.

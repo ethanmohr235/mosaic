@@ -30,13 +30,13 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from core import quantity_literals
 from core import roles as roles_repo
 from core.formula import (
     AGGREGATE_CALLS,
     CALCULUS_CALLS,
     INTEGRATE_CALL,
     MATH_CONSTANTS,
-    QUANTITY_CALL,
     NAVIGATION_CALLS,
     NUMERIC_CALLS,
     HYPERBOLIC_CALLS,
@@ -45,6 +45,7 @@ from core.formula import (
     TRIG_CALLS,
     PREVIOUS_CALL,
     PROPERTY_CALL,
+    QUANTITY_CALL,
     FormulaError,
     TICK_NAME,
     function_named,
@@ -681,11 +682,6 @@ def _written(node: ast.AST) -> str:
     return unparse(node)
 
 
-def _has_bare_number(node: ast.AST) -> bool:
-    return any(isinstance(n, ast.Constant) and isinstance(n.value, (int, float))
-               and not isinstance(n.value, bool) for n in ast.walk(node))
-
-
 def _single_value(node: ast.AST) -> bool:
     """A lone property, parameter or role read -- what a bare number beside
     it takes its unit from (core/formula.py's _companion_unit)."""
@@ -750,8 +746,10 @@ class _Checker:
             if node.id in self.bindings:
                 return self.bindings[node.id]
             if node.id == TICK_NAME:
+                self._shadowed(node.id, "the step index")
                 return None
             if node.id in MATH_CONSTANTS:
+                self._shadowed(node.id, f"the constant {MATH_CONSTANTS[node.id]:.6g}")
                 return LITERAL
             return self._name(self.ctx.mote_id, node.id)
         if isinstance(node, ast.BinOp):
@@ -763,6 +761,28 @@ class _Checker:
         if isinstance(node, ast.Attribute):
             return self._attribute(node)
         raise FormulaError(f"{type(node).__name__} is not allowed in a formula")
+
+    def _quantity(self, node: ast.Call) -> Dim:
+        """`51 cm` is a length -- a positive claim, unlike a bare `51`,
+        which adapts to whatever it is added to."""
+        try:
+            _value, unit_name = quantity_literals.parts(node)
+            return dimension_of(unit_name)
+        except (quantity_literals.QuantityError, UnitError) as e:
+            raise FormulaError(str(e)) from e
+
+    def _shadowed(self, name: str, meaning: str) -> None:
+        """A bare reserved name read where the mote has a property of that
+        name: the formula reads the reserved meaning, and the property --
+        almost certainly what was meant -- is never reached. Not a unit
+        problem, but this walk is the one every surface already reports."""
+        if name not in self.ctx.properties(self.ctx.mote_id):
+            return
+        mote = self.ctx.mote_name(self.ctx.mote_id) or self.ctx.label(self.ctx.mote_id)
+        self.report(
+            f"`{name}` here is {meaning}, not {mote}.{name} -- "
+            f"write {mote}.{name} to read the property"
+        )
 
     def _name(self, mote_id: str, key: str) -> Dim:
         # TICK_NAME and MATH_CONSTANTS are handled by callers that reach a
@@ -878,10 +898,21 @@ class _Checker:
 
     def side_kind(self, node: ast.AST) -> str | None:
         """temperature_kind of a whole side of a relation, where a written
-        `100 degF` alone is a temperature, as the evaluator reads it."""
-        found = quantity_of(node)
-        if found is not None and found[1] in _STEP_OF:
-            return ABSOLUTE
+        `100 degF` (or `-40 degF`) alone is a temperature, as the evaluator
+        reads it."""
+        if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
+                and quantity_of(node.operand) is not None):
+            node = node.operand
+        return self.temperature_kind(node)
+
+    def _operand_kind(self, node: ast.AST) -> str | None:
+        """temperature_kind of an operand of `+`/`-`, where a written
+        `10 degF` (or `-10 degF`) is a degree, as the evaluator reads it."""
+        inner = node.operand if (isinstance(node, ast.UnaryOp)
+                                 and isinstance(node.op, ast.USub)) else node
+        found = quantity_of(inner)
+        if found is not None:
+            return STEP if found[1] in _STEP_OF or found[1] == _FAHRENHEIT_STEP else None
         return self.temperature_kind(node)
 
     def temperature_kind(self, node: ast.AST) -> str | None:
@@ -904,7 +935,7 @@ class _Checker:
             return STEP if inner in (ABSOLUTE, STEP) else inner
         if isinstance(node, ast.BinOp):
             if isinstance(node.op, (ast.Add, ast.Sub)):
-                a, b = self.temperature_kind(node.left), self.temperature_kind(node.right)
+                a, b = self._operand_kind(node.left), self._operand_kind(node.right)
                 # A kelvin value beside a degF or degC one is its step --
                 # `Tc - dT` with the rise solved in K.
                 steps = (STEP, "literal", "kelvin")
@@ -918,8 +949,10 @@ class _Checker:
             return STEP
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             found = quantity_of(node)
-            if found is not None:
-                return STEP if found[1] in _STEP_OF or found[1] == _FAHRENHEIT_STEP else None
+            if found is not None:  # alone, as an argument or a whole side
+                if found[1] in _STEP_OF:
+                    return ABSOLUTE
+                return STEP if found[1] == _FAHRENHEIT_STEP else None
             if node.func.id in NUMERIC_CALLS:
                 kinds = [self.temperature_kind(a) for a in node.args]
                 return ABSOLUTE if ABSOLUTE in kinds else (STEP if STEP in kinds else None)
@@ -941,14 +974,17 @@ class _Checker:
     def _bare_beside_computed(self, bare: ast.AST, other: ast.AST, dim: Dim, op) -> None:
         if (dim is None or _is_literal(dim) or dim.is_dimensionless
                 or not is_bare_number(bare) or _single_value(other)
-                or not self._reads_non_si(other)):
+                or not self._reads_non_si(other) or _folded(bare) == 0):
             return
         verb = "added to" if isinstance(op, ast.Add) else "subtracted from"
         base = unit_named(dim) or describe(dim)
+        hint = ("if it was meant to be a pure number, a number in it is missing its unit "
+                "(`51 cm`, not `51`)") if _has_bare_number(other) \
+            else f"write its unit if it means something else (`{_written(bare)} {base}`)"
         self.report(
             f"{_written(bare)} is {verb} {_written(other)} (in {describe(dim)}), so it is "
             f"read as {_written(bare)} {base} -- a bare number beside a computed value is in "
-            f"base SI units; give it a unit if it means something else")
+            f"base SI units; {hint}")
 
     def _reads_non_si(self, node: ast.AST) -> bool:
         """Whether `node` reads a value declared in a unit other than its
@@ -1063,11 +1099,7 @@ class _Checker:
         name = node.func.id
 
         if name == QUANTITY_CALL:
-            found = quantity_of(node)
-            try:
-                return dimension_of(found[1]) if found else None
-            except UnitError:
-                return None
+            return self._quantity(node)
         if name in NAVIGATION_CALLS:
             return self._navigate(name, node)
         if name in AGGREGATE_CALLS:
@@ -1251,7 +1283,7 @@ class _Checker:
         argument = self.dimension(node.args[0])
         if (name in _ANGLE_CALLS and argument is not None and not _is_literal(argument)
                 and not argument.is_dimensionless):
-            hint = (" -- a bare number in it is read in base SI units; give it a unit"
+            hint = (" -- a bare number in it is read in base SI units; give it a unit (`109 cm`)"
                     if _has_bare_number(node.args[0]) else "")
             self.report(f"{name}() takes an angle (a pure number), but "
                         f"{_written(node.args[0])} is in {describe(argument)}{hint}")
@@ -1319,6 +1351,42 @@ class _Checker:
             # A provider declaring a unit this registry can't parse is a
             # provider-side gap, not a fault in the rule being checked.
             return None
+
+
+def _has_bare_number(node: ast.AST) -> bool:
+    """Whether a number without a unit appears in `node`, an exponent
+    aside (`x^2` says nothing about units)."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        return _has_bare_number(node.left)
+    if quantity_literals.parts(node) is not None:
+        return False
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
+    return any(_has_bare_number(child) for child in ast.iter_child_nodes(node))
+
+
+_FOLDABLE = {ast.Add: float.__add__, ast.Sub: float.__sub__, ast.Mult: float.__mul__,
+             ast.Div: float.__truediv__, ast.Pow: float.__pow__}
+
+
+def _folded(node: ast.AST) -> float | None:
+    """A literal's value -- numbers, `pi`/`e` and arithmetic on them -- or
+    None when it is not one or does not come to a real number."""
+    if isinstance(node, ast.Name) and node.id in MATH_CONSTANTS:
+        return MATH_CONSTANTS[node.id]
+    if isinstance(node, ast.BinOp) and type(node.op) in _FOLDABLE:
+        left, right = _folded(node.left), _folded(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            result = _FOLDABLE[type(node.op)](left, right)
+        except (ZeroDivisionError, OverflowError):
+            return None
+        return result if isinstance(result, float) else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        inner = _folded(node.operand)
+        return None if inner is None else (-inner if isinstance(node.op, ast.USub) else inner)
+    return _literal_number(node)
 
 
 def _literal_number(node: ast.AST) -> float | None:

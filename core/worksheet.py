@@ -99,6 +99,7 @@ from dataclasses import dataclass, field, replace
 from core import command_bar
 from core import functions as functions_repo
 from core import motes as motes_repo
+from core import quantity_literals
 from core import relationships as rel_repo
 from core import rules as rules_repo
 from core import simulation
@@ -1015,8 +1016,8 @@ def _head(relation: str) -> tuple[str, str] | None:
 def _refs(relation: str) -> set[tuple[str, str]]:
     """Every `Name.property` a relation mentions, as `(name, property)`."""
     try:
-        tree = syntax_tree(relation)
-    except SyntaxError:
+        tree = parse_expression(relation)
+    except FormulaError:
         return set()
     return {
         (node.value.id, node.attr) for node in ast.walk(tree)
@@ -1184,15 +1185,21 @@ def _qualify(relation: str, anchor: str) -> str:
     if not bare:
         return relation
     pattern = re.compile(rf"(?<![.\w]){'|'.join(re.escape(b) for b in sorted(bare))}(?!\w)")
-    return pattern.sub(lambda m: f"{anchor}.{m.group(0)}", relation)
+    # A unit is not a name: `2 m` stays `2 m` even when the anchor has an `m`.
+    units = quantity_literals.spans(relation)
+    return pattern.sub(
+        lambda m: f"{anchor}.{m.group(0)}" if quantity_literals.outside(units, m.start())
+        else m.group(0),
+        relation,
+    )
 
 
 def _names(relation: str) -> tuple[list[str], set[str]]:
     """`(dotted bases in source order, bare property names)`. A call's own
     name, the tick index and the math constants are none of those."""
     try:
-        tree = syntax_tree(relation)
-    except SyntaxError:
+        tree = parse_expression(relation)
+    except FormulaError:
         return [], set()
     dotted, calls, bases = [], set(), []
     for node in ast.walk(tree):

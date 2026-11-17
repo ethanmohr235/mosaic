@@ -231,10 +231,10 @@ Worksheet lines:
 | `p.f = ? 0.02` · `s.x [m] = ? 30 cm` | …starting newton there (the value it holds; shown back after a solve) |
 | `bd.Ax + bd.Bx == 0` | Relation: frees nothing |
 | `bd.s <= 250` · `b.R1 + b.R2 ?= b.W` | Check: evaluated, never solved |
-| `c.h ?= 16.4 ft` · `s.y == s.x + 1 m` · `w.q = w.cp * 10 degF` | A number with a unit inside an equation (unit written without spaces: `5 m/s`, `1.3 Btu/(lb*degF)`). An offset unit is a degree, except alone on one side of a comparison (`T == 100 degF`) |
 | `w.To = w.Ti + 10` | A bare number beside a value takes its unit (here 10 °F of rise; `R == 100` with R in kohm is 100 kohm). Products keep it a pure number |
 | `phi(r [cm]) = A * sin(B * r) / r` | Function |
 | `Tb(z [in]) [degF] = …` | …and declare its value's unit (refused if the body disagrees; `\val{Tb(0)}` and plots show it) |
+| `… (1 - (r / 51 cm)^2)` · `c.h ?= 16.4 ft` · `w.cp * 10 degF` | A number with a unit; the unit runs to the next space (`9.81 m/s^2`). degF/degC alone is a temperature (`?= 3940 degF`), inside arithmetic a degree |
 | `m.Q = integrate(phi, 0, m.R)` · `m.g = deriv(phi, m.r)` | Integral / derivative of a function (numeric) |
 | `ln(x)` · `log10(x)` | Logarithms. A bare `log(x)` is refused as ambiguous |
 | `cool.T == prev(cool.T) - …` | A step of a run (`sim`, `plot … vs t`); `prev` takes any one property |

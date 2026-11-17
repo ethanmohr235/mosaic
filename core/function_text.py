@@ -22,11 +22,11 @@ import itertools
 from dataclasses import dataclass, field
 
 from core import functions as functions_repo
+from core import quantity_literals
 from core import units as units_repo
 from core.formula import (
     ALLOWED_CALLS, CALCULUS_CALLS, MATH_CONSTANTS, TICK_NAME, FormulaError, is_bare_number,
     parse_expression,
-    unparse,
 )
 
 # How deep calls inside bodies are written out. A guard against a
@@ -57,11 +57,12 @@ def expand(equation: str, properties: dict[str, dict]) -> str | None:
         return None
     try:
         tree = _rewrite(parse_expression(equation), {}, "", state, ())
-    except (FormulaError, functions_repo.FunctionDefinitionError, SyntaxError):
+    except (FormulaError, functions_repo.FunctionDefinitionError, SyntaxError,
+            quantity_literals.QuantityError):
         return None
     if not state.expanded:
         return None
-    text = unparse(tree)
+    text = ast.unparse(tree).replace("**", "^")
     for placeholder, quantity in state.quantities.items():
         text = text.replace(placeholder, quantity)
     return text
@@ -99,6 +100,10 @@ def _rewrite(
     `owner.name`; outside, names are left as the equation wrote them."""
     if isinstance(node, ast.Name):
         return _name(node, bindings, owner)
+    quantity = quantity_literals.parts(node)
+    if quantity is not None:  # `51 cm`, written back as typed
+        value, unit = quantity
+        return state.quantity(f"({quantity_literals.number_text(value)} {unit})")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         # A calculus call's first argument names a function; it is not a
         # name to bind or qualify.
@@ -128,7 +133,7 @@ def _body(
     bindings = {}
     for parameter, source, arg in zip(parameters, typed, args):
         unit = units.get(parameter)
-        bindings[parameter] = (state.quantity(f"({unparse(arg)} {unit})")
+        bindings[parameter] = (state.quantity(f"({ast.unparse(arg)} {unit})")
                                if unit and is_bare_number(source) else arg)
     state.expanded = True
     return _rewrite(parse_expression(body), bindings, name, state, (*calls, name))

@@ -8,7 +8,7 @@ from core.dimensions import DimensionContext, check_equation
 
 
 def context(mote_id="r1", units=None, targets=None, capability_units=None,
-            neighbors=None, names=None, garden_names=None):
+            neighbors=None, names=None, garden_names=None, properties=None):
     """A checker context over plain dicts -- the same testing shape
     core/formula.py's Context is built for.
 
@@ -20,6 +20,7 @@ def context(mote_id="r1", units=None, targets=None, capability_units=None,
     neighbors = neighbors or {}
     names = names or {}
     garden_names = garden_names or {}
+    properties = properties or {}
     return DimensionContext(
         mote_id=mote_id,
         units=lambda mid: units.get(mid, {}),
@@ -29,6 +30,7 @@ def context(mote_id="r1", units=None, targets=None, capability_units=None,
         neighbors=lambda mid: neighbors.get(mid, []),
         mote_name=lambda mid: names.get(mid),
         named=lambda name: garden_names.get(name, []),
+        properties=lambda mid: properties.get(mid, {}),
     )
 
 
@@ -235,6 +237,25 @@ def test_math_constants_are_treated_as_literals():
     assert check_equation("circumference == 2 * pi * radius", context(units=units)) == []
 
 
+@pytest.mark.parametrize("name, meaning", [("e", "the constant 2.71828"), ("pi", "the constant 3.14159"), ("t", "the step index")])
+def test_a_reserved_name_the_mote_also_holds_is_reported(name, meaning):
+    # p12.e typed as a bare `e` reads Euler's number, never p12's own e.
+    ctx = context(names={"r1": "p12"}, properties={"r1": {name: 10404, "y": 1}})
+    problems = check_equation(f"y == 2 / {name}", ctx)
+    assert problems == [f"`{name}` here is {meaning}, not p12.{name} -- write p12.{name} to read the property"]
+
+
+def test_a_reserved_name_the_mote_lacks_is_quiet():
+    ctx = context(names={"r1": "p12"}, properties={"r1": {"y": 1}})
+    assert check_equation("y == 2 * pi * e", ctx) == []
+
+
+def test_a_qualified_reserved_name_is_quiet():
+    ctx = context(names={"r1": "p12"}, properties={"r1": {"e": 3, "y": 1}},
+                  garden_names={"p12": ["r1"]})
+    assert check_equation("y == 2 / p12.e", ctx) == []
+
+
 def test_a_role_qualified_e_keeps_its_real_dimension():
     units = {"r1": {"voltage": "V"}, "n1": {"e": "s"}}
     targets = {("r1", "a"): ["n1"]}
@@ -360,7 +381,7 @@ def test_every_whitelisted_builtin_is_understood_by_the_checker(name):
         "property": "property('a', 'op', 1)",
         "integrate": "integrate(f, 0, 1)",
         "deriv": "deriv(f, 1)",
-        "__qty__": "5 m",
+        "__unit__": "51 cm",
     }
     assert name in calls, f"{name}() is whitelisted but has no checker coverage here"
     # No assertion on the result -- the point is that it doesn't raise
@@ -414,3 +435,47 @@ def test_an_ambiguous_garden_scope_name_reports_nothing_here():
         context(garden_names={"bd": ["bd1", "bd2"]}),
     )
     assert problems == []
+
+
+# ---- a bare number in a sum ----
+# Beside a single value a bare number takes its unit (core/formula.py's
+# _beside); beside a computed one it is base SI, which warns when the
+# garden reads a non-SI unit there (tests/test_real_world.py).
+
+def test_beside_a_computed_value_it_says_a_number_is_missing_its_unit(conn):
+    from core import worksheet
+    from core.simulation import check_garden
+    worksheet.apply(conn, "P(r [cm]) = 1 - (r / 51)^2\nm.y = P(38.8)")
+    [problem] = check_garden(conn).problems
+    assert "1 is subtracted from (r / 51)^2" in problem
+    assert "a number in it is missing its unit (`51 cm`, not `51`)" in problem
+
+
+def test_with_nothing_bare_on_the_other_side_it_says_to_write_the_unit(conn):
+    from core import worksheet
+    from core.simulation import check_garden
+    worksheet.apply(conn, "P(r [cm]) = 1 + r * r\nm.y = P(38.8)")
+    [problem] = check_garden(conn).problems
+    assert "write its unit if it means something else (`1 m²`)" in problem or \
+        "write its unit if it means something else (`1 m^2`)" in problem
+
+
+def test_the_numbers_written_with_units_are_quiet(conn):
+    from core import worksheet
+    from core.simulation import check_garden
+    worksheet.apply(conn, "P(r [cm]) = 1 - (r / 51 cm)^2\nm.y = P(38.8)")
+    assert check_garden(conn).problems == []
+
+
+@pytest.mark.parametrize("equation", [
+    "y == x - 0",          # exact in any unit
+    "y == x + 1",          # beside a single value: read in its unit
+    "y == x * 2 - 0",      # zero is exact even beside a computed value
+    "x == 100",            # a given, stated
+    "x <= 250",            # a check
+    "y == ratio + 1",      # a ratio has no unit to adopt
+    "y == unknown + 1",    # nothing declared, nothing to say
+])
+def test_a_bare_number_is_quiet_where_it_cannot_mislead(equation):
+    units = {"r1": {"x": "kPa", "ratio": "%"}}
+    assert check_equation(equation, context(units=units)) == []

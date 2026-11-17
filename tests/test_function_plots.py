@@ -104,7 +104,7 @@ def test_a_declared_result_unit_is_the_axis_unit(garden):
     figure = draw(garden, "plot Tb(z) vs z -72:72 --steps 4")
     assert figure.x_label == "z (in)"
     (series,) = figure.series
-    assert series.unit == "degF"
+    assert series.unit == "°F"
     assert [p[1] for p in series.points] == pytest.approx([543, 548.2721, 561, 573.7279, 579], rel=1e-5)
 
 

@@ -87,11 +87,11 @@ to both.
 | `targets('a').voltage` | That property on those motes. Collapses to a single value when exactly one mote is reached -- unlike an `arity: many` role, which never collapses. |
 | `sum(...)`, `count(...)` | Combine several motes into one value. Required when more than one mote is reached. |
 | `+ - * / **` (`^` also works as exponent) | Arithmetic. Parentheses work as usual. An unknown may appear in a denominator -- see [Writing an equation the way you mean it](#writing-an-equation-the-way-you-mean-it). |
-| `pi`, `e` | The math constants (3.14159..., 2.71828...). Reserved words -- shadow a property literally named `pi` or `e` inside a formula specifically, the same way `t` does. |
+| `51 cm`, `9.81 m/s^2` | A number with a unit -- one quantity, so `r / 51 cm` is `r / (51 cm)`. See [Numbers with units](#numbers-with-units). |
+| `pi`, `e` | The math constants (3.14159..., 2.71828...). Reserved words -- shadow a property literally named `pi` or `e` inside a formula specifically, the same way `t` does. Such a property is still read qualified (`p12.e`), and the command bar keeps the prefix in front of a reserved name rather than stripping it as it does the anchor's other names. A rule that reads a bare `e`, `pi` or `t` on a mote that holds a property of that name gets a warning from the unit check (see [Checking equations](#checking-equations)). |
 | `abs`, `min`, `max` | Only on values that are already known. |
 | `sin`, `cos`, `tan`, `arcsin`, `arccos`, `arctan`, `sinc`, `sqrt` | Also only on known values. `sinc(x)` is the unnormalized `sin(x)/x`, with `sinc(0) = 1` (numpy's `sinc` is `sin(πx)/(πx)`; this one is not). `sin`/`cos`/`tan` take radians -- an argument declaring unit `deg` (see [Units](#units) below) arrives already converted; their inverses `arcsin`/`arccos`/`arctan` return radians the same way, and `arcsin`/`arccos` require an argument between -1 and 1. `sqrt` of a negative number is an error. |
 | `ln`, `log10`, `exp` | The natural and base-10 logarithms, and e^x; dimensionless in and out, only on known values (or deferred to newton). A bare `log` is refused -- mathematics means ln and a textbook usually log10, and a formula copied the wrong way gives a plausible wrong answer; the worksheet says so as the line is typed. |
-| `5 m`, `1.3 Btu/(lb*degF)` | A number with its unit (see [Numbers with units in an equation](#numbers-with-units-in-an-equation)). |
 | `sinh`, `cosh`, `tanh`, `arcsinh`, `arccosh`, `arctanh` | The hyperbolic functions and their inverses, only on known values. Dimensionless in and out, like `exp` (no `deg` conversion). `arccosh` needs an argument of at least 1, `arctanh` one strictly between -1 and 1. |
 | `t` | The current step's index within a time-based run (0 for the first step). A reserved word -- shadows a property literally named `t` inside a formula specifically, though that property is still ordinary and visible everywhere else. Always 0 in a plain (non-time-based) run. |
 | `prev(x)` | The value `x` had *entering* the current step -- `x` is a property: a bare name on the mote the rule is running against, or one named mote's (`prev(cool.T)`, as a worksheet writes it), not `targets(...)`'s result. This is how a rule expresses a recurrence: `balance == prev(balance) * 1.05`. Only meaningful in a time-based run; raises an error otherwise. |
@@ -1486,7 +1486,9 @@ included too -- `min`, `hr`, `day`, `in`, `ft`, `mi`, `lb`, `bar`,
 `degF`, which carry an offset. Inside a compound they mean their
 *degree* (`Btu/(lb*degF)` is per Fahrenheit degree, the same as
 `Btu/(lb*degR)`; `degC/s` is K/s): the offset belongs to a temperature,
-never to a degree of one. On their own they are temperatures.
+never to a degree of one. On their own they are temperatures. They (and
+`degR`) are typed that way and shown as `°C`, `°F` and `°R` wherever a
+value is displayed, a document and its PDF included.
 
 Angle is genuinely dimensionless in SI, so there's no separate `rad`:
 an unlabeled number is already radians, exactly what `sin`/`cos`/`tan`
@@ -1504,6 +1506,48 @@ bar it's the one unit written with no space before it: `P.efficiency =
 ```
 unit convert --value 36 --from km/hr --to m/s
 ```
+
+### Numbers with units
+
+A bare number in a formula is base SI. That is right for `2 * x`, and
+wrong for a textbook's `1 - (r/51)^2` with `r` in cm: inside a function
+whose `r` is declared `cm`, `r` arrives as metres and 51 is 51 m. Writing
+the unit says what the book meant:
+
+```
+P(r [cm], z [cm]) = P0 * (1 - (r / 51 cm)^2) * cos(pi * z / 109 cm)
+```
+
+- **A unit runs to the next space.** `9.81 m/s^2`, `1.3 kJ/(kg*K)` and
+  `51 cm^2` (51 square centimetres) are each one quantity. Spaces are
+  allowed inside the unit's own brackets (`1.3 kJ/(kg K)`), and a unit
+  also stops at a `,` or an unmatched `)`, so `(r / 51 cm)^2` and
+  `phi(5 cm, 2 s)` read as meant. To divide by a property, use a space:
+  `51 cm / m.s`.
+- **A quantity is one atom.** `r / 51 cm` is `r / (51 cm)`; `-5 cm` is
+  `-(5 cm)`; `(51 cm)^2` squares the quantity.
+- `5%` needs no space, as in the command bar.
+- **A degF or degC is a temperature where it stands alone** -- a whole
+  side of a comparison, a function's argument, a whole expression:
+  `p29.Tm_max ?= 3940 degF`, `k(500 degF)`, `T == 100 degF`. A minus
+  written directly in front of one negates the number before converting:
+  `-40 degC` is 233.15 K. **Inside arithmetic it is a degree**, a step
+  with no offset: `T + 10 degF` is ten degrees warmer and `cp * 10 degF`
+  is ten degrees' worth. (A power's base stays a temperature:
+  `(400 degC)^4`.)
+- A quantity carries its dimension into the [unit check](#checking-equations),
+  so `51 cm` never adapts the way a bare `51` does. Passed to a function,
+  it keeps its own unit rather than taking the parameter's.
+- **Errors say what to do.** `51 cm*x` is refused (a unit runs to the
+  next space, so put one after `cm`), and so is `51 cmm` (not a
+  recognized unit). `2 pi` says to write `2 * pi`.
+
+A number followed by a word was a syntax error before this existed, so no
+formula that parsed then means anything different now. The stored
+equation is never rewritten: it keeps what was typed, and every surface
+(the worksheet, `\work`, the typeset equation) shows `51 cm`. Inside the
+parser a quantity is a call to the reserved `__unit__`
+(`core/quantity_literals.py`), which is how every walker comes to handle it.
 
 ### Solving
 
@@ -1630,6 +1674,14 @@ or elapsed time. A *computed* dimensionless value is different: if
 `a / b` cancels to a pure ratio, comparing it to a voltage is a real
 mistake and gets reported.
 
+One warning is about names rather than dimensions, and rides along
+because this walk is the one every surface reports: a bare `e`, `pi` or
+`t` read on a mote that holds a property of that name. The formula reads
+the constant (or the step index), so the property, which is almost
+certainly what was meant, is never reached. The message says to write
+`p12.e`. It fires with or without units, since nothing about it is a
+unit.
+
 ### A given missing its unit
 
 A given typed with no unit is read as base SI, so `p29.cp = 1.3` meant to
@@ -1651,18 +1703,6 @@ It reports only what it can tell: other unitless givens are taken as the
 pure numbers they look like, and a pair with an undeclared value on it is
 skipped. Declaring `[1]` says a value really is a pure number.
 
-### Numbers with units in an equation
-
-A number followed by a unit is a quantity wherever an equation allows a
-number: `c.h ?= 16.4 ft`, `s.y == s.x + 1 m`, `w.q = w.cp * 1 lb * 10
-degF`. The unit is written without spaces (`5 m/s`, `1.3 Btu/(lb*degF)`;
-`5 m / p.t` is 5 m divided by `p.t`) and is never a name being read
-(`5 m.x` is not a quantity). A degF or degC there is a *degree* --
-`T + 10 degF` is ten degrees warmer -- except alone on one side of a
-comparison, where it is a temperature (`T == 100 degF`, `?= 3940 degF`).
-This is what a book answer is checked with: `p29.Tm_max ?= 3940 degF`.
-The worksheet, `\work` and the PDF write it back as it was typed.
-
 ### Bare numbers
 
 A number written with no unit means what a textbook means by it:
@@ -1682,12 +1722,16 @@ number is base SI -- and when that computed value reads a non-SI unit the
 unit check says so, since it is almost always a slip:
 
 ```
-m.v == Pr(m.r) on m: 1 is subtracted from (r / 51)^2 (in m²), so it is read as 1 m^2 -- …
-m.w == Pz(m.r) on m: cos() takes an angle (a pure number), but pi * z / 109 is in m -- a bare number in it is read in base SI units; give it a unit
+m.v == Pr(m.r) on m: 1 is subtracted from (r / 51)^2 (in m²), so it is read as 1 m^2 -- … a number in it is missing its unit (`51 cm`, not `51`)
+m.w == Pz(m.r) on m: cos() takes an angle (a pure number), but pi * z / 109 is in m -- a bare number in it is read in base SI units; give it a unit (`109 cm`)
 ```
 
-(`Pr(r [cm]) = 1 - (r/51)^2` reads 51 as 51 m. Write the constant with
-its unit -- a given `m.a = 51 cm`, then `r/m.a`.) `sin`, `cos`, `tan` and
+(`Pr(r [cm]) = 1 - (r/51)^2` reads 51 as 51 m. Write the number with
+its unit -- `1 - (r / 51 cm)^2`, see [Numbers with units](#numbers-with-units)
+-- or name it, a given `m.a = 51 cm`, then `r/m.a`.) The hint says
+which: when the computed side holds a bare number of its own, that one
+is likely the one missing its unit; otherwise it is the number being
+added. Adding 0 never warns. `sin`, `cos`, `tan` and
 `sinc` warn whenever their argument has a dimension.
 
 By default this is advisory -- warnings appear on the run's result

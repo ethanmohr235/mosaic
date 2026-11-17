@@ -223,16 +223,16 @@ m.u = Ok(m.r)""")
 def test_differences_read_as_degrees_and_temperatures_as_temperatures(conn):
     sheet = HX.replace("degR", "degF") + "\nhx.Tmid = hx.Tci + hx.dT1 / 2"
     d1, lmtd, mid, area = shown(conn, sheet, "hx.dT1", "hx.LMTD", "hx.Tmid", "hx.A}{ft^2, 6")
-    assert (number(d1), unit_of(d1)) == (150, "degR")
-    assert unit_of(lmtd) == "degR" and number(lmtd) == pytest.approx(139.762, rel=1e-5)
-    assert (number(mid), unit_of(mid)) == (145, "degF")
+    assert (number(d1), unit_of(d1)) == (150, "°R")
+    assert unit_of(lmtd) == "°R" and number(lmtd) == pytest.approx(139.762, rel=1e-5)
+    assert (number(mid), unit_of(mid)) == (145, "°F")
     assert number(area) == pytest.approx(500000 / (50 * 20 / math.log(150 / 130)), rel=1e-5)
 
 
 def test_celsius_differences_read_in_kelvin(conn):
     sheet = "c.T1 = 20 degC\nc.T2 = 80 degC\nc.d = c.T2 - c.T1\nc.m = c.T1 + c.d / 2"
     difference, middle = shown(conn, sheet, "c.d", "c.m")
-    assert difference == "60 K" and middle == "50 degC"
+    assert difference == "60 K" and middle == "50 °C"
 
 
 def test_a_difference_declared_in_degf_is_refused(conn):
@@ -248,7 +248,7 @@ w.q = 1.0718e6 Btu/hr
 w.Ti = 543 degF
 w.To = w.Ti + w.q / (w.m * w.cp)"""
     (outlet,) = shown(conn, sheet, "w.To")
-    assert unit_of(outlet) == "degF"
+    assert unit_of(outlet) == "°F"
     assert number(outlet) == pytest.approx(543 + 1.0718e6 / (3148 * 1.3), rel=1e-5)
 
 
@@ -261,7 +261,7 @@ p.Tfc = p.Tc - p.dT"""
     rise, interface = shown(conn, sheet, "p.dT", "p.Tfc")
     kelvin = 1000 / (4 * math.pi * 27)
     assert unit_of(rise) == "K" and number(rise) == pytest.approx(kelvin, rel=1e-5)
-    assert unit_of(interface) == "degF"
+    assert unit_of(interface) == "°F"
     assert number(interface) == pytest.approx(1220 - kelvin * 1.8, rel=1e-5)
 
 
@@ -344,13 +344,13 @@ w.To = w.Ti + w.q / (w.m * w.cp)"""
     w = next(m for m in list_motes(conn) if m.properties.get("name") == "w")
 
     kinds = inspect.inspect(conn, w.id)["kinds"]["To"]
-    assert kinds["unit"] == "degF" and float(kinds["shown"]) == pytest.approx(outlet, rel=1e-5)
+    assert kinds["unit"] == "°F" and float(kinds["shown"]) == pytest.approx(outlet, rel=1e-5)
 
     (row,) = [r for r in calc.answers(conn) if r.key == "To"]
     assert row.quantity.unit == "degF" and row.quantity.value == pytest.approx(outlet, rel=1e-6)
 
     (line,) = [p for p in worksheet.preview(conn, sheet) if p.value][-1:]
-    assert line.value.endswith("degF") and number(line.value) == pytest.approx(outlet, rel=1e-5)
+    assert line.value.endswith("°F") and number(line.value) == pytest.approx(outlet, rel=1e-5)
 
     resolved = plotcmd.resolve(conn, plotcmd.parse_text("plot w.To vs w.Ti 500:600 --steps 2").line)
     points = plotview.figure_from_spec(conn, resolved.spec, max_points=10).series[0].points
