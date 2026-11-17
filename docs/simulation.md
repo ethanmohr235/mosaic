@@ -1664,12 +1664,16 @@ number is base SI -- and when that computed value reads a non-SI unit the
 unit check says so, since it is almost always a slip:
 
 ```
-m.v == Pr(m.r) on m: 1 is subtracted from (r / 51)^2 (in m²), so it is read as 1 m^2 -- …
-m.w == Pz(m.r) on m: cos() takes an angle (a pure number), but pi * z / 109 is in m -- a bare number in it is read in base SI units; give it a unit
+m.v == Pr(m.r) on m: 1 is subtracted from (r / 51)^2 (in m²), so it is read as 1 m^2 -- … a number in it is missing its unit (`51 cm`, not `51`)
+m.w == Pz(m.r) on m: cos() takes an angle (a pure number), but pi * z / 109 is in m -- a bare number in it is read in base SI units; give it a unit (`109 cm`)
 ```
 
-(`Pr(r [cm]) = 1 - (r/51)^2` reads 51 as 51 m. Write the constant with
-its unit -- a given `m.a = 51 cm`, then `r/m.a`.) `sin`, `cos`, `tan` and
+(`Pr(r [cm]) = 1 - (r/51)^2` reads 51 as 51 m. Write the number with
+its unit -- `1 - (r / 51 cm)^2`, see [Numbers with units](#numbers-with-units)
+-- or name it, a given `m.a = 51 cm`, then `r/m.a`.) The hint says
+which: when the computed side holds a bare number of its own, that one
+is likely the one missing its unit; otherwise it is the number being
+added. Adding 0 never warns. `sin`, `cos`, `tan` and
 `sinc` warn whenever their argument has a dimension.
 
 By default this is advisory -- warnings appear on the run's result

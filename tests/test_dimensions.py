@@ -435,3 +435,47 @@ def test_an_ambiguous_garden_scope_name_reports_nothing_here():
         context(garden_names={"bd": ["bd1", "bd2"]}),
     )
     assert problems == []
+
+
+# ---- a bare number in a sum ----
+# Beside a single value a bare number takes its unit (core/formula.py's
+# _beside); beside a computed one it is base SI, which warns when the
+# garden reads a non-SI unit there (tests/test_real_world.py).
+
+def test_beside_a_computed_value_it_says_a_number_is_missing_its_unit(conn):
+    from core import worksheet
+    from core.simulation import check_garden
+    worksheet.apply(conn, "P(r [cm]) = 1 - (r / 51)^2\nm.y = P(38.8)")
+    [problem] = check_garden(conn).problems
+    assert "1 is subtracted from (r / 51)^2" in problem
+    assert "a number in it is missing its unit (`51 cm`, not `51`)" in problem
+
+
+def test_with_nothing_bare_on_the_other_side_it_says_to_write_the_unit(conn):
+    from core import worksheet
+    from core.simulation import check_garden
+    worksheet.apply(conn, "P(r [cm]) = 1 + r * r\nm.y = P(38.8)")
+    [problem] = check_garden(conn).problems
+    assert "write its unit if it means something else (`1 m²`)" in problem or \
+        "write its unit if it means something else (`1 m^2`)" in problem
+
+
+def test_the_numbers_written_with_units_are_quiet(conn):
+    from core import worksheet
+    from core.simulation import check_garden
+    worksheet.apply(conn, "P(r [cm]) = 1 - (r / 51 cm)^2\nm.y = P(38.8)")
+    assert check_garden(conn).problems == []
+
+
+@pytest.mark.parametrize("equation", [
+    "y == x - 0",          # exact in any unit
+    "y == x + 1",          # beside a single value: read in its unit
+    "y == x * 2 - 0",      # zero is exact even beside a computed value
+    "x == 100",            # a given, stated
+    "x <= 250",            # a check
+    "y == ratio + 1",      # a ratio has no unit to adopt
+    "y == unknown + 1",    # nothing declared, nothing to say
+])
+def test_a_bare_number_is_quiet_where_it_cannot_mislead(equation):
+    units = {"r1": {"x": "kPa", "ratio": "%"}}
+    assert check_equation(equation, context(units=units)) == []

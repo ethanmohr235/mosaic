@@ -374,11 +374,6 @@ def _written(node: ast.AST) -> str:
     return ast.unparse(node).replace(" ** ", "^")
 
 
-def _has_bare_number(node: ast.AST) -> bool:
-    return any(isinstance(n, ast.Constant) and isinstance(n.value, (int, float))
-               and not isinstance(n.value, bool) for n in ast.walk(node))
-
-
 def _single_value(node: ast.AST) -> bool:
     """A lone property, parameter or role read -- what a bare number beside
     it takes its unit from (core/formula.py's _companion_unit)."""
@@ -624,14 +619,17 @@ class _Checker:
     def _bare_beside_computed(self, bare: ast.AST, other: ast.AST, dim: Dim, op) -> None:
         if (dim is None or _is_literal(dim) or dim.is_dimensionless
                 or not is_bare_number(bare) or _single_value(other)
-                or not self._reads_non_si(other)):
+                or not self._reads_non_si(other) or _folded(bare) == 0):
             return
         verb = "added to" if isinstance(op, ast.Add) else "subtracted from"
         base = unit_named(dim) or describe(dim)
+        hint = ("if it was meant to be a pure number, a number in it is missing its unit "
+                "(`51 cm`, not `51`)") if _has_bare_number(other) \
+            else f"write its unit if it means something else (`{_written(bare)} {base}`)"
         self.report(
             f"{_written(bare)} is {verb} {_written(other)} (in {describe(dim)}), so it is "
             f"read as {_written(bare)} {base} -- a bare number beside a computed value is in "
-            f"base SI units; give it a unit if it means something else")
+            f"base SI units; {hint}")
 
     def _reads_non_si(self, node: ast.AST) -> bool:
         """Whether `node` reads a value declared in a unit other than its
@@ -928,7 +926,7 @@ class _Checker:
         argument = self.dimension(node.args[0])
         if (name in _ANGLE_CALLS and argument is not None and not _is_literal(argument)
                 and not argument.is_dimensionless):
-            hint = (" -- a bare number in it is read in base SI units; give it a unit"
+            hint = (" -- a bare number in it is read in base SI units; give it a unit (`109 cm`)"
                     if _has_bare_number(node.args[0]) else "")
             self.report(f"{name}() takes an angle (a pure number), but "
                         f"{_written(node.args[0])} is in {describe(argument)}{hint}")
@@ -993,6 +991,42 @@ class _Checker:
             # A provider declaring a unit this registry can't parse is a
             # provider-side gap, not a fault in the rule being checked.
             return None
+
+
+def _has_bare_number(node: ast.AST) -> bool:
+    """Whether a number without a unit appears in `node`, an exponent
+    aside (`x^2` says nothing about units)."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        return _has_bare_number(node.left)
+    if quantity_literals.parts(node) is not None:
+        return False
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
+    return any(_has_bare_number(child) for child in ast.iter_child_nodes(node))
+
+
+_FOLDABLE = {ast.Add: float.__add__, ast.Sub: float.__sub__, ast.Mult: float.__mul__,
+             ast.Div: float.__truediv__, ast.Pow: float.__pow__}
+
+
+def _folded(node: ast.AST) -> float | None:
+    """A literal's value -- numbers, `pi`/`e` and arithmetic on them -- or
+    None when it is not one or does not come to a real number."""
+    if isinstance(node, ast.Name) and node.id in MATH_CONSTANTS:
+        return MATH_CONSTANTS[node.id]
+    if isinstance(node, ast.BinOp) and type(node.op) in _FOLDABLE:
+        left, right = _folded(node.left), _folded(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            result = _FOLDABLE[type(node.op)](left, right)
+        except (ZeroDivisionError, OverflowError):
+            return None
+        return result if isinstance(result, float) else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        inner = _folded(node.operand)
+        return None if inner is None else (-inner if isinstance(node.op, ast.USub) else inner)
+    return _literal_number(node)
 
 
 def _literal_number(node: ast.AST) -> float | None:
