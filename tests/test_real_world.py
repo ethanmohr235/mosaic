@@ -411,3 +411,42 @@ def test_a_unit_written_with_spaces_inside_its_brackets(conn):
     cp, twice = shown(conn, sheet, "w.cp}{Btu/(lb*degF), 3", "w.c2}{kJ/(kg*K), 4")
     assert number(cp) == pytest.approx(1.302 / 4.1868, rel=1e-3)
     assert number(twice) == pytest.approx(2.604, rel=1e-6)
+
+
+# ---- small things that read wrong ----
+
+def test_angles_and_ratios_shown_in_degrees_and_percent(conn):
+    sheet = "pr.th = arcsin(0.5)\ncy.Th = 1000 degF\ncy.Tc = 100 degF\ncy.eta = 1 - cy.Tc / cy.Th"
+    angle, efficiency, spelled = shown(conn, sheet, "pr.th}{deg, 6", "cy.eta}{\\%, 4", "cy.eta}{percent, 4")
+    hot, cold = (1000 - 32) * 5 / 9 + 273.15, (100 - 32) * 5 / 9 + 273.15
+    assert angle == "30.0000 deg"
+    assert number(efficiency) == pytest.approx(100 * (1 - cold / hot), rel=1e-3)
+    assert unit_of(efficiency) == "%" and number(spelled) == number(efficiency)
+
+
+def test_a_bare_log_is_refused_where_it_is_typed(conn):
+    applied = worksheet.apply(conn, "p.x = 10\np.y = log(p.x)")
+    assert applied.problems and "write ln(x)" in applied.problems[0]
+
+
+def test_a_cube_root_keeps_its_unit(conn):
+    (edge,) = shown(conn, "r.V = 8 m^3\nr.e = r.V^(1/3)", "r.e")
+    assert edge == "2 m"
+
+
+def test_newton_cooling_steps_with_prev_of_a_named_property(conn):
+    from core.simulation import run_time_series
+    worksheet.apply(conn, """cool.k = 0.1
+cool.Ta = 20 degC
+cool.T [degC] = ? 90 degC
+cool.T == prev(cool.T) - cool.k * (prev(cool.T) - cool.Ta)""")
+    from core.motes import list_motes
+    cool = next(m.id for m in list_motes(conn) if m.properties.get("name") == "cool")
+    steps = run_time_series(conn, step_count=3).steps
+    temps = [s.values[(cool, "T")] for s in steps]
+    # 90 -> 83 -> 76.7 -> 71.03 (each step 10% of the way to 20)
+    expected, t = [], 90.0
+    for _ in range(3):
+        t = t - 0.1 * (t - 20)
+        expected.append(t + 273.15)
+    assert temps == pytest.approx(expected, rel=1e-9)

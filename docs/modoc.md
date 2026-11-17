@@ -180,6 +180,8 @@ significant figures, or both in either order.
     \val{bd.l}{in}              100 in
     \val{bd.l}{in, 4}           100.0 in
     \val{bd.l}{3}               2.54 m
+    \val{cy.eta}{\%, 3}         61.7 %      -- `%` alone starts a comment
+    \val{pr.th}{deg}            30 deg      -- a plain number is a ratio
 
 Neither half has to be labelled: there is no unit named `3` and no figure
 count spelled `in`. The unit is a **display** unit -- nothing about the

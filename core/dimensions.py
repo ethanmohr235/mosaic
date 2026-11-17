@@ -1082,8 +1082,10 @@ class _Checker:
             return self._sqrt(node)
         if name == PREVIOUS_CALL:
             # prev(x) is the same quantity as x, one step earlier.
-            if len(node.args) != 1 or not isinstance(node.args[0], ast.Name):
-                raise FormulaError("prev() takes a bare property name")
+            if len(node.args) != 1 or not isinstance(node.args[0], (ast.Name, ast.Attribute)):
+                raise FormulaError("prev() takes a property")
+            if isinstance(node.args[0], ast.Attribute):
+                return self.dimension(node.args[0])
             return self._name(self.ctx.mote_id, node.args[0].id)
         if name == PROPERTY_CALL:
             return self._property(node)
@@ -1262,6 +1264,9 @@ class _Checker:
         in which the logarithm (or sinh) of a length means anything, so a
         dimensioned argument is a modelling mistake worth reporting rather
         than a convention worth accommodating."""
+        if name == "log":
+            self.report("log() is ambiguous and is refused when solved -- write ln(x) for "
+                        "the natural log or log10(x) for base 10")
         if len(node.args) != 1:
             raise FormulaError(f"{name}() takes exactly one argument")
         argument = self.dimension(node.args[0])
@@ -1329,4 +1334,12 @@ def _literal_number(node: ast.AST) -> float | None:
         if isinstance(node.value, bool):
             return None
         return float(node.value)
+    # A constant expression -- `V^(1/3)` -- folds to its number.
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+        left, right = _literal_number(node.left), _literal_number(node.right)
+        if left is None or right is None:
+            return None
+        if isinstance(node.op, ast.Div):
+            return None if right == 0 else left / right
+        return {ast.Add: left + right, ast.Sub: left - right, ast.Mult: left * right}[type(node.op)]
     return None

@@ -380,6 +380,11 @@ def _as_number(rhs: str) -> tuple[float | int | None, str | None]:
 
 def _equation(number: int, text: str, relation: str, name: str, lhs: str, assigns: bool) -> Line:
     parse_equation(relation)  # raises FormulaError, which _line() reports
+    tree = syntax_tree(relation.replace("?=", "=="))
+    if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "log"
+           for n in ast.walk(tree)):
+        raise FormulaError("log() is ambiguous -- write ln(x) for the natural log or "
+                           "log10(x) for base 10 (a textbook's log is usually log10)")
     target = _TARGET_RE.match(lhs)
     # A freedom only for a line written with a single `=` whose left side is
     # exactly one mote's one property. `=` is the assignment -- "solve for

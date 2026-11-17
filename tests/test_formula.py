@@ -328,9 +328,14 @@ def test_bare_expression_still_rejects_an_unknown_denominator():
 
 # ---- logarithms ----
 
-def test_log_is_the_natural_logarithm():
-    assert evaluate_expression("log(e)", context()).constant == pytest.approx(1.0)
+def test_ln_is_the_natural_logarithm():
     assert evaluate_expression("ln(e)", context()).constant == pytest.approx(1.0)
+
+
+def test_a_bare_log_is_refused_as_ambiguous():
+    # Mathematics means ln, a textbook usually log10: neither is guessed.
+    with pytest.raises(FormulaError, match=r"write ln\(x\).*log10\(x\)"):
+        evaluate_expression("log(e)", context())
 
 
 def test_log10_is_base_ten():
@@ -338,19 +343,19 @@ def test_log10_is_base_ten():
 
 
 def test_exp_inverts_log():
-    assert evaluate_expression("exp(log(7))", context()).constant == pytest.approx(7.0)
+    assert evaluate_expression("exp(ln(7))", context()).constant == pytest.approx(7.0)
 
 
 def test_log_defers_on_an_unknown_argument():
     # Same rule as sin/sqrt: deferred until the substitution loop has a
     # number, not attempted symbolically.
     with pytest.raises(NonlinearError):
-        evaluate_expression("log(current)", context())
+        evaluate_expression("ln(current)", context())
 
 
 def test_log_of_a_non_positive_number_is_an_error():
     with pytest.raises(FormulaError, match="must be positive"):
-        evaluate_expression("log(0)", context())
+        evaluate_expression("ln(0)", context())
     with pytest.raises(FormulaError, match="must be positive"):
         evaluate_expression("log10(-1)", context())
 
@@ -445,10 +450,10 @@ def test_prev_on_an_unknown_reads_its_prior_solved_value_not_this_ticks():
     assert evaluate_expression("prev(current)", ctx).constant == 2.0
 
 
-def test_prev_requires_a_bare_name_argument():
-    with pytest.raises(FormulaError, match="bare property name"):
+def test_prev_requires_a_property_argument():
+    with pytest.raises(FormulaError, match="takes a property"):
         evaluate_expression("prev('resistance')", context())
-    with pytest.raises(FormulaError, match="bare property name"):
+    with pytest.raises(FormulaError, match="takes a property"):
         evaluate_expression("prev(resistance + 1)", context())
 
 

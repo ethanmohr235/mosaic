@@ -659,7 +659,8 @@ def _expression_quantity(
         return calc.Quantity(number)
     dimension = simulation.expression_dimension_of(
         garden.properties, garden.relationships, node.expression, anchor=mote_id)
-    base = dimensions_repo.unit_named(dimension)
+    base = "1" if dimension is not None and dimension.is_dimensionless else (
+        dimensions_repo.unit_named(dimension))
     if base is None:
         return calc.Quantity(number, target)
     return calc.Quantity(number, base).converted(target)

@@ -144,6 +144,9 @@ class Quantity:
         when they match, or when the conversion is not possible -- a
         document asking for inches from a mass must show the mass rather
         than nothing at all."""
+        if not self.unit and unit and self.numeric and _dimensionless(unit):
+            # A plain number is a ratio: 0.35 is 35 %, 0.5236 is 30 deg.
+            return Quantity(self.value, "1", self.sigma).converted(unit)
         if not unit or not self.unit or unit == self.unit or not self.numeric:
             return self
         try:
@@ -170,6 +173,13 @@ class Quantity:
         if self.unit and self.unit != "1" and self.numeric:
             return f"{text} {units_repo.format_unit(self.unit)}"
         return text
+
+
+def _dimensionless(unit: str) -> bool:
+    try:
+        return units_repo.dimension_of(unit).is_dimensionless
+    except UnitError:
+        return False
 
 
 def format_value(value: object) -> str:

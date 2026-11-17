@@ -522,6 +522,7 @@ register_unit("deg", DIMENSIONLESS, math.pi / 180.0)
 # back as `50`. Like every other unit, it converts rather than reformats:
 # nothing downstream needs to know a value was ever a percentage.
 register_unit("%", DIMENSIONLESS, 0.01)
+register_unit("percent", DIMENSIONLESS, 0.01)
 register_unit("in", _LENGTH, 0.0254)
 register_unit("ft", _LENGTH, 0.3048)
 register_unit("mi", _LENGTH, 1609.344)

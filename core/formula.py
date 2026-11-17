@@ -68,6 +68,10 @@ LOG_CALLS = frozenset({"log", "ln", "log10", "exp"})
 HYPERBOLIC_CALLS = frozenset({"sinh", "cosh", "tanh", "arcsinh", "arccosh", "arctanh"})
 SQRT_CALL = "sqrt"
 PREVIOUS_CALL = "prev"
+# `log` is refused rather than guessed: mathematics means ln, an
+# engineering text usually log10, and a copied formula silently read the
+# other way gives a plausible wrong answer.
+AMBIGUOUS_LOG = "log"
 PROPERTY_CALL = "property"
 # `integrate(f, a, b)` and `deriv(f, x0)` ask about a function mote along
 # one of its parameters, numerically (core/calculus.py). Their first
@@ -1418,19 +1422,31 @@ def _previous(node: ast.Call, ctx: Context) -> Ratio:
     growth_rate`). x must be a bare property/unknown name on the current
     mote, the same way targets()/sources() require a bare string literal
     rather than an evaluated expression."""
-    if len(node.args) != 1 or not isinstance(node.args[0], ast.Name):
-        raise FormulaError("prev() takes a bare property name, e.g. prev(voltage)")
-    key = node.args[0].id
-    properties = ctx.previous(ctx.mote_id)
+    if len(node.args) != 1 or not isinstance(node.args[0], (ast.Name, ast.Attribute)):
+        raise FormulaError("prev() takes a property, e.g. prev(voltage) or prev(cool.T)")
+    mote_id, key = _previous_ref(node.args[0], ctx)
+    properties = ctx.previous(mote_id)
     if key not in properties:
-        raise FormulaError(f"mote {ctx.mote_id[:8]} has no previous value for {key!r}")
+        raise FormulaError(f"mote {mote_id[:8]} has no previous value for {key!r}")
     value = properties[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise FormulaError(f"previous value of {key!r} is {value!r}, which is not a number")
     # The previous step's state is kept in the same representation the
     # database uses (declared units), so it needs the same normalization
     # an ordinary property read gets.
-    return Ratio.number(_normalize(ctx, ctx.mote_id, key, value))
+    return Ratio.number(_normalize(ctx, mote_id, key, value))
+
+
+def _previous_ref(node: ast.AST, ctx: Context) -> tuple[str, str]:
+    """(mote, key) prev() reads: a bare name on the anchor, or one mote's
+    property reached by name or role -- `prev(cool.T)`, as a worksheet
+    writes every reference."""
+    if isinstance(node, ast.Name):
+        return ctx.mote_id, node.id
+    _role, value = _role_or_value(node, ctx)
+    if not isinstance(value, MoteSet) or len(value.mote_ids) != 1:
+        raise FormulaError(f"prev({unparse(node)}) must name one mote's property")
+    return value.mote_ids[0], node.attr
 
 
 def _property(node: ast.Call, ctx: Context) -> Ratio:
@@ -1567,6 +1583,10 @@ def _log(name: str, node: ast.Call, ctx: Context) -> Ratio:
     Written the other way round, `mxs * x == -ln(I / I0)`, the same
     physics is linear in x and the default solver gets it exactly, with
     no initial guess and no convergence to worry about."""
+    if name == AMBIGUOUS_LOG:
+        raise FormulaError(
+            "log() is ambiguous -- write ln(x) for the natural log or log10(x) for base 10 "
+            "(a textbook's log is usually log10; Colebrook's is)")
     if len(node.args) != 1:
         raise FormulaError(f"{name}() takes exactly one argument")
     arg = _as_ratio(_evaluate(node.args[0], ctx))

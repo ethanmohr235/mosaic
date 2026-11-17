@@ -196,7 +196,8 @@ def parse_format(text: str | None) -> Format:
         if part.isdigit():
             figures = int(part)
         elif unit is None:
-            unit = part
+            # `%` starts a comment, so a percentage is asked for as `\%`.
+            unit = "%" if part == "\\%" else part
     return Format(unit, figures)
 
 

@@ -236,6 +236,8 @@ Worksheet lines:
 | `phi(r [cm]) = A * sin(B * r) / r` | Function |
 | `Tb(z [in]) [degF] = …` | …and declare its value's unit (refused if the body disagrees; `\val{Tb(0)}` and plots show it) |
 | `m.Q = integrate(phi, 0, m.R)` · `m.g = deriv(phi, m.r)` | Integral / derivative of a function (numeric) |
+| `ln(x)` · `log10(x)` | Logarithms. A bare `log(x)` is refused as ambiguous |
+| `cool.T == prev(cool.T) - …` | A step of a run (`sim`, `plot … vs t`); `prev` takes any one property |
 | `integrate(f, 'y', 0, 1, m.x)` · `deriv(f, 'y', m.y, m.x)` | …along a named parameter, the others held |
 | `… ! ΣFx` | Names the rule |
 
